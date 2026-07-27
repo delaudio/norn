@@ -2182,10 +2182,13 @@ fn find_published_finding_comment(
     match target.provider {
         PullRequestReviewEventProvider::Bitbucket => {
             let client = BitbucketClient::from_stored().map_err(map_publication_auth_error)?;
-            let mut url = format!(
-                "{}/pullrequests/{pr_id}/comments?pagelen=100&fields={BITBUCKET_PUBLICATION_COMMENT_FIELDS}",
+            let comments_endpoint = format!(
+                "{}/pullrequests/{pr_id}/comments",
                 repo_base(&target.workspace, &target.repository)
                     .map_err(ProviderPublicationApiError::unavailable)?
+            );
+            let mut url = format!(
+                "{comments_endpoint}?pagelen=100&fields={BITBUCKET_PUBLICATION_COMMENT_FIELDS}"
             );
             loop {
                 let page: BbPublicationCommentPage =
@@ -2198,7 +2201,10 @@ fn find_published_finding_comment(
                     }));
                 }
                 match page.next {
-                    Some(next) => url = next,
+                    Some(next) => {
+                        url = safe_bitbucket_publication_next_url(&next, &comments_endpoint)
+                            .map_err(map_publication_read_error)?;
+                    }
                     None => return Ok(None),
                 }
             }
@@ -2223,6 +2229,29 @@ fn find_published_finding_comment(
                 .transpose()
         }
     }
+}
+
+fn safe_bitbucket_publication_next_url(
+    value: &str,
+    comments_endpoint: &str,
+) -> Result<String, String> {
+    let next = reqwest::Url::parse(value)
+        .map_err(|_| "Bitbucket returned an invalid pagination URL.".to_string())?;
+    let expected = reqwest::Url::parse(comments_endpoint)
+        .map_err(|_| "The Bitbucket comments endpoint is invalid.".to_string())?;
+    let same_endpoint = next.scheme() == "https"
+        && next.scheme() == expected.scheme()
+        && next.host_str() == expected.host_str()
+        && next.port_or_known_default() == expected.port_or_known_default()
+        && next.path() == expected.path()
+        && next.username().is_empty()
+        && next.password().is_none()
+        && next.fragment().is_none()
+        && next.query().is_some();
+    if !same_endpoint {
+        return Err("Bitbucket returned an unsafe pagination URL.".to_string());
+    }
+    Ok(value.to_string())
 }
 
 fn publication_comment_id(value: serde_json::Value) -> Result<String, ProviderPublicationApiError> {
@@ -2817,6 +2846,31 @@ mod tests {
             .expect("last-only link"),
             None
         );
+    }
+
+    #[test]
+    fn bitbucket_publication_pagination_stays_on_the_expected_comment_endpoint() {
+        let endpoint =
+            "https://api.bitbucket.org/2.0/repositories/acme/payments/pullrequests/42/comments";
+        let next = format!("{endpoint}?pagelen=100&page=3");
+        assert_eq!(
+            safe_bitbucket_publication_next_url(&next, endpoint)
+                .expect("same-endpoint pagination URL"),
+            next
+        );
+
+        for unsafe_url in [
+            "https://attacker.invalid/comments?page=2",
+            "https://api.bitbucket.org.attacker.invalid/2.0/repositories/acme/payments/pullrequests/42/comments?page=2",
+            "https://api.bitbucket.org/2.0/repositories/other/payments/pullrequests/42/comments?page=2",
+            "https://user@api.bitbucket.org/2.0/repositories/acme/payments/pullrequests/42/comments?page=2",
+            "https://api.bitbucket.org/2.0/repositories/acme/payments/pullrequests/42/comments?page=2#redirect",
+        ] {
+            assert!(
+                safe_bitbucket_publication_next_url(unsafe_url, endpoint).is_err(),
+                "accepted unsafe pagination URL: {unsafe_url}"
+            );
+        }
     }
 
     #[test]
