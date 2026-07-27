@@ -345,12 +345,12 @@ where
                 message: "The pull request changed after this finding was produced; review the current diff before publishing.".to_string(),
             });
         }
-        let published = if let Some(existing) = self
+        let (published, created_here) = if let Some(existing) = self
             .api
             .find_inline_comment(target, marker, &payload)
             .map_err(publication_api_error)?
         {
-            existing
+            (existing, false)
         } else {
             let published = self
                 .api
@@ -370,11 +370,14 @@ where
                     message: "The pull request changed while this finding was being published; the stale comment was removed.".to_string(),
                 });
             }
-            published
+            (published, true)
         };
-        self.store
-            .complete(lease, &published)
-            .map_err(publication_state_error)?;
+        if let Err(error) = self.store.complete(lease, &published) {
+            if created_here {
+                let _ = self.api.delete_comment(target, &published);
+            }
+            return Err(publication_state_error(error));
+        }
         Ok(request.published_identity(published.comment_id, marker.to_string()))
     }
 }
@@ -760,6 +763,31 @@ mod tests {
         }
     }
 
+    #[derive(Debug, Default)]
+    struct FailingCompletionStore(MockPublicationStore);
+
+    impl FindingPublicationStore for FailingCompletionStore {
+        fn reserve(
+            &self,
+            request: &FindingPublicationRequest,
+            marker: &str,
+        ) -> Result<FindingPublicationReservation, String> {
+            self.0.reserve(request, marker)
+        }
+
+        fn complete(
+            &self,
+            _lease: &FindingPublicationLease,
+            _identity: &ProviderCommentIdentity,
+        ) -> Result<(), String> {
+            Err("publication database unavailable".to_string())
+        }
+
+        fn release(&self, lease: &FindingPublicationLease) -> Result<(), String> {
+            self.0.release(lease)
+        }
+    }
+
     fn request(provider: PullRequestReviewEventProvider) -> FindingPublicationRequest {
         FindingPublicationRequest {
             schema_version: FindingPublicationSchemaVersion::V1,
@@ -884,6 +912,24 @@ mod tests {
             .expect_err("post-write head change");
 
         assert_eq!(error.code, FindingPublicationErrorCode::OutdatedAnchor);
+        let state = publisher.api.state.lock().unwrap();
+        assert_eq!(state.deleted_comment_ids, vec!["comment-1"]);
+        assert!(state.comments.is_empty());
+    }
+
+    #[test]
+    fn completion_failure_deletes_the_comment_created_by_this_attempt() {
+        let publisher = FindingPublisher::new(
+            MockProviderApi::default(),
+            FailingCompletionStore::default(),
+        );
+        let request = request(PullRequestReviewEventProvider::Github);
+
+        let error = publisher
+            .publish(&request)
+            .expect_err("durable completion fails");
+
+        assert_eq!(error.code, FindingPublicationErrorCode::ProviderUnavailable);
         let state = publisher.api.state.lock().unwrap();
         assert_eq!(state.deleted_comment_ids, vec!["comment-1"]);
         assert!(state.comments.is_empty());

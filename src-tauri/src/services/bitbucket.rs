@@ -17,6 +17,10 @@ use crate::review_event::PullRequestReviewEventProvider;
 use crate::review_storage::{self, ClosedPrMetric};
 
 const BASE: &str = "https://api.bitbucket.org/2.0";
+const BITBUCKET_PUBLICATION_COMMENT_FIELDS: &str = concat!(
+    "next,values.id,values.deleted,values.content.raw,values.inline.path,",
+    "values.inline.to,values.inline.from,values.inline.start_to,values.inline.start_from"
+);
 
 /// When `LACHESI_DRY_RUN` is truthy, comment-creating commands log and return a
 /// synthetic comment instead of POSTing — lets the full UI flow run against live
@@ -2098,7 +2102,7 @@ fn find_published_finding_comment(
         PullRequestReviewEventProvider::Bitbucket => {
             let client = BitbucketClient::from_stored().map_err(map_publication_auth_error)?;
             let mut url = format!(
-                "{}/pullrequests/{pr_id}/comments?pagelen=100&fields=next,values.id,values.deleted,values.content.raw,values.inline.path",
+                "{}/pullrequests/{pr_id}/comments?pagelen=100&fields={BITBUCKET_PUBLICATION_COMMENT_FIELDS}",
                 repo_base(&target.workspace, &target.repository)
                     .map_err(ProviderPublicationApiError::unavailable)?
             );
@@ -2542,6 +2546,17 @@ mod tests {
 
     #[test]
     fn provider_publication_bodies_keep_inline_anchor_semantics() {
+        for field in [
+            "values.inline.path",
+            "values.inline.to",
+            "values.inline.from",
+            "values.inline.start_to",
+            "values.inline.start_from",
+        ] {
+            assert!(BITBUCKET_PUBLICATION_COMMENT_FIELDS
+                .split(',')
+                .any(|current| current == field));
+        }
         let github = github_publication_body(&publication_payload(FindingAnchorSide::New));
         assert_eq!(
             github["commit_id"],
@@ -2560,15 +2575,27 @@ mod tests {
         assert!(bitbucket["inline"].get("to").is_none());
         assert!(bitbucket.get("content").is_some());
 
-        let bitbucket_response = BbPublicationInline {
-            path: "src/lib.rs".to_string(),
-            to: None,
-            from: Some(14),
-            start_to: None,
-            start_from: Some(12),
-        };
+        let bitbucket_page: BbPublicationCommentPage = serde_json::from_value(json!({
+            "values": [{
+                "id": 99,
+                "deleted": false,
+                "content": {
+                    "raw": "finding\n\n<!-- lachesi:finding:abc -->"
+                },
+                "inline": {
+                    "path": "src/lib.rs",
+                    "from": 14,
+                    "start_from": 12
+                }
+            }]
+        }))
+        .expect("filtered Bitbucket publication page");
+        let bitbucket_response = bitbucket_page.values[0]
+            .inline
+            .as_ref()
+            .expect("inline anchor");
         assert!(bitbucket_anchor_matches(
-            &bitbucket_response,
+            bitbucket_response,
             &publication_payload(FindingAnchorSide::Old)
         ));
         let github_response = GhPublicationComment {
