@@ -8,17 +8,15 @@ If status files and git disagree, git is authoritative; correct this file.
 
 ## Active state
 
-- **Branch:** `agent/headless-review-cli`
-- **Active item:** `.docflow/plan/todo/0003-headless-review-cli.md`
+- **Branch:** `agent/ship-headless-review`
+- **Active item:** `.docflow/plan/done/2026-07-27-headless-review-cli.md`
 - **Blockers:** none; use the available SSH key for signed commits.
-- **Uncommitted work:** validated ADR, analyzer policy across headless/TUI/GUI,
-  sandbox-safe headless storage, and the Codex skill fast path.
+- **Uncommitted work:** completion metadata for the shipped headless review CLI.
 
 ## Last shipped
 
-`b12fe0c` - document `lac` current-repository startup and improve terminal startup errors.
+`7b35c16` - ship the headless review CLI through PR #115.
 
 ## Next item
 
-Create the signed commit and PR for the validated headless review work, merge
-after CI passes, then ship the plan item.
+Inspect and implement GitHub issue #89 after the closeout PR merges.

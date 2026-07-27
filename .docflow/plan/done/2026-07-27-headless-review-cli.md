@@ -50,3 +50,8 @@ despite lower-numbered historical queue items remaining open.
 - `../../adr/0006-terminal-ui.md`
 - `../../adr/0005-agentic-policy-pack-prototype.md`
 - `../../../docs/specs/0006-cli-headless-review.md`
+
+---
+
+Shipped at HEAD `7b35c164c3cadcd17217e4962a726487075fda24` via
+[PR #115](https://github.com/lachesi-hq/lachesi/pull/115).
