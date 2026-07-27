@@ -7,10 +7,10 @@ use crate::config::{self, AppConfig, RepoRef, ReviewProvider};
 use crate::config::{AiProvider, ReviewTerminal};
 use crate::credentials::{self, Credentials};
 use crate::finding_publication::{
-    FindingAnchorSide, FindingPublicationError, FindingPublicationRequest, FindingPublisher,
-    ProviderCommentIdentity, ProviderInlineCommentApi, ProviderInlineCommentPayload,
-    ProviderPublicationApiError, ProviderPublicationTarget, PublishedCommentIdentity,
-    SqliteFindingPublicationStore,
+    dry_run_publication_identity, FindingAnchorSide, FindingPublicationError,
+    FindingPublicationRequest, FindingPublisher, ProviderCommentIdentity, ProviderInlineCommentApi,
+    ProviderInlineCommentPayload, ProviderPublicationApiError, ProviderPublicationTarget,
+    PublishedCommentIdentity, SqliteFindingPublicationStore,
 };
 use crate::repo_config::{self, RepoReviewConfigLoadResult};
 use crate::review_event::PullRequestReviewEventProvider;
@@ -474,7 +474,17 @@ struct BbPublicationComment {
     content: Option<BbContent>,
     #[serde(default)]
     deleted: bool,
-    inline: Option<serde_json::Value>,
+    inline: Option<BbPublicationInline>,
+}
+
+#[derive(Deserialize)]
+struct BbPublicationInline {
+    #[serde(default)]
+    path: String,
+    to: Option<u32>,
+    from: Option<u32>,
+    start_to: Option<u32>,
+    start_from: Option<u32>,
 }
 
 #[derive(Deserialize)]
@@ -604,6 +614,10 @@ struct GhPublicationComment {
     #[serde(default)]
     body: String,
     path: Option<String>,
+    line: Option<u32>,
+    start_line: Option<u32>,
+    side: Option<String>,
+    start_side: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -1928,27 +1942,25 @@ impl ProviderInlineCommentApi for StoredProviderInlineCommentApi {
     ) -> Result<String, ProviderPublicationApiError> {
         let head = match target.provider {
             PullRequestReviewEventProvider::Bitbucket => {
-                let client = BitbucketClient::from_stored()
-                    .map_err(ProviderPublicationApiError::unavailable)?;
+                let client = BitbucketClient::from_stored().map_err(map_publication_auth_error)?;
                 fetch_pull_request_detail(
                     &client,
                     &target.workspace,
                     &target.repository,
                     publication_pr_id(target.pull_request_id)?,
                 )
-                .map_err(ProviderPublicationApiError::unavailable)?
+                .map_err(map_publication_read_error)?
                 .source_commit_hash
             }
             PullRequestReviewEventProvider::Github => {
-                let client = GithubClient::from_stored()
-                    .map_err(ProviderPublicationApiError::unavailable)?;
+                let client = GithubClient::from_stored().map_err(map_publication_auth_error)?;
                 fetch_github_pull_request_detail(
                     &client,
                     &target.workspace,
                     &target.repository,
                     publication_pr_id(target.pull_request_id)?,
                 )
-                .map_err(ProviderPublicationApiError::unavailable)?
+                .map_err(map_publication_read_error)?
                 .source_commit_hash
             }
         };
@@ -1973,19 +1985,9 @@ impl ProviderInlineCommentApi for StoredProviderInlineCommentApi {
         payload: &ProviderInlineCommentPayload,
     ) -> Result<ProviderCommentIdentity, ProviderPublicationApiError> {
         let pr_id = publication_pr_id(target.pull_request_id)?;
-        if dry_run() {
-            eprintln!(
-                "[dry-run] structured inline finding on PR #{} {}:{}-{}",
-                target.pull_request_id, payload.path, payload.start_line, payload.end_line
-            );
-            return Ok(ProviderCommentIdentity {
-                comment_id: "dry-run".to_string(),
-            });
-        }
         let (comment_id, inline) = match target.provider {
             PullRequestReviewEventProvider::Bitbucket => {
-                let client = BitbucketClient::from_stored()
-                    .map_err(ProviderPublicationApiError::unavailable)?;
+                let client = BitbucketClient::from_stored().map_err(map_publication_auth_error)?;
                 let url = format!(
                     "{}/pullrequests/{pr_id}/comments",
                     repo_base(&target.workspace, &target.repository)
@@ -1999,12 +2001,14 @@ impl ProviderInlineCommentApi for StoredProviderInlineCommentApi {
                     .map_err(|error| ProviderPublicationApiError::unavailable(error.to_string()))?;
                 (
                     publication_comment_id(comment.id)?,
-                    comment.inline.is_some(),
+                    comment
+                        .inline
+                        .as_ref()
+                        .is_some_and(|anchor| bitbucket_anchor_matches(anchor, payload)),
                 )
             }
             PullRequestReviewEventProvider::Github => {
-                let client = GithubClient::from_stored()
-                    .map_err(ProviderPublicationApiError::unavailable)?;
+                let client = GithubClient::from_stored().map_err(map_publication_auth_error)?;
                 let base = github_repo_base(&target.workspace, &target.repository)
                     .map_err(ProviderPublicationApiError::unavailable)?;
                 let body = github_publication_body(payload);
@@ -2014,7 +2018,8 @@ impl ProviderInlineCommentApi for StoredProviderInlineCommentApi {
                 let comment: GhPublicationComment = response
                     .json()
                     .map_err(|error| ProviderPublicationApiError::unavailable(error.to_string()))?;
-                (publication_comment_id(comment.id)?, comment.path.is_some())
+                let inline = github_anchor_matches(&comment, payload);
+                (publication_comment_id(comment.id)?, inline)
             }
         };
         if !inline {
@@ -2029,6 +2034,16 @@ impl ProviderInlineCommentApi for StoredProviderInlineCommentApi {
 pub fn publish_review_finding_native(
     request: &FindingPublicationRequest,
 ) -> Result<PublishedCommentIdentity, FindingPublicationError> {
+    if dry_run() {
+        eprintln!(
+            "[dry-run] structured inline finding on PR #{} {}:{}-{}",
+            request.pull_request_id,
+            request.anchor.path,
+            request.anchor.start_line,
+            request.anchor.end_line
+        );
+        return dry_run_publication_identity(request);
+    }
     FindingPublisher::new(
         StoredProviderInlineCommentApi,
         SqliteFindingPublicationStore,
@@ -2043,8 +2058,7 @@ fn find_published_finding_comment(
     let pr_id = publication_pr_id(target.pull_request_id)?;
     match target.provider {
         PullRequestReviewEventProvider::Bitbucket => {
-            let client =
-                BitbucketClient::from_stored().map_err(ProviderPublicationApiError::unavailable)?;
+            let client = BitbucketClient::from_stored().map_err(map_publication_auth_error)?;
             let mut url = format!(
                 "{}/pullrequests/{pr_id}/comments?pagelen=100&fields=next,values.id,values.deleted,values.content.raw,values.inline.path",
                 repo_base(&target.workspace, &target.repository)
@@ -2052,7 +2066,7 @@ fn find_published_finding_comment(
             );
             loop {
                 let page: BbPublicationCommentPage =
-                    get_json(client.get(&url)).map_err(ProviderPublicationApiError::unavailable)?;
+                    get_json(client.get(&url)).map_err(map_publication_read_error)?;
                 if let Some(comment) = page.values.into_iter().find(|comment| {
                     !comment.deleted
                         && comment.inline.is_some()
@@ -2072,15 +2086,14 @@ fn find_published_finding_comment(
             }
         }
         PullRequestReviewEventProvider::Github => {
-            let client =
-                GithubClient::from_stored().map_err(ProviderPublicationApiError::unavailable)?;
+            let client = GithubClient::from_stored().map_err(map_publication_auth_error)?;
             let url = format!(
                 "{}/pulls/{pr_id}/comments?per_page=100&page=1",
                 github_repo_base(&target.workspace, &target.repository)
                     .map_err(ProviderPublicationApiError::unavailable)?
             );
-            let comments: Vec<GhPublicationComment> = github_paginated_get(&client, url)
-                .map_err(ProviderPublicationApiError::unavailable)?;
+            let comments: Vec<GhPublicationComment> =
+                github_paginated_get(&client, url).map_err(map_publication_read_error)?;
             comments
                 .into_iter()
                 .find(|comment| {
@@ -2157,8 +2170,77 @@ fn github_publication_body(payload: &ProviderInlineCommentPayload) -> serde_json
     body
 }
 
+fn bitbucket_anchor_matches(
+    anchor: &BbPublicationInline,
+    payload: &ProviderInlineCommentPayload,
+) -> bool {
+    if anchor.path != payload.path {
+        return false;
+    }
+    match payload.side {
+        FindingAnchorSide::New => {
+            anchor.to == Some(payload.end_line)
+                && if payload.start_line < payload.end_line {
+                    anchor.start_to == Some(payload.start_line)
+                } else {
+                    anchor.start_to.is_none()
+                }
+        }
+        FindingAnchorSide::Old => {
+            anchor.from == Some(payload.end_line)
+                && if payload.start_line < payload.end_line {
+                    anchor.start_from == Some(payload.start_line)
+                } else {
+                    anchor.start_from.is_none()
+                }
+        }
+    }
+}
+
+fn github_anchor_matches(
+    comment: &GhPublicationComment,
+    payload: &ProviderInlineCommentPayload,
+) -> bool {
+    let side = match payload.side {
+        FindingAnchorSide::New => "RIGHT",
+        FindingAnchorSide::Old => "LEFT",
+    };
+    comment.path.as_deref() == Some(payload.path.as_str())
+        && comment.line == Some(payload.end_line)
+        && comment
+            .side
+            .as_deref()
+            .is_some_and(|value| value.eq_ignore_ascii_case(side))
+        && if payload.start_line < payload.end_line {
+            comment.start_line == Some(payload.start_line)
+                && comment
+                    .start_side
+                    .as_deref()
+                    .is_some_and(|value| value.eq_ignore_ascii_case(side))
+        } else {
+            comment.start_line.is_none()
+        }
+}
+
+fn map_publication_auth_error(error: String) -> ProviderPublicationApiError {
+    ProviderPublicationApiError::permission_denied(error)
+}
+
+fn map_publication_read_error(error: String) -> ProviderPublicationApiError {
+    if publication_permission_error(&error) {
+        ProviderPublicationApiError::permission_denied(error)
+    } else if error.contains("404 Not Found") {
+        ProviderPublicationApiError::invalid_anchor(error)
+    } else {
+        ProviderPublicationApiError::unavailable(error)
+    }
+}
+
 fn map_publication_write_error(error: String) -> ProviderPublicationApiError {
-    if error.contains("400 Bad Request")
+    if publication_permission_error(&error) {
+        ProviderPublicationApiError::permission_denied(error)
+    } else if error.contains("400 Bad Request")
+        || error.contains("404 Not Found")
         || error.contains("409 Conflict")
         || error.contains("422 Unprocessable Entity")
     {
@@ -2166,6 +2248,10 @@ fn map_publication_write_error(error: String) -> ProviderPublicationApiError {
     } else {
         ProviderPublicationApiError::unavailable(error)
     }
+}
+
+fn publication_permission_error(error: &str) -> bool {
+    error.contains("401 Unauthorized") || error.contains("403 Forbidden")
 }
 
 #[tauri::command]
@@ -2428,6 +2514,31 @@ mod tests {
         assert_eq!(bitbucket["inline"]["from"], 14);
         assert!(bitbucket["inline"].get("to").is_none());
         assert!(bitbucket.get("content").is_some());
+
+        let bitbucket_response = BbPublicationInline {
+            path: "src/lib.rs".to_string(),
+            to: None,
+            from: Some(14),
+            start_to: None,
+            start_from: Some(12),
+        };
+        assert!(bitbucket_anchor_matches(
+            &bitbucket_response,
+            &publication_payload(FindingAnchorSide::Old)
+        ));
+        let github_response = GhPublicationComment {
+            id: json!(99),
+            body: String::new(),
+            path: Some("src/lib.rs".to_string()),
+            line: Some(14),
+            start_line: Some(12),
+            side: Some("RIGHT".to_string()),
+            start_side: Some("RIGHT".to_string()),
+        };
+        assert!(github_anchor_matches(
+            &github_response,
+            &publication_payload(FindingAnchorSide::New)
+        ));
     }
 
     #[test]
@@ -2482,6 +2593,13 @@ mod tests {
         assert_eq!(
             error.kind,
             crate::finding_publication::ProviderPublicationApiErrorKind::Unavailable
+        );
+
+        let error =
+            map_publication_write_error("GitHub API error 403 Forbidden: denied".to_string());
+        assert_eq!(
+            error.kind,
+            crate::finding_publication::ProviderPublicationApiErrorKind::PermissionDenied
         );
     }
 

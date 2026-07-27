@@ -150,6 +150,7 @@ pub trait ProviderInlineCommentApi {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ProviderPublicationApiErrorKind {
     InvalidAnchor,
+    PermissionDenied,
     Unavailable,
 }
 
@@ -170,6 +171,13 @@ impl ProviderPublicationApiError {
     pub fn unavailable(message: impl Into<String>) -> Self {
         Self {
             kind: ProviderPublicationApiErrorKind::Unavailable,
+            message: message.into(),
+        }
+    }
+
+    pub fn permission_denied(message: impl Into<String>) -> Self {
+        Self {
+            kind: ProviderPublicationApiErrorKind::PermissionDenied,
             message: message.into(),
         }
     }
@@ -240,6 +248,7 @@ pub enum FindingPublicationErrorCode {
     AnchorRejected,
     OutdatedAnchor,
     PublicationInProgress,
+    PermissionDenied,
     ProviderUnavailable,
 }
 
@@ -415,6 +424,7 @@ impl FindingPublicationRequest {
 
 pub fn finding_marker(request: &FindingPublicationRequest) -> String {
     let pull_request_id = request.pull_request_id.to_string();
+    let head_sha = request.head_sha.to_ascii_lowercase();
     let mut hasher = Sha256::new();
     for part in [
         request.tenant_id.as_str(),
@@ -422,7 +432,7 @@ pub fn finding_marker(request: &FindingPublicationRequest) -> String {
         request.workspace.as_str(),
         request.repository.as_str(),
         pull_request_id.as_str(),
-        request.head_sha.as_str(),
+        head_sha.as_str(),
         request.finding_fingerprint.as_str(),
     ] {
         hasher.update((part.len() as u64).to_be_bytes());
@@ -430,6 +440,13 @@ pub fn finding_marker(request: &FindingPublicationRequest) -> String {
     }
     let digest = hasher.finalize();
     format!("<!-- lachesi:finding:{digest:x} -->")
+}
+
+pub fn dry_run_publication_identity(
+    request: &FindingPublicationRequest,
+) -> Result<PublishedCommentIdentity, FindingPublicationError> {
+    request.validate().map_err(invalid_request)?;
+    Ok(request.published_identity("dry-run".to_string(), finding_marker(request)))
 }
 
 fn render_finding_markdown(request: &FindingPublicationRequest, marker: &str) -> String {
@@ -519,6 +536,11 @@ fn publication_api_error(error: ProviderPublicationApiError) -> FindingPublicati
     match error.kind {
         ProviderPublicationApiErrorKind::InvalidAnchor => FindingPublicationError {
             code: FindingPublicationErrorCode::AnchorRejected,
+            retryable: false,
+            message: error.message,
+        },
+        ProviderPublicationApiErrorKind::PermissionDenied => FindingPublicationError {
+            code: FindingPublicationErrorCode::PermissionDenied,
             retryable: false,
             message: error.message,
         },
@@ -836,6 +858,10 @@ mod tests {
         request.head_sha = HEAD_SHA.to_string();
         request.tenant_id = "tenant-other".to_string();
         assert_ne!(marker, finding_marker(&request));
+
+        request.tenant_id = "tenant-acme".to_string();
+        request.head_sha = HEAD_SHA.to_ascii_uppercase();
+        assert_eq!(marker, finding_marker(&request));
     }
 
     #[test]
@@ -858,5 +884,14 @@ mod tests {
         assert!(value.get("token").is_none());
         assert!(value.get("credentials").is_none());
         assert_eq!(value["schemaVersion"], "v1");
+    }
+
+    #[test]
+    fn dry_run_identity_is_synthetic_without_reserving_publication_state() {
+        let request = request(PullRequestReviewEventProvider::Github);
+        let identity = dry_run_publication_identity(&request).expect("dry-run identity");
+
+        assert_eq!(identity.comment_id, "dry-run");
+        assert_eq!(identity.finding_marker, finding_marker(&request));
     }
 }

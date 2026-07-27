@@ -2353,6 +2353,7 @@ pub(crate) fn reserve_finding_publication(
         return Err("Publication marker and lease token are required.".to_string());
     }
     let pr_id = shared_review_pr_id(request.pull_request_id)?;
+    let canonical_head_sha = request.head_sha.to_ascii_lowercase();
     let now = now_ms_i64();
     let lease_expires_at = now.saturating_add(FINDING_PUBLICATION_LEASE_MS);
     let mut conn = open()?;
@@ -2459,7 +2460,7 @@ pub(crate) fn reserve_finding_publication(
                     request.workspace,
                     request.repository,
                     pr_id,
-                    request.head_sha,
+                    canonical_head_sha,
                     request.finding_fingerprint,
                     lease_token,
                     lease_expires_at,
