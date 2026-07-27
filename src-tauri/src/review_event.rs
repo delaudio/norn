@@ -85,7 +85,8 @@ pub struct PullRequestReviewEvent {
     pub base: PullRequestRevision,
     pub head: PullRequestRevision,
     /// Provider-supplied pull-request update time normalized to Unix milliseconds.
-    pub provider_updated_at_ms: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_updated_at_ms: Option<i64>,
     pub draft: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub closed_outcome: Option<PullRequestClosedOutcome>,
@@ -125,7 +126,7 @@ impl PullRequestReviewEvent {
         validate_sha("base.sha", &self.base.sha)?;
         require_value("head.refName", &self.head.ref_name)?;
         validate_sha("head.sha", &self.head.sha)?;
-        if self.provider_updated_at_ms < 0 {
+        if self.provider_updated_at_ms.is_some_and(|value| value < 0) {
             return Err(PullRequestReviewEventValidationError::InvalidProviderTimestamp);
         }
         match (self.kind, self.closed_outcome) {
@@ -254,7 +255,7 @@ mod tests {
                 ref_name: "feature/retry".to_string(),
                 sha: HEAD_SHA.to_string(),
             },
-            provider_updated_at_ms: 1_785_168_000_000,
+            provider_updated_at_ms: Some(1_785_168_000_000),
             draft: false,
             closed_outcome: (kind == PullRequestReviewEventKind::Closed)
                 .then_some(PullRequestClosedOutcome::Merged),
@@ -322,6 +323,16 @@ mod tests {
         assert!(!rendered.contains("secret"));
         assert!(!rendered.contains("token"));
         assert!(!rendered.contains("webhook"));
+
+        let mut legacy_v1 = value;
+        legacy_v1
+            .as_object_mut()
+            .expect("event object")
+            .remove("providerUpdatedAtMs");
+        let decoded: PullRequestReviewEvent =
+            serde_json::from_value(legacy_v1).expect("decode legacy v1 event");
+        assert_eq!(decoded.provider_updated_at_ms, None);
+        decoded.validate().expect("legacy v1 event remains valid");
     }
 
     #[test]
@@ -410,7 +421,7 @@ mod tests {
         );
 
         let mut invalid_timestamp = event(PullRequestReviewEventKind::Opened);
-        invalid_timestamp.provider_updated_at_ms = -1;
+        invalid_timestamp.provider_updated_at_ms = Some(-1);
         assert_eq!(
             invalid_timestamp.validate(),
             Err(PullRequestReviewEventValidationError::InvalidProviderTimestamp)

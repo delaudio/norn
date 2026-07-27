@@ -577,6 +577,7 @@ fn migrate(conn: &mut Connection) -> Result<(), String> {
               current_head_sha TEXT NOT NULL,
               provider_updated_at_ms INTEGER NOT NULL CHECK (provider_updated_at_ms >= 0),
               reviewable INTEGER NOT NULL CHECK (reviewable IN (0, 1)),
+              ambiguous INTEGER NOT NULL DEFAULT 0 CHECK (ambiguous IN (0, 1)),
               updated_at_ms INTEGER NOT NULL CHECK (updated_at_ms >= 0),
               PRIMARY KEY (tenant_id, provider, workspace, repo, pr_id)
             );
@@ -1226,7 +1227,9 @@ pub(crate) fn enqueue_shared_review_job(
     }
     let now = now_ms_i64();
     if let Some(existing) = shared_review_job_by_head_from(&transaction, event)? {
-        if freshness != SharedReviewEventFreshness::Ambiguous {
+        if freshness == SharedReviewEventFreshness::Ambiguous {
+            mark_shared_review_event_ambiguous(&transaction, event, now)?;
+        } else {
             mark_shared_review_event_current(&transaction, event, now)?;
         }
         transaction.commit().map_err(|error| error.to_string())?;
@@ -1313,7 +1316,9 @@ pub(crate) fn enqueue_shared_review_job(
             ],
         )
         .map_err(|error| error.to_string())?;
-    if freshness != SharedReviewEventFreshness::Ambiguous {
+    if freshness == SharedReviewEventFreshness::Ambiguous {
+        mark_shared_review_event_ambiguous(&transaction, event, now)?;
+    } else {
         mark_shared_review_event_current(&transaction, event, now)?;
     }
     let record = get_shared_review_job_from(&transaction, &request.id)?
@@ -1347,10 +1352,13 @@ pub(crate) fn suppress_shared_review_jobs(
         .transaction_with_behavior(TransactionBehavior::Immediate)
         .map_err(|error| error.to_string())?;
     let now = now_ms_i64();
-    if matches!(
-        shared_review_event_freshness(&transaction, event)?,
-        SharedReviewEventFreshness::Stale | SharedReviewEventFreshness::Ambiguous
-    ) {
+    let freshness = shared_review_event_freshness(&transaction, event)?;
+    if freshness == SharedReviewEventFreshness::Stale {
+        transaction.commit().map_err(|error| error.to_string())?;
+        return Ok(0);
+    }
+    if freshness == SharedReviewEventFreshness::Ambiguous {
+        mark_shared_review_event_ambiguous(&transaction, event, now)?;
         transaction.commit().map_err(|error| error.to_string())?;
         return Ok(0);
     }
@@ -1816,10 +1824,13 @@ fn shared_review_event_freshness(
     conn: &Connection,
     event: &crate::review_event::PullRequestReviewEvent,
 ) -> Result<SharedReviewEventFreshness, String> {
+    let event_updated_at_ms = event
+        .provider_updated_at_ms
+        .ok_or_else(|| "`providerUpdatedAtMs` is required".to_string())?;
     let state = conn
         .query_row(
             r#"
-            SELECT current_base_sha, current_head_sha, provider_updated_at_ms
+            SELECT current_base_sha, current_head_sha, provider_updated_at_ms, ambiguous
             FROM shared_review_pull_request_state
             WHERE tenant_id = ?1
               AND provider = ?2
@@ -1839,19 +1850,24 @@ fn shared_review_event_freshness(
                     row.get::<_, String>(0)?,
                     row.get::<_, String>(1)?,
                     row.get::<_, i64>(2)?,
+                    row.get::<_, i64>(3)?,
                 ))
             },
         )
         .optional()
         .map_err(|error| error.to_string())?;
-    let Some((current_base_sha, current_head_sha, provider_updated_at_ms)) = state else {
+    let Some((current_base_sha, current_head_sha, provider_updated_at_ms, ambiguous)) = state
+    else {
         return Ok(SharedReviewEventFreshness::Newer);
     };
-    if event.provider_updated_at_ms < provider_updated_at_ms {
+    if event_updated_at_ms < provider_updated_at_ms {
         return Ok(SharedReviewEventFreshness::Stale);
     }
-    if event.provider_updated_at_ms > provider_updated_at_ms {
+    if event_updated_at_ms > provider_updated_at_ms {
         return Ok(SharedReviewEventFreshness::Newer);
+    }
+    if ambiguous == 1 {
+        return Ok(SharedReviewEventFreshness::Ambiguous);
     }
     if event.base.sha == current_base_sha && event.head.sha == current_head_sha {
         Ok(SharedReviewEventFreshness::SameRevision)
@@ -1871,14 +1887,15 @@ fn upsert_shared_pull_request_state(
         INSERT INTO shared_review_pull_request_state (
           tenant_id, provider, workspace, repo, pr_id,
           current_base_sha, current_head_sha, provider_updated_at_ms,
-          reviewable, updated_at_ms
+          reviewable, ambiguous, updated_at_ms
         )
-        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 0, ?10)
         ON CONFLICT(tenant_id, provider, workspace, repo, pr_id) DO UPDATE SET
           current_base_sha = excluded.current_base_sha,
           current_head_sha = excluded.current_head_sha,
           provider_updated_at_ms = excluded.provider_updated_at_ms,
           reviewable = excluded.reviewable,
+          ambiguous = 0,
           updated_at_ms = excluded.updated_at_ms
         WHERE excluded.provider_updated_at_ms
                 > shared_review_pull_request_state.provider_updated_at_ms
@@ -1899,7 +1916,9 @@ fn upsert_shared_pull_request_state(
             shared_review_pr_id(event.pull_request_id)?,
             event.base.sha,
             event.head.sha,
-            event.provider_updated_at_ms,
+            event
+                .provider_updated_at_ms
+                .ok_or_else(|| "`providerUpdatedAtMs` is required".to_string())?,
             if reviewable { 1 } else { 0 },
             now,
         ],
@@ -1940,6 +1959,44 @@ fn mark_shared_review_event_current(
         ],
     )
     .map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+fn mark_shared_review_event_ambiguous(
+    conn: &Connection,
+    event: &crate::review_event::PullRequestReviewEvent,
+    now: i64,
+) -> Result<(), String> {
+    let changed = conn
+        .execute(
+            r#"
+            UPDATE shared_review_pull_request_state
+            SET reviewable = 0,
+                ambiguous = 1,
+                updated_at_ms = ?1
+            WHERE tenant_id = ?2
+              AND provider = ?3
+              AND workspace = ?4
+              AND repo = ?5
+              AND pr_id = ?6
+              AND provider_updated_at_ms = ?7
+            "#,
+            params![
+                now,
+                event.tenant_id,
+                event.provider.as_str(),
+                event.workspace,
+                event.repository,
+                shared_review_pr_id(event.pull_request_id)?,
+                event
+                    .provider_updated_at_ms
+                    .ok_or_else(|| "`providerUpdatedAtMs` is required".to_string())?,
+            ],
+        )
+        .map_err(|error| error.to_string())?;
+    if changed != 1 {
+        return Err("Failed to persist ambiguous pull-request revision state".to_string());
+    }
     Ok(())
 }
 
@@ -2006,9 +2063,7 @@ fn advance_shared_review_cursor_if_current(
         ),
     };
     let cursor_matches_scope = match &job.request.scope {
-        ReviewJobScope::FullBranch { head_sha, .. } => {
-            current_cursor_head.is_none() || current_cursor_head == Some(head_sha.as_str())
-        }
+        ReviewJobScope::FullBranch { .. } => true,
         ReviewJobScope::Incremental {
             previous_head_sha, ..
         } => {
@@ -2094,6 +2149,11 @@ fn validate_shared_review_event_for_storage(
     event: &crate::review_event::PullRequestReviewEvent,
 ) -> Result<(), String> {
     event.validate().map_err(|error| error.to_string())?;
+    if event.provider_updated_at_ms.is_none() {
+        return Err(
+            "`providerUpdatedAtMs` is required for automated review coordination".to_string(),
+        );
+    }
     for (field, value) in [
         ("tenantId", event.tenant_id.as_str()),
         ("deliveryId", event.delivery_id.as_str()),
@@ -2978,13 +3038,15 @@ mod tests {
                 ref_name: format!("feature/{pr_id}"),
                 sha: head_sha.to_string(),
             },
-            provider_updated_at_ms: head_sha
-                .as_bytes()
-                .first()
-                .and_then(|byte| char::from(*byte).to_digit(16))
-                .map(i64::from)
-                .unwrap_or_default()
-                * 1_000,
+            provider_updated_at_ms: Some(
+                head_sha
+                    .as_bytes()
+                    .first()
+                    .and_then(|byte| char::from(*byte).to_digit(16))
+                    .map(i64::from)
+                    .unwrap_or_default()
+                    * 1_000,
+            ),
             draft: false,
             closed_outcome: None,
             actor: PullRequestEventActor {
@@ -3956,7 +4018,8 @@ mod tests {
             retargeted.delivery_id = "delivery-new-base".to_string();
             retargeted.base.ref_name = "release".to_string();
             retargeted.base.sha = NEW_BASE_SHA.to_string();
-            retargeted.provider_updated_at_ms += 1;
+            retargeted.provider_updated_at_ms =
+                retargeted.provider_updated_at_ms.map(|value| value + 1);
             let queued = queued_shared_job(
                 enqueue_shared_review_job(&retargeted).expect("enqueue retargeted base"),
             );
@@ -4030,6 +4093,18 @@ mod tests {
                     head_sha: SECOND_HEAD_SHA.to_string(),
                 }
             );
+            let running = claim_next_shared_review_job(ReviewConcurrencyLimits::default())
+                .expect("claim changed base and head")
+                .expect("changed base and head job");
+            let completed = finish_shared_review_job(
+                &running.request.id,
+                running.attempt_count,
+                &ReviewJobExecution::Completed {
+                    run_id: "run-changed-revision".to_string(),
+                },
+            )
+            .expect("complete changed base and head");
+            assert_eq!(completed.status, SharedReviewJobStatus::Completed);
         });
     }
 
@@ -4114,6 +4189,58 @@ mod tests {
                     .status,
                 SharedReviewJobStatus::Queued
             );
+            let running_first = claim_next_shared_review_job(ReviewConcurrencyLimits::default())
+                .expect("claim first ambiguous job")
+                .expect("first ambiguous job");
+            let cancelled_first = finish_shared_review_job(
+                &running_first.request.id,
+                running_first.attempt_count,
+                &ReviewJobExecution::Completed {
+                    run_id: "run-ambiguous-first".to_string(),
+                },
+            )
+            .expect("finish first ambiguous job");
+            assert_eq!(cancelled_first.status, SharedReviewJobStatus::Cancelled);
+            let running_second = claim_next_shared_review_job(ReviewConcurrencyLimits::default())
+                .expect("claim second ambiguous job")
+                .expect("second ambiguous job");
+            let cancelled_second = finish_shared_review_job(
+                &running_second.request.id,
+                running_second.attempt_count,
+                &ReviewJobExecution::Completed {
+                    run_id: "run-ambiguous-second".to_string(),
+                },
+            )
+            .expect("finish second ambiguous job");
+            assert_eq!(cancelled_second.status, SharedReviewJobStatus::Cancelled);
+            assert_eq!(
+                get_review_cursor(&cursor_identity()).expect("ambiguous cursor"),
+                ReviewCursorState::NotReviewed
+            );
+
+            same_timestamp.delivery_id = "delivery-confirmed".to_string();
+            same_timestamp.provider_updated_at_ms =
+                same_timestamp.provider_updated_at_ms.map(|value| value + 1);
+            enqueue_shared_review_job(&same_timestamp).expect("enqueue confirmed revision");
+            let confirmed = claim_next_shared_review_job(ReviewConcurrencyLimits::default())
+                .expect("claim confirmed revision")
+                .expect("confirmed revision");
+            let completed = finish_shared_review_job(
+                &confirmed.request.id,
+                confirmed.attempt_count,
+                &ReviewJobExecution::Completed {
+                    run_id: "run-confirmed".to_string(),
+                },
+            )
+            .expect("finish confirmed revision");
+            assert_eq!(completed.status, SharedReviewJobStatus::Completed);
+            assert!(matches!(
+                get_review_cursor(&cursor_identity()).expect("confirmed cursor"),
+                ReviewCursorState::Reviewed(ReviewCursor {
+                    reviewed_head_sha,
+                    ..
+                }) if reviewed_head_sha == SECOND_SHA
+            ));
         });
     }
 

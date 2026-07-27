@@ -465,7 +465,7 @@ fn normalize_github(
             ref_name: payload.pull_request.head.ref_name,
             sha: payload.pull_request.head.sha,
         },
-        provider_updated_at_ms: provider_timestamp_ms(&payload.pull_request.updated_at)?,
+        provider_updated_at_ms: Some(provider_timestamp_ms(&payload.pull_request.updated_at)?),
         draft: payload.pull_request.draft,
         closed_outcome,
         actor: PullRequestEventActor {
@@ -591,7 +591,7 @@ fn normalize_bitbucket<C: WebhookCommitResolver>(
             ref_name: payload.pullrequest.source.branch.name,
             sha: head_sha,
         },
-        provider_updated_at_ms: provider_timestamp_ms(&payload.pullrequest.updated_on)?,
+        provider_updated_at_ms: Some(provider_timestamp_ms(&payload.pullrequest.updated_on)?),
         draft: payload.pullrequest.draft,
         closed_outcome,
         actor: PullRequestEventActor {

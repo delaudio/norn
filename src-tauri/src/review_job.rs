@@ -453,7 +453,7 @@ mod tests {
                 ref_name: "feature/retry".to_string(),
                 sha: HEAD_SHA.to_string(),
             },
-            provider_updated_at_ms: 1_785_168_000_000,
+            provider_updated_at_ms: Some(1_785_168_000_000),
             draft,
             closed_outcome: (kind == PullRequestReviewEventKind::Closed)
                 .then_some(crate::review_event::PullRequestClosedOutcome::ClosedWithoutMerge),
