@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
 use crate::administrative_audit::{
     validate_identifier as validate_audit_identifier, AdministrativeAuditAppendResult,
@@ -15,11 +16,17 @@ use crate::review_feedback::{
     derive_finding_feedback_state, ReviewFindingFeedbackAction, ReviewFindingFeedbackEvent,
     ReviewFindingFeedbackIdentity, ReviewFindingFeedbackState, ReviewFindingFeedbackTarget,
 };
+use crate::review_job::{
+    ReviewConcurrencyLimits, ReviewJobEnqueueOutcome, ReviewJobExecution, ReviewJobIgnoredReason,
+    ReviewJobRecord, ReviewJobRequest, ReviewJobSchemaVersion, ReviewJobScope,
+    ReviewJobStatus as SharedReviewJobStatus,
+};
 
 const APP_DIR: &str = "lachesi";
 const DB_FILE: &str = "lachesi.sqlite3";
 const LEGACY_REVIEWS_DIR: &str = "reviews";
 const MAX_ADMINISTRATIVE_AUDIT_TIMESTAMP_MS: i64 = 4_102_444_800_000;
+const SHARED_REVIEW_JOB_LEASE_MS: i64 = 15 * 60 * 1000;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -463,6 +470,90 @@ fn migrate(conn: &mut Connection) -> Result<(), String> {
     migration
         .execute(
             "INSERT OR IGNORE INTO schema_migrations(version) VALUES (4)",
+            [],
+        )
+        .map_err(|error| error.to_string())?;
+    migration.commit().map_err(|error| error.to_string())?;
+
+    let migration = conn
+        .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+        .map_err(|error| error.to_string())?;
+    migration
+        .execute_batch(
+            r#"
+            CREATE TABLE IF NOT EXISTS shared_review_jobs (
+              id TEXT PRIMARY KEY,
+              tenant_id TEXT NOT NULL,
+              provider TEXT NOT NULL CHECK (provider IN ('github', 'bitbucket')),
+              delivery_id TEXT NOT NULL,
+              workspace TEXT NOT NULL,
+              repo TEXT NOT NULL,
+              pr_id INTEGER NOT NULL CHECK (pr_id > 0),
+              trigger TEXT NOT NULL CHECK (
+                trigger IN ('opened', 'reopened', 'synchronized', 'ready_for_review')
+              ),
+              base_ref_name TEXT NOT NULL,
+              base_sha TEXT NOT NULL,
+              head_ref_name TEXT NOT NULL,
+              head_sha TEXT NOT NULL,
+              scope_kind TEXT NOT NULL CHECK (
+                scope_kind IN ('full_branch', 'incremental')
+              ),
+              previous_head_sha TEXT,
+              status TEXT NOT NULL CHECK (
+                status IN ('queued', 'running', 'completed', 'failed', 'cancelled')
+              ),
+              run_id TEXT,
+              error_code TEXT,
+              attempt_count INTEGER NOT NULL DEFAULT 0 CHECK (attempt_count >= 0),
+              lease_expires_at_ms INTEGER CHECK (lease_expires_at_ms >= 0),
+              created_at_ms INTEGER NOT NULL CHECK (created_at_ms >= 0),
+              started_at_ms INTEGER CHECK (started_at_ms >= 0),
+              finished_at_ms INTEGER CHECK (finished_at_ms >= 0),
+              UNIQUE (tenant_id, provider, delivery_id),
+              CHECK (
+                (scope_kind = 'full_branch' AND previous_head_sha IS NULL)
+                OR
+                (scope_kind = 'incremental' AND previous_head_sha IS NOT NULL)
+              )
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_shared_review_jobs_queue
+              ON shared_review_jobs(status, created_at_ms, id);
+
+            CREATE INDEX IF NOT EXISTS idx_shared_review_jobs_repository
+              ON shared_review_jobs(
+                tenant_id, provider, workspace, repo, status, created_at_ms
+              );
+
+            CREATE INDEX IF NOT EXISTS idx_shared_review_jobs_pull_request
+              ON shared_review_jobs(
+                tenant_id, provider, workspace, repo, pr_id, status, created_at_ms
+              );
+
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_shared_review_jobs_active_head
+              ON shared_review_jobs(
+                tenant_id, provider, workspace, repo, pr_id, head_sha
+              )
+              WHERE status IN ('queued', 'running', 'completed', 'failed');
+
+            CREATE TABLE IF NOT EXISTS shared_review_pull_request_state (
+              tenant_id TEXT NOT NULL,
+              provider TEXT NOT NULL CHECK (provider IN ('github', 'bitbucket')),
+              workspace TEXT NOT NULL,
+              repo TEXT NOT NULL,
+              pr_id INTEGER NOT NULL CHECK (pr_id > 0),
+              current_head_sha TEXT NOT NULL,
+              reviewable INTEGER NOT NULL CHECK (reviewable IN (0, 1)),
+              updated_at_ms INTEGER NOT NULL CHECK (updated_at_ms >= 0),
+              PRIMARY KEY (tenant_id, provider, workspace, repo, pr_id)
+            );
+            "#,
+        )
+        .map_err(|error| error.to_string())?;
+    migration
+        .execute(
+            "INSERT OR IGNORE INTO schema_migrations(version) VALUES (5)",
             [],
         )
         .map_err(|error| error.to_string())?;
@@ -1053,6 +1144,951 @@ fn cursor_pr_id(identity: &ReviewCursorIdentity) -> Result<i64, String> {
         return Err("`prId` must be a positive integer".to_string());
     }
     i64::try_from(identity.pr_id).map_err(|_| "`prId` exceeds the supported range".to_string())
+}
+
+const SHARED_REVIEW_JOB_SELECT: &str = r#"
+    SELECT
+      id, tenant_id, provider, delivery_id, workspace, repo, pr_id, trigger,
+      base_ref_name, base_sha, head_ref_name, head_sha, scope_kind,
+      previous_head_sha, status, run_id, error_code,
+      attempt_count, lease_expires_at_ms,
+      created_at_ms, started_at_ms, finished_at_ms
+    FROM shared_review_jobs
+"#;
+
+pub(crate) fn enqueue_shared_review_job(
+    event: &crate::review_event::PullRequestReviewEvent,
+) -> Result<ReviewJobEnqueueOutcome, String> {
+    validate_shared_review_event_for_storage(event)?;
+    if event.kind == crate::review_event::PullRequestReviewEventKind::Closed || event.draft {
+        return Err("Only non-draft, open pull-request events can be enqueued".to_string());
+    }
+
+    let mut conn = open()?;
+    let transaction = conn
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .map_err(|error| error.to_string())?;
+
+    if let Some(existing) = shared_review_job_by_delivery_from(&transaction, event)? {
+        if !shared_job_matches_event(&existing, event) {
+            return Err("Delivery id conflicts with an existing review job".to_string());
+        }
+        transaction.commit().map_err(|error| error.to_string())?;
+        return Ok(ReviewJobEnqueueOutcome::DuplicateDelivery(Box::new(
+            existing,
+        )));
+    }
+    if let Some(existing) = shared_review_job_by_head_from(&transaction, event)? {
+        transaction.commit().map_err(|error| error.to_string())?;
+        return Ok(ReviewJobEnqueueOutcome::DuplicateHead(Some(Box::new(
+            existing,
+        ))));
+    }
+
+    let identity = cursor_identity_from_event(event);
+    let cursor = get_review_cursor_from(&transaction, &identity)?;
+    let previous_head_sha = match &cursor {
+        ReviewCursorState::NotReviewed => None,
+        ReviewCursorState::Reviewed(cursor) => Some(cursor.reviewed_head_sha.clone()),
+    };
+    if previous_head_sha.as_deref() == Some(event.head.sha.as_str()) {
+        transaction.commit().map_err(|error| error.to_string())?;
+        return Ok(ReviewJobEnqueueOutcome::DuplicateHead(None));
+    }
+
+    let scope = match previous_head_sha {
+        Some(previous_head_sha) => ReviewJobScope::Incremental {
+            previous_head_sha,
+            current_head_sha: event.head.sha.clone(),
+        },
+        None => ReviewJobScope::FullBranch {
+            base_sha: event.base.sha.clone(),
+            head_sha: event.head.sha.clone(),
+        },
+    };
+    let now = now_ms_i64();
+    let request = ReviewJobRequest {
+        schema_version: ReviewJobSchemaVersion::V1,
+        id: shared_review_job_id(event),
+        tenant_id: event.tenant_id.clone(),
+        provider: event.provider,
+        delivery_id: event.delivery_id.clone(),
+        workspace: event.workspace.clone(),
+        repository: event.repository.clone(),
+        pull_request_id: event.pull_request_id,
+        trigger: event.kind,
+        base: event.base.clone(),
+        head: event.head.clone(),
+        scope,
+    };
+    let (scope_kind, previous_head_sha) = shared_scope_columns(&request.scope);
+    transaction
+        .execute(
+            r#"
+            INSERT INTO shared_review_jobs (
+              id, tenant_id, provider, delivery_id, workspace, repo, pr_id,
+              trigger, base_ref_name, base_sha, head_ref_name, head_sha,
+              scope_kind, previous_head_sha, status, run_id, error_code,
+              attempt_count, lease_expires_at_ms,
+              created_at_ms, started_at_ms, finished_at_ms
+            )
+            VALUES (
+              ?1, ?2, ?3, ?4, ?5, ?6, ?7,
+              ?8, ?9, ?10, ?11, ?12,
+              ?13, ?14, 'queued', NULL, NULL,
+              0, NULL, ?15, NULL, NULL
+            )
+            "#,
+            params![
+                request.id,
+                request.tenant_id,
+                request.provider.as_str(),
+                request.delivery_id,
+                request.workspace,
+                request.repository,
+                shared_review_pr_id(request.pull_request_id)?,
+                shared_event_kind(request.trigger)?,
+                request.base.ref_name,
+                request.base.sha,
+                request.head.ref_name,
+                request.head.sha,
+                scope_kind,
+                previous_head_sha,
+                now,
+            ],
+        )
+        .map_err(|error| error.to_string())?;
+    upsert_shared_pull_request_state(&transaction, event, true, now)?;
+    transaction
+        .execute(
+            r#"
+            UPDATE shared_review_jobs
+            SET status = 'cancelled',
+                error_code = 'superseded',
+                finished_at_ms = ?1
+            WHERE tenant_id = ?2
+              AND provider = ?3
+              AND workspace = ?4
+              AND repo = ?5
+              AND pr_id = ?6
+              AND status = 'queued'
+              AND head_sha <> ?7
+            "#,
+            params![
+                now,
+                event.tenant_id,
+                event.provider.as_str(),
+                event.workspace,
+                event.repository,
+                shared_review_pr_id(event.pull_request_id)?,
+                event.head.sha,
+            ],
+        )
+        .map_err(|error| error.to_string())?;
+    let record = get_shared_review_job_from(&transaction, &request.id)?
+        .ok_or_else(|| "Failed to reload queued shared review job".to_string())?;
+    transaction.commit().map_err(|error| error.to_string())?;
+    Ok(ReviewJobEnqueueOutcome::Queued(Box::new(record)))
+}
+
+pub(crate) fn suppress_shared_review_jobs(
+    event: &crate::review_event::PullRequestReviewEvent,
+    reason: ReviewJobIgnoredReason,
+) -> Result<usize, String> {
+    validate_shared_review_event_for_storage(event)?;
+    match reason {
+        ReviewJobIgnoredReason::Draft if !event.draft => {
+            return Err("Draft suppression requires a draft event".to_string());
+        }
+        ReviewJobIgnoredReason::Closed
+            if event.kind != crate::review_event::PullRequestReviewEventKind::Closed =>
+        {
+            return Err("Closed suppression requires a closed event".to_string());
+        }
+        _ => {}
+    }
+
+    let mut conn = open()?;
+    let transaction = conn
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .map_err(|error| error.to_string())?;
+    let now = now_ms_i64();
+    let current_head = transaction
+        .query_row(
+            r#"
+            SELECT current_head_sha
+            FROM shared_review_pull_request_state
+            WHERE tenant_id = ?1
+              AND provider = ?2
+              AND workspace = ?3
+              AND repo = ?4
+              AND pr_id = ?5
+            "#,
+            params![
+                event.tenant_id,
+                event.provider.as_str(),
+                event.workspace,
+                event.repository,
+                shared_review_pr_id(event.pull_request_id)?,
+            ],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()
+        .map_err(|error| error.to_string())?;
+    if current_head
+        .as_deref()
+        .is_some_and(|head| head != event.head.sha)
+    {
+        transaction.commit().map_err(|error| error.to_string())?;
+        return Ok(0);
+    }
+    upsert_shared_pull_request_state(&transaction, event, false, now)?;
+    let reason_code = match reason {
+        ReviewJobIgnoredReason::Draft => "pull_request_draft",
+        ReviewJobIgnoredReason::Closed => "pull_request_closed",
+    };
+    let cancelled = transaction
+        .execute(
+            r#"
+            UPDATE shared_review_jobs
+            SET status = 'cancelled',
+                error_code = ?1,
+                finished_at_ms = ?2
+            WHERE tenant_id = ?3
+              AND provider = ?4
+              AND workspace = ?5
+              AND repo = ?6
+              AND pr_id = ?7
+              AND status = 'queued'
+              AND head_sha = ?8
+            "#,
+            params![
+                reason_code,
+                now,
+                event.tenant_id,
+                event.provider.as_str(),
+                event.workspace,
+                event.repository,
+                shared_review_pr_id(event.pull_request_id)?,
+                event.head.sha,
+            ],
+        )
+        .map_err(|error| error.to_string())?;
+    transaction.commit().map_err(|error| error.to_string())?;
+    Ok(cancelled)
+}
+
+pub(crate) fn claim_next_shared_review_job(
+    limits: ReviewConcurrencyLimits,
+) -> Result<Option<ReviewJobRecord>, String> {
+    let limits = limits.validate()?;
+    let mut conn = open()?;
+    let transaction = conn
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .map_err(|error| error.to_string())?;
+    let now = now_ms_i64();
+    transaction
+        .execute(
+            r#"
+            UPDATE shared_review_jobs
+            SET status = 'queued',
+                error_code = 'worker_lease_expired',
+                started_at_ms = NULL,
+                lease_expires_at_ms = NULL
+            WHERE status = 'running'
+              AND lease_expires_at_ms IS NOT NULL
+              AND lease_expires_at_ms <= ?1
+            "#,
+            params![now],
+        )
+        .map_err(|error| error.to_string())?;
+    let queued_ids = {
+        let mut statement = transaction
+            .prepare(
+                r#"
+                SELECT id
+                FROM shared_review_jobs
+                WHERE status = 'queued'
+                ORDER BY created_at_ms, id
+                "#,
+            )
+            .map_err(|error| error.to_string())?;
+        let queued_ids = statement
+            .query_map([], |row| row.get::<_, String>(0))
+            .map_err(|error| error.to_string())?
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(|error| error.to_string())?;
+        queued_ids
+    };
+
+    for job_id in queued_ids {
+        let Some(job) = get_shared_review_job_from(&transaction, &job_id)? else {
+            continue;
+        };
+        let repository_running = shared_running_count(&transaction, &job, false)?;
+        let pull_request_running = shared_running_count(&transaction, &job, true)?;
+        if repository_running >= limits.per_repository
+            || pull_request_running >= limits.per_pull_request
+        {
+            continue;
+        }
+        let changed = transaction
+            .execute(
+                r#"
+                UPDATE shared_review_jobs
+                SET status = 'running',
+                    attempt_count = attempt_count + 1,
+                    error_code = NULL,
+                    started_at_ms = ?1,
+                    lease_expires_at_ms = ?2
+                WHERE id = ?3 AND status = 'queued'
+                "#,
+                params![now, now.saturating_add(SHARED_REVIEW_JOB_LEASE_MS), job_id],
+            )
+            .map_err(|error| error.to_string())?;
+        if changed == 1 {
+            let claimed = get_shared_review_job_from(&transaction, &job_id)?
+                .ok_or_else(|| "Failed to reload claimed shared review job".to_string())?;
+            transaction.commit().map_err(|error| error.to_string())?;
+            return Ok(Some(claimed));
+        }
+    }
+    transaction.commit().map_err(|error| error.to_string())?;
+    Ok(None)
+}
+
+pub(crate) fn finish_shared_review_job(
+    job_id: &str,
+    expected_attempt_count: u32,
+    execution: &ReviewJobExecution,
+) -> Result<ReviewJobRecord, String> {
+    if job_id.trim().is_empty() {
+        return Err("`jobId` must not be empty".to_string());
+    }
+    let (requested_status, run_id, requested_error_code) = shared_execution_columns(execution)?;
+    let mut conn = open()?;
+    let transaction = conn
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .map_err(|error| error.to_string())?;
+    let current = get_shared_review_job_from(&transaction, job_id)?
+        .ok_or_else(|| format!("Unknown shared review job: {job_id}"))?;
+    if matches!(
+        current.status,
+        SharedReviewJobStatus::Completed
+            | SharedReviewJobStatus::Failed
+            | SharedReviewJobStatus::Cancelled
+    ) {
+        let matching_terminal_state = current.status == requested_status
+            && current.error_code.as_deref() == requested_error_code;
+        let matching_stale_completion = requested_status == SharedReviewJobStatus::Completed
+            && current.status == SharedReviewJobStatus::Cancelled
+            && current.error_code.as_deref() == Some("stale_pull_request_state");
+        if current.attempt_count == expected_attempt_count
+            && (matching_terminal_state || matching_stale_completion)
+            && current.run_id.as_deref() == run_id
+        {
+            transaction.commit().map_err(|error| error.to_string())?;
+            return Ok(current);
+        }
+        return Err("Shared review job already has a different terminal state".to_string());
+    }
+    if current.status != SharedReviewJobStatus::Running {
+        return Err("Only a running shared review job can be finished".to_string());
+    }
+    if current.attempt_count != expected_attempt_count {
+        return Err("Shared review job lease belongs to a different attempt".to_string());
+    }
+
+    let finished_at = now_ms_i64();
+    let lease_expires_at = current
+        .lease_expires_at
+        .as_deref()
+        .ok_or_else(|| "Running shared review job has no active lease".to_string())?
+        .parse::<i64>()
+        .map_err(|_| "Running shared review job has an invalid lease".to_string())?;
+    if lease_expires_at <= finished_at {
+        return Err("Shared review job lease expired before completion".to_string());
+    }
+    let (target_status, error_code) = if requested_status == SharedReviewJobStatus::Completed {
+        if advance_shared_review_cursor_if_current(&transaction, &current, run_id, finished_at)? {
+            (SharedReviewJobStatus::Completed, requested_error_code)
+        } else {
+            (
+                SharedReviewJobStatus::Cancelled,
+                Some("stale_pull_request_state"),
+            )
+        }
+    } else {
+        (requested_status, requested_error_code)
+    };
+    let changed = transaction
+        .execute(
+            r#"
+            UPDATE shared_review_jobs
+            SET status = ?1,
+                run_id = ?2,
+                error_code = ?3,
+                lease_expires_at_ms = NULL,
+                finished_at_ms = ?4
+            WHERE id = ?5
+              AND status = 'running'
+              AND attempt_count = ?6
+              AND lease_expires_at_ms > ?7
+            "#,
+            params![
+                target_status.as_str(),
+                run_id,
+                error_code,
+                finished_at,
+                job_id,
+                i64::from(expected_attempt_count),
+                finished_at,
+            ],
+        )
+        .map_err(|error| error.to_string())?;
+    if changed != 1 {
+        return Err("Shared review job lease changed before completion".to_string());
+    }
+    let finished = get_shared_review_job_from(&transaction, job_id)?
+        .ok_or_else(|| "Failed to reload finished shared review job".to_string())?;
+    transaction.commit().map_err(|error| error.to_string())?;
+    Ok(finished)
+}
+
+pub(crate) fn renew_shared_review_job_lease(
+    job_id: &str,
+    expected_attempt_count: u32,
+) -> Result<ReviewJobRecord, String> {
+    if job_id.trim().is_empty() {
+        return Err("`jobId` must not be empty".to_string());
+    }
+    let mut conn = open()?;
+    let transaction = conn
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .map_err(|error| error.to_string())?;
+    let now = now_ms_i64();
+    let changed = transaction
+        .execute(
+            r#"
+            UPDATE shared_review_jobs
+            SET lease_expires_at_ms = ?1
+            WHERE id = ?2
+              AND status = 'running'
+              AND attempt_count = ?3
+              AND lease_expires_at_ms > ?4
+            "#,
+            params![
+                now.saturating_add(SHARED_REVIEW_JOB_LEASE_MS),
+                job_id,
+                i64::from(expected_attempt_count),
+                now,
+            ],
+        )
+        .map_err(|error| error.to_string())?;
+    if changed != 1 {
+        return Err("Shared review job lease is expired or belongs to another attempt".to_string());
+    }
+    let renewed = get_shared_review_job_from(&transaction, job_id)?
+        .ok_or_else(|| "Failed to reload renewed shared review job".to_string())?;
+    transaction.commit().map_err(|error| error.to_string())?;
+    Ok(renewed)
+}
+
+pub(crate) fn get_shared_review_job(job_id: &str) -> Result<Option<ReviewJobRecord>, String> {
+    if job_id.trim().is_empty() {
+        return Err("`jobId` must not be empty".to_string());
+    }
+    let conn = open()?;
+    get_shared_review_job_from(&conn, job_id)
+}
+
+fn shared_review_job_by_delivery_from(
+    conn: &Connection,
+    event: &crate::review_event::PullRequestReviewEvent,
+) -> Result<Option<ReviewJobRecord>, String> {
+    let id = conn
+        .query_row(
+            r#"
+            SELECT id
+            FROM shared_review_jobs
+            WHERE tenant_id = ?1 AND provider = ?2 AND delivery_id = ?3
+            "#,
+            params![event.tenant_id, event.provider.as_str(), event.delivery_id],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()
+        .map_err(|error| error.to_string())?;
+    id.map(|id| get_shared_review_job_from(conn, &id))
+        .transpose()
+        .map(Option::flatten)
+}
+
+fn shared_review_job_by_head_from(
+    conn: &Connection,
+    event: &crate::review_event::PullRequestReviewEvent,
+) -> Result<Option<ReviewJobRecord>, String> {
+    let id = conn
+        .query_row(
+            r#"
+            SELECT id
+            FROM shared_review_jobs
+            WHERE tenant_id = ?1
+              AND provider = ?2
+              AND workspace = ?3
+              AND repo = ?4
+              AND pr_id = ?5
+              AND head_sha = ?6
+              AND status IN ('queued', 'running', 'completed', 'failed')
+            "#,
+            params![
+                event.tenant_id,
+                event.provider.as_str(),
+                event.workspace,
+                event.repository,
+                shared_review_pr_id(event.pull_request_id)?,
+                event.head.sha,
+            ],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()
+        .map_err(|error| error.to_string())?;
+    id.map(|id| get_shared_review_job_from(conn, &id))
+        .transpose()
+        .map(Option::flatten)
+}
+
+fn get_shared_review_job_from(
+    conn: &Connection,
+    job_id: &str,
+) -> Result<Option<ReviewJobRecord>, String> {
+    let sql = format!("{SHARED_REVIEW_JOB_SELECT} WHERE id = ?1");
+    conn.query_row(&sql, params![job_id], row_to_shared_review_job)
+        .optional()
+        .map_err(|error| error.to_string())
+}
+
+fn row_to_shared_review_job(row: &rusqlite::Row<'_>) -> rusqlite::Result<ReviewJobRecord> {
+    let provider = parse_shared_provider(&row.get::<_, String>(2)?)
+        .map_err(|message| shared_job_conversion_error(2, message))?;
+    let trigger = parse_shared_event_kind(&row.get::<_, String>(7)?)
+        .map_err(|message| shared_job_conversion_error(7, message))?;
+    let base = crate::review_event::PullRequestRevision {
+        ref_name: row.get(8)?,
+        sha: row.get(9)?,
+    };
+    let head = crate::review_event::PullRequestRevision {
+        ref_name: row.get(10)?,
+        sha: row.get(11)?,
+    };
+    let scope_kind: String = row.get(12)?;
+    let previous_head_sha: Option<String> = row.get(13)?;
+    let scope = match (scope_kind.as_str(), previous_head_sha) {
+        ("full_branch", None) => ReviewJobScope::FullBranch {
+            base_sha: base.sha.clone(),
+            head_sha: head.sha.clone(),
+        },
+        ("incremental", Some(previous_head_sha)) => ReviewJobScope::Incremental {
+            previous_head_sha,
+            current_head_sha: head.sha.clone(),
+        },
+        _ => {
+            return Err(shared_job_conversion_error(
+                12,
+                "Invalid shared review job scope",
+            ));
+        }
+    };
+    let status = SharedReviewJobStatus::from_str(&row.get::<_, String>(14)?)
+        .map_err(|message| shared_job_conversion_error(14, &message))?;
+    Ok(ReviewJobRecord {
+        request: ReviewJobRequest {
+            schema_version: ReviewJobSchemaVersion::V1,
+            id: row.get(0)?,
+            tenant_id: row.get(1)?,
+            provider,
+            delivery_id: row.get(3)?,
+            workspace: row.get(4)?,
+            repository: row.get(5)?,
+            pull_request_id: u64::try_from(row.get::<_, i64>(6)?).map_err(|_| {
+                shared_job_conversion_error(6, "Invalid shared review job pull-request id")
+            })?,
+            trigger,
+            base,
+            head,
+            scope,
+        },
+        status,
+        attempt_count: u32::try_from(row.get::<_, i64>(17)?).map_err(|_| {
+            shared_job_conversion_error(17, "Invalid shared review job attempt count")
+        })?,
+        lease_expires_at: row
+            .get::<_, Option<i64>>(18)?
+            .map(|value| value.to_string()),
+        run_id: row.get(15)?,
+        error_code: row.get(16)?,
+        created_at: row.get::<_, i64>(19)?.to_string(),
+        started_at: row
+            .get::<_, Option<i64>>(20)?
+            .map(|value| value.to_string()),
+        finished_at: row
+            .get::<_, Option<i64>>(21)?
+            .map(|value| value.to_string()),
+    })
+}
+
+fn shared_running_count(
+    conn: &Connection,
+    job: &ReviewJobRecord,
+    include_pull_request: bool,
+) -> Result<usize, String> {
+    let mut sql = r#"
+        SELECT COUNT(*)
+        FROM shared_review_jobs
+        WHERE tenant_id = ?1
+          AND provider = ?2
+          AND workspace = ?3
+          AND repo = ?4
+          AND status = 'running'
+    "#
+    .to_string();
+    if include_pull_request {
+        sql.push_str(" AND pr_id = ?5");
+    }
+    let count: i64 = if include_pull_request {
+        conn.query_row(
+            &sql,
+            params![
+                job.request.tenant_id,
+                job.request.provider.as_str(),
+                job.request.workspace,
+                job.request.repository,
+                shared_review_pr_id(job.request.pull_request_id)?,
+            ],
+            |row| row.get(0),
+        )
+    } else {
+        conn.query_row(
+            &sql,
+            params![
+                job.request.tenant_id,
+                job.request.provider.as_str(),
+                job.request.workspace,
+                job.request.repository,
+            ],
+            |row| row.get(0),
+        )
+    }
+    .map_err(|error| error.to_string())?;
+    usize::try_from(count).map_err(|_| "Invalid running review job count".to_string())
+}
+
+fn upsert_shared_pull_request_state(
+    conn: &Connection,
+    event: &crate::review_event::PullRequestReviewEvent,
+    reviewable: bool,
+    now: i64,
+) -> Result<(), String> {
+    conn.execute(
+        r#"
+        INSERT INTO shared_review_pull_request_state (
+          tenant_id, provider, workspace, repo, pr_id,
+          current_head_sha, reviewable, updated_at_ms
+        )
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+        ON CONFLICT(tenant_id, provider, workspace, repo, pr_id) DO UPDATE SET
+          current_head_sha = excluded.current_head_sha,
+          reviewable = excluded.reviewable,
+          updated_at_ms = excluded.updated_at_ms
+        "#,
+        params![
+            event.tenant_id,
+            event.provider.as_str(),
+            event.workspace,
+            event.repository,
+            shared_review_pr_id(event.pull_request_id)?,
+            event.head.sha,
+            if reviewable { 1 } else { 0 },
+            now,
+        ],
+    )
+    .map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+fn advance_shared_review_cursor_if_current(
+    conn: &Connection,
+    job: &ReviewJobRecord,
+    run_id: Option<&str>,
+    completed_at: i64,
+) -> Result<bool, String> {
+    let Some(run_id) = run_id else {
+        return Err("Completed review jobs require a run id".to_string());
+    };
+    let state = conn
+        .query_row(
+            r#"
+            SELECT current_head_sha, reviewable
+            FROM shared_review_pull_request_state
+            WHERE tenant_id = ?1
+              AND provider = ?2
+              AND workspace = ?3
+              AND repo = ?4
+              AND pr_id = ?5
+            "#,
+            params![
+                job.request.tenant_id,
+                job.request.provider.as_str(),
+                job.request.workspace,
+                job.request.repository,
+                shared_review_pr_id(job.request.pull_request_id)?,
+            ],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
+        )
+        .optional()
+        .map_err(|error| error.to_string())?;
+    let Some((current_head_sha, reviewable)) = state else {
+        return Ok(false);
+    };
+    if reviewable != 1 || current_head_sha != job.request.head.sha {
+        return Ok(false);
+    }
+
+    let identity = ReviewCursorIdentity {
+        tenant_id: job.request.tenant_id.clone(),
+        provider: job.request.provider,
+        workspace: job.request.workspace.clone(),
+        repo: job.request.repository.clone(),
+        pr_id: job.request.pull_request_id,
+    };
+    let current_cursor = get_review_cursor_from(conn, &identity)?;
+    let current_cursor_head = match &current_cursor {
+        ReviewCursorState::NotReviewed => None,
+        ReviewCursorState::Reviewed(cursor) => Some(cursor.reviewed_head_sha.as_str()),
+    };
+    if current_cursor_head != job.request.scope.previous_head_sha() {
+        return Ok(false);
+    }
+    conn.execute(
+        r#"
+        INSERT INTO review_cursors (
+          tenant_id, provider, workspace, repo, pr_id,
+          reviewed_head_sha, run_id, completed_at
+        )
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+        ON CONFLICT(tenant_id, provider, workspace, repo, pr_id) DO UPDATE SET
+          reviewed_head_sha = excluded.reviewed_head_sha,
+          run_id = excluded.run_id,
+          completed_at = excluded.completed_at
+        "#,
+        params![
+            identity.tenant_id,
+            identity.provider.as_str(),
+            identity.workspace,
+            identity.repo,
+            cursor_pr_id(&identity)?,
+            job.request.head.sha,
+            run_id,
+            completed_at.to_string(),
+        ],
+    )
+    .map_err(|error| error.to_string())?;
+    Ok(true)
+}
+
+fn shared_execution_columns(
+    execution: &ReviewJobExecution,
+) -> Result<(SharedReviewJobStatus, Option<&str>, Option<&str>), String> {
+    match execution {
+        ReviewJobExecution::Completed { run_id } => {
+            validate_shared_metadata("runId", run_id, 512)?;
+            Ok((
+                SharedReviewJobStatus::Completed,
+                Some(run_id.as_str()),
+                None,
+            ))
+        }
+        ReviewJobExecution::Failed { run_id, error_code } => {
+            validate_shared_job_code("errorCode", error_code)?;
+            if let Some(run_id) = run_id {
+                validate_shared_metadata("runId", run_id, 512)?;
+            }
+            Ok((
+                SharedReviewJobStatus::Failed,
+                run_id.as_deref(),
+                Some(error_code.as_str()),
+            ))
+        }
+        ReviewJobExecution::Cancelled {
+            run_id,
+            reason_code,
+        } => {
+            if let Some(run_id) = run_id {
+                validate_shared_metadata("runId", run_id, 512)?;
+            }
+            if let Some(reason_code) = reason_code {
+                validate_shared_job_code("reasonCode", reason_code)?;
+            }
+            Ok((
+                SharedReviewJobStatus::Cancelled,
+                run_id.as_deref(),
+                reason_code.as_deref(),
+            ))
+        }
+    }
+}
+
+fn validate_shared_review_event_for_storage(
+    event: &crate::review_event::PullRequestReviewEvent,
+) -> Result<(), String> {
+    event.validate().map_err(|error| error.to_string())?;
+    for (field, value) in [
+        ("tenantId", event.tenant_id.as_str()),
+        ("deliveryId", event.delivery_id.as_str()),
+        ("workspace", event.workspace.as_str()),
+        ("repository", event.repository.as_str()),
+    ] {
+        validate_shared_metadata(field, value, 512)?;
+    }
+    validate_shared_metadata("base.refName", &event.base.ref_name, 1024)?;
+    validate_shared_metadata("head.refName", &event.head.ref_name, 1024)?;
+    Ok(())
+}
+
+fn validate_shared_metadata(field: &str, value: &str, max_bytes: usize) -> Result<(), String> {
+    if value.is_empty()
+        || value != value.trim()
+        || value.len() > max_bytes
+        || value.chars().any(char::is_control)
+    {
+        Err(format!(
+            "`{field}` must be a bounded, non-control metadata value"
+        ))
+    } else {
+        Ok(())
+    }
+}
+
+fn validate_shared_job_code(field: &str, value: &str) -> Result<(), String> {
+    if value.is_empty()
+        || value.len() > 128
+        || !value.bytes().all(|byte| {
+            byte.is_ascii_lowercase() || byte.is_ascii_digit() || matches!(byte, b'_' | b'-' | b'.')
+        })
+    {
+        Err(format!(
+            "`{field}` must be a non-empty stable lowercase code"
+        ))
+    } else {
+        Ok(())
+    }
+}
+
+fn shared_job_matches_event(
+    job: &ReviewJobRecord,
+    event: &crate::review_event::PullRequestReviewEvent,
+) -> bool {
+    job.request.tenant_id == event.tenant_id
+        && job.request.provider == event.provider
+        && job.request.workspace == event.workspace
+        && job.request.repository == event.repository
+        && job.request.pull_request_id == event.pull_request_id
+        && job.request.trigger == event.kind
+        && job.request.base == event.base
+        && job.request.head == event.head
+}
+
+fn cursor_identity_from_event(
+    event: &crate::review_event::PullRequestReviewEvent,
+) -> ReviewCursorIdentity {
+    ReviewCursorIdentity {
+        tenant_id: event.tenant_id.clone(),
+        provider: event.provider,
+        workspace: event.workspace.clone(),
+        repo: event.repository.clone(),
+        pr_id: event.pull_request_id,
+    }
+}
+
+fn shared_review_job_id(event: &crate::review_event::PullRequestReviewEvent) -> String {
+    let mut digest = Sha256::new();
+    for value in [
+        event.tenant_id.as_bytes(),
+        event.provider.as_str().as_bytes(),
+        event.workspace.as_bytes(),
+        event.repository.as_bytes(),
+        event.head.sha.as_bytes(),
+        event.delivery_id.as_bytes(),
+    ] {
+        digest.update(value.len().to_be_bytes());
+        digest.update(value);
+    }
+    digest.update(event.pull_request_id.to_be_bytes());
+    format!("job-{}", hex::encode(digest.finalize()))
+}
+
+fn shared_scope_columns(scope: &ReviewJobScope) -> (&'static str, Option<&str>) {
+    match scope {
+        ReviewJobScope::FullBranch { .. } => ("full_branch", None),
+        ReviewJobScope::Incremental {
+            previous_head_sha, ..
+        } => ("incremental", Some(previous_head_sha)),
+    }
+}
+
+fn shared_event_kind(
+    kind: crate::review_event::PullRequestReviewEventKind,
+) -> Result<&'static str, String> {
+    match kind {
+        crate::review_event::PullRequestReviewEventKind::Opened => Ok("opened"),
+        crate::review_event::PullRequestReviewEventKind::Reopened => Ok("reopened"),
+        crate::review_event::PullRequestReviewEventKind::Synchronized => Ok("synchronized"),
+        crate::review_event::PullRequestReviewEventKind::ReadyForReview => Ok("ready_for_review"),
+        crate::review_event::PullRequestReviewEventKind::Closed => {
+            Err("Closed events cannot create review jobs".to_string())
+        }
+    }
+}
+
+fn parse_shared_event_kind(
+    value: &str,
+) -> Result<crate::review_event::PullRequestReviewEventKind, &'static str> {
+    match value {
+        "opened" => Ok(crate::review_event::PullRequestReviewEventKind::Opened),
+        "reopened" => Ok(crate::review_event::PullRequestReviewEventKind::Reopened),
+        "synchronized" => Ok(crate::review_event::PullRequestReviewEventKind::Synchronized),
+        "ready_for_review" => Ok(crate::review_event::PullRequestReviewEventKind::ReadyForReview),
+        _ => Err("Invalid shared review job trigger"),
+    }
+}
+
+fn parse_shared_provider(value: &str) -> Result<PullRequestReviewEventProvider, &'static str> {
+    match value {
+        "github" => Ok(PullRequestReviewEventProvider::Github),
+        "bitbucket" => Ok(PullRequestReviewEventProvider::Bitbucket),
+        _ => Err("Invalid shared review job provider"),
+    }
+}
+
+fn shared_review_pr_id(pr_id: u64) -> Result<i64, String> {
+    if pr_id == 0 {
+        return Err("`pullRequestId` must be positive".to_string());
+    }
+    i64::try_from(pr_id).map_err(|_| "`pullRequestId` exceeds the supported range".to_string())
+}
+
+fn now_ms_i64() -> i64 {
+    now_ms().parse().unwrap_or(0)
+}
+
+fn shared_job_conversion_error(column: usize, message: impl Into<String>) -> rusqlite::Error {
+    rusqlite::Error::FromSqlConversionFailure(
+        column,
+        rusqlite::types::Type::Text,
+        Box::new(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            message.into(),
+        )),
+    )
 }
 
 pub fn load_review_json(workspace: &str, repo: &str, id: u32) -> Result<Option<String>, String> {
@@ -1709,6 +2745,10 @@ mod tests {
         AdministrativeAuditSchemaVersion, AdministrativeAuditTarget, AdministrativeAuditTargetKind,
         REDACTED_AUDIT_VALUE,
     };
+    use crate::review_event::{
+        PullRequestClosedOutcome, PullRequestEventActor, PullRequestReviewEvent,
+        PullRequestReviewEventKind, PullRequestReviewEventSchemaVersion, PullRequestRevision,
+    };
 
     use super::*;
 
@@ -1758,6 +2798,48 @@ mod tests {
             completed_at: completed_at.to_string(),
             outcome,
         }
+    }
+
+    fn shared_event(
+        tenant_id: &str,
+        workspace: &str,
+        repo: &str,
+        pr_id: u64,
+        head_sha: &str,
+        delivery_id: &str,
+    ) -> PullRequestReviewEvent {
+        PullRequestReviewEvent {
+            schema_version: PullRequestReviewEventSchemaVersion::V1,
+            kind: PullRequestReviewEventKind::Synchronized,
+            provider: PullRequestReviewEventProvider::Github,
+            tenant_id: tenant_id.to_string(),
+            workspace: workspace.to_string(),
+            repository: repo.to_string(),
+            pull_request_id: pr_id,
+            base: PullRequestRevision {
+                ref_name: "main".to_string(),
+                sha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_string(),
+            },
+            head: PullRequestRevision {
+                ref_name: format!("feature/{pr_id}"),
+                sha: head_sha.to_string(),
+            },
+            draft: false,
+            closed_outcome: None,
+            actor: PullRequestEventActor {
+                id: "user-7".to_string(),
+                login: "reviewer".to_string(),
+                display_name: None,
+            },
+            delivery_id: delivery_id.to_string(),
+        }
+    }
+
+    fn queued_shared_job(outcome: ReviewJobEnqueueOutcome) -> ReviewJobRecord {
+        let ReviewJobEnqueueOutcome::Queued(job) = outcome else {
+            panic!("expected a queued shared review job");
+        };
+        *job
     }
 
     fn feedback_event(
@@ -2400,7 +3482,7 @@ mod tests {
                 .expect("query migrations")
                 .collect::<rusqlite::Result<_>>()
                 .expect("read migration versions");
-            assert_eq!(versions, vec![1, 2, 3, 4]);
+            assert_eq!(versions, vec![1, 2, 3, 4, 5]);
         });
     }
 
@@ -2503,6 +3585,552 @@ mod tests {
             let jobs = list_recent_review_jobs(10).expect("list jobs");
             assert_eq!(jobs.len(), 1);
             assert_eq!(jobs[0].id, job.id);
+        });
+    }
+
+    #[test]
+    fn shared_review_jobs_use_full_then_incremental_scope_and_advance_on_success_only() {
+        const FIRST_SHA: &str = "1111111111111111111111111111111111111111";
+        const SECOND_SHA: &str = "2222222222222222222222222222222222222222";
+        const THIRD_SHA: &str = "3333333333333333333333333333333333333333";
+
+        with_test_data_dir("shared-review-scope-cursor", |_| {
+            let first = queued_shared_job(
+                enqueue_shared_review_job(&shared_event(
+                    "tenant-acme",
+                    "acme",
+                    "payments",
+                    42,
+                    FIRST_SHA,
+                    "delivery-1",
+                ))
+                .expect("enqueue first review"),
+            );
+            assert_eq!(
+                first.request.scope,
+                ReviewJobScope::FullBranch {
+                    base_sha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_string(),
+                    head_sha: FIRST_SHA.to_string(),
+                }
+            );
+            let running = claim_next_shared_review_job(ReviewConcurrencyLimits::default())
+                .expect("claim first review")
+                .expect("first review job");
+            assert_eq!(running.request.id, first.request.id);
+            let completed = finish_shared_review_job(
+                &running.request.id,
+                running.attempt_count,
+                &ReviewJobExecution::Completed {
+                    run_id: "run-1".to_string(),
+                },
+            )
+            .expect("finish first review");
+            assert_eq!(completed.status, SharedReviewJobStatus::Completed);
+            assert_eq!(
+                finish_shared_review_job(
+                    &running.request.id,
+                    running.attempt_count,
+                    &ReviewJobExecution::Completed {
+                        run_id: "run-1".to_string(),
+                    },
+                )
+                .expect("repeat matching completion"),
+                completed
+            );
+            assert!(finish_shared_review_job(
+                &running.request.id,
+                running.attempt_count,
+                &ReviewJobExecution::Failed {
+                    run_id: Some("run-1".to_string()),
+                    error_code: "conflicting_outcome".to_string(),
+                },
+            )
+            .is_err());
+            assert_eq!(
+                get_review_cursor(&cursor_identity()).expect("cursor after success"),
+                ReviewCursorState::Reviewed(ReviewCursor {
+                    identity: cursor_identity(),
+                    reviewed_head_sha: FIRST_SHA.to_string(),
+                    run_id: "run-1".to_string(),
+                    completed_at: completed.finished_at.clone().expect("completion time"),
+                })
+            );
+
+            let second = queued_shared_job(
+                enqueue_shared_review_job(&shared_event(
+                    "tenant-acme",
+                    "acme",
+                    "payments",
+                    42,
+                    SECOND_SHA,
+                    "delivery-2",
+                ))
+                .expect("enqueue incremental review"),
+            );
+            assert_eq!(
+                second.request.scope,
+                ReviewJobScope::Incremental {
+                    previous_head_sha: FIRST_SHA.to_string(),
+                    current_head_sha: SECOND_SHA.to_string(),
+                }
+            );
+            let running = claim_next_shared_review_job(ReviewConcurrencyLimits::default())
+                .expect("claim incremental review")
+                .expect("incremental review job");
+            let failed = finish_shared_review_job(
+                &running.request.id,
+                running.attempt_count,
+                &ReviewJobExecution::Failed {
+                    run_id: Some("run-2".to_string()),
+                    error_code: "provider_unavailable".to_string(),
+                },
+            )
+            .expect("fail incremental review");
+            assert_eq!(failed.status, SharedReviewJobStatus::Failed);
+            assert_eq!(
+                get_review_cursor(&cursor_identity()).expect("cursor after failure"),
+                ReviewCursorState::Reviewed(ReviewCursor {
+                    identity: cursor_identity(),
+                    reviewed_head_sha: FIRST_SHA.to_string(),
+                    run_id: "run-1".to_string(),
+                    completed_at: completed.finished_at.expect("completion time"),
+                })
+            );
+
+            let third = queued_shared_job(
+                enqueue_shared_review_job(&shared_event(
+                    "tenant-acme",
+                    "acme",
+                    "payments",
+                    42,
+                    THIRD_SHA,
+                    "delivery-3",
+                ))
+                .expect("enqueue after failed review"),
+            );
+            assert_eq!(third.request.scope.previous_head_sha(), Some(FIRST_SHA));
+        });
+    }
+
+    #[test]
+    fn shared_review_jobs_deduplicate_delivery_and_head_per_tenant() {
+        const HEAD_SHA: &str = "1111111111111111111111111111111111111111";
+        const OTHER_SHA: &str = "2222222222222222222222222222222222222222";
+
+        with_test_data_dir("shared-review-dedup", |_| {
+            let event = shared_event(
+                "tenant-acme",
+                "acme",
+                "payments",
+                42,
+                HEAD_SHA,
+                "delivery-1",
+            );
+            let queued =
+                queued_shared_job(enqueue_shared_review_job(&event).expect("enqueue review"));
+            assert!(matches!(
+                enqueue_shared_review_job(&event).expect("deduplicate delivery"),
+                ReviewJobEnqueueOutcome::DuplicateDelivery(_)
+            ));
+
+            let mut same_head = event.clone();
+            same_head.delivery_id = "delivery-2".to_string();
+            assert!(matches!(
+                enqueue_shared_review_job(&same_head).expect("deduplicate head"),
+                ReviewJobEnqueueOutcome::DuplicateHead(Some(_))
+            ));
+
+            let mut conflicting_delivery = event.clone();
+            conflicting_delivery.head.sha = OTHER_SHA.to_string();
+            assert!(enqueue_shared_review_job(&conflicting_delivery).is_err());
+
+            let mut other_tenant = event;
+            other_tenant.tenant_id = "tenant-other".to_string();
+            assert!(matches!(
+                enqueue_shared_review_job(&other_tenant).expect("other tenant review"),
+                ReviewJobEnqueueOutcome::Queued(_)
+            ));
+            assert_eq!(
+                get_shared_review_job(&queued.request.id)
+                    .expect("load original job")
+                    .expect("original job")
+                    .request
+                    .tenant_id,
+                "tenant-acme"
+            );
+        });
+    }
+
+    #[test]
+    fn newer_head_supersedes_only_queued_work_for_the_same_pull_request() {
+        const OLD_SHA: &str = "1111111111111111111111111111111111111111";
+        const NEW_SHA: &str = "2222222222222222222222222222222222222222";
+        const OTHER_SHA: &str = "3333333333333333333333333333333333333333";
+
+        with_test_data_dir("shared-review-supersede", |_| {
+            let stale = queued_shared_job(
+                enqueue_shared_review_job(&shared_event(
+                    "tenant-acme",
+                    "acme",
+                    "payments",
+                    42,
+                    OLD_SHA,
+                    "delivery-stale",
+                ))
+                .expect("enqueue stale job"),
+            );
+            let unrelated = queued_shared_job(
+                enqueue_shared_review_job(&shared_event(
+                    "tenant-acme",
+                    "acme",
+                    "payments",
+                    43,
+                    OTHER_SHA,
+                    "delivery-unrelated",
+                ))
+                .expect("enqueue unrelated job"),
+            );
+            let current = queued_shared_job(
+                enqueue_shared_review_job(&shared_event(
+                    "tenant-acme",
+                    "acme",
+                    "payments",
+                    42,
+                    NEW_SHA,
+                    "delivery-current",
+                ))
+                .expect("enqueue current job"),
+            );
+
+            let stale = get_shared_review_job(&stale.request.id)
+                .expect("load stale job")
+                .expect("stale job");
+            assert_eq!(stale.status, SharedReviewJobStatus::Cancelled);
+            assert_eq!(stale.error_code.as_deref(), Some("superseded"));
+            assert_eq!(
+                get_shared_review_job(&unrelated.request.id)
+                    .expect("load unrelated job")
+                    .expect("unrelated job")
+                    .status,
+                SharedReviewJobStatus::Queued
+            );
+            assert_eq!(current.status, SharedReviewJobStatus::Queued);
+        });
+    }
+
+    #[test]
+    fn shared_review_claims_respect_repository_and_pull_request_limits() {
+        const FIRST_SHA: &str = "1111111111111111111111111111111111111111";
+        const SECOND_SHA: &str = "2222222222222222222222222222222222222222";
+        const OTHER_SHA: &str = "3333333333333333333333333333333333333333";
+
+        with_test_data_dir("shared-review-concurrency", |_| {
+            enqueue_shared_review_job(&shared_event(
+                "tenant-acme",
+                "acme",
+                "payments",
+                42,
+                FIRST_SHA,
+                "delivery-running",
+            ))
+            .expect("enqueue running job");
+            let running = claim_next_shared_review_job(ReviewConcurrencyLimits {
+                per_repository: 1,
+                per_pull_request: 1,
+            })
+            .expect("claim first job")
+            .expect("running job");
+            enqueue_shared_review_job(&shared_event(
+                "tenant-acme",
+                "acme",
+                "payments",
+                43,
+                OTHER_SHA,
+                "delivery-same-repo",
+            ))
+            .expect("enqueue same repository");
+            enqueue_shared_review_job(&shared_event(
+                "tenant-acme",
+                "acme",
+                "ledger",
+                42,
+                OTHER_SHA,
+                "delivery-other-repo",
+            ))
+            .expect("enqueue other repository");
+
+            let other_repository = claim_next_shared_review_job(ReviewConcurrencyLimits {
+                per_repository: 1,
+                per_pull_request: 1,
+            })
+            .expect("claim other repository")
+            .expect("other repository job");
+            assert_eq!(other_repository.request.repository, "ledger");
+            assert!(claim_next_shared_review_job(ReviewConcurrencyLimits {
+                per_repository: 1,
+                per_pull_request: 1,
+            })
+            .expect("repository limit")
+            .is_none());
+
+            finish_shared_review_job(
+                &running.request.id,
+                running.attempt_count,
+                &ReviewJobExecution::Failed {
+                    run_id: None,
+                    error_code: "synthetic_failure".to_string(),
+                },
+            )
+            .expect("release repository slot");
+            let same_repository = claim_next_shared_review_job(ReviewConcurrencyLimits {
+                per_repository: 1,
+                per_pull_request: 1,
+            })
+            .expect("claim same repository")
+            .expect("same repository job");
+            assert_eq!(same_repository.request.pull_request_id, 43);
+
+            let mut newer = shared_event(
+                "tenant-acme",
+                "acme",
+                "ledger",
+                42,
+                SECOND_SHA,
+                "delivery-same-pr-new-head",
+            );
+            newer.head.ref_name = "feature/new-head".to_string();
+            enqueue_shared_review_job(&newer).expect("enqueue same PR new head");
+            assert!(claim_next_shared_review_job(ReviewConcurrencyLimits {
+                per_repository: 2,
+                per_pull_request: 1,
+            })
+            .expect("pull-request limit")
+            .is_none());
+        });
+    }
+
+    #[test]
+    fn draft_or_closed_state_cancels_queued_jobs_and_blocks_cursor_advancement() {
+        const HEAD_SHA: &str = "1111111111111111111111111111111111111111";
+        with_test_data_dir("shared-review-suppression", |_| {
+            enqueue_shared_review_job(&shared_event(
+                "tenant-acme",
+                "acme",
+                "payments",
+                42,
+                HEAD_SHA,
+                "delivery-running",
+            ))
+            .expect("enqueue running job");
+            let running = claim_next_shared_review_job(ReviewConcurrencyLimits::default())
+                .expect("claim running job")
+                .expect("running job");
+
+            let mut closed = shared_event(
+                "tenant-acme",
+                "acme",
+                "payments",
+                42,
+                HEAD_SHA,
+                "delivery-closed",
+            );
+            closed.kind = PullRequestReviewEventKind::Closed;
+            closed.closed_outcome = Some(PullRequestClosedOutcome::ClosedWithoutMerge);
+            assert_eq!(
+                suppress_shared_review_jobs(&closed, ReviewJobIgnoredReason::Closed)
+                    .expect("suppress closed PR"),
+                0
+            );
+            let stale = finish_shared_review_job(
+                &running.request.id,
+                running.attempt_count,
+                &ReviewJobExecution::Completed {
+                    run_id: "run-stale".to_string(),
+                },
+            )
+            .expect("finish now-closed review");
+            assert_eq!(stale.status, SharedReviewJobStatus::Cancelled);
+            assert_eq!(
+                stale.error_code.as_deref(),
+                Some("stale_pull_request_state")
+            );
+            assert_eq!(
+                get_review_cursor(&cursor_identity()).expect("closed PR cursor"),
+                ReviewCursorState::NotReviewed
+            );
+            closed.kind = PullRequestReviewEventKind::Reopened;
+            closed.closed_outcome = None;
+            closed.delivery_id = "delivery-reopened".to_string();
+            let reopened = queued_shared_job(
+                enqueue_shared_review_job(&closed).expect("enqueue reopened PR at the same head"),
+            );
+            assert_eq!(reopened.request.head.sha, HEAD_SHA);
+
+            let mut draft = shared_event(
+                "tenant-acme",
+                "acme",
+                "other",
+                7,
+                HEAD_SHA,
+                "delivery-draft",
+            );
+            let queued =
+                queued_shared_job(enqueue_shared_review_job(&draft).expect("enqueue before draft"));
+            draft.draft = true;
+            assert_eq!(
+                suppress_shared_review_jobs(&draft, ReviewJobIgnoredReason::Draft)
+                    .expect("suppress draft PR"),
+                1
+            );
+            assert_eq!(
+                get_shared_review_job(&queued.request.id)
+                    .expect("load cancelled draft job")
+                    .expect("cancelled draft job")
+                    .status,
+                SharedReviewJobStatus::Cancelled
+            );
+            draft.draft = false;
+            draft.kind = PullRequestReviewEventKind::ReadyForReview;
+            draft.delivery_id = "delivery-ready".to_string();
+            let ready = queued_shared_job(
+                enqueue_shared_review_job(&draft)
+                    .expect("enqueue ready-for-review PR at the same head"),
+            );
+            assert_ne!(ready.request.id, queued.request.id);
+        });
+    }
+
+    #[test]
+    fn expired_review_job_leases_are_reclaimed_and_fence_stale_workers() {
+        const HEAD_SHA: &str = "1111111111111111111111111111111111111111";
+        with_test_data_dir("shared-review-lease-recovery", |dir| {
+            enqueue_shared_review_job(&shared_event(
+                "tenant-acme",
+                "acme",
+                "payments",
+                42,
+                HEAD_SHA,
+                "delivery-lease",
+            ))
+            .expect("enqueue leased job");
+            let first_attempt = claim_next_shared_review_job(ReviewConcurrencyLimits::default())
+                .expect("claim first attempt")
+                .expect("first attempt");
+            assert_eq!(first_attempt.attempt_count, 1);
+
+            let conn =
+                Connection::open(dir.join(DB_FILE)).expect("open review job database directly");
+            conn.execute(
+                "UPDATE shared_review_jobs SET lease_expires_at_ms = 0 WHERE id = ?1",
+                params![first_attempt.request.id],
+            )
+            .expect("expire first attempt lease");
+            drop(conn);
+            assert!(finish_shared_review_job(
+                &first_attempt.request.id,
+                first_attempt.attempt_count,
+                &ReviewJobExecution::Completed {
+                    run_id: "run-expired-worker".to_string(),
+                },
+            )
+            .is_err());
+
+            let second_attempt = claim_next_shared_review_job(ReviewConcurrencyLimits::default())
+                .expect("reclaim expired job")
+                .expect("second attempt");
+            assert_eq!(second_attempt.request.id, first_attempt.request.id);
+            assert_eq!(second_attempt.attempt_count, 2);
+            assert!(renew_shared_review_job_lease(
+                &second_attempt.request.id,
+                first_attempt.attempt_count
+            )
+            .is_err());
+            let renewed = renew_shared_review_job_lease(
+                &second_attempt.request.id,
+                second_attempt.attempt_count,
+            )
+            .expect("renew current attempt");
+            assert!(renewed.lease_expires_at.is_some());
+            assert!(finish_shared_review_job(
+                &first_attempt.request.id,
+                first_attempt.attempt_count,
+                &ReviewJobExecution::Completed {
+                    run_id: "run-stale-worker".to_string(),
+                },
+            )
+            .is_err());
+
+            let completed = finish_shared_review_job(
+                &second_attempt.request.id,
+                second_attempt.attempt_count,
+                &ReviewJobExecution::Completed {
+                    run_id: "run-current-worker".to_string(),
+                },
+            )
+            .expect("complete current attempt");
+            assert_eq!(completed.status, SharedReviewJobStatus::Completed);
+        });
+    }
+
+    #[test]
+    fn stale_suppression_events_do_not_cancel_or_invalidate_newer_head_work() {
+        const OLD_SHA: &str = "1111111111111111111111111111111111111111";
+        const NEW_SHA: &str = "2222222222222222222222222222222222222222";
+        with_test_data_dir("shared-review-stale-suppression", |_| {
+            let queued = queued_shared_job(
+                enqueue_shared_review_job(&shared_event(
+                    "tenant-acme",
+                    "acme",
+                    "payments",
+                    42,
+                    NEW_SHA,
+                    "delivery-new-head",
+                ))
+                .expect("enqueue current head"),
+            );
+            let mut stale_closed = shared_event(
+                "tenant-acme",
+                "acme",
+                "payments",
+                42,
+                OLD_SHA,
+                "delivery-stale-closed",
+            );
+            stale_closed.kind = PullRequestReviewEventKind::Closed;
+            stale_closed.closed_outcome = Some(PullRequestClosedOutcome::ClosedWithoutMerge);
+
+            assert_eq!(
+                suppress_shared_review_jobs(&stale_closed, ReviewJobIgnoredReason::Closed)
+                    .expect("ignore stale close"),
+                0
+            );
+            assert_eq!(
+                get_shared_review_job(&queued.request.id)
+                    .expect("load current job")
+                    .expect("current job")
+                    .status,
+                SharedReviewJobStatus::Queued
+            );
+
+            let running = claim_next_shared_review_job(ReviewConcurrencyLimits::default())
+                .expect("claim current job")
+                .expect("current job");
+            let completed = finish_shared_review_job(
+                &running.request.id,
+                running.attempt_count,
+                &ReviewJobExecution::Completed {
+                    run_id: "run-current-head".to_string(),
+                },
+            )
+            .expect("finish current head");
+            assert_eq!(completed.status, SharedReviewJobStatus::Completed);
+            assert!(matches!(
+                get_review_cursor(&cursor_identity()).expect("current cursor"),
+                ReviewCursorState::Reviewed(ReviewCursor {
+                    reviewed_head_sha,
+                    ..
+                }) if reviewed_head_sha == NEW_SHA
+            ));
         });
     }
 

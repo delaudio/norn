@@ -10,6 +10,7 @@ mod local_repo;
 mod repo_config;
 pub mod review_event;
 pub mod review_feedback;
+pub mod review_job;
 mod review_storage;
 mod services;
 pub mod tui;
