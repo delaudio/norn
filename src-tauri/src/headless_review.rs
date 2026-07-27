@@ -822,13 +822,19 @@ fn working_tree_diff(repo_path: &Path) -> Result<(String, Vec<String>), Headless
         .filter(|path| !path.is_empty())
     {
         let relative = String::from_utf8_lossy(raw_path).to_string();
+        if std::str::from_utf8(raw_path).is_err() {
+            warnings.push(format!(
+                "Untracked file path `{relative}` is not UTF-8 and was rendered lossily."
+            ));
+        }
         if is_sensitive_untracked_path(&relative) {
             warnings.push(format!(
                 "Skipped potentially sensitive untracked file `{relative}`."
             ));
             continue;
         }
-        let path = repo_path.join(&relative);
+        let relative_path = untracked_relative_path(raw_path);
+        let path = repo_path.join(relative_path);
         let metadata = match fs::symlink_metadata(&path) {
             Ok(metadata) if metadata.is_file() => metadata,
             Ok(metadata) if metadata.file_type().is_symlink() => {
@@ -867,6 +873,18 @@ fn working_tree_diff(repo_path: &Path) -> Result<(String, Vec<String>), Headless
         included_bytes = included_bytes.saturating_add(metadata.len());
     }
     Ok((diff, warnings))
+}
+
+fn untracked_relative_path(raw_path: &[u8]) -> PathBuf {
+    #[cfg(unix)]
+    {
+        use std::os::unix::ffi::OsStrExt;
+        PathBuf::from(OsStr::from_bytes(raw_path))
+    }
+    #[cfg(not(unix))]
+    {
+        PathBuf::from(String::from_utf8_lossy(raw_path).as_ref())
+    }
 }
 
 fn append_diff_section(diff: &mut String, label: &str, patch: &str) {
@@ -912,6 +930,7 @@ fn is_sensitive_untracked_path(relative: &str) -> bool {
     }
     if file_name == ".env"
         || file_name == ".envrc"
+        || file_name.starts_with(".envrc.")
         || file_name.starts_with(".env.")
         || file_name.ends_with(".env")
         || file_name.starts_with("env.")
@@ -1085,7 +1104,7 @@ mod tests {
         branch_scope_warnings, build_review_payload, format_findings_markdown, format_markdown,
         is_sensitive_untracked_path, map_native_review_error, map_provider_target_error,
         markdown_fence, new_file_patch, public_provider_error, repo_identity_matches_target,
-        requested_repo_identity, run, strip_private_evidence_payloads,
+        requested_repo_identity, run, strip_private_evidence_payloads, untracked_relative_path,
         validate_explicit_repo_identity, validate_requested_identity_shape, working_tree_diff,
         HeadlessReviewExecution, HeadlessReviewRequest, HeadlessReviewTarget, ReviewScope,
         HEADLESS_REVIEW_BOUNDARY,
@@ -1573,6 +1592,7 @@ mod tests {
         assert!(is_sensitive_untracked_path("config/client-secrets.json"));
         assert!(is_sensitive_untracked_path("certs/signing.key"));
         assert!(is_sensitive_untracked_path(".envrc"));
+        assert!(is_sensitive_untracked_path(".envrc.local"));
         assert!(is_sensitive_untracked_path("config/prod.env"));
         assert!(is_sensitive_untracked_path("config/prod.env.local"));
         assert!(is_sensitive_untracked_path("config/env.production"));
@@ -1614,6 +1634,17 @@ mod tests {
             .iter()
             .any(|warning| warning.contains("no commits")));
         let _ = fs::remove_dir_all(repo);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn untracked_relative_path_preserves_non_utf8_bytes() {
+        use std::os::unix::ffi::OsStrExt;
+
+        let raw_path = [b'n', b'o', b't', b'e', 0xff];
+        let path = untracked_relative_path(&raw_path);
+
+        assert_eq!(path.as_os_str().as_bytes(), raw_path);
     }
 
     #[cfg(unix)]

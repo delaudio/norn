@@ -149,10 +149,7 @@ fn run_args(args: &[String], stdout: &mut dyn Write, stderr: &mut dyn Write) -> 
     match args.first().map(String::as_str) {
         Some("review") => match parse_review_args(args) {
             Ok(args) => run_review(args, stdout, stderr),
-            Err(error) => {
-                let _ = writeln!(stderr, "{error}\n\n{}", usage());
-                2
-            }
+            Err(error) => write_review_parse_failure(args, &error, stdout, stderr),
         },
         _ => match parse_config_validate_args(args) {
             Ok(args) => run_config_validate(args, stdout, stderr),
@@ -162,6 +159,30 @@ fn run_args(args: &[String], stdout: &mut dyn Write, stderr: &mut dyn Write) -> 
             }
         },
     }
+}
+
+fn write_review_parse_failure(
+    args: &[String],
+    error: &str,
+    stdout: &mut dyn Write,
+    stderr: &mut dyn Write,
+) -> i32 {
+    let json_requested = args.iter().any(|arg| arg == "--json")
+        || args
+            .windows(2)
+            .any(|pair| pair[0] == "--format" && pair[1] == "json");
+    if json_requested {
+        let rendered = serde_json::json!({
+            "schemaVersion": "lachesi.headless-review.v1",
+            "status": "failed",
+            "exitCode": 2,
+            "error": error,
+        });
+        let _ = writeln!(stdout, "{rendered}");
+    } else {
+        let _ = writeln!(stderr, "{error}\n\n{}", review_usage());
+    }
+    2
 }
 
 fn parse_review_args(args: &[String]) -> Result<ReviewArgs, String> {
@@ -805,6 +826,32 @@ profiles:
         assert!(String::from_utf8(stderr)
             .expect("stderr")
             .contains("Unknown review option"));
+    }
+
+    #[test]
+    fn review_usage_errors_honor_json_output() {
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+        let code = run_args(
+            &[
+                "review".to_string(),
+                "--json".to_string(),
+                "--unknown".to_string(),
+            ],
+            &mut stdout,
+            &mut stderr,
+        );
+
+        assert_eq!(code, 2);
+        assert!(stderr.is_empty());
+        let output: serde_json::Value =
+            serde_json::from_slice(&stdout).expect("JSON usage failure");
+        assert_eq!(output["schemaVersion"], "lachesi.headless-review.v1");
+        assert_eq!(output["status"], "failed");
+        assert_eq!(output["exitCode"], 2);
+        assert!(output["error"]
+            .as_str()
+            .is_some_and(|error| error.contains("Unknown review option")));
     }
 
     #[test]
