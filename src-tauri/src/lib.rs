@@ -2,6 +2,7 @@ pub mod cli;
 mod commands;
 mod config;
 mod credentials;
+mod headless_review;
 mod launch;
 mod local_repo;
 mod repo_config;

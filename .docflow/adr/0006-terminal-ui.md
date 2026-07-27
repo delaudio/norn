@@ -69,6 +69,8 @@ the desktop app, and preserves Lachesi's staged review workflow.
    backend or equivalent non-interactive renderer.
 7. Launching external git tooling from the TUI suspends and restores terminal
    state cleanly and does not require widening shipped Tauri capabilities.
+8. Starting AI review from the TUI skips local evidence analyzers because
+   repository validation belongs to the development flow before Lachesi review.
 
 ## Out of scope
 
@@ -105,9 +107,11 @@ the desktop app, and preserves Lachesi's staged review workflow.
 | Date | Revision | Author | Change |
 |------|----------|--------|--------|
 | 2026-07-23 | r1 | default-agent | Accepted the terminal UI as a second local review interface. |
+| 2026-07-24 | r2 | default-agent | Made TUI AI review skip duplicate local analyzers. |
 
 ## Approvals
 
 | Role | Name | Date | Signature |
 |------|------|------|-----------|
 | Maintainer | fdg | 2026-07-23 | approved in chat |
+| Maintainer | fdg | 2026-07-24 | approved analyzer skip revision in chat |

@@ -15,6 +15,8 @@ Implement the first foundation for the terminal UI roadmap:
 - render configured repositories, open pull requests, selected pull request
   metadata, comments, and unified diff loading/error states;
 - add the terminal lifecycle guard needed to restore raw mode on exit and panic;
+- start TUI AI review without rerunning repository analyzers already completed
+  by the development flow;
 - add task runner/script entrypoints while preserving `Makefile`/`justfile`
   recipe parity.
 
@@ -33,6 +35,7 @@ separate repository extraction, and rebuilding a full git TUI.
   selected pull request details, comments, and unified diff states.
 - ADR 0006 AC6: focused terminal render/layout tests run without a real
   terminal session.
+- ADR 0006 AC8: TUI AI review skips duplicate local evidence analyzers.
 
 ## Dependencies
 

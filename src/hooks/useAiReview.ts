@@ -19,7 +19,6 @@ interface StartReviewArgs {
   destinationBranch: string;
   reviewKind?: "lineQuestion" | null;
   threadTitle?: string | null;
-  skipAnalyzers?: boolean;
   aiProvider: AiProvider;
   claudeModel: ClaudeReviewModel | null;
   claudeEffort: ClaudeReviewEffort | null;
@@ -172,7 +171,6 @@ export function useAiReview(
       destinationBranch,
       reviewKind,
       threadTitle,
-      skipAnalyzers,
       aiProvider,
       claudeModel,
       claudeEffort,
@@ -197,13 +195,13 @@ export function useAiReview(
           destinationBranch,
           reviewKind,
           threadTitle,
-          skipAnalyzers: Boolean(skipAnalyzers),
           aiProvider,
           claudeModel,
           claudeEffort,
           codexModel,
           codexEffort,
           reviewProfile: reviewProfile?.trim() || null,
+          skipAnalyzers: true,
         });
         if (keyRef.current === key) {
           setState(result);

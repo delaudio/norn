@@ -490,6 +490,14 @@ fn load_from_str(
                 &mut errors,
                 &mut loaded_pack_paths,
             ));
+            if let Some(profile_id) = selected_profile.as_deref() {
+                apply_profile_analyzer_requirements(
+                    config_path,
+                    &mut config,
+                    profile_id,
+                    &mut errors,
+                );
+            }
             validate_config(config_path, &config, &mut errors);
             Some(config)
         }
@@ -599,13 +607,27 @@ fn apply_review_profile(
             .extend(profile.policy_packs);
     }
 
-    for (id, requirement) in profile.analyzers {
+    Some(profile_id)
+}
+
+fn apply_profile_analyzer_requirements(
+    config_path: &Path,
+    config: &mut RepoReviewConfig,
+    profile_id: &str,
+    errors: &mut Vec<RepoConfigValidationMessage>,
+) {
+    let Some(profile) = config.profiles.get(profile_id) else {
+        return;
+    };
+    let requirements = profile.analyzers.clone();
+    for (id, requirement) in requirements {
         match requirement {
             ProfileAnalyzerRequirement::Required => {
                 if let Some(analyzer) = config.analyzers.get_mut(&id) {
                     analyzer.enabled = true;
+                    analyzer.required = true;
                 } else {
-                    warnings.push(message(
+                    errors.push(message(
                         config_path,
                         format!(
                             "Review profile `{profile_id}` requires analyzer `{id}`, but no analyzer config is available."
@@ -621,8 +643,6 @@ fn apply_review_profile(
             ProfileAnalyzerRequirement::Optional => {}
         }
     }
-
-    Some(profile_id)
 }
 
 fn load_policy_packs(
@@ -1259,6 +1279,70 @@ analyzers:
             config.analyzers.get("tsc").map(|analyzer| analyzer.enabled),
             Some(true)
         );
+        assert_eq!(
+            config
+                .analyzers
+                .get("tsc")
+                .map(|analyzer| analyzer.required),
+            Some(true)
+        );
+    }
+
+    #[test]
+    fn missing_required_profile_analyzer_is_a_config_error() {
+        let repo = temp_repo();
+        let result = load_test_config(
+            &repo,
+            r#"
+version: 0.1
+profiles:
+  default:
+    analyzers:
+      missing-check: required
+"#,
+        );
+
+        assert!(result.warnings.is_empty());
+        assert_eq!(result.errors.len(), 1);
+        assert!(result.errors[0]
+            .message
+            .contains("requires analyzer `missing-check`"));
+    }
+
+    #[test]
+    fn required_profile_analyzer_can_come_from_profile_policy_pack() {
+        let repo = temp_repo();
+        let pack_dir = repo.join("packs/profile-checks");
+        fs::create_dir_all(&pack_dir).expect("create profile pack");
+        fs::write(
+            pack_dir.join("pack.yaml"),
+            r#"
+id: profile-checks
+analyzers:
+  pack-check:
+    enabled: false
+    command: "cargo check"
+"#,
+        )
+        .expect("write profile pack");
+        let result = load_test_config(
+            &repo,
+            r#"
+version: 0.1
+profiles:
+  default:
+    policyPacks:
+      - ./packs/profile-checks
+    analyzers:
+      pack-check: required
+"#,
+        );
+
+        assert!(result.errors.is_empty(), "{:?}", result.errors);
+        let config = result.config.expect("config");
+        let analyzer = config.analyzers.get("pack-check").expect("pack analyzer");
+        assert!(analyzer.enabled);
+        assert!(analyzer.required);
     }
 
     #[test]

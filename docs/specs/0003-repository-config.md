@@ -245,7 +245,7 @@ Profile fields:
   `optional`, and `disabled`.
 
 `required` enables an analyzer already defined by the repo or loaded packs. If no
-analyzer config exists for that id, Lachesi warns and continues.
+analyzer config exists for that id, configuration validation fails.
 
 ### `review.prompt.replace`
 

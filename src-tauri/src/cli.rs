@@ -3,12 +3,41 @@ use std::path::PathBuf;
 
 use serde::Serialize;
 
+use crate::config::{AiProvider, ReviewProvider};
+use crate::headless_review::{self, HeadlessReviewRequest, ReviewScope};
 use crate::repo_config::{self, LoadedPolicyPack, RepoConfigValidationMessage};
+use crate::services::review::ReviewFindingSeverity;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum OutputFormat {
     Human,
     Json,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ReviewOutputFormat {
+    Markdown,
+    Json,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ReviewArgs {
+    repo_path: Option<PathBuf>,
+    scope: ReviewScope,
+    base: Option<String>,
+    workspace: Option<String>,
+    repo: Option<String>,
+    pr_id: Option<u32>,
+    provider: Option<ReviewProvider>,
+    profile: Option<String>,
+    ai_provider: Option<AiProvider>,
+    model: Option<String>,
+    effort: Option<String>,
+    format: ReviewOutputFormat,
+    output: Option<PathBuf>,
+    fail_on_findings: bool,
+    min_severity: Option<ReviewFindingSeverity>,
+    run_analyzers: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -32,6 +61,49 @@ struct ConfigValidateOutput {
     errors: Vec<RepoConfigValidationMessage>,
 }
 
+struct HeadlessDataDirGuard {
+    temp_dir: Option<tempfile::TempDir>,
+}
+
+impl HeadlessDataDirGuard {
+    fn install() -> Result<Self, String> {
+        if std::env::var_os("LACHESI_REVIEW_DATA_DIR").is_some()
+            || std::env::var_os("LACHESI_DATA_DIR").is_some()
+        {
+            return Ok(Self { temp_dir: None });
+        }
+        let temp_dir = create_headless_data_dir()?;
+        std::env::set_var("LACHESI_REVIEW_DATA_DIR", temp_dir.path());
+        Ok(Self {
+            temp_dir: Some(temp_dir),
+        })
+    }
+}
+
+fn create_headless_data_dir() -> Result<tempfile::TempDir, String> {
+    let temp_dir = tempfile::Builder::new()
+        .prefix("lachesi-headless-storage-")
+        .tempdir()
+        .map_err(|error| format!("Failed to create temporary headless storage: {error}"))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+
+        std::fs::set_permissions(temp_dir.path(), std::fs::Permissions::from_mode(0o700)).map_err(
+            |error| format!("Failed to secure temporary headless storage permissions: {error}"),
+        )?;
+    }
+    Ok(temp_dir)
+}
+
+impl Drop for HeadlessDataDirGuard {
+    fn drop(&mut self) {
+        if self.temp_dir.is_some() {
+            std::env::remove_var("LACHESI_REVIEW_DATA_DIR");
+        }
+    }
+}
+
 pub fn run_from_env_if_cli() -> Option<i32> {
     let args = std::env::args().skip(1).collect::<Vec<_>>();
     if !is_cli_command(&args) {
@@ -40,29 +112,337 @@ pub fn run_from_env_if_cli() -> Option<i32> {
 
     let mut stdout = io::stdout();
     let mut stderr = io::stderr();
+    let _headless_data_dir = if review_needs_headless_storage(&args) {
+        match HeadlessDataDirGuard::install() {
+            Ok(guard) => Some(guard),
+            Err(error) => {
+                let _ = writeln!(stderr, "{error}");
+                return Some(7);
+            }
+        }
+    } else {
+        None
+    };
     Some(run_args(&args, &mut stdout, &mut stderr))
+}
+
+fn review_needs_headless_storage(args: &[String]) -> bool {
+    args.first().map(String::as_str) == Some("review")
+        && !args
+            .iter()
+            .skip(1)
+            .any(|arg| arg == "--help" || arg == "-h")
+        && parse_review_args(args).is_ok()
 }
 
 fn is_cli_command(args: &[String]) -> bool {
     matches!(
         args.first().map(String::as_str),
-        Some("config" | "--help" | "-h")
+        Some("config" | "review" | "--help" | "-h")
     )
 }
 
 fn run_args(args: &[String], stdout: &mut dyn Write, stderr: &mut dyn Write) -> i32 {
+    if args.first().map(String::as_str) == Some("review")
+        && args
+            .iter()
+            .skip(1)
+            .any(|arg| arg == "--help" || arg == "-h")
+    {
+        let _ = writeln!(stdout, "{}", review_usage());
+        return 0;
+    }
     if args.iter().any(|arg| arg == "--help" || arg == "-h") {
         let _ = writeln!(stdout, "{}", usage());
         return 0;
     }
 
-    match parse_config_validate_args(args) {
-        Ok(args) => run_config_validate(args, stdout, stderr),
-        Err(error) => {
-            let _ = writeln!(stderr, "{error}\n\n{}", usage());
-            1
-        }
+    match args.first().map(String::as_str) {
+        Some("review") => match parse_review_args(args) {
+            Ok(args) => run_review(args, stdout, stderr),
+            Err(error) => write_review_parse_failure(args, &error, stdout, stderr),
+        },
+        _ => match parse_config_validate_args(args) {
+            Ok(args) => run_config_validate(args, stdout, stderr),
+            Err(error) => {
+                let _ = writeln!(stderr, "{error}\n\n{}", usage());
+                2
+            }
+        },
     }
+}
+
+fn write_review_parse_failure(
+    args: &[String],
+    error: &str,
+    stdout: &mut dyn Write,
+    stderr: &mut dyn Write,
+) -> i32 {
+    let json_requested = args.iter().any(|arg| arg == "--json")
+        || args
+            .windows(2)
+            .any(|pair| pair[0] == "--format" && pair[1] == "json");
+    if json_requested {
+        let rendered = serde_json::json!({
+            "schemaVersion": "lachesi.headless-review.v1",
+            "status": "failed",
+            "exitCode": 2,
+            "error": error,
+        });
+        if let Some(path) = review_parse_output_path(args) {
+            if let Err(write_error) = std::fs::write(&path, format!("{rendered}\n")) {
+                let _ = writeln!(
+                    stderr,
+                    "Failed to write review failure to {}: {write_error}",
+                    path.display()
+                );
+                return 7;
+            }
+            let _ = writeln!(stderr, "Review failure written to {}.", path.display());
+        } else {
+            let _ = writeln!(stdout, "{rendered}");
+        }
+    } else {
+        let _ = writeln!(stderr, "{error}\n\n{}", review_usage());
+    }
+    2
+}
+
+fn review_parse_output_path(args: &[String]) -> Option<PathBuf> {
+    args.windows(2)
+        .rev()
+        .find(|pair| pair[0] == "--output" && !pair[1].starts_with('-'))
+        .map(|pair| PathBuf::from(&pair[1]))
+}
+
+fn parse_review_args(args: &[String]) -> Result<ReviewArgs, String> {
+    if args.first().map(String::as_str) != Some("review") {
+        return Err("Expected `lachesi review`.".to_string());
+    }
+    let mut parsed = ReviewArgs {
+        repo_path: None,
+        scope: ReviewScope::WorkingTree,
+        base: None,
+        workspace: None,
+        repo: None,
+        pr_id: None,
+        provider: None,
+        profile: None,
+        ai_provider: None,
+        model: None,
+        effort: None,
+        format: ReviewOutputFormat::Markdown,
+        output: None,
+        fail_on_findings: false,
+        min_severity: None,
+        run_analyzers: false,
+    };
+    let mut scope_explicit = false;
+    let mut index = 1;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--repo-path" => {
+                parsed.repo_path = Some(PathBuf::from(next_value(args, &mut index)?));
+            }
+            "--scope" => {
+                parsed.scope = match next_value(args, &mut index)?.as_str() {
+                    "working-tree" | "worktree" | "local" => ReviewScope::WorkingTree,
+                    "branch" => ReviewScope::Branch,
+                    "pr" | "pull-request" => ReviewScope::PullRequest,
+                    _ => {
+                        return Err(
+                            "`--scope` must be `working-tree`, `branch`, or `pr`.".to_string()
+                        )
+                    }
+                };
+                scope_explicit = true;
+            }
+            "--base" => parsed.base = Some(next_value(args, &mut index)?),
+            "--workspace" => parsed.workspace = Some(next_value(args, &mut index)?),
+            "--repo" => parsed.repo = Some(next_value(args, &mut index)?),
+            "--pr" => {
+                let value = next_value(args, &mut index)?;
+                let pr_id = value
+                    .parse::<u32>()
+                    .map_err(|_| "`--pr` must be a positive integer.".to_string())?;
+                if pr_id == 0 {
+                    return Err("`--pr` must be a positive integer.".to_string());
+                }
+                parsed.pr_id = Some(pr_id);
+                if !scope_explicit {
+                    parsed.scope = ReviewScope::PullRequest;
+                }
+            }
+            "--provider" => {
+                parsed.provider = Some(match next_value(args, &mut index)?.as_str() {
+                    "github" => ReviewProvider::Github,
+                    "bitbucket" => ReviewProvider::Bitbucket,
+                    _ => return Err("`--provider` must be `github` or `bitbucket`.".to_string()),
+                });
+            }
+            "--profile" => parsed.profile = Some(next_value(args, &mut index)?),
+            "--ai-provider" => {
+                parsed.ai_provider = Some(match next_value(args, &mut index)?.as_str() {
+                    "codex" => AiProvider::Codex,
+                    "claude" => AiProvider::Claude,
+                    _ => return Err("`--ai-provider` must be `codex` or `claude`.".to_string()),
+                });
+            }
+            "--model" => parsed.model = Some(next_value(args, &mut index)?),
+            "--effort" => parsed.effort = Some(next_value(args, &mut index)?),
+            "--format" => {
+                parsed.format = match next_value(args, &mut index)?.as_str() {
+                    "markdown" | "md" | "human" => ReviewOutputFormat::Markdown,
+                    "json" => ReviewOutputFormat::Json,
+                    _ => return Err("`--format` must be `markdown` or `json`.".to_string()),
+                };
+            }
+            "--json" => parsed.format = ReviewOutputFormat::Json,
+            "--output" => parsed.output = Some(PathBuf::from(next_value(args, &mut index)?)),
+            "--fail-on-findings" => parsed.fail_on_findings = true,
+            "--run-analyzers" => parsed.run_analyzers = true,
+            "--min-severity" => {
+                parsed.min_severity = Some(parse_severity(&next_value(args, &mut index)?)?);
+            }
+            unknown => return Err(format!("Unknown review option `{unknown}`.")),
+        }
+        index += 1;
+    }
+    if parsed.workspace.is_some() != parsed.repo.is_some() {
+        return Err("`--workspace` and `--repo` must be provided together.".to_string());
+    }
+    if parsed.pr_id.is_some() && parsed.scope != ReviewScope::PullRequest {
+        return Err("`--pr` requires `--scope pr` when scope is explicit.".to_string());
+    }
+    if parsed.base.is_some() && parsed.scope != ReviewScope::Branch {
+        return Err("`--base` requires `--scope branch`.".to_string());
+    }
+    Ok(parsed)
+}
+
+fn next_value(args: &[String], index: &mut usize) -> Result<String, String> {
+    let option = args
+        .get(*index)
+        .cloned()
+        .unwrap_or_else(|| "option".to_string());
+    *index += 1;
+    match args.get(*index) {
+        Some(value) if !value.starts_with('-') => Ok(value.clone()),
+        _ => Err(format!("`{option}` requires a value.")),
+    }
+}
+
+fn parse_severity(value: &str) -> Result<ReviewFindingSeverity, String> {
+    match value {
+        "info" => Ok(ReviewFindingSeverity::Info),
+        "low" => Ok(ReviewFindingSeverity::Low),
+        "medium" => Ok(ReviewFindingSeverity::Medium),
+        "high" => Ok(ReviewFindingSeverity::High),
+        "critical" => Ok(ReviewFindingSeverity::Critical),
+        _ => Err(
+            "`--min-severity` must be `info`, `low`, `medium`, `high`, or `critical`.".to_string(),
+        ),
+    }
+}
+
+fn run_review(args: ReviewArgs, stdout: &mut dyn Write, stderr: &mut dyn Write) -> i32 {
+    let request = HeadlessReviewRequest {
+        repo_path: args.repo_path,
+        scope: args.scope,
+        base: args.base,
+        workspace: args.workspace,
+        repo: args.repo,
+        pr_id: args.pr_id,
+        provider: args.provider,
+        profile: args.profile,
+        ai_provider: args.ai_provider,
+        model: args.model,
+        effort: args.effort,
+        run_analyzers: args.run_analyzers,
+    };
+    let _ = writeln!(stderr, "Starting headless review...");
+    let mut execution = match headless_review::run(request) {
+        Ok(execution) => execution,
+        Err(error) => {
+            return write_review_failure(
+                error,
+                args.format,
+                args.output.as_deref(),
+                stdout,
+                stderr,
+            );
+        }
+    };
+    let minimum = args
+        .min_severity
+        .or(execution.minimum_severity)
+        .unwrap_or(ReviewFindingSeverity::High);
+    execution.minimum_severity = Some(minimum);
+    let exit_code = if args.fail_on_findings
+        && headless_review::has_findings_at_or_above(&execution, minimum)
+    {
+        1
+    } else {
+        0
+    };
+    execution.exit_code = exit_code;
+
+    let rendered = match args.format {
+        ReviewOutputFormat::Markdown => headless_review::format_markdown(&execution),
+        ReviewOutputFormat::Json => match serde_json::to_string_pretty(&execution) {
+            Ok(json) => json,
+            Err(error) => {
+                let _ = writeln!(stderr, "Failed to serialize review output: {error}");
+                return 7;
+            }
+        },
+    };
+    if let Some(path) = args.output {
+        if let Err(error) = std::fs::write(&path, format!("{rendered}\n")) {
+            let _ = writeln!(stderr, "Failed to write {}: {error}", path.display());
+            return 7;
+        }
+        let _ = writeln!(stderr, "Review written to {}.", path.display());
+    } else {
+        let _ = writeln!(stdout, "{rendered}");
+    }
+    exit_code
+}
+
+fn write_review_failure(
+    error: headless_review::HeadlessReviewError,
+    format: ReviewOutputFormat,
+    output: Option<&std::path::Path>,
+    stdout: &mut dyn Write,
+    stderr: &mut dyn Write,
+) -> i32 {
+    let exit_code = error.exit_code;
+    if format == ReviewOutputFormat::Markdown {
+        let _ = writeln!(stderr, "{}", error.message);
+        return exit_code;
+    }
+
+    let rendered = serde_json::json!({
+        "schemaVersion": "lachesi.headless-review.v1",
+        "status": "failed",
+        "exitCode": exit_code,
+        "error": error.message,
+    })
+    .to_string();
+    if let Some(path) = output {
+        if let Err(write_error) = std::fs::write(path, format!("{rendered}\n")) {
+            let _ = writeln!(
+                stderr,
+                "Failed to write review failure to {}: {write_error}",
+                path.display()
+            );
+            return 7;
+        }
+        let _ = writeln!(stderr, "Review failure written to {}.", path.display());
+    } else {
+        let _ = writeln!(stdout, "{rendered}");
+    }
+    exit_code
 }
 
 fn parse_config_validate_args(args: &[String]) -> Result<ConfigValidateArgs, String> {
@@ -214,12 +594,40 @@ fn write_human_output(output: &ConfigValidateOutput, out: &mut dyn Write) -> io:
 }
 
 fn usage() -> &'static str {
-    "Usage: lachesi config validate [--repo-path <path>] [--profile <name>] [--format human|json] [--json]"
+    "Usage:
+Review:
+  lachesi review [--repo-path <path>] [--scope working-tree|branch|pr]
+                 [--base <ref>] [--pr <id>] [--workspace <name>] [--repo <slug>]
+                 [--provider github|bitbucket] [--profile <name>]
+                 [--ai-provider codex|claude] [--model <name>] [--effort <level>]
+                 [--format markdown|json] [--json] [--output <path>]
+                 [--fail-on-findings] [--min-severity info|low|medium|high|critical]
+                 [--run-analyzers]
+Config validation:
+  lachesi config validate [--repo-path <path>] [--profile <name>]
+                          [--format human|json] [--json]"
+}
+
+fn review_usage() -> &'static str {
+    "Usage:
+  lachesi review [--repo-path <path>] [--scope working-tree|branch|pr]
+                 [--base <ref>] [--pr <id>] [--workspace <name>] [--repo <slug>]
+                 [--provider github|bitbucket] [--profile <name>]
+                 [--ai-provider codex|claude] [--model <name>] [--effort <level>]
+                 [--format markdown|json] [--json] [--output <path>]
+                 [--fail-on-findings] [--min-severity info|low|medium|high|critical]
+                 [--run-analyzers]"
 }
 
 #[cfg(test)]
 mod tests {
-    use super::run_args;
+    use super::{
+        create_headless_data_dir, parse_review_args, review_needs_headless_storage, run_args,
+        ReviewOutputFormat,
+    };
+    use crate::config::AiProvider;
+    use crate::headless_review::ReviewScope;
+    use crate::services::review::ReviewFindingSeverity;
     use std::fs;
     use std::path::PathBuf;
     use std::sync::atomic::{AtomicU64, Ordering};
@@ -234,6 +642,27 @@ mod tests {
         ));
         fs::create_dir_all(&path).expect("create temp repo");
         path
+    }
+
+    #[test]
+    fn headless_data_dirs_are_unique_and_private() {
+        let first = create_headless_data_dir().expect("first temp dir");
+        let second = create_headless_data_dir().expect("second temp dir");
+
+        assert_ne!(first.path(), second.path());
+        assert!(first.path().is_dir());
+        assert!(second.path().is_dir());
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+
+            let mode = fs::metadata(first.path())
+                .expect("temp dir metadata")
+                .permissions()
+                .mode();
+            assert_eq!(mode & 0o777, 0o700);
+        }
     }
 
     #[test]
@@ -295,6 +724,27 @@ token: unsafe
     }
 
     #[test]
+    fn config_usage_errors_return_config_exit_code() {
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+        let code = run_args(
+            &[
+                "config".to_string(),
+                "validate".to_string(),
+                "--unknown".to_string(),
+            ],
+            &mut stdout,
+            &mut stderr,
+        );
+
+        assert_eq!(code, 2);
+        assert!(stdout.is_empty());
+        assert!(String::from_utf8(stderr)
+            .expect("stderr")
+            .contains("Unknown option"));
+    }
+
+    #[test]
     fn config_validate_accepts_profile_override() {
         let repo = temp_repo();
         fs::write(
@@ -327,6 +777,254 @@ profiles:
         assert!(String::from_utf8(stdout)
             .expect("stdout")
             .contains("Profile: strict"));
+        let _ = fs::remove_dir_all(repo);
+    }
+
+    #[test]
+    fn review_defaults_to_working_tree_markdown() {
+        let args = parse_review_args(&["review".to_string()]).expect("parse review args");
+        assert_eq!(args.scope, ReviewScope::WorkingTree);
+        assert_eq!(args.format, ReviewOutputFormat::Markdown);
+        assert_eq!(args.repo_path, None);
+        assert!(!args.run_analyzers);
+    }
+
+    #[test]
+    fn review_pr_flag_selects_pr_scope_and_structured_options() {
+        let args = parse_review_args(&[
+            "review".to_string(),
+            "--pr".to_string(),
+            "42".to_string(),
+            "--json".to_string(),
+            "--ai-provider".to_string(),
+            "codex".to_string(),
+            "--fail-on-findings".to_string(),
+            "--min-severity".to_string(),
+            "medium".to_string(),
+        ])
+        .expect("parse review args");
+
+        assert_eq!(args.scope, ReviewScope::PullRequest);
+        assert_eq!(args.pr_id, Some(42));
+        assert_eq!(args.format, ReviewOutputFormat::Json);
+        assert_eq!(args.ai_provider, Some(AiProvider::Codex));
+        assert!(args.fail_on_findings);
+        assert_eq!(args.min_severity, Some(ReviewFindingSeverity::Medium));
+    }
+
+    #[test]
+    fn review_rejects_zero_pull_request_id() {
+        let error = parse_review_args(&["review".to_string(), "--pr".to_string(), "0".to_string()])
+            .expect_err("zero should not be accepted as a pull request id");
+
+        assert!(error.contains("positive integer"));
+    }
+
+    #[test]
+    fn review_rejects_an_option_token_as_a_value() {
+        let error = parse_review_args(&[
+            "review".to_string(),
+            "--repo-path".to_string(),
+            "--json".to_string(),
+        ])
+        .expect_err("option token must not be accepted as a value");
+
+        assert_eq!(error, "`--repo-path` requires a value.");
+    }
+
+    #[test]
+    fn review_rejects_conflicting_target_options() {
+        let conflicting_pr = parse_review_args(&[
+            "review".to_string(),
+            "--scope".to_string(),
+            "working-tree".to_string(),
+            "--pr".to_string(),
+            "42".to_string(),
+        ])
+        .expect_err("explicit working-tree scope must not ignore --pr");
+        assert!(conflicting_pr.contains("requires `--scope pr`"));
+
+        let misplaced_base = parse_review_args(&[
+            "review".to_string(),
+            "--base".to_string(),
+            "main".to_string(),
+        ])
+        .expect_err("working-tree scope must not ignore --base");
+        assert!(misplaced_base.contains("requires `--scope branch`"));
+
+        let partial_identity = parse_review_args(&[
+            "review".to_string(),
+            "--workspace".to_string(),
+            "lachesi-hq".to_string(),
+        ])
+        .expect_err("partial repository identity must be rejected");
+        assert!(partial_identity.contains("provided together"));
+    }
+
+    #[test]
+    fn review_usage_errors_return_config_exit_code() {
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+        let code = run_args(
+            &["review".to_string(), "--unknown".to_string()],
+            &mut stdout,
+            &mut stderr,
+        );
+
+        assert_eq!(code, 2);
+        assert!(stdout.is_empty());
+        assert!(String::from_utf8(stderr)
+            .expect("stderr")
+            .contains("Unknown review option"));
+    }
+
+    #[test]
+    fn review_usage_errors_honor_json_output() {
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+        let code = run_args(
+            &[
+                "review".to_string(),
+                "--json".to_string(),
+                "--unknown".to_string(),
+            ],
+            &mut stdout,
+            &mut stderr,
+        );
+
+        assert_eq!(code, 2);
+        assert!(stderr.is_empty());
+        let output: serde_json::Value =
+            serde_json::from_slice(&stdout).expect("JSON usage failure");
+        assert_eq!(output["schemaVersion"], "lachesi.headless-review.v1");
+        assert_eq!(output["status"], "failed");
+        assert_eq!(output["exitCode"], 2);
+        assert!(output["error"]
+            .as_str()
+            .is_some_and(|error| error.contains("Unknown review option")));
+    }
+
+    #[test]
+    fn review_usage_errors_write_json_to_requested_output() {
+        let temp_dir = tempfile::tempdir().expect("output temp dir");
+        let output_path = temp_dir.path().join("review.json");
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+        let code = run_args(
+            &[
+                "review".to_string(),
+                "--json".to_string(),
+                "--output".to_string(),
+                output_path.to_string_lossy().to_string(),
+                "--unknown".to_string(),
+            ],
+            &mut stdout,
+            &mut stderr,
+        );
+
+        assert_eq!(code, 2);
+        assert!(stdout.is_empty());
+        assert!(String::from_utf8(stderr)
+            .expect("stderr")
+            .contains("Review failure written"));
+        let output: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(output_path).expect("JSON usage failure output"))
+                .expect("JSON usage failure");
+        assert_eq!(output["status"], "failed");
+        assert_eq!(output["exitCode"], 2);
+    }
+
+    #[test]
+    fn review_usage_errors_do_not_treat_an_option_as_output_path() {
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+        let code = run_args(
+            &[
+                "review".to_string(),
+                "--json".to_string(),
+                "--output".to_string(),
+                "--unknown".to_string(),
+            ],
+            &mut stdout,
+            &mut stderr,
+        );
+
+        assert_eq!(code, 2);
+        assert!(stderr.is_empty());
+        let output: serde_json::Value =
+            serde_json::from_slice(&stdout).expect("JSON usage failure");
+        assert_eq!(output["status"], "failed");
+        assert!(output["error"]
+            .as_str()
+            .is_some_and(|error| error.contains("`--output` requires a value")));
+    }
+
+    #[test]
+    fn headless_storage_is_only_needed_for_valid_review_runs() {
+        assert!(review_needs_headless_storage(&["review".to_string()]));
+        assert!(!review_needs_headless_storage(&[
+            "review".to_string(),
+            "--help".to_string()
+        ]));
+        assert!(!review_needs_headless_storage(&[
+            "review".to_string(),
+            "--unknown".to_string()
+        ]));
+    }
+
+    #[test]
+    fn review_help_returns_zero_and_advertises_review_options() {
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+        let code = run_args(
+            &["review".to_string(), "--help".to_string()],
+            &mut stdout,
+            &mut stderr,
+        );
+
+        assert_eq!(code, 0);
+        assert!(stderr.is_empty());
+        let output = String::from_utf8(stdout).expect("help output");
+        assert!(output.contains("lachesi review"));
+        assert!(output.contains("--scope working-tree|branch|pr"));
+        assert!(output.contains("--run-analyzers"));
+        assert!(output.contains("--json"));
+        assert!(!output.contains("config validate"));
+    }
+
+    #[test]
+    fn review_analyzers_are_explicit_opt_in() {
+        let args = parse_review_args(&["review".to_string(), "--run-analyzers".to_string()])
+            .expect("parse analyzer opt-in");
+
+        assert!(args.run_analyzers);
+    }
+
+    #[test]
+    fn review_json_failure_uses_stable_envelope() {
+        let repo = temp_repo();
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+        let code = run_args(
+            &[
+                "review".to_string(),
+                "--repo-path".to_string(),
+                repo.display().to_string(),
+                "--json".to_string(),
+            ],
+            &mut stdout,
+            &mut stderr,
+        );
+
+        assert_eq!(code, 4);
+        let output: serde_json::Value =
+            serde_json::from_slice(&stdout).expect("failure should be JSON");
+        assert_eq!(output["schemaVersion"], "lachesi.headless-review.v1");
+        assert_eq!(output["status"], "failed");
+        assert_eq!(output["exitCode"], 4);
+        assert!(output["error"]
+            .as_str()
+            .is_some_and(|error| !error.is_empty()));
         let _ = fs::remove_dir_all(repo);
     }
 }

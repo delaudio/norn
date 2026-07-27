@@ -8,10 +8,11 @@ If status files and git disagree, git is authoritative; correct this file.
 
 ## Active state
 
-- **Branch:** `main`
-- **Active item:** none; GitHub issues #86, #87, and #88 are shipped and closed.
-- **Blockers:** none.
-- **Uncommitted work:** none.
+- **Branch:** `agent/headless-review-cli`
+- **Active item:** `.docflow/plan/todo/0003-headless-review-cli.md`
+- **Blockers:** none; use the available SSH key for signed commits.
+- **Uncommitted work:** validated ADR, analyzer policy across headless/TUI/GUI,
+  sandbox-safe headless storage, and the Codex skill fast path.
 
 ## Last shipped
 
@@ -19,4 +20,5 @@ If status files and git disagree, git is authoritative; correct this file.
 
 ## Next item
 
-`ls .docflow/plan/todo/` for the queue; the lowest-numbered file runs next.
+Create the signed commit and PR for the validated headless review work, merge
+after CI passes, then ship the plan item.

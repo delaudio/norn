@@ -119,37 +119,59 @@ Primary v0.1 command:
 lachesi review --workspace example-workspace --repo frontend-app --pr 1731
 ```
 
-Options:
+Options implemented in the first CLI cut:
 
 ```sh
 lachesi review \
-  --workspace <workspace> \
-  --repo <repo> \
-  --pr <id> \
   [--repo-path <path>] \
-  [--config <path>] \
-  [--local-config <path>] \
-  [--format markdown|json|jsonl] \
+  [--scope working-tree|branch|pr] \
+  [--base <ref>] \
+  [--workspace <workspace>] \
+  [--repo <repo>] \
+  [--pr <id>] \
+  [--provider github|bitbucket] \
+  [--format markdown|json] \
   [--profile <name>] \
+  [--ai-provider codex|claude] \
+  [--model <name>] \
+  [--effort <level>] \
   [--output <path>] \
-  [--evidence-only] \
   [--fail-on-findings] \
   [--min-severity info|low|medium|high|critical] \
-  [--session-instruction <text>] \
-  [--no-jira] \
-  [--no-notion]
+  [--run-analyzers]
 ```
 
 Defaults:
 
 - `--format markdown`
 - repo path comes from app config, explicit `--repo-path`, or discovery
+- `--workspace` and `--repo` must be provided together; explicit identity
+  values must match the selected local checkout
+- `--pr` is valid only for PR scope and `--base` only for branch scope
+- branch scope reviews committed changes from merge base through `HEAD`; when
+  local changes are present, Lachesi warns that working-tree scope must be run
+  separately
 - `.lachesi.yaml` is loaded from repo root when present
 - `--profile` overrides `review.profile`; if omitted, `review.profile` or a
   `default` profile is used when configured
 - local `.lachesi.local.yaml` is loaded when present
 - manual publication is not attempted
 - findings do not fail the process unless `--fail-on-findings` is set
+- local analyzers are skipped by default because agent-driven review follows
+  the repository validation gate; `--run-analyzers` opts in for standalone use
+- working-tree review includes ordinary untracked text files but skips
+  potentially sensitive paths such as environment files, credential files, and
+  private-key material with a warning
+- `--run-analyzers` requires a non-empty review target and fails target
+  resolution instead of reporting that analyzers ran when there are no changes
+- headless review uses temporary local storage by default and removes it after
+  completion; setting `LACHESI_DATA_DIR` explicitly opts into a chosen
+  persistent location
+
+Planned options such as custom config paths, JSONL streaming, evidence-only
+execution, per-run session instructions, and source-specific enrichment
+switches are not part of the first CLI cut. They must not be advertised by
+`lachesi review --help` until implemented.
 
 ### `lachesi config validate`
 
@@ -163,14 +185,15 @@ Exit behavior follows the config exit-code model below.
 
 ### `lachesi evidence`
 
-Optional v0.1 command if implemented early:
+Planned follow-up command:
 
 ```sh
 lachesi evidence --workspace example-workspace --repo frontend-app --pr 1731 --format json
 ```
 
-This runs configured analyzers and emits evidence without invoking the model.
-Equivalent behavior is also available through `lachesi review --evidence-only`.
+This will run configured analyzers and emit evidence without invoking the
+model. Neither this command nor `lachesi review --evidence-only` is implemented
+in the first CLI cut.
 
 ## Output Formats
 
@@ -196,11 +219,21 @@ The top-level JSON object should be:
 
 ```json
 {
-  "schemaVersion": "v0.1",
+  "schemaVersion": "lachesi.headless-review.v1",
   "status": "succeeded",
   "exitCode": 1,
   "warnings": [],
-  "analyzerFailures": [],
+  "minimumSeverity": "high",
+  "analyzersRan": false,
+  "target": {
+    "scope": "branch",
+    "repoPath": "/workspace/frontend-app",
+    "workspace": null,
+    "repo": "frontend-app",
+    "prId": null,
+    "source": "feature/example",
+    "destination": "main"
+  },
   "reviewRun": {
     "id": "run-1",
     "schemaVersion": "v0.1",
@@ -212,7 +245,17 @@ The top-level JSON object should be:
 }
 ```
 
-`reviewRun` must use the same contract documented in the findings spec.
+The top-level headless envelope uses `lachesi.headless-review.v1`.
+`reviewRun` independently uses the same `v0.1` contract documented in the
+findings spec. Setup and runtime failures use the same top-level headless
+schema with `status: "failed"`, `exitCode`, and `error`.
+
+Headless output retains evidence identifiers, kinds, sources, titles, and
+summaries, but omits raw evidence payloads. Analyzer stdout and stderr can
+contain credentials or other sensitive process output and are never serialized
+to terminal or CI output. Summaries and findings are derived from the reviewed
+diff and model response, so consumers must protect them like source code rather
+than treating the complete review artifact as secret-free.
 
 ### JSONL
 
@@ -244,8 +287,9 @@ ship first.
 130 cancelled by user
 ```
 
-Analyzer failures are non-fatal by default. They use exit code `5` only when the
-effective config marks the analyzer as required.
+Analyzer failures are relevant only when `--run-analyzers` is set. They are
+non-fatal by default and use exit code `5` only when the effective config marks
+the analyzer as required.
 
 Findings use exit code `1` only when `--fail-on-findings` is set. The threshold
 is controlled by `--min-severity` or repo config.
@@ -265,7 +309,7 @@ Expected behavior:
 - load `.lachesi.yaml` and `.lachesi.local.yaml`
 - print progress to stderr
 - print markdown result to stdout unless `--output` is set
-- write structured review state to the same local review store if configured
+- keep review state ephemeral unless `LACHESI_DATA_DIR` is explicitly configured
 
 ## CI Usage
 
@@ -304,7 +348,9 @@ Bitbucket-linked review requires:
 The core should preserve the existing security boundary:
 
 - secrets are not read from `.lachesi.yaml`
-- secrets are not included in JSON output
+- credential sources and raw analyzer evidence are not included in JSON output
+- model-derived summaries and findings can reflect reviewed source content and
+  must be handled with the same confidentiality as the diff
 - webview-only assumptions must not leak into CLI
 
 Jira and Notion enrichment are optional. Missing enrichment credentials should
