@@ -147,6 +147,7 @@ struct ResolvedTarget {
 }
 
 pub fn run(request: HeadlessReviewRequest) -> Result<HeadlessReviewExecution, HeadlessReviewError> {
+    validate_requested_identity_shape(&request)?;
     let repo_path = resolve_repo_root_for_request(&request)?;
     let config_result =
         repo_config::load_from_repo_path_with_profile(&repo_path, request.profile.as_deref())
@@ -444,7 +445,9 @@ fn resolve_repo_root_for_request(
         HeadlessReviewError::target(format!("Cannot read current directory: {error}"))
     })?;
     let Some((workspace, repo)) = requested_repo_identity(request) else {
-        return resolve_repo_root(&cwd);
+        let repo_root = resolve_repo_root(&cwd)?;
+        validate_explicit_repo_identity(&repo_root, request)?;
+        return Ok(repo_root);
     };
     let discovered = match request.provider {
         Some(provider) => local_repo::resolve_local_repo_for_provider(provider, workspace, repo),
@@ -467,6 +470,17 @@ fn resolve_repo_root_for_request(
             resolve_repo_root(&cwd)
         }
     }
+}
+
+fn validate_requested_identity_shape(
+    request: &HeadlessReviewRequest,
+) -> Result<(), HeadlessReviewError> {
+    if request.workspace.is_some() != request.repo.is_some() {
+        return Err(HeadlessReviewError::target(
+            "`--workspace` and `--repo` must be provided together.",
+        ));
+    }
+    Ok(())
 }
 
 fn validate_explicit_repo_identity(
@@ -738,6 +752,12 @@ fn working_tree_diff(repo_path: &Path) -> Result<(String, Vec<String>), Headless
         .filter(|path| !path.is_empty())
     {
         let relative = String::from_utf8_lossy(raw_path).to_string();
+        if is_sensitive_untracked_path(&relative) {
+            warnings.push(format!(
+                "Skipped potentially sensitive untracked file `{relative}`."
+            ));
+            continue;
+        }
         let path = repo_path.join(&relative);
         let metadata = match fs::symlink_metadata(&path) {
             Ok(metadata) if metadata.is_file() => metadata,
@@ -770,6 +790,47 @@ fn working_tree_diff(repo_path: &Path) -> Result<(String, Vec<String>), Headless
         included_bytes = included_bytes.saturating_add(metadata.len());
     }
     Ok((diff, warnings))
+}
+
+fn is_sensitive_untracked_path(relative: &str) -> bool {
+    let normalized = relative.replace('\\', "/").to_ascii_lowercase();
+    let path = Path::new(&normalized);
+    let file_name = path.file_name().and_then(OsStr::to_str).unwrap_or_default();
+    let extension = path.extension().and_then(OsStr::to_str).unwrap_or_default();
+    if normalized
+        .split('/')
+        .any(|component| matches!(component, ".ssh" | ".aws" | ".gnupg"))
+    {
+        return true;
+    }
+    if file_name == ".env"
+        || file_name.starts_with(".env.")
+        || matches!(
+            file_name,
+            ".npmrc"
+                | ".pypirc"
+                | ".netrc"
+                | "id_rsa"
+                | "id_dsa"
+                | "id_ecdsa"
+                | "id_ed25519"
+                | "credentials"
+                | "credentials.json"
+                | "auth.json"
+        )
+    {
+        return true;
+    }
+    if matches!(
+        extension,
+        "pem" | "key" | "p12" | "pfx" | "jks" | "keystore" | "der"
+    ) {
+        return true;
+    }
+    matches!(extension, "json" | "yaml" | "yml" | "toml")
+        && (file_name.contains("secret")
+            || file_name.contains("credential")
+            || file_name.contains("service-account"))
 }
 
 fn new_file_patch(path: &str, contents: &str) -> String {
@@ -883,11 +944,11 @@ mod tests {
     use std::sync::atomic::{AtomicU64, Ordering};
 
     use super::{
-        build_review_payload, format_findings_markdown, map_native_review_error,
-        map_provider_target_error, new_file_patch, public_provider_error,
+        build_review_payload, format_findings_markdown, is_sensitive_untracked_path,
+        map_native_review_error, map_provider_target_error, new_file_patch, public_provider_error,
         repo_identity_matches_target, requested_repo_identity, run,
-        strip_private_evidence_payloads, validate_explicit_repo_identity, working_tree_diff,
-        HeadlessReviewRequest, ReviewScope,
+        strip_private_evidence_payloads, validate_explicit_repo_identity,
+        validate_requested_identity_shape, working_tree_diff, HeadlessReviewRequest, ReviewScope,
     };
     use crate::config::{RepoRef, ReviewProvider};
     use crate::services::review::{
@@ -1037,6 +1098,30 @@ mod tests {
         assert_eq!(error.exit_code, 4);
         assert!(error.message.contains("does not match"));
         let _ = fs::remove_dir_all(repo);
+    }
+
+    #[test]
+    fn partial_requested_repo_identity_is_rejected() {
+        let request = HeadlessReviewRequest {
+            repo_path: None,
+            scope: ReviewScope::WorkingTree,
+            base: None,
+            workspace: Some("lachesi-hq".to_string()),
+            repo: None,
+            pr_id: None,
+            provider: None,
+            profile: None,
+            ai_provider: None,
+            model: None,
+            effort: None,
+            run_analyzers: false,
+        };
+
+        let error = validate_requested_identity_shape(&request)
+            .expect_err("partial repository identity must be rejected");
+
+        assert_eq!(error.exit_code, 4);
+        assert!(error.message.contains("provided together"));
     }
 
     #[test]
@@ -1196,6 +1281,26 @@ mod tests {
         assert!(diff.contains("+after unstaged"));
         assert!(diff.contains("diff --git a/untracked.txt b/untracked.txt"));
         assert!(diff.contains("+new untracked"));
+        let _ = fs::remove_dir_all(repo);
+    }
+
+    #[test]
+    fn working_tree_diff_skips_sensitive_untracked_files() {
+        let repo = temp_git_repo();
+        fs::write(repo.join(".env.local"), "API_TOKEN=must-not-leak\n")
+            .expect("write sensitive untracked file");
+        fs::write(repo.join("notes.txt"), "review this\n").expect("write safe untracked file");
+
+        let (diff, warnings) = working_tree_diff(&repo).expect("collect working tree diff");
+
+        assert!(!diff.contains("must-not-leak"));
+        assert!(diff.contains("+review this"));
+        assert!(warnings
+            .iter()
+            .any(|warning| warning.contains(".env.local")));
+        assert!(is_sensitive_untracked_path("config/client-secrets.json"));
+        assert!(is_sensitive_untracked_path("certs/signing.key"));
+        assert!(!is_sensitive_untracked_path("src/credentials.rs"));
         let _ = fs::remove_dir_all(repo);
     }
 

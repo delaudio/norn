@@ -145,6 +145,9 @@ Defaults:
 
 - `--format markdown`
 - repo path comes from app config, explicit `--repo-path`, or discovery
+- `--workspace` and `--repo` must be provided together; explicit identity
+  values must match the selected local checkout
+- `--pr` is valid only for PR scope and `--base` only for branch scope
 - `.lachesi.yaml` is loaded from repo root when present
 - `--profile` overrides `review.profile`; if omitted, `review.profile` or a
   `default` profile is used when configured
@@ -153,6 +156,9 @@ Defaults:
 - findings do not fail the process unless `--fail-on-findings` is set
 - local analyzers are skipped by default because agent-driven review follows
   the repository validation gate; `--run-analyzers` opts in for standalone use
+- working-tree review includes ordinary untracked text files but skips
+  potentially sensitive paths such as environment files, credential files, and
+  private-key material with a warning
 - `--run-analyzers` requires a non-empty review target and fails target
   resolution instead of reporting that analyzers ran when there are no changes
 - headless review uses temporary local storage by default and removes it after

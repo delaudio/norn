@@ -55,7 +55,8 @@ orchestrated safely by coding agents and CI.
    default so sandboxed agents do not need access to the desktop database;
    explicit `LACHESI_DATA_DIR` configuration remains respected.
 2. Local working-tree review includes staged changes, unstaged changes, and
-   untracked text files without modifying the repository.
+   non-sensitive untracked text files without modifying the repository.
+   Potentially sensitive untracked paths are skipped with an explicit warning.
 3. Local branch review compares the current branch with an explicit or resolved
    base reference, and pull-request review can use the configured GitHub or
    Bitbucket provider diff.
@@ -105,6 +106,7 @@ orchestrated safely by coding agents and CI.
 | 2026-07-24 | r1 | default-agent | Accepted headless review execution and agent orchestration. |
 | 2026-07-24 | r2 | default-agent | Made analyzers opt-in for post-task headless review. |
 | 2026-07-24 | r3 | default-agent | Made headless storage ephemeral and agent execution one-shot. |
+| 2026-07-27 | r4 | default-agent | Excluded potentially sensitive untracked files from AI review payloads. |
 
 ## Approvals
 
@@ -113,3 +115,4 @@ orchestrated safely by coding agents and CI.
 | Maintainer | fdg | 2026-07-24 | approved in chat |
 | Maintainer | fdg | 2026-07-24 | approved analyzer opt-in revision in chat |
 | Maintainer | fdg | 2026-07-24 | approved one-shot review refinement in chat |
+| Maintainer | fdg | 2026-07-27 | approved autonomous issue remediation in chat |

@@ -248,6 +248,15 @@ fn parse_review_args(args: &[String]) -> Result<ReviewArgs, String> {
         }
         index += 1;
     }
+    if parsed.workspace.is_some() != parsed.repo.is_some() {
+        return Err("`--workspace` and `--repo` must be provided together.".to_string());
+    }
+    if parsed.pr_id.is_some() && parsed.scope != ReviewScope::PullRequest {
+        return Err("`--pr` requires `--scope pr` when scope is explicit.".to_string());
+    }
+    if parsed.base.is_some() && parsed.scope != ReviewScope::Branch {
+        return Err("`--base` requires `--scope branch`.".to_string());
+    }
     Ok(parsed)
 }
 
@@ -728,6 +737,35 @@ profiles:
             .expect_err("zero should not be accepted as a pull request id");
 
         assert!(error.contains("positive integer"));
+    }
+
+    #[test]
+    fn review_rejects_conflicting_target_options() {
+        let conflicting_pr = parse_review_args(&[
+            "review".to_string(),
+            "--scope".to_string(),
+            "working-tree".to_string(),
+            "--pr".to_string(),
+            "42".to_string(),
+        ])
+        .expect_err("explicit working-tree scope must not ignore --pr");
+        assert!(conflicting_pr.contains("requires `--scope pr`"));
+
+        let misplaced_base = parse_review_args(&[
+            "review".to_string(),
+            "--base".to_string(),
+            "main".to_string(),
+        ])
+        .expect_err("working-tree scope must not ignore --base");
+        assert!(misplaced_base.contains("requires `--scope branch`"));
+
+        let partial_identity = parse_review_args(&[
+            "review".to_string(),
+            "--workspace".to_string(),
+            "lachesi-hq".to_string(),
+        ])
+        .expect_err("partial repository identity must be rejected");
+        assert!(partial_identity.contains("provided together"));
     }
 
     #[test]
