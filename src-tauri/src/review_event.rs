@@ -40,6 +40,15 @@ pub enum PullRequestReviewEventProvider {
     Bitbucket,
 }
 
+impl PullRequestReviewEventProvider {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Github => "github",
+            Self::Bitbucket => "bitbucket",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PullRequestClosedOutcome {

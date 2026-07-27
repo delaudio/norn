@@ -5,6 +5,8 @@ use std::path::{Path, PathBuf};
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 
+use crate::review_event::PullRequestReviewEventProvider;
+
 const APP_DIR: &str = "lachesi";
 const DB_FILE: &str = "lachesi.sqlite3";
 const LEGACY_REVIEWS_DIR: &str = "reviews";
@@ -58,6 +60,51 @@ pub struct ReviewJob {
     pub created_at: String,
     pub started_at: Option<String>,
     pub finished_at: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReviewCursorIdentity {
+    pub tenant_id: String,
+    pub provider: PullRequestReviewEventProvider,
+    pub workspace: String,
+    pub repo: String,
+    pub pr_id: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReviewCursor {
+    pub identity: ReviewCursorIdentity,
+    pub reviewed_head_sha: String,
+    pub run_id: String,
+    pub completed_at: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "state", content = "cursor", rename_all = "camelCase")]
+pub enum ReviewCursorState {
+    NotReviewed,
+    Reviewed(ReviewCursor),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ReviewRunOutcome {
+    Succeeded,
+    Failed,
+    Cancelled,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReviewRunCompletion {
+    pub identity: ReviewCursorIdentity,
+    pub reviewed_head_sha: String,
+    pub current_head_sha: String,
+    pub run_id: String,
+    pub completed_at: String,
+    pub outcome: ReviewRunOutcome,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
@@ -262,11 +309,28 @@ fn migrate(conn: &Connection) -> Result<(), String> {
 
         CREATE INDEX IF NOT EXISTS idx_closed_pr_metrics_state
           ON closed_pr_metrics(state, updated_on);
+
+        CREATE TABLE IF NOT EXISTS review_cursors (
+          tenant_id TEXT NOT NULL,
+          provider TEXT NOT NULL,
+          workspace TEXT NOT NULL,
+          repo TEXT NOT NULL,
+          pr_id INTEGER NOT NULL,
+          reviewed_head_sha TEXT NOT NULL,
+          run_id TEXT NOT NULL,
+          completed_at TEXT NOT NULL,
+          PRIMARY KEY (tenant_id, provider, workspace, repo, pr_id)
+        );
         "#,
     )
     .map_err(|e| e.to_string())?;
     conn.execute(
         "INSERT OR IGNORE INTO schema_migrations(version) VALUES (1)",
+        [],
+    )
+    .map_err(|e| e.to_string())?;
+    conn.execute(
+        "INSERT OR IGNORE INTO schema_migrations(version) VALUES (2)",
         [],
     )
     .map_err(|e| e.to_string())?;
@@ -278,6 +342,146 @@ fn now_ms() -> String {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis().to_string())
         .unwrap_or_else(|_| "0".to_string())
+}
+
+pub fn get_review_cursor(identity: &ReviewCursorIdentity) -> Result<ReviewCursorState, String> {
+    validate_cursor_identity(identity)?;
+    let conn = open()?;
+    get_review_cursor_from(&conn, identity)
+}
+
+pub fn record_review_completion(
+    completion: &ReviewRunCompletion,
+) -> Result<ReviewCursorState, String> {
+    validate_cursor_identity(&completion.identity)?;
+    if completion.outcome != ReviewRunOutcome::Succeeded {
+        let conn = open()?;
+        return get_review_cursor_from(&conn, &completion.identity);
+    }
+    validate_review_completion(completion)?;
+    if completion.reviewed_head_sha != completion.current_head_sha {
+        let conn = open()?;
+        return get_review_cursor_from(&conn, &completion.identity);
+    }
+
+    let mut conn = open()?;
+    let transaction = conn.transaction().map_err(|e| e.to_string())?;
+    transaction
+        .execute(
+            r#"
+            INSERT INTO review_cursors (
+              tenant_id, provider, workspace, repo, pr_id,
+              reviewed_head_sha, run_id, completed_at
+            )
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+            ON CONFLICT(tenant_id, provider, workspace, repo, pr_id) DO UPDATE SET
+              reviewed_head_sha = excluded.reviewed_head_sha,
+              run_id = excluded.run_id,
+              completed_at = excluded.completed_at
+            WHERE CAST(excluded.completed_at AS INTEGER)
+              > CAST(review_cursors.completed_at AS INTEGER)
+            "#,
+            params![
+                completion.identity.tenant_id,
+                completion.identity.provider.as_str(),
+                completion.identity.workspace,
+                completion.identity.repo,
+                cursor_pr_id(&completion.identity)?,
+                completion.reviewed_head_sha,
+                completion.run_id,
+                completion.completed_at
+            ],
+        )
+        .map_err(|e| e.to_string())?;
+    let state = get_review_cursor_from(&transaction, &completion.identity)?;
+    transaction.commit().map_err(|e| e.to_string())?;
+    Ok(state)
+}
+
+fn get_review_cursor_from(
+    conn: &Connection,
+    identity: &ReviewCursorIdentity,
+) -> Result<ReviewCursorState, String> {
+    let cursor = conn
+        .query_row(
+            r#"
+            SELECT reviewed_head_sha, run_id, completed_at
+            FROM review_cursors
+            WHERE tenant_id = ?1
+              AND provider = ?2
+              AND workspace = ?3
+              AND repo = ?4
+              AND pr_id = ?5
+            "#,
+            params![
+                identity.tenant_id,
+                identity.provider.as_str(),
+                identity.workspace,
+                identity.repo,
+                cursor_pr_id(identity)?
+            ],
+            |row| {
+                Ok(ReviewCursor {
+                    identity: identity.clone(),
+                    reviewed_head_sha: row.get(0)?,
+                    run_id: row.get(1)?,
+                    completed_at: row.get(2)?,
+                })
+            },
+        )
+        .optional()
+        .map_err(|e| e.to_string())?;
+    Ok(match cursor {
+        Some(cursor) => ReviewCursorState::Reviewed(cursor),
+        None => ReviewCursorState::NotReviewed,
+    })
+}
+
+fn validate_cursor_identity(identity: &ReviewCursorIdentity) -> Result<(), String> {
+    require_cursor_value("tenantId", &identity.tenant_id)?;
+    require_cursor_value("workspace", &identity.workspace)?;
+    require_cursor_value("repo", &identity.repo)?;
+    cursor_pr_id(identity)?;
+    Ok(())
+}
+
+fn validate_review_completion(completion: &ReviewRunCompletion) -> Result<(), String> {
+    require_cursor_value("runId", &completion.run_id)?;
+    validate_cursor_sha("reviewedHeadSha", &completion.reviewed_head_sha)?;
+    validate_cursor_sha("currentHeadSha", &completion.current_head_sha)?;
+    let completed_at = completion
+        .completed_at
+        .parse::<i64>()
+        .map_err(|_| "`completedAt` must be a non-negative Unix timestamp in milliseconds")?;
+    if completed_at < 0 {
+        return Err(
+            "`completedAt` must be a non-negative Unix timestamp in milliseconds".to_string(),
+        );
+    }
+    Ok(())
+}
+
+fn validate_cursor_sha(field: &str, value: &str) -> Result<(), String> {
+    if matches!(value.len(), 40 | 64) && value.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        Ok(())
+    } else {
+        Err(format!("`{field}` must be a full hexadecimal commit SHA"))
+    }
+}
+
+fn require_cursor_value(field: &str, value: &str) -> Result<(), String> {
+    if value.trim().is_empty() {
+        Err(format!("`{field}` must not be empty"))
+    } else {
+        Ok(())
+    }
+}
+
+fn cursor_pr_id(identity: &ReviewCursorIdentity) -> Result<i64, String> {
+    if identity.pr_id == 0 {
+        return Err("`prId` must be a positive integer".to_string());
+    }
+    i64::try_from(identity.pr_id).map_err(|_| "`prId` exceeds the supported range".to_string())
 }
 
 pub fn load_review_json(workspace: &str, repo: &str, id: u32) -> Result<Option<String>, String> {
@@ -950,6 +1154,32 @@ mod tests {
         result
     }
 
+    fn cursor_identity() -> ReviewCursorIdentity {
+        ReviewCursorIdentity {
+            tenant_id: "tenant-acme".to_string(),
+            provider: PullRequestReviewEventProvider::Github,
+            workspace: "acme".to_string(),
+            repo: "payments".to_string(),
+            pr_id: 42,
+        }
+    }
+
+    fn completion(
+        outcome: ReviewRunOutcome,
+        head_sha: &str,
+        run_id: &str,
+        completed_at: &str,
+    ) -> ReviewRunCompletion {
+        ReviewRunCompletion {
+            identity: cursor_identity(),
+            reviewed_head_sha: head_sha.to_string(),
+            current_head_sha: head_sha.to_string(),
+            run_id: run_id.to_string(),
+            completed_at: completed_at.to_string(),
+            outcome,
+        }
+    }
+
     #[test]
     fn dedicated_review_data_dir_is_created() {
         let _guard = ENV_LOCK.lock().expect("test env lock");
@@ -992,6 +1222,197 @@ mod tests {
                 Some(r#"{"content":"old review","generatedAt":"1"}"#)
             );
             assert!(dir.join(DB_FILE).exists());
+        });
+    }
+
+    #[test]
+    fn first_review_has_an_explicit_no_cursor_state() {
+        with_test_data_dir("review-cursor-empty", |_| {
+            let state = get_review_cursor(&cursor_identity()).expect("load empty cursor");
+
+            assert_eq!(state, ReviewCursorState::NotReviewed);
+        });
+    }
+
+    #[test]
+    fn successful_review_atomically_advances_only_to_the_latest_completion() {
+        const FIRST_SHA: &str = "1111111111111111111111111111111111111111";
+        const SECOND_SHA: &str = "2222222222222222222222222222222222222222";
+
+        with_test_data_dir("review-cursor-success", |_| {
+            let first = record_review_completion(&completion(
+                ReviewRunOutcome::Succeeded,
+                FIRST_SHA,
+                "run-1",
+                "1000",
+            ))
+            .expect("record first completion");
+            assert_eq!(
+                first,
+                ReviewCursorState::Reviewed(ReviewCursor {
+                    identity: cursor_identity(),
+                    reviewed_head_sha: FIRST_SHA.to_string(),
+                    run_id: "run-1".to_string(),
+                    completed_at: "1000".to_string(),
+                })
+            );
+
+            let latest = record_review_completion(&completion(
+                ReviewRunOutcome::Succeeded,
+                SECOND_SHA,
+                "run-2",
+                "2000",
+            ))
+            .expect("record latest completion");
+            let stale = record_review_completion(&completion(
+                ReviewRunOutcome::Succeeded,
+                FIRST_SHA,
+                "run-stale",
+                "1500",
+            ))
+            .expect("ignore stale completion");
+            let same_timestamp = record_review_completion(&completion(
+                ReviewRunOutcome::Succeeded,
+                FIRST_SHA,
+                "run-same-timestamp",
+                "2000",
+            ))
+            .expect("ignore completion with ambiguous ordering");
+            let mut obsolete = completion(
+                ReviewRunOutcome::Succeeded,
+                FIRST_SHA,
+                "run-obsolete",
+                "3000",
+            );
+            obsolete.current_head_sha = SECOND_SHA.to_string();
+            let obsolete = record_review_completion(&obsolete)
+                .expect("ignore completion for an obsolete pull-request head");
+
+            assert_eq!(stale, latest);
+            assert_eq!(same_timestamp, latest);
+            assert_eq!(obsolete, latest);
+            assert_eq!(
+                get_review_cursor(&cursor_identity()).expect("reload cursor"),
+                latest
+            );
+        });
+    }
+
+    #[test]
+    fn failed_and_cancelled_reviews_do_not_advance_the_cursor() {
+        const HEAD_SHA: &str = "1111111111111111111111111111111111111111";
+        const OTHER_SHA: &str = "2222222222222222222222222222222222222222";
+
+        with_test_data_dir("review-cursor-unsuccessful", |_| {
+            let successful = record_review_completion(&completion(
+                ReviewRunOutcome::Succeeded,
+                HEAD_SHA,
+                "run-successful",
+                "1000",
+            ))
+            .expect("record successful completion");
+
+            for outcome in [ReviewRunOutcome::Failed, ReviewRunOutcome::Cancelled] {
+                let state = record_review_completion(&completion(
+                    outcome,
+                    OTHER_SHA,
+                    "run-unsuccessful",
+                    "2000",
+                ))
+                .expect("record unsuccessful completion");
+                assert_eq!(state, successful);
+            }
+        });
+    }
+
+    #[test]
+    fn v1_database_migrates_without_losing_review_jobs_or_findings() {
+        with_test_data_dir("review-cursor-v1-migration", |dir| {
+            fs::create_dir_all(dir).expect("create v1 data directory");
+            let db = dir.join(DB_FILE);
+            let conn = Connection::open(&db).expect("open v1 database");
+            conn.execute_batch(
+                r#"
+                CREATE TABLE schema_migrations (
+                  version INTEGER PRIMARY KEY,
+                  applied_at TEXT NOT NULL DEFAULT (strftime('%s','now') || '000')
+                );
+                INSERT INTO schema_migrations(version) VALUES (1);
+
+                CREATE TABLE ai_review_stores (
+                  review_key TEXT PRIMARY KEY,
+                  workspace TEXT NOT NULL,
+                  repo TEXT NOT NULL,
+                  pr_id INTEGER NOT NULL,
+                  store_json TEXT NOT NULL,
+                  migrated_from_json INTEGER NOT NULL DEFAULT 0,
+                  created_at TEXT NOT NULL,
+                  updated_at TEXT NOT NULL
+                );
+                INSERT INTO ai_review_stores (
+                  review_key, workspace, repo, pr_id, store_json,
+                  migrated_from_json, created_at, updated_at
+                ) VALUES (
+                  'acme_payments_42', 'acme', 'payments', 42,
+                  '{"reviewRuns":[{"findings":[{"title":"preserved"}]}]}',
+                  0, '1000', '2000'
+                );
+
+                CREATE TABLE ai_review_jobs (
+                  id TEXT PRIMARY KEY,
+                  workspace TEXT NOT NULL,
+                  repo TEXT NOT NULL,
+                  pr_id INTEGER NOT NULL,
+                  pr_title TEXT NOT NULL,
+                  source_branch TEXT NOT NULL,
+                  destination_branch TEXT NOT NULL,
+                  status TEXT NOT NULL,
+                  trigger TEXT NOT NULL,
+                  thread_id TEXT,
+                  error TEXT,
+                  created_at TEXT NOT NULL,
+                  started_at TEXT,
+                  finished_at TEXT
+                );
+                INSERT INTO ai_review_jobs (
+                  id, workspace, repo, pr_id, pr_title, source_branch,
+                  destination_branch, status, trigger, thread_id, error,
+                  created_at, started_at, finished_at
+                ) VALUES (
+                  'job-existing', 'acme', 'payments', 42, 'Existing review',
+                  'feature', 'main', 'succeeded', 'manual', 'thread-existing',
+                  NULL, '1000', '1000', '2000'
+                );
+                "#,
+            )
+            .expect("create v1 schema");
+            drop(conn);
+
+            assert_eq!(
+                get_review_cursor(&cursor_identity()).expect("migrate and load cursor"),
+                ReviewCursorState::NotReviewed
+            );
+            assert_eq!(
+                load_review_json("acme", "payments", 42).expect("load preserved findings"),
+                Some(r#"{"reviewRuns":[{"findings":[{"title":"preserved"}]}]}"#.to_string())
+            );
+            assert_eq!(
+                get_review_job("job-existing")
+                    .expect("load preserved job")
+                    .expect("existing job")
+                    .status,
+                ReviewJobStatus::Succeeded
+            );
+
+            let conn = Connection::open(db).expect("reopen migrated database");
+            let versions: Vec<i64> = conn
+                .prepare("SELECT version FROM schema_migrations ORDER BY version")
+                .expect("prepare migration query")
+                .query_map([], |row| row.get(0))
+                .expect("query migrations")
+                .collect::<rusqlite::Result<_>>()
+                .expect("read migration versions");
+            assert_eq!(versions, vec![1, 2]);
         });
     }
 
