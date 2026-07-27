@@ -693,7 +693,7 @@ fn build_review_payload(
             "This target contains the provider pull-request diff."
         }
     };
-    [
+    let mut payload = [
         prompt.trim(),
         "",
         "## Review target",
@@ -703,10 +703,15 @@ fn build_review_payload(
         "",
         "## Diff",
         "```diff",
-        diff.trim(),
-        "```",
     ]
-    .join("\n")
+    .join("\n");
+    payload.push('\n');
+    payload.push_str(diff);
+    if !diff.ends_with('\n') {
+        payload.push('\n');
+    }
+    payload.push_str("```");
+    payload
 }
 
 #[cfg(test)]
@@ -784,6 +789,21 @@ mod tests {
 
         assert!(payload.contains("staged, unstaged, and untracked files"));
         assert!(payload.contains("Do not describe a file as committed"));
+    }
+
+    #[test]
+    fn review_payload_preserves_diff_whitespace() {
+        let diff = " diff header\n+trailing spaces  \n+   \n";
+        let payload = build_review_payload(
+            "Review carefully.",
+            "Whitespace changes",
+            "feature",
+            "main",
+            diff,
+            ReviewScope::Branch,
+        );
+
+        assert!(payload.contains(&format!("```diff\n{diff}```")));
     }
 
     #[test]

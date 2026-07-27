@@ -2093,6 +2093,7 @@ dependencies = [
  "tauri-build",
  "tauri-plugin-notification",
  "tauri-plugin-opener",
+ "tempfile",
  "toml 0.8.2",
 ]
 

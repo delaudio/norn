@@ -62,34 +62,43 @@ struct ConfigValidateOutput {
 }
 
 struct HeadlessDataDirGuard {
-    path: Option<PathBuf>,
+    temp_dir: Option<tempfile::TempDir>,
 }
 
 impl HeadlessDataDirGuard {
     fn install() -> Result<Self, String> {
         if std::env::var_os("LACHESI_DATA_DIR").is_some() {
-            return Ok(Self { path: None });
+            return Ok(Self { temp_dir: None });
         }
-        let path =
-            std::env::temp_dir().join(format!("lachesi-headless-storage-{}", std::process::id()));
-        std::fs::create_dir_all(&path).map_err(|error| {
-            format!(
-                "Failed to create temporary headless storage at {}: {error}",
-                path.display()
-            )
-        })?;
-        std::env::set_var("LACHESI_DATA_DIR", &path);
-        Ok(Self { path: Some(path) })
+        let temp_dir = create_headless_data_dir()?;
+        std::env::set_var("LACHESI_DATA_DIR", temp_dir.path());
+        Ok(Self {
+            temp_dir: Some(temp_dir),
+        })
     }
+}
+
+fn create_headless_data_dir() -> Result<tempfile::TempDir, String> {
+    let temp_dir = tempfile::Builder::new()
+        .prefix("lachesi-headless-storage-")
+        .tempdir()
+        .map_err(|error| format!("Failed to create temporary headless storage: {error}"))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+
+        std::fs::set_permissions(temp_dir.path(), std::fs::Permissions::from_mode(0o700)).map_err(
+            |error| format!("Failed to secure temporary headless storage permissions: {error}"),
+        )?;
+    }
+    Ok(temp_dir)
 }
 
 impl Drop for HeadlessDataDirGuard {
     fn drop(&mut self) {
-        let Some(path) = self.path.take() else {
-            return;
-        };
-        std::env::remove_var("LACHESI_DATA_DIR");
-        let _ = std::fs::remove_dir_all(path);
+        if self.temp_dir.is_some() {
+            std::env::remove_var("LACHESI_DATA_DIR");
+        }
     }
 }
 
@@ -525,7 +534,7 @@ fn usage() -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_review_args, run_args, ReviewOutputFormat};
+    use super::{create_headless_data_dir, parse_review_args, run_args, ReviewOutputFormat};
     use crate::config::AiProvider;
     use crate::headless_review::ReviewScope;
     use crate::services::review::ReviewFindingSeverity;
@@ -543,6 +552,27 @@ mod tests {
         ));
         fs::create_dir_all(&path).expect("create temp repo");
         path
+    }
+
+    #[test]
+    fn headless_data_dirs_are_unique_and_private() {
+        let first = create_headless_data_dir().expect("first temp dir");
+        let second = create_headless_data_dir().expect("second temp dir");
+
+        assert_ne!(first.path(), second.path());
+        assert!(first.path().is_dir());
+        assert!(second.path().is_dir());
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+
+            let mode = fs::metadata(first.path())
+                .expect("temp dir metadata")
+                .permissions()
+                .mode();
+            assert_eq!(mode & 0o777, 0o700);
+        }
     }
 
     #[test]
