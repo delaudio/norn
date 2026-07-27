@@ -1,7 +1,7 @@
 ---
 adr: 0007
 title: Run reviews through a headless local CLI
-status: Accepted
+status: Implemented
 date: 2026-07-24
 owner: default-agent
 supersedes:
@@ -114,6 +114,7 @@ orchestrated safely by coding agents and CI.
 | 2026-07-27 | r4 | default-agent | Excluded potentially sensitive untracked files from AI review payloads. |
 | 2026-07-27 | r5 | default-agent | Scoped the machine-output secrecy guarantee to credential sources and raw evidence. |
 | 2026-07-27 | r6 | default-agent | Isolated headless provider execution from the reviewed checkout. |
+| 2026-07-27 | r7 | default-agent | Marked the headless review capability implemented after PR #115 shipped. |
 
 ## Approvals
 
@@ -124,3 +125,4 @@ orchestrated safely by coding agents and CI.
 | Maintainer | fdg | 2026-07-24 | approved one-shot review refinement in chat |
 | Maintainer | fdg | 2026-07-27 | approved autonomous issue remediation in chat |
 | Maintainer | fdg | 2026-07-27 | approved autonomous security remediation in chat |
+| Maintainer | fdg | 2026-07-27 | approved autonomous completion and issue progression in chat |
