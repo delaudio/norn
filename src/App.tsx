@@ -33,6 +33,7 @@ import {
 import { buildReviewPromptDisplayMessage } from "@/lib/aiReviewPromptDisplay";
 import { buildAiFixPayload } from "@/lib/buildAiFixPayload";
 import { buildAiReviewPayloadForPr } from "@/lib/buildAiReviewPayloadForPr";
+import { buildBackgroundReviewStartArgs } from "@/lib/backgroundReviewStart";
 import { buildReviewPayload } from "@/lib/buildReviewPayload";
 import { shouldIgnoreShortcut } from "@/lib/keyboard";
 import {
@@ -243,22 +244,24 @@ export default function App() {
           destinationBranch: detail.destinationBranch,
           trigger: "menuBar",
         });
-        const started = await tauriCall<AiReviewRunState>("start_inline_review", {
-          workspace: pr.workspace,
-          repo: pr.repo,
-          id: pr.id,
-          title: detail.title || `PR #${pr.id}`,
-          payload,
-          sourceBranch: detail.sourceBranch,
-          destinationBranch: detail.destinationBranch,
-          aiProvider: config?.aiProvider ?? "claude",
-          claudeModel: config?.claudeModel ?? null,
-          claudeEffort: config?.claudeEffort ?? null,
-          codexModel: config?.codexModel ?? null,
-          codexEffort: config?.codexEffort ?? null,
-          reviewProfile: null,
-          skipAnalyzers: true,
-        });
+        const started = await tauriCall<AiReviewRunState>(
+          "start_inline_review",
+          {
+            ...buildBackgroundReviewStartArgs({
+              workspace: pr.workspace,
+              repo: pr.repo,
+              prId: pr.id,
+              detail,
+              payload,
+              aiProvider: config?.aiProvider ?? "claude",
+              claudeModel: config?.claudeModel ?? null,
+              claudeEffort: config?.claudeEffort ?? null,
+              codexModel: config?.codexModel ?? null,
+              codexEffort: config?.codexEffort ?? null,
+            }),
+            skipAnalyzers: true,
+          },
+        );
         await updateJob("running", started.threadId);
 
         let finalState: AiReviewRunState | null = null;
