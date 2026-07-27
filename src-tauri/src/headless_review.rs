@@ -1,5 +1,6 @@
 use std::ffi::OsStr;
-use std::fs;
+use std::fs::{self, File, OpenOptions};
+use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -842,7 +843,7 @@ fn working_tree_diff(repo_path: &Path) -> Result<(String, Vec<String>), Headless
         }
         let relative_path = untracked_relative_path(raw_path);
         let path = repo_path.join(relative_path);
-        let metadata = match fs::symlink_metadata(&path) {
+        match fs::symlink_metadata(&path) {
             Ok(metadata) if metadata.is_file() => metadata,
             Ok(metadata) if metadata.file_type().is_symlink() => {
                 warnings.push(format!("Skipped untracked symlink `{display_relative}`."));
@@ -850,19 +851,40 @@ fn working_tree_diff(repo_path: &Path) -> Result<(String, Vec<String>), Headless
             }
             _ => continue,
         };
-        if metadata.len() > MAX_UNTRACKED_FILE_BYTES
-            || included_bytes.saturating_add(metadata.len()) > MAX_UNTRACKED_TOTAL_BYTES
-        {
+        let file = match open_untracked_file(&path) {
+            Ok(file) => file,
+            Err(_error)
+                if fs::symlink_metadata(&path)
+                    .is_ok_and(|metadata| metadata.file_type().is_symlink()) =>
+            {
+                warnings.push(format!("Skipped untracked symlink `{display_relative}`."));
+                continue;
+            }
+            Err(error) => {
+                return Err(HeadlessReviewError::target(format!(
+                    "Failed to open untracked file `{display_relative}`: {error}"
+                )));
+            }
+        };
+        if !file.metadata().is_ok_and(|metadata| metadata.is_file()) {
+            continue;
+        }
+        let remaining_bytes = MAX_UNTRACKED_TOTAL_BYTES.saturating_sub(included_bytes);
+        let allowed_bytes = MAX_UNTRACKED_FILE_BYTES.min(remaining_bytes);
+        let mut contents = Vec::new();
+        file.take(allowed_bytes.saturating_add(1))
+            .read_to_end(&mut contents)
+            .map_err(|error| {
+                HeadlessReviewError::target(format!(
+                    "Failed to read untracked file `{display_relative}`: {error}"
+                ))
+            })?;
+        if contents.len() as u64 > allowed_bytes {
             warnings.push(format!(
                 "Skipped large untracked file `{display_relative}`."
             ));
             continue;
         }
-        let contents = fs::read(&path).map_err(|error| {
-            HeadlessReviewError::target(format!(
-                "Failed to read untracked file `{display_relative}`: {error}"
-            ))
-        })?;
         if contents.contains(&0) {
             warnings.push(format!(
                 "Skipped binary untracked file `{display_relative}`."
@@ -883,9 +905,28 @@ fn working_tree_diff(repo_path: &Path) -> Result<(String, Vec<String>), Headless
             has_untracked_section = true;
         }
         append_diff(&mut diff, &new_file_patch(&relative, &text));
-        included_bytes = included_bytes.saturating_add(metadata.len());
+        included_bytes = included_bytes.saturating_add(contents.len() as u64);
     }
     Ok((diff, warnings))
+}
+
+fn open_untracked_file(path: &Path) -> io::Result<File> {
+    let mut options = OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+
+        options.custom_flags(libc::O_NOFOLLOW);
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+
+        // FILE_FLAG_OPEN_REPARSE_POINT opens the link itself instead of its target.
+        options.custom_flags(0x0020_0000);
+    }
+    options.open(path)
 }
 
 fn is_safe_synthetic_diff_path(relative: &str) -> bool {

@@ -3169,6 +3169,8 @@ fn validate_isolated_provider_cli(ai_provider: AiProvider) -> Result<(), String>
                 ],
             ),
         };
+    // Exercise the exact isolation option combination. A CLI that rejects this
+    // parser contract is unsupported even if each flag appears in its help.
     let output = user_installed_cli_command(program)
         .args(args)
         .output()

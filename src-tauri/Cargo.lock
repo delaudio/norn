@@ -2083,6 +2083,7 @@ dependencies = [
  "ctrlc",
  "dirs 5.0.1",
  "keyring",
+ "libc",
  "ratatui",
  "reqwest 0.12.28",
  "rusqlite",
