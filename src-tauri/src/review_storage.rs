@@ -27,6 +27,7 @@ const DB_FILE: &str = "lachesi.sqlite3";
 const LEGACY_REVIEWS_DIR: &str = "reviews";
 const MAX_ADMINISTRATIVE_AUDIT_TIMESTAMP_MS: i64 = 4_102_444_800_000;
 const SHARED_REVIEW_JOB_LEASE_MS: i64 = 15 * 60 * 1000;
+const MAX_SHARED_REVIEW_JOB_ATTEMPTS: u32 = 3;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -1379,6 +1380,22 @@ pub(crate) fn claim_next_shared_review_job(
         .execute(
             r#"
             UPDATE shared_review_jobs
+            SET status = 'failed',
+                error_code = 'worker_lease_exhausted',
+                lease_expires_at_ms = NULL,
+                finished_at_ms = ?1
+            WHERE status = 'running'
+              AND lease_expires_at_ms IS NOT NULL
+              AND lease_expires_at_ms <= ?1
+              AND attempt_count >= ?2
+            "#,
+            params![now, i64::from(MAX_SHARED_REVIEW_JOB_ATTEMPTS)],
+        )
+        .map_err(|error| error.to_string())?;
+    transaction
+        .execute(
+            r#"
+            UPDATE shared_review_jobs
             SET status = 'queued',
                 error_code = 'worker_lease_expired',
                 started_at_ms = NULL,
@@ -1386,8 +1403,9 @@ pub(crate) fn claim_next_shared_review_job(
             WHERE status = 'running'
               AND lease_expires_at_ms IS NOT NULL
               AND lease_expires_at_ms <= ?1
+              AND attempt_count < ?2
             "#,
-            params![now],
+            params![now, i64::from(MAX_SHARED_REVIEW_JOB_ATTEMPTS)],
         )
         .map_err(|error| error.to_string())?;
     let queued_ids = {
@@ -1779,7 +1797,7 @@ fn shared_review_event_is_stale(
     let state = conn
         .query_row(
             r#"
-            SELECT current_base_sha, current_head_sha, provider_updated_at_ms
+            SELECT provider_updated_at_ms
             FROM shared_review_pull_request_state
             WHERE tenant_id = ?1
               AND provider = ?2
@@ -1794,22 +1812,14 @@ fn shared_review_event_is_stale(
                 event.repository,
                 shared_review_pr_id(event.pull_request_id)?,
             ],
-            |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, i64>(2)?,
-                ))
-            },
+            |row| row.get::<_, i64>(0),
         )
         .optional()
         .map_err(|error| error.to_string())?;
-    let Some((current_base_sha, current_head_sha, provider_updated_at_ms)) = state else {
+    let Some(provider_updated_at_ms) = state else {
         return Ok(false);
     };
-    Ok(event.provider_updated_at_ms < provider_updated_at_ms
-        || (event.provider_updated_at_ms == provider_updated_at_ms
-            && (event.base.sha != current_base_sha || event.head.sha != current_head_sha)))
+    Ok(event.provider_updated_at_ms < provider_updated_at_ms)
 }
 
 fn upsert_shared_pull_request_state(
@@ -1833,15 +1843,7 @@ fn upsert_shared_pull_request_state(
           reviewable = excluded.reviewable,
           updated_at_ms = excluded.updated_at_ms
         WHERE excluded.provider_updated_at_ms
-                > shared_review_pull_request_state.provider_updated_at_ms
-           OR (
-                excluded.provider_updated_at_ms
-                  = shared_review_pull_request_state.provider_updated_at_ms
-                AND excluded.current_base_sha
-                  = shared_review_pull_request_state.current_base_sha
-                AND excluded.current_head_sha
-                  = shared_review_pull_request_state.current_head_sha
-              )
+                >= shared_review_pull_request_state.provider_updated_at_ms
         "#,
         params![
             event.tenant_id,
@@ -3929,6 +3931,38 @@ mod tests {
     }
 
     #[test]
+    fn equal_timestamp_revision_changes_are_enqueued_instead_of_dropped() {
+        const FIRST_SHA: &str = "1111111111111111111111111111111111111111";
+        const SECOND_SHA: &str = "2222222222222222222222222222222222222222";
+        with_test_data_dir("shared-review-equal-timestamp", |_| {
+            let first = shared_event(
+                "tenant-acme",
+                "acme",
+                "payments",
+                42,
+                FIRST_SHA,
+                "delivery-first",
+            );
+            enqueue_shared_review_job(&first).expect("enqueue first revision");
+            let mut same_timestamp = shared_event(
+                "tenant-acme",
+                "acme",
+                "payments",
+                42,
+                SECOND_SHA,
+                "delivery-second",
+            );
+            same_timestamp.provider_updated_at_ms = first.provider_updated_at_ms;
+
+            assert!(matches!(
+                enqueue_shared_review_job(&same_timestamp)
+                    .expect("enqueue ambiguous same-timestamp revision"),
+                ReviewJobEnqueueOutcome::Queued(_)
+            ));
+        });
+    }
+
+    #[test]
     fn newer_head_supersedes_only_queued_work_for_the_same_pull_request() {
         const OLD_SHA: &str = "1111111111111111111111111111111111111111";
         const NEW_SHA: &str = "2222222222222222222222222222222222222222";
@@ -4236,6 +4270,53 @@ mod tests {
             )
             .expect("complete current attempt");
             assert_eq!(completed.status, SharedReviewJobStatus::Completed);
+        });
+    }
+
+    #[test]
+    fn expired_review_job_leases_stop_requeueing_after_the_attempt_limit() {
+        const HEAD_SHA: &str = "1111111111111111111111111111111111111111";
+        with_test_data_dir("shared-review-lease-exhaustion", |dir| {
+            let queued = queued_shared_job(
+                enqueue_shared_review_job(&shared_event(
+                    "tenant-acme",
+                    "acme",
+                    "payments",
+                    42,
+                    HEAD_SHA,
+                    "delivery-exhaustion",
+                ))
+                .expect("enqueue recoverable job"),
+            );
+
+            for expected_attempt in 1..=MAX_SHARED_REVIEW_JOB_ATTEMPTS {
+                let running = claim_next_shared_review_job(ReviewConcurrencyLimits::default())
+                    .expect("claim recoverable job")
+                    .expect("running attempt");
+                assert_eq!(running.attempt_count, expected_attempt);
+                let conn =
+                    Connection::open(dir.join(DB_FILE)).expect("open review database directly");
+                conn.execute(
+                    "UPDATE shared_review_jobs SET lease_expires_at_ms = 0 WHERE id = ?1",
+                    params![running.request.id],
+                )
+                .expect("expire running attempt");
+            }
+
+            assert!(
+                claim_next_shared_review_job(ReviewConcurrencyLimits::default())
+                    .expect("process exhausted lease")
+                    .is_none()
+            );
+            let exhausted = get_shared_review_job(&queued.request.id)
+                .expect("load exhausted job")
+                .expect("exhausted job");
+            assert_eq!(exhausted.status, SharedReviewJobStatus::Failed);
+            assert_eq!(
+                exhausted.error_code.as_deref(),
+                Some("worker_lease_exhausted")
+            );
+            assert_eq!(exhausted.attempt_count, MAX_SHARED_REVIEW_JOB_ATTEMPTS);
         });
     }
 
