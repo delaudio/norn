@@ -11,7 +11,7 @@ If status files and git disagree, git is authoritative; correct this file.
 - **Branch:** `agent/headless-review-jobs`
 - **Active item:** GitHub issue #96 and `.docflow/plan/todo/0004-shared-review-service-program.md`
 - **Blockers:** none; use the available SSH key for signed commits.
-- **Uncommitted work:** issue #96 coordination closeout through hardening commit `e0421a7`; final branch review and PR integration remain.
+- **Uncommitted work:** issue #96 coordination closeout through hardening commit `d1dedd8`; final branch review and PR integration remain.
 
 ## Last shipped
 
