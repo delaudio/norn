@@ -11,7 +11,7 @@ use crate::repo_config::{self, ReviewSeverity};
 use crate::services::bitbucket::{get_pr_diff_native, get_pull_request_native};
 use crate::services::review::{
     run_headless_review_native, HeadlessNativeReviewError, HeadlessNativeReviewRequest,
-    ReviewFindingSeverity, ReviewRun,
+    ReviewFinding, ReviewFindingSeverity, ReviewProvider as ReviewRunProvider, ReviewRun,
 };
 
 const DEFAULT_REVIEW_PROMPT: &str = include_str!("../../src/lib/defaultReviewPrompt.md");
@@ -135,6 +135,7 @@ pub struct HeadlessReviewExecution {
 
 struct ResolvedTarget {
     target: HeadlessReviewTarget,
+    provider: ReviewProvider,
     workspace: String,
     repo: String,
     pr_id: u32,
@@ -217,6 +218,7 @@ pub fn run(request: HeadlessReviewRequest) -> Result<HeadlessReviewExecution, He
     );
     let review_run = run_headless_review_native(HeadlessNativeReviewRequest {
         repo_path: repo_path.clone(),
+        review_provider: review_run_provider(resolved.provider),
         workspace: resolved.workspace,
         repo: resolved.repo,
         pr_id: resolved.pr_id,
@@ -277,11 +279,22 @@ pub fn format_markdown(execution: &HeadlessReviewExecution) -> String {
     }
     match execution.review_run.as_ref() {
         Some(run) => {
+            output.push(String::new());
+            output.extend(format_findings_markdown(&run.findings));
+            if let Some(summary) = run
+                .summary_markdown
+                .as_deref()
+                .map(str::trim)
+                .filter(|summary| !summary.is_empty())
+            {
+                output.extend([
+                    String::new(),
+                    "## Assistant summary".to_string(),
+                    String::new(),
+                    summary.to_string(),
+                ]);
+            }
             output.extend([
-                String::new(),
-                run.summary_markdown
-                    .clone()
-                    .unwrap_or_else(|| "Review completed without a summary.".to_string()),
                 String::new(),
                 format!("Run: {} ({})", run.id, run.schema_version),
             ]);
@@ -291,6 +304,62 @@ pub fn format_markdown(execution: &HeadlessReviewExecution) -> String {
         }
     }
     output.join("\n")
+}
+
+fn format_findings_markdown(findings: &[ReviewFinding]) -> Vec<String> {
+    let mut output = vec!["## Findings".to_string()];
+    if findings.is_empty() {
+        output.extend([String::new(), "No findings.".to_string()]);
+        return output;
+    }
+
+    for severity in [
+        ReviewFindingSeverity::Critical,
+        ReviewFindingSeverity::High,
+        ReviewFindingSeverity::Medium,
+        ReviewFindingSeverity::Low,
+        ReviewFindingSeverity::Info,
+    ] {
+        let group = findings
+            .iter()
+            .filter(|finding| finding.severity == severity)
+            .collect::<Vec<_>>();
+        if group.is_empty() {
+            continue;
+        }
+        output.extend([String::new(), format!("### {}", severity_label(severity))]);
+        for finding in group {
+            let anchor = finding.anchor.as_ref().map(|anchor| {
+                let lines = match anchor.end_line {
+                    Some(end) if end != anchor.start_line => {
+                        format!("{}-{}", anchor.start_line, end)
+                    }
+                    _ => anchor.start_line.to_string(),
+                };
+                format!(" (`{}:{lines}`)", anchor.path)
+            });
+            output.push(format!(
+                "- **{}**{}: {}",
+                finding.title,
+                anchor.unwrap_or_default(),
+                finding.summary
+            ));
+            if let Some(fix) = finding.suggested_fix.as_deref() {
+                output.push(format!("  Fix: {fix}"));
+            }
+        }
+    }
+    output
+}
+
+fn severity_label(severity: ReviewFindingSeverity) -> &'static str {
+    match severity {
+        ReviewFindingSeverity::Info => "Info",
+        ReviewFindingSeverity::Low => "Low",
+        ReviewFindingSeverity::Medium => "Medium",
+        ReviewFindingSeverity::High => "High",
+        ReviewFindingSeverity::Critical => "Critical",
+    }
 }
 
 pub fn has_findings_at_or_above(
@@ -353,13 +422,32 @@ fn resolve_repo_root_for_request(
     };
     match discovered {
         Ok(path) => resolve_repo_root(&path),
-        Err(discovery_error) => resolve_repo_root(&cwd).map_err(|cwd_error| {
-            HeadlessReviewError::target(format!(
-                "{discovery_error} Current-directory fallback failed: {}",
-                cwd_error.message
-            ))
-        }),
+        Err(discovery_error) => {
+            let identity =
+                local_repo::resolve_current_repo_from_dir(&cwd).map_err(|cwd_error| {
+                    HeadlessReviewError::target(format!(
+                        "{discovery_error} Current-directory fallback failed: {cwd_error}"
+                    ))
+                })?;
+            if !repo_identity_matches_target(&identity, request.provider, workspace, repo) {
+                return Err(HeadlessReviewError::target(format!(
+                    "{discovery_error} The current directory does not match the requested repository. Pass `--repo-path` or configure its local path."
+                )));
+            }
+            resolve_repo_root(&cwd)
+        }
     }
+}
+
+fn repo_identity_matches_target(
+    identity: &config::RepoRef,
+    provider: Option<ReviewProvider>,
+    workspace: &str,
+    repo: &str,
+) -> bool {
+    identity.workspace == workspace
+        && identity.repo == repo
+        && provider.is_none_or(|provider| identity.provider == provider)
 }
 
 fn resolve_target(
@@ -385,7 +473,8 @@ fn resolve_target(
         .ok_or_else(|| HeadlessReviewError::target("Cannot determine repository name."))?;
     let provider = request
         .provider
-        .or_else(|| identity.as_ref().map(|repo| repo.provider));
+        .or_else(|| identity.as_ref().map(|repo| repo.provider))
+        .unwrap_or_else(|| config::load().review_provider);
 
     match request.scope {
         ReviewScope::WorkingTree => {
@@ -401,6 +490,7 @@ fn resolve_target(
                 diff,
                 warnings,
                 request.scope,
+                provider,
             ))
         }
         ReviewScope::Branch => {
@@ -431,17 +521,13 @@ fn resolve_target(
                 diff,
                 Vec::new(),
                 request.scope,
+                provider,
             ))
         }
         ReviewScope::PullRequest => {
             let pr_id = request
                 .pr_id
                 .ok_or_else(|| HeadlessReviewError::target("`--pr` is required for PR scope."))?;
-            let provider = provider.ok_or_else(|| {
-                HeadlessReviewError::target(
-                    "Cannot determine PR provider. Pass `--provider github|bitbucket`.",
-                )
-            })?;
             let detail = get_pull_request_native(Some(provider), &workspace, &repo, pr_id)
                 .map_err(map_provider_target_error)?;
             let diff = get_pr_diff_native(Some(provider), &workspace, &repo, pr_id)
@@ -456,6 +542,7 @@ fn resolve_target(
                     source: detail.source_branch.clone(),
                     destination: detail.destination_branch.clone(),
                 },
+                provider,
                 workspace,
                 repo,
                 pr_id,
@@ -495,6 +582,7 @@ fn local_target(
     diff: String,
     warnings: Vec<String>,
     scope: ReviewScope,
+    provider: ReviewProvider,
 ) -> ResolvedTarget {
     ResolvedTarget {
         target: HeadlessReviewTarget {
@@ -506,6 +594,7 @@ fn local_target(
             source: source.clone(),
             destination: destination.clone(),
         },
+        provider,
         workspace,
         repo,
         pr_id: 0,
@@ -514,6 +603,13 @@ fn local_target(
         destination_branch: destination,
         diff,
         warnings,
+    }
+}
+
+fn review_run_provider(provider: ReviewProvider) -> ReviewRunProvider {
+    match provider {
+        ReviewProvider::Bitbucket => ReviewRunProvider::Bitbucket,
+        ReviewProvider::Github => ReviewRunProvider::Github,
     }
 }
 
@@ -722,10 +818,16 @@ mod tests {
     use std::sync::atomic::{AtomicU64, Ordering};
 
     use super::{
-        build_review_payload, map_native_review_error, map_provider_target_error, new_file_patch,
-        working_tree_diff, ReviewScope,
+        build_review_payload, format_findings_markdown, map_native_review_error,
+        map_provider_target_error, new_file_patch, repo_identity_matches_target, working_tree_diff,
+        ReviewScope,
     };
-    use crate::services::review::HeadlessNativeReviewError;
+    use crate::config::{RepoRef, ReviewProvider};
+    use crate::services::review::{
+        HeadlessNativeReviewError, ReviewAnchorSide, ReviewFinding, ReviewFindingAnchor,
+        ReviewFindingCategory, ReviewFindingConfidence, ReviewFindingSeverity, ReviewFindingSource,
+        ReviewFindingStatus,
+    };
 
     static TEMP_REPO_COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -774,6 +876,67 @@ mod tests {
         assert_eq!(ReviewScope::WorkingTree.label(), "working-tree");
         assert_eq!(ReviewScope::Branch.label(), "branch");
         assert_eq!(ReviewScope::PullRequest.label(), "pr");
+    }
+
+    #[test]
+    fn cwd_fallback_requires_matching_repository_identity() {
+        let identity = RepoRef {
+            provider: ReviewProvider::Github,
+            workspace: "lachesi-hq".to_string(),
+            repo: "lachesi".to_string(),
+            local_path: Some("/tmp/lachesi".to_string()),
+        };
+
+        assert!(repo_identity_matches_target(
+            &identity,
+            Some(ReviewProvider::Github),
+            "lachesi-hq",
+            "lachesi",
+        ));
+        assert!(!repo_identity_matches_target(
+            &identity,
+            Some(ReviewProvider::Bitbucket),
+            "lachesi-hq",
+            "lachesi",
+        ));
+        assert!(!repo_identity_matches_target(
+            &identity,
+            Some(ReviewProvider::Github),
+            "other",
+            "lachesi",
+        ));
+    }
+
+    #[test]
+    fn markdown_findings_are_grouped_and_anchored() {
+        let finding = ReviewFinding {
+            id: "finding-1".to_string(),
+            fingerprint: "fingerprint-1".to_string(),
+            title: "Unsafe fallback".to_string(),
+            severity: ReviewFindingSeverity::High,
+            confidence: ReviewFindingConfidence::High,
+            category: ReviewFindingCategory::Security,
+            status: ReviewFindingStatus::New,
+            summary: "The fallback can select the wrong repository.".to_string(),
+            rationale: None,
+            rule_id: None,
+            source: ReviewFindingSource::Llm,
+            anchor: Some(ReviewFindingAnchor {
+                path: "src/review.rs".to_string(),
+                start_line: 42,
+                end_line: Some(44),
+                side: ReviewAnchorSide::New,
+            }),
+            suggested_fix: Some("Validate the remote identity.".to_string()),
+            evidence_ids: Vec::new(),
+            publication: None,
+        };
+
+        let markdown = format_findings_markdown(&[finding]).join("\n");
+
+        assert!(markdown.contains("### High"));
+        assert!(markdown.contains("`src/review.rs:42-44`"));
+        assert!(markdown.contains("Fix: Validate the remote identity."));
     }
 
     #[test]

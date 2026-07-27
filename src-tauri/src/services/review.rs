@@ -268,6 +268,7 @@ pub struct ReviewRun {
 #[derive(Debug, Clone)]
 pub struct HeadlessNativeReviewRequest {
     pub repo_path: PathBuf,
+    pub review_provider: ReviewProvider,
     pub workspace: String,
     pub repo: String,
     pub pr_id: u32,
@@ -1834,6 +1835,7 @@ fn extract_review_findings(
 fn materialize_review_run(
     workspace: &str,
     repo: &str,
+    review_provider_override: Option<ReviewProvider>,
     pr_id: u32,
     source_branch: &str,
     destination_branch: &str,
@@ -1894,7 +1896,8 @@ fn materialize_review_run(
     Ok(ReviewRun {
         id: run_id.clone(),
         schema_version: REVIEW_SCHEMA_VERSION.to_string(),
-        provider: review_provider_for_repo(workspace, repo),
+        provider: review_provider_override
+            .unwrap_or_else(|| review_provider_for_repo(workspace, repo)),
         workspace: workspace.to_string(),
         repo: repo.to_string(),
         pr_id,
@@ -4362,6 +4365,7 @@ fn run_inline_review_pipeline(
     skip_analyzers: bool,
     review_profile: Option<String>,
     repo_path_override: Option<PathBuf>,
+    review_provider_override: Option<ReviewProvider>,
 ) -> Result<(), ReviewPipelineFailure> {
     let provider_label = match ai_provider {
         AiProvider::Claude => "Claude",
@@ -4484,7 +4488,7 @@ fn run_inline_review_pipeline(
             &store,
             &key,
             run_id,
-            "Skipping local evidence analyzers for focused line question.",
+            "Skipping local evidence analyzers for this review.",
         );
     }
 
@@ -4778,6 +4782,7 @@ fn run_inline_review_pipeline(
     let review_run = materialize_review_run(
         &workspace,
         &repo,
+        review_provider_override,
         id,
         &source_branch,
         &destination_branch,
@@ -4927,6 +4932,7 @@ pub fn start_inline_review_native(
             skip_analyzers,
             review_profile,
             None,
+            None,
         ) {
             set_inline_review_failed(&store_clone, &key, run_id, error.to_string());
         }
@@ -4939,6 +4945,7 @@ pub fn run_headless_review_native(
 ) -> Result<ReviewRun, HeadlessNativeReviewError> {
     let HeadlessNativeReviewRequest {
         repo_path,
+        review_provider,
         workspace,
         repo,
         pr_id,
@@ -5007,6 +5014,7 @@ pub fn run_headless_review_native(
         !run_analyzers,
         review_profile,
         Some(repo_path),
+        Some(review_provider),
     ) {
         let message = error.to_string();
         set_inline_review_failed(&store, &key, run_id, message.clone());
@@ -5291,6 +5299,7 @@ pub async fn reply_inline_review(
             codex_model,
             codex_effort,
             false,
+            None,
             None,
             None,
         ) {
@@ -5727,7 +5736,8 @@ mod tests {
         AiReviewDraftCommentResult, AiReviewRunStatus, AiReviewRunStore, AiReviewTurnKind,
         ReviewEvidenceArtifact, ReviewEvidenceKind, ReviewEvidenceSource, ReviewFindingCategory,
         ReviewFindingConfidence, ReviewFindingPublicationEvent, ReviewFindingPublicationEventKind,
-        ReviewFindingSeverity, ReviewPublicationMode, STRUCTURED_REVIEW_SCHEMA_VERSION,
+        ReviewFindingSeverity, ReviewProvider, ReviewPublicationMode,
+        STRUCTURED_REVIEW_SCHEMA_VERSION,
     };
 
     #[test]
@@ -6188,6 +6198,7 @@ Fix: render a useful empty state.
         let run = materialize_review_run(
             "acme",
             "lachesi",
+            Some(ReviewProvider::Github),
             1731,
             "feature/review-schema",
             "main",
@@ -6204,6 +6215,7 @@ Fix: render a useful empty state.
         .expect("review run should materialize");
 
         assert_eq!(run.findings.len(), 1);
+        assert_eq!(run.provider, ReviewProvider::Github);
         assert_eq!(run.review_profile.as_deref(), Some("agentic-balanced"));
         let summary = run.summary_markdown.as_deref().unwrap_or_default();
         assert!(summary.contains("## Review"));
@@ -6231,6 +6243,7 @@ Fix: render a useful empty state.
         let run = materialize_review_run(
             "acme",
             "lachesi",
+            None,
             1731,
             "feature/review-schema",
             "main",
@@ -6266,6 +6279,7 @@ Fix: invalidate the query after the mutation succeeds."#;
         let run = materialize_review_run(
             "acme",
             "lachesi",
+            None,
             1731,
             "feature/review-schema",
             "main",
@@ -6305,6 +6319,7 @@ Fix: invalidate the query after the mutation succeeds."#;
         let mut run = materialize_review_run(
             "acme",
             "lachesi",
+            None,
             1731,
             "feature/review-schema",
             "main",
