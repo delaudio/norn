@@ -7,6 +7,8 @@ import type {
   AiReviewStore,
   BranchStatus,
   BranchSyncResult,
+  FindingPublicationRequest,
+  PublishedCommentIdentity,
   PrComment,
   PrFilePreview,
   PrListFilter,
@@ -927,6 +929,23 @@ export const mockHandlers: Record<string, Handler> = {
   },
   list_comments: () => mockComments,
 
+  publish_review_finding: (args) => {
+    const request = args?.request as FindingPublicationRequest;
+    mockCommentId += 1;
+    return {
+      tenantId: request.tenantId,
+      provider: request.provider,
+      workspace: request.workspace,
+      repository: request.repository,
+      pullRequestId: request.pullRequestId,
+      commentId: String(mockCommentId),
+      findingMarker: "<!-- lachesi:finding:mock -->",
+      path: request.anchor.path,
+      startLine: request.anchor.startLine,
+      endLine: request.anchor.endLine,
+      side: request.anchor.side,
+    } satisfies PublishedCommentIdentity;
+  },
   create_inline_comment: (args) => {
     const req = (args?.req ?? {}) as NewInlineCommentArgs;
     mockCommentId += 1;

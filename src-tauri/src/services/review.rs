@@ -182,8 +182,8 @@ pub struct ReviewFindingPublication {
     pub mode: ReviewPublicationMode,
     #[serde(default)]
     pub draft_ids: Vec<String>,
-    #[serde(default)]
-    pub remote_comment_ids: Vec<u64>,
+    #[serde(default, deserialize_with = "deserialize_remote_comment_ids")]
+    pub remote_comment_ids: Vec<String>,
     pub published_at: Option<String>,
 }
 
@@ -235,8 +235,42 @@ pub struct ReviewFindingPublicationEvent {
     pub finding_fingerprint: String,
     pub mode: ReviewPublicationMode,
     pub draft_id: Option<String>,
-    pub remote_comment_id: Option<u64>,
+    #[serde(default, deserialize_with = "deserialize_optional_remote_comment_id")]
+    pub remote_comment_id: Option<String>,
     pub published_at: Option<String>,
+}
+
+fn remote_comment_id_from_value<E: serde::de::Error>(
+    value: serde_json::Value,
+) -> Result<String, E> {
+    match value {
+        serde_json::Value::String(value) if !value.trim().is_empty() => Ok(value),
+        serde_json::Value::Number(value) if value.as_u64().is_some() => Ok(value.to_string()),
+        _ => Err(E::custom(
+            "remote comment ids must be non-empty strings or unsigned integers",
+        )),
+    }
+}
+
+fn deserialize_remote_comment_ids<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Vec::<serde_json::Value>::deserialize(deserializer)?
+        .into_iter()
+        .map(remote_comment_id_from_value)
+        .collect()
+}
+
+fn deserialize_optional_remote_comment_id<'de, D>(
+    deserializer: D,
+) -> Result<Option<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Option::<serde_json::Value>::deserialize(deserializer)?
+        .map(remote_comment_id_from_value)
+        .transpose()
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
@@ -1968,13 +2002,15 @@ fn apply_review_finding_publication_event(
             if let Some(draft_id) = event.draft_id.as_deref() {
                 publication.draft_ids.retain(|current| current != draft_id);
             }
-            if let Some(remote_comment_id) = event.remote_comment_id {
+            if let Some(remote_comment_id) = event.remote_comment_id.as_deref() {
                 if !publication
                     .remote_comment_ids
                     .iter()
-                    .any(|current| *current == remote_comment_id)
+                    .any(|current| current == remote_comment_id)
                 {
-                    publication.remote_comment_ids.push(remote_comment_id);
+                    publication
+                        .remote_comment_ids
+                        .push(remote_comment_id.to_string());
                 }
             }
             publication.published_at = Some(event.published_at.clone().unwrap_or_else(now_ms));
@@ -5861,10 +5897,11 @@ mod tests {
         user_installed_cli_command, validate_isolated_provider_cli, AiReviewDraftCommentResult,
         AiReviewRunStatus, AiReviewRunStore, AiReviewTurnKind, ProviderExecutionContext,
         ReviewEvidenceArtifact, ReviewEvidenceKind, ReviewEvidenceSource, ReviewFindingCategory,
-        ReviewFindingConfidence, ReviewFindingPublicationEvent, ReviewFindingPublicationEventKind,
-        ReviewFindingSeverity, ReviewProvider, ReviewPublicationMode,
-        STRUCTURED_REVIEW_SCHEMA_VERSION,
+        ReviewFindingConfidence, ReviewFindingPublication, ReviewFindingPublicationEvent,
+        ReviewFindingPublicationEventKind, ReviewFindingSeverity, ReviewProvider,
+        ReviewPublicationMode, STRUCTURED_REVIEW_SCHEMA_VERSION,
     };
+    use serde_json::json;
 
     #[test]
     fn parses_structured_output_from_claude_json_envelope() {
@@ -6590,7 +6627,7 @@ Fix: invalidate the query after the mutation succeeds."#;
             finding_fingerprint,
             mode: ReviewPublicationMode::Inline,
             draft_id: Some("draft-1".to_string()),
-            remote_comment_id: Some(42),
+            remote_comment_id: Some("42".to_string()),
             published_at: Some("1750076500000".to_string()),
         };
         apply_review_finding_publication_event(finding, &publish);
@@ -6607,7 +6644,7 @@ Fix: invalidate the query after the mutation succeeds."#;
                 .publication
                 .as_ref()
                 .map(|publication| publication.remote_comment_ids.as_slice()),
-            Some(&[42][..])
+            Some(&["42".to_string()][..])
         );
         assert_eq!(
             finding
@@ -6616,6 +6653,33 @@ Fix: invalidate the query after the mutation succeeds."#;
                 .and_then(|publication| publication.published_at.as_deref()),
             Some("1750076500000")
         );
+    }
+
+    #[test]
+    fn publication_comment_ids_accept_legacy_numbers_and_preserve_strings() {
+        let publication: ReviewFindingPublication = serde_json::from_value(json!({
+            "mode": "inline",
+            "draftIds": [],
+            "remoteCommentIds": [42, "9223372036854775000"],
+            "publishedAt": "1750076500000"
+        }))
+        .expect("legacy and current publication ids");
+        assert_eq!(
+            publication.remote_comment_ids,
+            vec!["42".to_string(), "9223372036854775000".to_string()]
+        );
+
+        let event: ReviewFindingPublicationEvent = serde_json::from_value(json!({
+            "kind": "publishDraft",
+            "reviewRunId": "run-1",
+            "findingFingerprint": "finding-1",
+            "mode": "inline",
+            "draftId": "draft-1",
+            "remoteCommentId": 42,
+            "publishedAt": "1750076500000"
+        }))
+        .expect("legacy numeric event id");
+        assert_eq!(event.remote_comment_id.as_deref(), Some("42"));
     }
 }
 fn review_provider_for_repo(workspace: &str, repo: &str) -> ReviewProvider {

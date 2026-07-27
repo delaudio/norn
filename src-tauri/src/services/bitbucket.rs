@@ -8,9 +8,10 @@ use crate::config::{AiProvider, ReviewTerminal};
 use crate::credentials::{self, Credentials};
 use crate::finding_publication::{
     dry_run_publication_identity, FindingAnchorSide, FindingPublicationError,
-    FindingPublicationRequest, FindingPublisher, ProviderCommentIdentity, ProviderInlineCommentApi,
-    ProviderInlineCommentPayload, ProviderPublicationApiError, ProviderPublicationTarget,
-    PublishedCommentIdentity, SqliteFindingPublicationStore,
+    FindingPublicationErrorCode, FindingPublicationRequest, FindingPublisher,
+    ProviderCommentIdentity, ProviderInlineCommentApi, ProviderInlineCommentPayload,
+    ProviderPublicationApiError, ProviderPublicationTarget, PublishedCommentIdentity,
+    SqliteFindingPublicationStore,
 };
 use crate::repo_config::{self, RepoReviewConfigLoadResult};
 use crate::review_event::PullRequestReviewEventProvider;
@@ -136,7 +137,11 @@ fn repo_base(workspace: &str, repo: &str) -> Result<String, String> {
     if workspace.trim().is_empty() || repo.trim().is_empty() {
         return Err("Bitbucket workspace/repo is required.".to_string());
     }
-    Ok(format!("{BASE}/repositories/{workspace}/{repo}"))
+    Ok(format!(
+        "{BASE}/repositories/{}/{}",
+        encode_path_segment(workspace),
+        encode_path_segment(repo)
+    ))
 }
 
 fn github_repo_base(owner: &str, repo: &str) -> Result<String, String> {
@@ -225,8 +230,49 @@ fn check_github(resp: reqwest::blocking::Response) -> Result<reqwest::blocking::
     if status.is_success() {
         return Ok(resp);
     }
+    let rate_limited_by_header = github_rate_limit_wait(status, resp.headers()).is_some();
     let body = resp.text().unwrap_or_default();
-    Err(format!("GitHub API error {status}: {body}"))
+    if rate_limited_by_header || body.to_ascii_lowercase().contains("rate limit") {
+        Err(format!("GitHub API rate limit error {status}: {body}"))
+    } else {
+        Err(format!("GitHub API error {status}: {body}"))
+    }
+}
+
+fn github_rate_limit_wait(
+    status: reqwest::StatusCode,
+    headers: &reqwest::header::HeaderMap,
+) -> Option<u64> {
+    let retry_after = headers
+        .get(reqwest::header::RETRY_AFTER)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.parse::<u64>().ok());
+    let remaining_is_zero = headers
+        .get("x-ratelimit-remaining")
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|value| value == "0");
+    if status.as_u16() != 429
+        && !(status == reqwest::StatusCode::FORBIDDEN
+            && (retry_after.is_some() || remaining_is_zero))
+    {
+        return None;
+    }
+    if let Some(wait) = retry_after {
+        return Some(wait);
+    }
+    let reset_at = headers
+        .get("x-ratelimit-reset")
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.parse::<u64>().ok());
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_secs())
+        .unwrap_or(0);
+    Some(
+        reset_at
+            .map(|reset_at| reset_at.saturating_sub(now).max(1))
+            .unwrap_or(1),
+    )
 }
 
 /// Send a request, retrying on 429 (honoring `Retry-After`) and transient 5xx
@@ -265,14 +311,28 @@ fn get_json<T: DeserializeOwned>(req: reqwest::blocking::RequestBuilder) -> Resu
 fn github_get_json<T: DeserializeOwned>(
     req: reqwest::blocking::RequestBuilder,
 ) -> Result<T, String> {
-    let resp = check_github(req.send().map_err(|e| e.to_string())?)?;
+    let resp = github_send_checked(req)?;
     resp.json::<T>().map_err(|e| e.to_string())
 }
 
 fn github_send_checked(
     req: reqwest::blocking::RequestBuilder,
 ) -> Result<reqwest::blocking::Response, String> {
-    check_github(req.send().map_err(|e| e.to_string())?)
+    let mut attempt = 0;
+    loop {
+        let this = req
+            .try_clone()
+            .ok_or_else(|| "request is not retryable".to_string())?;
+        let response = this.send().map_err(|error| error.to_string())?;
+        if let Some(wait) = github_rate_limit_wait(response.status(), response.headers()) {
+            if attempt < 3 {
+                std::thread::sleep(std::time::Duration::from_secs(wait.min(10)));
+                attempt += 1;
+                continue;
+            }
+        }
+        return check_github(response);
+    }
 }
 
 #[derive(Deserialize)]
@@ -2092,6 +2152,19 @@ pub fn publish_review_finding_native(
     .publish(request)
 }
 
+#[tauri::command]
+pub async fn publish_review_finding(
+    request: FindingPublicationRequest,
+) -> Result<PublishedCommentIdentity, FindingPublicationError> {
+    tauri::async_runtime::spawn_blocking(move || publish_review_finding_native(&request))
+        .await
+        .map_err(|_| FindingPublicationError {
+            code: FindingPublicationErrorCode::ProviderUnavailable,
+            retryable: true,
+            message: "The finding publication worker stopped unexpectedly.".to_string(),
+        })?
+}
+
 fn find_published_finding_comment(
     target: &ProviderPublicationTarget,
     marker: &str,
@@ -2276,7 +2349,9 @@ fn map_publication_auth_error(error: String) -> ProviderPublicationApiError {
 }
 
 fn map_publication_read_error(error: String) -> ProviderPublicationApiError {
-    if publication_permission_error(&error) {
+    if publication_rate_limit_error(&error) {
+        ProviderPublicationApiError::unavailable(error)
+    } else if publication_permission_error(&error) {
         ProviderPublicationApiError::permission_denied(error)
     } else if error.contains("404 Not Found") {
         ProviderPublicationApiError::invalid_anchor(error)
@@ -2286,7 +2361,9 @@ fn map_publication_read_error(error: String) -> ProviderPublicationApiError {
 }
 
 fn map_publication_write_error(error: String) -> ProviderPublicationApiError {
-    if publication_permission_error(&error) {
+    if publication_rate_limit_error(&error) {
+        ProviderPublicationApiError::unavailable(error)
+    } else if publication_permission_error(&error) {
         ProviderPublicationApiError::permission_denied(error)
     } else if error.contains("400 Bad Request")
         || error.contains("404 Not Found")
@@ -2301,6 +2378,10 @@ fn map_publication_write_error(error: String) -> ProviderPublicationApiError {
 
 fn publication_permission_error(error: &str) -> bool {
     error.contains("401 Unauthorized") || error.contains("403 Forbidden")
+}
+
+fn publication_rate_limit_error(error: &str) -> bool {
+    error.contains("rate limit") || error.contains("429 Too Many Requests")
 }
 
 #[tauri::command]
@@ -2632,6 +2713,36 @@ mod tests {
         assert_eq!(
             publication_comment_id(json!("opaque-comment-id")).expect("opaque id"),
             "opaque-comment-id"
+        );
+    }
+
+    #[test]
+    fn provider_repository_segments_are_percent_encoded() {
+        assert_eq!(
+            repo_base("team/name", "payments?#").expect("encoded Bitbucket repository path"),
+            "https://api.bitbucket.org/2.0/repositories/team%2Fname/payments%3F%23"
+        );
+    }
+
+    #[test]
+    fn github_rate_limits_are_retryable_publication_failures() {
+        let mut headers = reqwest::header::HeaderMap::new();
+        headers.insert(reqwest::header::RETRY_AFTER, "7".parse().unwrap());
+        assert_eq!(
+            github_rate_limit_wait(reqwest::StatusCode::FORBIDDEN, &headers),
+            Some(7)
+        );
+        assert_eq!(
+            github_rate_limit_wait(reqwest::StatusCode::UNAUTHORIZED, &headers),
+            None
+        );
+
+        let error = map_publication_write_error(
+            "GitHub API rate limit error 403 Forbidden: slow down".to_string(),
+        );
+        assert_eq!(
+            error.kind,
+            crate::finding_publication::ProviderPublicationApiErrorKind::Unavailable
         );
     }
 

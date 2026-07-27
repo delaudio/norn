@@ -339,6 +339,15 @@ where
             .current_head_sha(target)
             .map_err(publication_api_error)?;
         if !current_head.eq_ignore_ascii_case(&request.head_sha) {
+            if let Some(stale) = self
+                .api
+                .find_inline_comment(target, marker, &payload)
+                .map_err(publication_api_error)?
+            {
+                self.api
+                    .delete_comment(target, &stale)
+                    .map_err(publication_api_error)?;
+            }
             return Err(FindingPublicationError {
                 code: FindingPublicationErrorCode::OutdatedAnchor,
                 retryable: false,
@@ -619,6 +628,7 @@ mod tests {
         comments: HashMap<String, ProviderCommentIdentity>,
         payloads: Vec<(PullRequestReviewEventProvider, ProviderInlineCommentPayload)>,
         fail_next_write: bool,
+        fail_next_delete: bool,
         advance_head_on_write: bool,
         deleted_comment_ids: Vec<String>,
     }
@@ -630,6 +640,7 @@ mod tests {
                 comments: HashMap::new(),
                 payloads: Vec::new(),
                 fail_next_write: false,
+                fail_next_delete: false,
                 advance_head_on_write: false,
                 deleted_comment_ids: Vec::new(),
             }
@@ -688,6 +699,12 @@ mod tests {
             identity: &ProviderCommentIdentity,
         ) -> Result<(), ProviderPublicationApiError> {
             let mut state = self.state.lock().unwrap();
+            if state.fail_next_delete {
+                state.fail_next_delete = false;
+                return Err(ProviderPublicationApiError::unavailable(
+                    "provider delete temporarily unavailable",
+                ));
+            }
             state.comments.retain(|_, current| current != identity);
             state.deleted_comment_ids.push(identity.comment_id.clone());
             Ok(())
@@ -912,6 +929,33 @@ mod tests {
             .expect_err("post-write head change");
 
         assert_eq!(error.code, FindingPublicationErrorCode::OutdatedAnchor);
+        let state = publisher.api.state.lock().unwrap();
+        assert_eq!(state.deleted_comment_ids, vec!["comment-1"]);
+        assert!(state.comments.is_empty());
+    }
+
+    #[test]
+    fn failed_stale_comment_cleanup_is_retried_before_outdated_rejection() {
+        let publisher =
+            FindingPublisher::new(MockProviderApi::default(), MockPublicationStore::default());
+        {
+            let mut state = publisher.api.state.lock().unwrap();
+            state.advance_head_on_write = true;
+            state.fail_next_delete = true;
+        }
+        let request = request(PullRequestReviewEventProvider::Github);
+
+        let first = publisher
+            .publish(&request)
+            .expect_err("first cleanup attempt fails");
+        assert_eq!(first.code, FindingPublicationErrorCode::ProviderUnavailable);
+        assert!(first.retryable);
+        assert_eq!(publisher.api.state.lock().unwrap().comments.len(), 1);
+
+        let retry = publisher
+            .publish(&request)
+            .expect_err("the stale finding remains outdated");
+        assert_eq!(retry.code, FindingPublicationErrorCode::OutdatedAnchor);
         let state = publisher.api.state.lock().unwrap();
         assert_eq!(state.deleted_comment_ids, vec!["comment-1"]);
         assert!(state.comments.is_empty());

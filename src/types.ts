@@ -304,10 +304,45 @@ export interface ReviewFindingAnchor {
   side: ReviewAnchorSide;
 }
 
+export interface FindingPublicationRequest {
+  schemaVersion: "v1";
+  tenantId: string;
+  provider: ReviewProvider;
+  workspace: string;
+  repository: string;
+  pullRequestId: number;
+  headSha: string;
+  findingFingerprint: string;
+  anchor: {
+    path: string;
+    startLine: number;
+    endLine: number;
+    side: ReviewAnchorSide;
+  };
+  title: string;
+  body: string;
+  severity: ReviewFindingSeverity;
+  suggestedFix?: string;
+}
+
+export interface PublishedCommentIdentity {
+  tenantId: string;
+  provider: ReviewProvider;
+  workspace: string;
+  repository: string;
+  pullRequestId: number;
+  commentId: string;
+  findingMarker: string;
+  path: string;
+  startLine: number;
+  endLine: number;
+  side: ReviewAnchorSide;
+}
+
 export interface ReviewFindingPublication {
   mode: ReviewPublicationMode;
   draftIds: string[];
-  remoteCommentIds: number[];
+  remoteCommentIds: string[];
   publishedAt: string | null;
 }
 
@@ -319,7 +354,7 @@ export interface ReviewFindingPublicationEvent {
   findingFingerprint: string;
   mode: ReviewPublicationMode;
   draftId: string | null;
-  remoteCommentId: number | null;
+  remoteCommentId: string | null;
   publishedAt: string | null;
 }
 
@@ -679,6 +714,7 @@ export interface DraftComment {
   source?: "manual" | "aiFinding";
   findingRef?: ReviewFindingRef | null;
   publicationMode?: ReviewPublicationMode | null;
+  reviewHeadSha?: string | null;
 }
 
 /** Helper: a stable string key for a repo. */

@@ -1,8 +1,11 @@
 import type {
   AiReviewStore,
   DraftComment,
+  FindingPublicationRequest,
+  PullRequestDetail,
   ReviewFinding,
   ReviewFindingAnchor,
+  ReviewProvider,
   ReviewPublicationMode,
   ReviewRun,
 } from "@/types";
@@ -33,6 +36,70 @@ export interface FilterStageableAiReviewDraftCommentsResult {
 interface FindingRunMatch {
   runId: string;
   finding: ReviewFinding;
+}
+
+export interface BuildFindingPublicationRequestInput {
+  provider: ReviewProvider;
+  workspace: string;
+  repo: string;
+  pr: PullRequestDetail;
+  reviewRun: ReviewRun;
+  draft: DraftComment;
+}
+
+export function buildFindingPublicationRequest({
+  provider,
+  workspace,
+  repo,
+  pr,
+  reviewRun,
+  draft,
+}: BuildFindingPublicationRequestInput): FindingPublicationRequest {
+  const findingRef = draft.findingRef;
+  if (!findingRef || findingRef.reviewRunId !== reviewRun.id) {
+    throw new Error("The draft is not linked to this review run.");
+  }
+  const finding = reviewRun.findings.find(
+    (candidate) =>
+      candidate.id === findingRef.findingId &&
+      candidate.fingerprint === findingRef.findingFingerprint,
+  );
+  if (!finding) {
+    throw new Error("The structured finding linked to this draft is no longer available.");
+  }
+  const headSha = draft.reviewHeadSha?.trim();
+  if (!headSha) {
+    throw new Error("The reviewed head commit is unavailable; refresh and restage the finding.");
+  }
+  const line = draft.to ?? draft.from;
+  const side = draft.to != null ? "new" : draft.from != null ? "old" : null;
+  if (!draft.path.trim() || line == null || side == null) {
+    throw new Error("The structured finding draft no longer has a valid inline anchor.");
+  }
+  if (!draft.raw.trim()) {
+    throw new Error("The structured finding draft cannot be empty.");
+  }
+
+  return {
+    schemaVersion: "v1",
+    tenantId: "local",
+    provider,
+    workspace,
+    repository: repo,
+    pullRequestId: pr.id,
+    headSha,
+    findingFingerprint: finding.fingerprint,
+    anchor: {
+      path: draft.path,
+      startLine: line,
+      endLine: line,
+      side,
+    },
+    title: finding.title,
+    body: draft.raw,
+    severity: finding.severity,
+    ...(finding.suggestedFix ? { suggestedFix: finding.suggestedFix } : {}),
+  };
 }
 
 function anchorKey(anchor: ReviewFindingAnchor | null): string | null {

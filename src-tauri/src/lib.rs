@@ -133,6 +133,7 @@ pub fn run() {
             bitbucket::get_pr_diff,
             bitbucket::get_pr_file_preview,
             bitbucket::list_comments,
+            bitbucket::publish_review_finding,
             bitbucket::create_inline_comment,
             bitbucket::create_general_comment,
             bitbucket::delete_comment,
@@ -255,5 +256,48 @@ mod tauri_ipc_smoke {
         assert_eq!(response["errors"].as_array().map(Vec::len), Some(0));
 
         fs::remove_dir_all(repo_dir).expect("test repo directory should be removed");
+    }
+
+    #[test]
+    fn publish_review_finding_runs_through_tauri_ipc() {
+        let app = mock_builder()
+            .invoke_handler(tauri::generate_handler![bitbucket::publish_review_finding])
+            .build(mock_context(noop_assets()))
+            .expect("mock Tauri app should build");
+        let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
+            .build()
+            .expect("mock webview should build");
+
+        let error = tauri::test::get_ipc_response(
+            &webview,
+            ipc_request(
+                "publish_review_finding",
+                json!({
+                    "request": {
+                        "schemaVersion": "v1",
+                        "tenantId": "",
+                        "provider": "github",
+                        "workspace": "acme",
+                        "repository": "payments",
+                        "pullRequestId": 42,
+                        "headSha": "2222222222222222222222222222222222222222",
+                        "findingFingerprint": "finding-1",
+                        "anchor": {
+                            "path": "src/lib.rs",
+                            "startLine": 12,
+                            "endLine": 12,
+                            "side": "new"
+                        },
+                        "title": "Validate the value",
+                        "body": "The value may be absent.",
+                        "severity": "high"
+                    }
+                }),
+            ),
+        )
+        .expect_err("invalid publication request should use the command error channel");
+
+        assert_eq!(error["code"], "invalid_request");
+        assert_eq!(error["retryable"], false);
     }
 }

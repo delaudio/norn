@@ -27,7 +27,15 @@ function loadDrafts(
 
 export type NewDraft = Pick<
   DraftComment,
-  "path" | "to" | "from" | "raw" | "parentId" | "source" | "findingRef" | "publicationMode"
+  | "path"
+  | "to"
+  | "from"
+  | "raw"
+  | "parentId"
+  | "source"
+  | "findingRef"
+  | "publicationMode"
+  | "reviewHeadSha"
 >;
 export type DraftPatch = Partial<Pick<DraftComment, "raw">>;
 
@@ -36,9 +44,14 @@ export interface PublishResult {
   failed: { draft: DraftComment; error: string }[];
 }
 
+export interface PublishedDraftComment {
+  id: string;
+  createdOn: string;
+}
+
 export interface PublishDraftResult {
   draft: DraftComment | null;
-  comment: PrComment | null;
+  comment: PublishedDraftComment | null;
   error: string | null;
 }
 
@@ -56,7 +69,11 @@ interface UseDraftCommentsResult {
 }
 
 export interface DraftCommentLifecycleOptions {
-  onDraftPublished?: (draft: DraftComment, comment: PrComment) => void | Promise<void>;
+  publishFindingDraft?: (draft: DraftComment) => Promise<PublishedDraftComment>;
+  onDraftPublished?: (
+    draft: DraftComment,
+    comment: PublishedDraftComment,
+  ) => void | Promise<void>;
   onDraftRemoved?: (draft: DraftComment) => void | Promise<void>;
   onDraftsDiscarded?: (drafts: DraftComment[]) => void | Promise<void>;
 }
@@ -70,6 +87,7 @@ function materializeDraft(prId: number, draft: NewDraft, index: number): DraftCo
     source: draft.source ?? "manual",
     findingRef: draft.findingRef ?? null,
     publicationMode: draft.publicationMode ?? null,
+    reviewHeadSha: draft.reviewHeadSha ?? null,
   };
 }
 
@@ -79,9 +97,17 @@ async function publishDraftToServer(
   repo: string,
   prId: number,
   draft: DraftComment,
-): Promise<PrComment> {
+  publishFindingDraft?: (draft: DraftComment) => Promise<PublishedDraftComment>,
+): Promise<PublishedDraftComment> {
+  if (draft.findingRef) {
+    if (!publishFindingDraft) {
+      throw new Error("Structured finding publication is unavailable; refresh the review.");
+    }
+    return publishFindingDraft(draft);
+  }
+
   if (draft.parentId != null) {
-    return tauriCall<PrComment>("create_general_comment", {
+    const comment = await tauriCall<PrComment>("create_general_comment", {
       provider,
       workspace,
       repo,
@@ -89,9 +115,10 @@ async function publishDraftToServer(
       raw: draft.raw,
       parentId: draft.parentId,
     });
+    return { id: String(comment.id), createdOn: comment.createdOn };
   }
 
-  return tauriCall<PrComment>("create_inline_comment", {
+  const comment = await tauriCall<PrComment>("create_inline_comment", {
     provider,
     workspace,
     repo,
@@ -104,6 +131,7 @@ async function publishDraftToServer(
       parentId: null,
     },
   });
+  return { id: String(comment.id), createdOn: comment.createdOn };
 }
 
 /**
@@ -120,7 +148,7 @@ export function useDraftComments(
   const [drafts, setDrafts] = useState<DraftComment[]>([]);
   const [publishing, setPublishing] = useState(false);
   const [publishingDraftId, setPublishingDraftId] = useState<string | null>(null);
-  const { onDraftPublished, onDraftRemoved, onDraftsDiscarded } = options;
+  const { publishFindingDraft, onDraftPublished, onDraftRemoved, onDraftsDiscarded } = options;
 
   const active = provider != null && workspace != null && repo != null && prId != null;
 
@@ -198,11 +226,18 @@ export function useDraftComments(
       setPublishing(true);
       setPublishingDraftId(localId);
       try {
-        const comment = await publishDraftToServer(provider, workspace, repo, prId, draft);
-        setDrafts((prev) => prev.filter((candidate) => candidate.localId !== localId));
+        const comment = await publishDraftToServer(
+          provider,
+          workspace,
+          repo,
+          prId,
+          draft,
+          publishFindingDraft,
+        );
         if (onDraftPublished) {
-          void Promise.resolve(onDraftPublished(draft, comment));
+          await onDraftPublished(draft, comment);
         }
+        setDrafts((prev) => prev.filter((candidate) => candidate.localId !== localId));
         return { draft, comment, error: null };
       } catch (e) {
         return {
@@ -215,7 +250,7 @@ export function useDraftComments(
         setPublishing(false);
       }
     },
-    [active, provider, workspace, repo, prId, drafts, onDraftPublished],
+    [active, provider, workspace, repo, prId, drafts, publishFindingDraft, onDraftPublished],
   );
 
   const publishAll = useCallback(async (): Promise<PublishResult> => {
@@ -226,12 +261,19 @@ export function useDraftComments(
     for (const draft of [...drafts]) {
       setPublishingDraftId(draft.localId);
       try {
-        const comment = await publishDraftToServer(provider, workspace, repo, prId, draft);
+        const comment = await publishDraftToServer(
+          provider,
+          workspace,
+          repo,
+          prId,
+          draft,
+          publishFindingDraft,
+        );
+        if (onDraftPublished) {
+          await onDraftPublished(draft, comment);
+        }
         published += 1;
         setDrafts((prev) => prev.filter((d) => d.localId !== draft.localId));
-        if (onDraftPublished) {
-          void Promise.resolve(onDraftPublished(draft, comment));
-        }
       } catch (e) {
         failed.push({ draft, error: e instanceof Error ? e.message : String(e) });
       }
@@ -239,7 +281,7 @@ export function useDraftComments(
     setPublishingDraftId(null);
     setPublishing(false);
     return { published, failed };
-  }, [active, provider, workspace, repo, prId, drafts, onDraftPublished]);
+  }, [active, provider, workspace, repo, prId, drafts, publishFindingDraft, onDraftPublished]);
 
   return {
     drafts,

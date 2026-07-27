@@ -19,7 +19,7 @@ import { useClosedPrAnalytics } from "@/hooks/useClosedPrAnalytics";
 import { useConfig } from "@/hooks/useConfig";
 import { useCredentials } from "@/hooks/useCredentials";
 import { authorKey, useCurrentUser } from "@/hooks/useCurrentUser";
-import { useDraftComments } from "@/hooks/useDraftComments";
+import { type PublishedDraftComment, useDraftComments } from "@/hooks/useDraftComments";
 import { useMenuBarPrSync } from "@/hooks/useMenuBarPrSync";
 import { type PrGroup, usePullRequests } from "@/hooks/usePullRequests";
 import { useReviewReferences } from "@/hooks/useReviewReferences";
@@ -36,6 +36,7 @@ import { buildAiReviewPayloadForPr } from "@/lib/buildAiReviewPayloadForPr";
 import { buildReviewPayload } from "@/lib/buildReviewPayload";
 import { shouldIgnoreShortcut } from "@/lib/keyboard";
 import {
+  buildFindingPublicationRequest,
   filterStageableAiReviewDraftComments,
   summarizeActiveReviewFindings,
 } from "@/lib/reviewFindingPublication";
@@ -50,7 +51,7 @@ import type {
   AiReviewRunState,
   AppSelection,
   DraftComment,
-  PrComment,
+  PublishedCommentIdentity,
   PrListFilter,
   PullRequestSummary,
   RepoRef,
@@ -396,7 +397,40 @@ export default function App() {
     await removeFindingDrafts([draft]);
   };
 
-  const publishFindingDraft = async (draft: DraftComment, comment: PrComment): Promise<void> => {
+  const publishStructuredFindingDraft = async (
+    draft: DraftComment,
+  ): Promise<PublishedDraftComment> => {
+    if (!activeSel || !aiReviewContext || !draft.findingRef) {
+      throw new Error("The structured finding publication context is unavailable.");
+    }
+    const reviewRun =
+      aiReview.store?.reviewRuns?.find(
+        (candidate) => candidate.id === draft.findingRef?.reviewRunId,
+      ) ?? null;
+    if (!reviewRun) {
+      throw new Error("The review run linked to this draft is no longer available.");
+    }
+    const request = buildFindingPublicationRequest({
+      provider: activeRepo?.provider ?? reviewProvider,
+      workspace: activeSel.workspace,
+      repo: activeSel.repo,
+      pr: aiReviewContext.pr,
+      reviewRun,
+      draft,
+    });
+    const published = await tauriCall<PublishedCommentIdentity>("publish_review_finding", {
+      request,
+    });
+    return {
+      id: published.commentId,
+      createdOn: new Date().toISOString(),
+    };
+  };
+
+  const recordPublishedFindingDraft = async (
+    draft: DraftComment,
+    comment: PublishedDraftComment,
+  ): Promise<void> => {
     if (!draft.findingRef) return;
     await recordFindingPublicationEvents([
       {
@@ -417,7 +451,8 @@ export default function App() {
     activeSel?.repo ?? null,
     activeSel?.prId ?? null,
     {
-      onDraftPublished: publishFindingDraft,
+      publishFindingDraft: publishStructuredFindingDraft,
+      onDraftPublished: recordPublishedFindingDraft,
       onDraftRemoved: removeFindingDraft,
       onDraftsDiscarded: async (drafts) => {
         await removeFindingDrafts(drafts);
@@ -961,6 +996,7 @@ export default function App() {
         source: comment.findingRef ? "aiFinding" : "manual",
         findingRef: comment.findingRef,
         publicationMode: comment.publicationMode,
+        reviewHeadSha: comment.findingRef ? (aiReviewContext.pr.sourceCommitHash ?? null) : null,
       })),
     );
     await stageFindingDrafts(stagedDrafts);
