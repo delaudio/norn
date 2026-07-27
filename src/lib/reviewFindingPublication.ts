@@ -67,9 +67,22 @@ export function buildFindingPublicationRequest({
   if (!finding) {
     throw new Error("The structured finding linked to this draft is no longer available.");
   }
-  const headSha = draft.reviewHeadSha?.trim();
+  const headSha = reviewRun.reviewedHeadSha?.trim();
   if (!headSha) {
     throw new Error("The reviewed head commit is unavailable; refresh and restage the finding.");
+  }
+  const draftHeadSha = draft.reviewHeadSha?.trim();
+  if (!draftHeadSha || draftHeadSha.toLowerCase() !== headSha.toLowerCase()) {
+    throw new Error("The staged draft does not belong to the reviewed head commit.");
+  }
+  const sameTarget =
+    provider === reviewRun.provider &&
+    workspace.trim().toLowerCase() === reviewRun.workspace.trim().toLowerCase() &&
+    repo.trim().toLowerCase() === reviewRun.repo.trim().toLowerCase() &&
+    pr.id === reviewRun.prId &&
+    draft.prId === reviewRun.prId;
+  if (!sameTarget) {
+    throw new Error("The active pull request does not match the structured review run.");
   }
   const line = draft.to ?? draft.from;
   const side = draft.to != null ? "new" : draft.from != null ? "old" : null;
@@ -95,10 +108,10 @@ export function buildFindingPublicationRequest({
   return {
     schemaVersion: "v1",
     tenantId: "local",
-    provider,
-    workspace,
-    repository: repo,
-    pullRequestId: pr.id,
+    provider: reviewRun.provider,
+    workspace: reviewRun.workspace,
+    repository: reviewRun.repo,
+    pullRequestId: reviewRun.prId,
     headSha,
     findingFingerprint: finding.fingerprint,
     anchor: {

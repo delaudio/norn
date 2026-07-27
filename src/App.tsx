@@ -42,7 +42,7 @@ import {
   summarizeActiveReviewFindings,
 } from "@/lib/reviewFindingPublication";
 import { resolveReviewPrompt } from "@/lib/reviewPrompt";
-import { publishReviewFinding } from "@/lib/reviewService";
+import { publishReviewFinding, recordReviewFindingPublicationEvents } from "@/lib/reviewService";
 import { tauriCall } from "@/lib/tauri";
 import type {
   AiLineQuestionContext,
@@ -350,10 +350,10 @@ export default function App() {
     events: ReviewFindingPublicationEvent[],
   ): Promise<void> => {
     if (!activeSel || events.length === 0) return;
-    await tauriCall("record_ai_review_finding_publication", {
+    await recordReviewFindingPublicationEvents({
       workspace: activeSel.workspace,
       repo: activeSel.repo,
-      id: activeSel.prId,
+      prId: activeSel.prId,
       events,
     });
     await aiReview.refreshStore();

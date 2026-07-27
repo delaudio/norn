@@ -1,7 +1,16 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { tauriCall } from "@/lib/tauri";
-import type { FindingPublicationRequest, PublishedCommentIdentity } from "@/types";
-import { publishReviewFinding } from "./reviewService";
+import type {
+  AiReviewStore,
+  FindingPublicationRequest,
+  PublishedCommentIdentity,
+  ReviewFindingPublicationEvent,
+} from "@/types";
+import {
+  publishReviewFinding,
+  ReviewFindingPublicationError,
+  recordReviewFindingPublicationEvents,
+} from "./reviewService";
 
 vi.mock("@/lib/tauri", () => ({
   tauriCall: vi.fn(),
@@ -27,6 +36,69 @@ const request: FindingPublicationRequest = {
   severity: "high",
 };
 
+const publicationEvent: ReviewFindingPublicationEvent = {
+  kind: "publishDraft",
+  reviewRunId: "run-1",
+  findingFingerprint: "finding-1",
+  mode: "inline",
+  draftId: "draft-1",
+  remoteCommentId: "comment-1",
+  publishedAt: "2026-07-27T20:00:00.000Z",
+};
+
+function trackedStore(): AiReviewStore {
+  return {
+    activeThreadId: null,
+    threads: [],
+    reviewRuns: [
+      {
+        id: "run-1",
+        schemaVersion: "v0.1",
+        provider: "bitbucket",
+        workspace: "acme",
+        repo: "payments",
+        prId: 42,
+        sourceBranch: "feature/review",
+        destinationBranch: "main",
+        reviewedHeadSha: request.headSha,
+        status: "succeeded",
+        turnKind: "initial",
+        reviewProfile: null,
+        createdAt: "0",
+        finishedAt: "1",
+        diffFingerprint: "diff",
+        threadId: null,
+        summaryMarkdown: null,
+        evidence: [],
+        findings: [
+          {
+            id: "finding-id-1",
+            fingerprint: publicationEvent.findingFingerprint,
+            title: request.title,
+            severity: request.severity,
+            confidence: "high",
+            category: "bug",
+            status: "published",
+            summary: request.body,
+            rationale: null,
+            ruleId: null,
+            source: "llm",
+            anchor: request.anchor,
+            suggestedFix: null,
+            evidenceIds: [],
+            publication: {
+              mode: "inline",
+              draftIds: [],
+              remoteCommentIds: ["comment-1"],
+              publishedAt: publicationEvent.publishedAt,
+            },
+          },
+        ],
+      },
+    ],
+  };
+}
+
 describe("publishReviewFinding", () => {
   beforeEach(() => {
     vi.mocked(tauriCall).mockReset();
@@ -50,5 +122,60 @@ describe("publishReviewFinding", () => {
 
     await expect(publishReviewFinding(request)).resolves.toEqual(published);
     expect(tauriCall).toHaveBeenCalledWith("publish_review_finding", { request });
+  });
+
+  it("normalizes serialized Tauri publication failures", async () => {
+    vi.mocked(tauriCall).mockRejectedValue({
+      code: "outdated_anchor",
+      retryable: false,
+      message: "The pull request head changed.",
+    });
+
+    const error = await publishReviewFinding(request).catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(ReviewFindingPublicationError);
+    expect(error).toMatchObject({
+      message: "The pull request head changed.",
+      code: "outdated_anchor",
+      retryable: false,
+    });
+  });
+});
+
+describe("recordReviewFindingPublicationEvents", () => {
+  beforeEach(() => {
+    vi.mocked(tauriCall).mockReset();
+  });
+
+  it("requires the returned store to contain every applied event", async () => {
+    const store = trackedStore();
+    vi.mocked(tauriCall).mockResolvedValue(store);
+
+    await expect(
+      recordReviewFindingPublicationEvents({
+        workspace: "acme",
+        repo: "payments",
+        prId: 42,
+        events: [publicationEvent],
+      }),
+    ).resolves.toEqual(store);
+  });
+
+  it("rejects missing or unchanged tracking state", async () => {
+    vi.mocked(tauriCall)
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({
+        ...trackedStore(),
+        reviewRuns: [],
+      });
+    const input = {
+      workspace: "acme",
+      repo: "payments",
+      prId: 42,
+      events: [publicationEvent],
+    };
+
+    await expect(recordReviewFindingPublicationEvents(input)).rejects.toThrow("was not applied");
+    await expect(recordReviewFindingPublicationEvents(input)).rejects.toThrow("was not applied");
   });
 });

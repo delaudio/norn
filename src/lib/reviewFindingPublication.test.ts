@@ -16,6 +16,7 @@ const previousRun: ReviewRun = {
   prId: 1020,
   sourceBranch: "feature/invoice-lines-v2-bff-mock",
   destinationBranch: "develop",
+  reviewedHeadSha: "2222222222222222222222222222222222222222",
   status: "succeeded",
   turnKind: "initial",
   reviewProfile: null,
@@ -65,6 +66,7 @@ const activeRun: ReviewRun = {
   prId: 1020,
   sourceBranch: "feature/invoice-lines-v2-bff-mock",
   destinationBranch: "develop",
+  reviewedHeadSha: "2222222222222222222222222222222222222222",
   status: "succeeded",
   turnKind: "reply",
   reviewProfile: null,
@@ -195,6 +197,67 @@ describe("buildFindingPublicationRequest", () => {
       body: "Publish the edited reviewer-facing explanation.",
       severity: "high",
     });
+  });
+
+  it("rejects draft head and active target metadata that diverge from the review run", () => {
+    const draft: DraftComment = {
+      localId: "draft-1",
+      prId: 1020,
+      path: "src/app/modules/invoice-lines/invoice-lines-v2.controller.ts",
+      to: 29,
+      from: null,
+      raw: "Publish the edited reviewer-facing explanation.",
+      parentId: null,
+      createdAt: 0,
+      source: "aiFinding",
+      findingRef: {
+        reviewRunId: "run-1",
+        findingId: "run-1-finding-1",
+        findingFingerprint: "fingerprint-1",
+      },
+      publicationMode: "inline",
+      reviewHeadSha: "3333333333333333333333333333333333333333",
+    };
+    const pr = {
+      id: 1020,
+      title: "Invoice lines",
+      descriptionRaw: "",
+      state: "OPEN" as const,
+      draft: false,
+      authorDisplayName: "Reviewer",
+      reviewers: [],
+      sourceBranch: "feature/invoice-lines",
+      destinationBranch: "develop",
+      sourceCommitHash: "2222222222222222222222222222222222222222",
+      destinationCommitHash: null,
+      createdOn: "",
+      updatedOn: "",
+    };
+
+    expect(() =>
+      buildFindingPublicationRequest({
+        provider: "bitbucket",
+        workspace: "example-workspace",
+        repo: "backend-api",
+        pr,
+        reviewRun: activeRun,
+        draft,
+      }),
+    ).toThrow("does not belong to the reviewed head");
+
+    expect(() =>
+      buildFindingPublicationRequest({
+        provider: "github",
+        workspace: "other-workspace",
+        repo: "backend-api",
+        pr,
+        reviewRun: activeRun,
+        draft: {
+          ...draft,
+          reviewHeadSha: activeRun.reviewedHeadSha ?? null,
+        },
+      }),
+    ).toThrow("does not match the structured review run");
   });
 });
 
