@@ -320,20 +320,18 @@ impl ReviewPipelineFailure {
             message: message.into(),
         }
     }
+
+    fn internal(message: impl Into<String>) -> Self {
+        Self {
+            kind: ReviewPipelineFailureKind::Internal,
+            message: message.into(),
+        }
+    }
 }
 
 impl std::fmt::Display for ReviewPipelineFailure {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter.write_str(&self.message)
-    }
-}
-
-impl From<String> for ReviewPipelineFailure {
-    fn from(message: String) -> Self {
-        Self {
-            kind: ReviewPipelineFailureKind::Internal,
-            message,
-        }
     }
 }
 
@@ -4777,8 +4775,11 @@ fn run_inline_review_pipeline(
     }
 
     let generated_at = now_ms();
-    let mut review_store = load_review_store(&workspace, &repo, id)?
-        .ok_or_else(|| "The AI review store could not be loaded.".to_string())?;
+    let mut review_store = load_review_store(&workspace, &repo, id)
+        .map_err(ReviewPipelineFailure::internal)?
+        .ok_or_else(|| {
+            ReviewPipelineFailure::internal("The AI review store could not be loaded.")
+        })?;
     let review_run = materialize_review_run(
         &workspace,
         &repo,
@@ -4795,8 +4796,10 @@ fn run_inline_review_pipeline(
         response.content.trim(),
         assistant_evidence_source,
         analyzer_artifacts,
-    )?;
-    let thread = find_review_thread_mut(&mut review_store, &thread_id)?;
+    )
+    .map_err(ReviewPipelineFailure::provider)?;
+    let thread = find_review_thread_mut(&mut review_store, &thread_id)
+        .map_err(ReviewPipelineFailure::internal)?;
     append_review_message(
         thread,
         AiReviewMessageRole::Assistant,
@@ -4808,7 +4811,8 @@ fn run_inline_review_pipeline(
     }
     review_store.active_thread_id = Some(thread_id);
     review_store.review_runs.push(review_run);
-    save_review_store(&workspace, &repo, id, &review_store)?;
+    save_review_store(&workspace, &repo, id, &review_store)
+        .map_err(ReviewPipelineFailure::internal)?;
 
     finish_inline_review_success(&store, &key, run_id, generated_at, provider_label);
     Ok(())

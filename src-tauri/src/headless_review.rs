@@ -180,6 +180,11 @@ pub fn run(request: HeadlessReviewRequest) -> Result<HeadlessReviewExecution, He
     let selected_profile = config_result.selected_profile.clone();
 
     if resolved.diff.trim().is_empty() {
+        if request.run_analyzers {
+            return Err(HeadlessReviewError::target(
+                "No changes to review; local analyzers were not run.",
+            ));
+        }
         return Ok(HeadlessReviewExecution {
             schema_version: "lachesi.headless-review.v1".to_string(),
             status: "succeeded".to_string(),
@@ -258,9 +263,30 @@ fn strip_private_evidence_payloads(review_run: &mut ReviewRun) {
 fn map_native_review_error(error: HeadlessNativeReviewError) -> HeadlessReviewError {
     match error {
         HeadlessNativeReviewError::Analyzer(message) => HeadlessReviewError::analyzer(message),
-        HeadlessNativeReviewError::Provider(message) => HeadlessReviewError::model(message),
+        HeadlessNativeReviewError::Provider(message) => {
+            HeadlessReviewError::model(public_provider_error(&message))
+        }
         HeadlessNativeReviewError::Internal(message) => HeadlessReviewError::internal(message),
         HeadlessNativeReviewError::Cancelled => HeadlessReviewError::cancelled("Review cancelled."),
+    }
+}
+
+fn public_provider_error(message: &str) -> &'static str {
+    let normalized = message.to_ascii_lowercase();
+    if normalized.contains("empty review response") {
+        "AI provider returned an empty review response."
+    } else if normalized.contains("structured review")
+        || normalized.contains("invalid json")
+        || normalized.contains("failed to parse")
+    {
+        "AI provider returned invalid review output."
+    } else if normalized.contains("failed to run")
+        || normalized.contains("not found")
+        || normalized.contains("was not captured")
+    {
+        "AI provider CLI could not be started."
+    } else {
+        "AI provider review failed."
     }
 }
 
@@ -826,16 +852,16 @@ mod tests {
 
     use super::{
         build_review_payload, format_findings_markdown, map_native_review_error,
-        map_provider_target_error, new_file_patch, repo_identity_matches_target,
-        strip_private_evidence_payloads, working_tree_diff, ReviewScope,
+        map_provider_target_error, new_file_patch, public_provider_error,
+        repo_identity_matches_target, run, strip_private_evidence_payloads, working_tree_diff,
+        HeadlessReviewRequest, ReviewScope,
     };
     use crate::config::{RepoRef, ReviewProvider};
     use crate::services::review::{
         AiReviewRunStatus, AiReviewTurnKind, HeadlessNativeReviewError, ReviewAnchorSide,
         ReviewEvidenceArtifact, ReviewEvidenceKind, ReviewEvidenceSource, ReviewFinding,
-        ReviewFindingAnchor, ReviewFindingCategory, ReviewFindingConfidence,
-        ReviewFindingSeverity, ReviewFindingSource, ReviewFindingStatus,
-        ReviewProvider as ReviewRunProvider, ReviewRun,
+        ReviewFindingAnchor, ReviewFindingCategory, ReviewFindingConfidence, ReviewFindingSeverity,
+        ReviewFindingSource, ReviewFindingStatus, ReviewProvider as ReviewRunProvider, ReviewRun,
     };
 
     static TEMP_REPO_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -988,6 +1014,44 @@ mod tests {
         assert_eq!(run.evidence[0].payload, None);
         let json = serde_json::to_string(&run).expect("serialize sanitized review run");
         assert!(!json.contains("secret-value"));
+    }
+
+    #[test]
+    fn provider_errors_expose_only_stable_public_messages() {
+        let message = public_provider_error(
+            "codex exited with code 1.\nstderr: TOKEN=secret-value\nstdout: private output",
+        );
+
+        assert_eq!(message, "AI provider review failed.");
+        assert!(!message.contains("secret-value"));
+        assert_eq!(
+            public_provider_error("failed to parse structured review JSON"),
+            "AI provider returned invalid review output."
+        );
+    }
+
+    #[test]
+    fn analyzer_opt_in_rejects_an_empty_review_target() {
+        let repo = temp_git_repo();
+        let error = run(HeadlessReviewRequest {
+            repo_path: Some(repo.clone()),
+            scope: ReviewScope::WorkingTree,
+            base: None,
+            workspace: None,
+            repo: None,
+            pr_id: None,
+            provider: Some(ReviewProvider::Github),
+            profile: None,
+            ai_provider: None,
+            model: None,
+            effort: None,
+            run_analyzers: true,
+        })
+        .expect_err("analyzer opt-in must not silently pass without a review target");
+
+        assert_eq!(error.exit_code, 4);
+        assert!(error.message.contains("analyzers were not run"));
+        let _ = fs::remove_dir_all(repo);
     }
 
     #[test]

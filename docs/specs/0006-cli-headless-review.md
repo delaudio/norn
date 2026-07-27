@@ -153,6 +153,8 @@ Defaults:
 - findings do not fail the process unless `--fail-on-findings` is set
 - local analyzers are skipped by default because agent-driven review follows
   the repository validation gate; `--run-analyzers` opts in for standalone use
+- `--run-analyzers` requires a non-empty review target and fails target
+  resolution instead of reporting that analyzers ran when there are no changes
 - headless review uses temporary local storage by default and removes it after
   completion; setting `LACHESI_DATA_DIR` explicitly opts into a chosen
   persistent location
