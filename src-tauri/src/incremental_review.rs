@@ -53,6 +53,7 @@ pub enum IncrementalReviewSetupErrorCode {
     PatchTooLarge,
     MetadataTooLarge,
     UnsupportedObjectFormat,
+    NonIncrementalCommitRange,
     DiffFailed,
 }
 
@@ -122,6 +123,7 @@ pub fn build_incremental_review_scope(
         IncrementalCommitRole::CurrentHead,
         object_id_hex_len,
     )?;
+    validate_incremental_range(repo_path, &previous_head_sha, &current_head_sha)?;
 
     let name_status = git_diff(
         repo_path,
@@ -254,6 +256,44 @@ fn validate_commit(
             commit_error_message(role, "is unavailable"),
         ))
     }
+}
+
+fn validate_incremental_range(
+    repo_path: &Path,
+    previous_head_sha: &str,
+    current_head_sha: &str,
+) -> Result<(), IncrementalReviewSetupError> {
+    let output = git(
+        repo_path,
+        &[
+            "merge-base",
+            "--is-ancestor",
+            previous_head_sha,
+            current_head_sha,
+        ],
+    )
+    .map_err(|_| {
+        setup_error(
+            IncrementalReviewSetupErrorCode::NonIncrementalCommitRange,
+            None,
+            "Cannot validate the incremental commit range.",
+        )
+    })?;
+    if output.status.success() {
+        return Ok(());
+    }
+    if output.status.code() == Some(1) {
+        return Err(setup_error(
+            IncrementalReviewSetupErrorCode::NonIncrementalCommitRange,
+            Some(IncrementalCommitRole::PreviousHead),
+            "`previousHeadSha` is not an ancestor of `currentHeadSha`.",
+        ));
+    }
+    Err(setup_error(
+        IncrementalReviewSetupErrorCode::NonIncrementalCommitRange,
+        None,
+        "Cannot validate the incremental commit range.",
+    ))
 }
 
 fn repository_object_id_hex_len(repo_path: &Path) -> Result<usize, IncrementalReviewSetupError> {
@@ -814,6 +854,35 @@ mod tests {
 
         assert_eq!(scope.previous_head_sha, previous);
         assert_eq!(scope.current_head_sha, current);
+    }
+
+    #[test]
+    fn unrelated_commits_return_a_structured_range_error() {
+        let fixture = RepoFixture::new();
+        fixture.write("file.txt", b"base\n");
+        fixture.commit("base");
+        fixture.write("file.txt", b"base\ncurrent\n");
+        let current = fixture.commit("current");
+        let unrelated = git_stdout(
+            &fixture.path,
+            &[
+                "commit-tree",
+                &format!("{current}^{{tree}}"),
+                "-m",
+                "unrelated",
+            ],
+        )
+        .trim()
+        .to_string();
+
+        let error = build_incremental_review_scope(&fixture.path, &unrelated, &current)
+            .expect_err("unrelated commit range");
+
+        assert_eq!(
+            error.code,
+            IncrementalReviewSetupErrorCode::NonIncrementalCommitRange
+        );
+        assert_eq!(error.commit_role, Some(IncrementalCommitRole::PreviousHead));
     }
 
     #[test]
