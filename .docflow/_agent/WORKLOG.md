@@ -29,3 +29,4 @@ Append one row per commit. Newest at the bottom.
 | 2026-07-24 | `5e0993f` | `codex/tui-roadmap` | `.docflow/plan/todo/0002-terminal-ui-foundation.md` | Rendered terminal PR diffs through the delta pager to match the local lazygit diff style. |
 | 2026-07-24 | `31e70e3` | `main` | `.docflow/plan/todo/0002-terminal-ui-foundation.md` | Added release build and local `lac` install recipes for the terminal UI. |
 | 2026-07-27 | `7b35c16` | `main` | `.docflow/plan/done/2026-07-27-headless-review-cli.md` | Shipped headless review through PR #115; typecheck, frontend/Rust tests, build, Tauri smoke, Archgate, and Lachesi review completed. |
+| 2026-07-27 | `7f95a9a` | `agent/shared-service-boundary` | `.docflow/plan/todo/0004-shared-review-service-program.md` | Accepted the shared-service trust boundary for issue #89; typecheck, frontend tests, Archgate, docflow audit, and Lachesi review passed. |
