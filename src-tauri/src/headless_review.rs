@@ -308,13 +308,30 @@ pub fn format_markdown(execution: &HeadlessReviewExecution) -> String {
             }
         ),
     ];
+    if let Some(pr_id) = execution.target.pr_id {
+        output.push(format!("Pull request: #{pr_id}"));
+    }
     for warning in &execution.warnings {
         output.push(format!("Warning: {warning}"));
     }
     match execution.review_run.as_ref() {
         Some(run) => {
+            if let Some(profile) = run.review_profile.as_deref() {
+                output.push(format!("Profile: {profile}"));
+            }
             output.push(String::new());
             output.extend(format_findings_markdown(&run.findings));
+            if !run.evidence.is_empty() {
+                output.extend([String::new(), "## Evidence".to_string(), String::new()]);
+                output.extend(run.evidence.iter().map(|evidence| {
+                    let summary = evidence
+                        .summary
+                        .as_deref()
+                        .map(|summary| format!(": {summary}"))
+                        .unwrap_or_default();
+                    format!("- **{}**{summary}", evidence.title)
+                }));
+            }
             if let Some(summary) = run
                 .summary_markdown
                 .as_deref()
@@ -730,10 +747,28 @@ fn resolve_default_base(repo_path: &Path) -> Result<String, HeadlessReviewError>
 }
 
 fn working_tree_diff(repo_path: &Path) -> Result<(String, Vec<String>), HeadlessReviewError> {
-    let mut diff = git_output(
-        repo_path,
-        ["diff", "--no-ext-diff", "--find-renames", "HEAD", "--"],
-    )?;
+    let mut warnings = Vec::new();
+    let mut diff = if git_output(repo_path, ["rev-parse", "--verify", "--quiet", "HEAD"]).is_ok() {
+        git_output(
+            repo_path,
+            ["diff", "--no-ext-diff", "--find-renames", "HEAD", "--"],
+        )?
+    } else {
+        warnings.push(
+            "Repository has no commits; staged and unstaged changes are shown separately."
+                .to_string(),
+        );
+        let mut staged = git_output(
+            repo_path,
+            ["diff", "--cached", "--no-ext-diff", "--find-renames", "--"],
+        )?;
+        let unstaged = git_output(repo_path, ["diff", "--no-ext-diff", "--find-renames", "--"])?;
+        if !staged.is_empty() && !staged.ends_with('\n') && !unstaged.is_empty() {
+            staged.push('\n');
+        }
+        staged.push_str(&unstaged);
+        staged
+    };
     let output = Command::new("git")
         .arg("-C")
         .arg(repo_path)
@@ -744,7 +779,6 @@ fn working_tree_diff(repo_path: &Path) -> Result<(String, Vec<String>), Headless
         return Err(HeadlessReviewError::target(git_error_message(&output)));
     }
 
-    let mut warnings = Vec::new();
     let mut included_bytes = 0_u64;
     for raw_path in output
         .stdout
@@ -797,6 +831,7 @@ fn is_sensitive_untracked_path(relative: &str) -> bool {
     let path = Path::new(&normalized);
     let file_name = path.file_name().and_then(OsStr::to_str).unwrap_or_default();
     let extension = path.extension().and_then(OsStr::to_str).unwrap_or_default();
+    let normalized_file_name = file_name.replace('-', "_");
     if normalized
         .split('/')
         .any(|component| matches!(component, ".ssh" | ".aws" | ".gnupg"))
@@ -807,6 +842,8 @@ fn is_sensitive_untracked_path(relative: &str) -> bool {
         || file_name == ".envrc"
         || file_name.starts_with(".env.")
         || file_name.ends_with(".env")
+        || file_name.starts_with("env.")
+        || file_name.contains(".env.")
         || matches!(
             file_name,
             ".npmrc"
@@ -830,9 +867,14 @@ fn is_sensitive_untracked_path(relative: &str) -> bool {
         return true;
     }
     matches!(extension, "json" | "yaml" | "yml" | "toml")
-        && (file_name.contains("secret")
-            || file_name.contains("credential")
-            || file_name.contains("service-account"))
+        && (normalized_file_name.contains("secret")
+            || normalized_file_name.contains("credential")
+            || normalized_file_name.contains("service_account")
+            || normalized_file_name.contains("private_key")
+            || normalized_file_name.contains("access_token")
+            || normalized_file_name.contains("api_token")
+            || normalized_file_name.contains("auth_token")
+            || normalized_file_name.contains("refresh_token"))
 }
 
 fn new_file_patch(path: &str, contents: &str) -> String {
@@ -946,11 +988,12 @@ mod tests {
     use std::sync::atomic::{AtomicU64, Ordering};
 
     use super::{
-        build_review_payload, format_findings_markdown, is_sensitive_untracked_path,
-        map_native_review_error, map_provider_target_error, new_file_patch, public_provider_error,
-        repo_identity_matches_target, requested_repo_identity, run,
-        strip_private_evidence_payloads, validate_explicit_repo_identity,
-        validate_requested_identity_shape, working_tree_diff, HeadlessReviewRequest, ReviewScope,
+        build_review_payload, format_findings_markdown, format_markdown,
+        is_sensitive_untracked_path, map_native_review_error, map_provider_target_error,
+        new_file_patch, public_provider_error, repo_identity_matches_target,
+        requested_repo_identity, run, strip_private_evidence_payloads,
+        validate_explicit_repo_identity, validate_requested_identity_shape, working_tree_diff,
+        HeadlessReviewExecution, HeadlessReviewRequest, HeadlessReviewTarget, ReviewScope,
     };
     use crate::config::{RepoRef, ReviewProvider};
     use crate::services::review::{
@@ -1201,6 +1244,62 @@ mod tests {
     }
 
     #[test]
+    fn markdown_includes_pr_profile_and_evidence_context() {
+        let execution = HeadlessReviewExecution {
+            schema_version: "lachesi.headless-review.v1".to_string(),
+            status: "succeeded".to_string(),
+            exit_code: 0,
+            warnings: Vec::new(),
+            minimum_severity: None,
+            analyzers_ran: false,
+            target: HeadlessReviewTarget {
+                scope: "pr".to_string(),
+                repo_path: "/tmp/lachesi".to_string(),
+                workspace: Some("lachesi-hq".to_string()),
+                repo: "lachesi".to_string(),
+                pr_id: Some(42),
+                source: "feature".to_string(),
+                destination: "main".to_string(),
+            },
+            review_run: Some(ReviewRun {
+                id: "run-1".to_string(),
+                schema_version: "v0.1".to_string(),
+                provider: ReviewRunProvider::Github,
+                workspace: "lachesi-hq".to_string(),
+                repo: "lachesi".to_string(),
+                pr_id: 42,
+                source_branch: "feature".to_string(),
+                destination_branch: "main".to_string(),
+                status: AiReviewRunStatus::Succeeded,
+                turn_kind: AiReviewTurnKind::Initial,
+                review_profile: Some("strict".to_string()),
+                created_at: "1".to_string(),
+                finished_at: Some("2".to_string()),
+                diff_fingerprint: "fingerprint".to_string(),
+                thread_id: None,
+                summary_markdown: Some("Looks good.".to_string()),
+                evidence: vec![ReviewEvidenceArtifact {
+                    id: "evidence-1".to_string(),
+                    kind: ReviewEvidenceKind::Analyzer,
+                    source: ReviewEvidenceSource::Tests,
+                    title: "Test suite".to_string(),
+                    summary: Some("All tests passed.".to_string()),
+                    payload: None,
+                }],
+                findings: Vec::new(),
+            }),
+        };
+
+        let markdown = format_markdown(&execution);
+
+        assert!(markdown.contains("Pull request: #42"));
+        assert!(markdown.contains("Profile: strict"));
+        assert!(markdown.contains("## Evidence"));
+        assert!(markdown.contains("Test suite"));
+        assert!(markdown.contains("All tests passed."));
+    }
+
+    #[test]
     fn provider_errors_expose_only_stable_public_messages() {
         let message = public_provider_error(
             "codex exited with code 1.\nstderr: TOKEN=secret-value\nstdout: private output",
@@ -1304,7 +1403,35 @@ mod tests {
         assert!(is_sensitive_untracked_path("certs/signing.key"));
         assert!(is_sensitive_untracked_path(".envrc"));
         assert!(is_sensitive_untracked_path("config/prod.env"));
+        assert!(is_sensitive_untracked_path("config/prod.env.local"));
+        assert!(is_sensitive_untracked_path("config/env.production"));
+        assert!(is_sensitive_untracked_path("config/service_account.json"));
+        assert!(is_sensitive_untracked_path("config/client_secret.json"));
         assert!(!is_sensitive_untracked_path("src/credentials.rs"));
+        let _ = fs::remove_dir_all(repo);
+    }
+
+    #[test]
+    fn working_tree_diff_supports_repositories_without_commits() {
+        let nonce = TEMP_REPO_COUNTER.fetch_add(1, Ordering::Relaxed);
+        let repo = std::env::temp_dir().join(format!(
+            "lachesi-headless-unborn-test-{}-{nonce}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&repo).expect("create unborn repo");
+        git(&repo, &["init"]);
+        fs::write(repo.join("staged.txt"), "staged content\n").expect("write staged fixture");
+        git(&repo, &["add", "staged.txt"]);
+        fs::write(repo.join("untracked.txt"), "untracked content\n")
+            .expect("write untracked fixture");
+
+        let (diff, warnings) = working_tree_diff(&repo).expect("collect unborn repository diff");
+
+        assert!(diff.contains("+staged content"));
+        assert!(diff.contains("+untracked content"));
+        assert!(warnings
+            .iter()
+            .any(|warning| warning.contains("no commits")));
         let _ = fs::remove_dir_all(repo);
     }
 
