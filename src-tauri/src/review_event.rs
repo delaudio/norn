@@ -83,15 +83,22 @@ pub struct PullRequestReviewEvent {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PullRequestReviewEventIdempotencyKey {
+pub struct PullRequestEventDeliveryKey {
+    pub tenant_id: String,
+    pub provider: PullRequestReviewEventProvider,
+    pub delivery_id: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PullRequestReviewKey {
     pub tenant_id: String,
     pub provider: PullRequestReviewEventProvider,
     pub kind: PullRequestReviewEventKind,
     pub workspace: String,
     pub repository: String,
     pub pull_request_id: u64,
-    pub delivery_id: String,
     pub head_sha: String,
+    pub closed_outcome: Option<PullRequestClosedOutcome>,
 }
 
 impl PullRequestReviewEvent {
@@ -123,16 +130,24 @@ impl PullRequestReviewEvent {
         Ok(())
     }
 
-    pub fn idempotency_key(&self) -> PullRequestReviewEventIdempotencyKey {
-        PullRequestReviewEventIdempotencyKey {
+    pub fn delivery_key(&self) -> PullRequestEventDeliveryKey {
+        PullRequestEventDeliveryKey {
+            tenant_id: self.tenant_id.clone(),
+            provider: self.provider,
+            delivery_id: self.delivery_id.clone(),
+        }
+    }
+
+    pub fn review_key(&self) -> PullRequestReviewKey {
+        PullRequestReviewKey {
             tenant_id: self.tenant_id.clone(),
             provider: self.provider,
             kind: self.kind,
             workspace: self.workspace.clone(),
             repository: self.repository.clone(),
             pull_request_id: self.pull_request_id,
-            delivery_id: self.delivery_id.clone(),
             head_sha: self.head.sha.clone(),
+            closed_outcome: self.closed_outcome,
         }
     }
 }
@@ -312,15 +327,22 @@ mod tests {
     }
 
     #[test]
-    fn delivery_and_head_sha_form_part_of_the_idempotency_key() {
+    fn delivery_and_review_idempotency_keys_cover_distinct_replay_cases() {
         let event = event(PullRequestReviewEventKind::Synchronized);
-        let key = event.idempotency_key();
+        let delivery_key = event.delivery_key();
+        let review_key = event.review_key();
 
-        assert_eq!(key.delivery_id, "delivery-123");
-        assert_eq!(key.head_sha, HEAD_SHA);
-        assert_eq!(key.tenant_id, "tenant-acme");
-        assert_eq!(key.kind, PullRequestReviewEventKind::Synchronized);
-        assert_eq!(key.pull_request_id, 42);
+        assert_eq!(delivery_key.delivery_id, "delivery-123");
+        assert_eq!(delivery_key.tenant_id, "tenant-acme");
+        assert_eq!(review_key.head_sha, HEAD_SHA);
+        assert_eq!(review_key.tenant_id, "tenant-acme");
+        assert_eq!(review_key.kind, PullRequestReviewEventKind::Synchronized);
+        assert_eq!(review_key.pull_request_id, 42);
+
+        let mut redelivery = event.clone();
+        redelivery.delivery_id = "delivery-456".to_string();
+        assert_ne!(redelivery.delivery_key(), delivery_key);
+        assert_eq!(redelivery.review_key(), review_key);
     }
 
     #[test]
