@@ -1,0 +1,862 @@
+//! Explicit, provider-neutral publication of structured review findings.
+//!
+//! Provider adapters implement [`ProviderInlineCommentApi`]. The publisher
+//! validates anchors, fences writes to the reviewed head, and uses a stable
+//! hidden marker to make retries idempotent without rerunning review work.
+
+use std::fmt;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{SystemTime, UNIX_EPOCH};
+
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
+
+use crate::review_event::PullRequestReviewEventProvider;
+use crate::review_storage;
+
+const MAX_IDENTIFIER_BYTES: usize = 512;
+const MAX_PATH_BYTES: usize = 4096;
+const MAX_TITLE_BYTES: usize = 1024;
+const MAX_BODY_BYTES: usize = 64 * 1024;
+const MAX_SUGGESTED_FIX_BYTES: usize = 64 * 1024;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum FindingPublicationSchemaVersion {
+    #[serde(rename = "v1")]
+    V1,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FindingSeverity {
+    Critical,
+    High,
+    Medium,
+    Low,
+    Info,
+}
+
+impl FindingSeverity {
+    const fn label(self) -> &'static str {
+        match self {
+            Self::Critical => "Critical",
+            Self::High => "High",
+            Self::Medium => "Medium",
+            Self::Low => "Low",
+            Self::Info => "Info",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FindingAnchorSide {
+    Old,
+    New,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct FindingLineRange {
+    pub path: String,
+    pub start_line: u32,
+    pub end_line: u32,
+    pub side: FindingAnchorSide,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct FindingPublicationRequest {
+    pub schema_version: FindingPublicationSchemaVersion,
+    pub tenant_id: String,
+    pub provider: PullRequestReviewEventProvider,
+    pub workspace: String,
+    pub repository: String,
+    pub pull_request_id: u64,
+    /// Full immutable head SHA used by the review that produced the finding.
+    pub head_sha: String,
+    pub finding_fingerprint: String,
+    pub anchor: FindingLineRange,
+    pub title: String,
+    pub body: String,
+    pub severity: FindingSeverity,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub suggested_fix: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PublishedCommentIdentity {
+    pub tenant_id: String,
+    pub provider: PullRequestReviewEventProvider,
+    pub workspace: String,
+    pub repository: String,
+    pub pull_request_id: u64,
+    pub comment_id: String,
+    pub finding_marker: String,
+    pub path: String,
+    pub start_line: u32,
+    pub end_line: u32,
+    pub side: FindingAnchorSide,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProviderCommentIdentity {
+    pub comment_id: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProviderPublicationTarget {
+    pub tenant_id: String,
+    pub provider: PullRequestReviewEventProvider,
+    pub workspace: String,
+    pub repository: String,
+    pub pull_request_id: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProviderInlineCommentPayload {
+    pub head_sha: String,
+    pub path: String,
+    pub start_line: u32,
+    pub end_line: u32,
+    pub side: FindingAnchorSide,
+    pub markdown: String,
+}
+
+pub trait ProviderInlineCommentApi {
+    /// Returns the provider's current pull-request head as a full commit SHA.
+    fn current_head_sha(
+        &self,
+        target: &ProviderPublicationTarget,
+    ) -> Result<String, ProviderPublicationApiError>;
+
+    /// Finds an existing non-deleted inline comment containing `marker`.
+    fn find_inline_comment(
+        &self,
+        target: &ProviderPublicationTarget,
+        marker: &str,
+    ) -> Result<Option<ProviderCommentIdentity>, ProviderPublicationApiError>;
+
+    /// Creates an inline comment. Implementations must never fall back to a
+    /// file-level or top-level comment when the anchor is rejected.
+    fn create_inline_comment(
+        &self,
+        target: &ProviderPublicationTarget,
+        payload: &ProviderInlineCommentPayload,
+    ) -> Result<ProviderCommentIdentity, ProviderPublicationApiError>;
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProviderPublicationApiErrorKind {
+    InvalidAnchor,
+    Unavailable,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProviderPublicationApiError {
+    pub kind: ProviderPublicationApiErrorKind,
+    pub message: String,
+}
+
+impl ProviderPublicationApiError {
+    pub fn invalid_anchor(message: impl Into<String>) -> Self {
+        Self {
+            kind: ProviderPublicationApiErrorKind::InvalidAnchor,
+            message: message.into(),
+        }
+    }
+
+    pub fn unavailable(message: impl Into<String>) -> Self {
+        Self {
+            kind: ProviderPublicationApiErrorKind::Unavailable,
+            message: message.into(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FindingPublicationLease {
+    pub marker: String,
+    pub token: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FindingPublicationReservation {
+    Acquired(FindingPublicationLease),
+    InProgress,
+    Published(ProviderCommentIdentity),
+}
+
+pub trait FindingPublicationStore {
+    /// Atomically reserves a marker, returns its durable result, or reports
+    /// another live publisher. Expired reservations may be reclaimed.
+    fn reserve(
+        &self,
+        request: &FindingPublicationRequest,
+        marker: &str,
+    ) -> Result<FindingPublicationReservation, String>;
+
+    /// Persists the provider identity only for the current fenced lease.
+    fn complete(
+        &self,
+        lease: &FindingPublicationLease,
+        identity: &ProviderCommentIdentity,
+    ) -> Result<(), String>;
+
+    /// Releases a failed attempt only when the caller still owns the lease.
+    fn release(&self, lease: &FindingPublicationLease) -> Result<(), String>;
+}
+
+#[derive(Debug, Default, Clone, Copy)]
+pub struct SqliteFindingPublicationStore;
+
+impl FindingPublicationStore for SqliteFindingPublicationStore {
+    fn reserve(
+        &self,
+        request: &FindingPublicationRequest,
+        marker: &str,
+    ) -> Result<FindingPublicationReservation, String> {
+        review_storage::reserve_finding_publication(request, marker, &next_lease_token())
+    }
+
+    fn complete(
+        &self,
+        lease: &FindingPublicationLease,
+        identity: &ProviderCommentIdentity,
+    ) -> Result<(), String> {
+        review_storage::complete_finding_publication(lease, identity)
+    }
+
+    fn release(&self, lease: &FindingPublicationLease) -> Result<(), String> {
+        review_storage::release_finding_publication(lease)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FindingPublicationErrorCode {
+    InvalidRequest,
+    AnchorRejected,
+    OutdatedAnchor,
+    PublicationInProgress,
+    ProviderUnavailable,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FindingPublicationError {
+    pub code: FindingPublicationErrorCode,
+    pub retryable: bool,
+    pub message: String,
+}
+
+impl fmt::Display for FindingPublicationError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(&self.message)
+    }
+}
+
+impl std::error::Error for FindingPublicationError {}
+
+#[derive(Debug)]
+pub struct FindingPublisher<A, S> {
+    api: A,
+    store: S,
+}
+
+impl<A, S> FindingPublisher<A, S>
+where
+    A: ProviderInlineCommentApi,
+    S: FindingPublicationStore,
+{
+    pub const fn new(api: A, store: S) -> Self {
+        Self { api, store }
+    }
+
+    /// Publishes only when explicitly called by the user or service
+    /// coordinator. Validation and lookup happen before any provider write.
+    pub fn publish(
+        &self,
+        request: &FindingPublicationRequest,
+    ) -> Result<PublishedCommentIdentity, FindingPublicationError> {
+        request.validate().map_err(invalid_request)?;
+        let target = request.target();
+        let marker = finding_marker(request);
+        let lease = match self
+            .store
+            .reserve(request, &marker)
+            .map_err(publication_state_error)?
+        {
+            FindingPublicationReservation::Published(existing) => {
+                return Ok(request.published_identity(existing.comment_id, marker));
+            }
+            FindingPublicationReservation::InProgress => {
+                return Err(FindingPublicationError {
+                    code: FindingPublicationErrorCode::PublicationInProgress,
+                    retryable: true,
+                    message: "This finding is already being published.".to_string(),
+                });
+            }
+            FindingPublicationReservation::Acquired(lease) => lease,
+        };
+
+        let result = self.publish_reserved(request, &target, &marker, &lease);
+        if result.is_err() {
+            let _ = self.store.release(&lease);
+        }
+        result
+    }
+
+    fn publish_reserved(
+        &self,
+        request: &FindingPublicationRequest,
+        target: &ProviderPublicationTarget,
+        marker: &str,
+        lease: &FindingPublicationLease,
+    ) -> Result<PublishedCommentIdentity, FindingPublicationError> {
+        let published = if let Some(existing) = self
+            .api
+            .find_inline_comment(target, marker)
+            .map_err(publication_api_error)?
+        {
+            existing
+        } else {
+            let current_head = self
+                .api
+                .current_head_sha(target)
+                .map_err(publication_api_error)?;
+            if !current_head.eq_ignore_ascii_case(&request.head_sha) {
+                return Err(FindingPublicationError {
+                    code: FindingPublicationErrorCode::OutdatedAnchor,
+                    retryable: false,
+                    message: "The pull request changed after this finding was produced; review the current diff before publishing.".to_string(),
+                });
+            }
+
+            let payload = request.provider_payload(marker);
+            self.api
+                .create_inline_comment(target, &payload)
+                .map_err(publication_api_error)?
+        };
+        self.store
+            .complete(lease, &published)
+            .map_err(publication_state_error)?;
+        Ok(request.published_identity(published.comment_id, marker.to_string()))
+    }
+}
+
+impl FindingPublicationRequest {
+    pub fn validate(&self) -> Result<(), String> {
+        validate_identifier("tenantId", &self.tenant_id)?;
+        validate_identifier("workspace", &self.workspace)?;
+        validate_identifier("repository", &self.repository)?;
+        if self.pull_request_id == 0 {
+            return Err("`pullRequestId` must be a positive integer".to_string());
+        }
+        validate_sha(&self.head_sha)?;
+        validate_identifier("findingFingerprint", &self.finding_fingerprint)?;
+        validate_path(&self.anchor.path)?;
+        if self.anchor.start_line == 0 || self.anchor.end_line == 0 {
+            return Err("finding line numbers must be positive".to_string());
+        }
+        if self.anchor.start_line > self.anchor.end_line {
+            return Err("finding start line must not exceed its end line".to_string());
+        }
+        validate_text("title", &self.title, MAX_TITLE_BYTES)?;
+        validate_text("body", &self.body, MAX_BODY_BYTES)?;
+        if let Some(suggested_fix) = &self.suggested_fix {
+            validate_text("suggestedFix", suggested_fix, MAX_SUGGESTED_FIX_BYTES)?;
+        }
+        Ok(())
+    }
+
+    fn target(&self) -> ProviderPublicationTarget {
+        ProviderPublicationTarget {
+            tenant_id: self.tenant_id.clone(),
+            provider: self.provider,
+            workspace: self.workspace.clone(),
+            repository: self.repository.clone(),
+            pull_request_id: self.pull_request_id,
+        }
+    }
+
+    fn provider_payload(&self, marker: &str) -> ProviderInlineCommentPayload {
+        ProviderInlineCommentPayload {
+            head_sha: self.head_sha.clone(),
+            path: self.anchor.path.clone(),
+            start_line: self.anchor.start_line,
+            end_line: self.anchor.end_line,
+            side: self.anchor.side,
+            markdown: render_finding_markdown(self, marker),
+        }
+    }
+
+    fn published_identity(
+        &self,
+        comment_id: String,
+        finding_marker: String,
+    ) -> PublishedCommentIdentity {
+        PublishedCommentIdentity {
+            tenant_id: self.tenant_id.clone(),
+            provider: self.provider,
+            workspace: self.workspace.clone(),
+            repository: self.repository.clone(),
+            pull_request_id: self.pull_request_id,
+            comment_id,
+            finding_marker,
+            path: self.anchor.path.clone(),
+            start_line: self.anchor.start_line,
+            end_line: self.anchor.end_line,
+            side: self.anchor.side,
+        }
+    }
+}
+
+pub fn finding_marker(request: &FindingPublicationRequest) -> String {
+    let pull_request_id = request.pull_request_id.to_string();
+    let mut hasher = Sha256::new();
+    for part in [
+        request.tenant_id.as_str(),
+        request.provider.as_str(),
+        request.workspace.as_str(),
+        request.repository.as_str(),
+        pull_request_id.as_str(),
+        request.head_sha.as_str(),
+        request.finding_fingerprint.as_str(),
+    ] {
+        hasher.update((part.len() as u64).to_be_bytes());
+        hasher.update(part.as_bytes());
+    }
+    let digest = hasher.finalize();
+    format!("<!-- lachesi:finding:{digest:x} -->")
+}
+
+fn render_finding_markdown(request: &FindingPublicationRequest, marker: &str) -> String {
+    let mut markdown = format!(
+        "**{}**\n\n{}\n\nSeverity: **{}**",
+        request.title,
+        request.body,
+        request.severity.label()
+    );
+    if let Some(suggested_fix) = &request.suggested_fix {
+        let fence = suggestion_fence(suggested_fix);
+        markdown.push_str("\n\nSuggested fix:\n\n");
+        markdown.push_str(&fence);
+        markdown.push_str("suggestion\n");
+        markdown.push_str(suggested_fix);
+        if !suggested_fix.ends_with('\n') {
+            markdown.push('\n');
+        }
+        markdown.push_str(&fence);
+    }
+    markdown.push_str("\n\n");
+    markdown.push_str(marker);
+    markdown
+}
+
+fn suggestion_fence(suggested_fix: &str) -> String {
+    let longest_run = suggested_fix
+        .split(|character| character != '`')
+        .map(str::len)
+        .max()
+        .unwrap_or(0);
+    "`".repeat(longest_run.saturating_add(1).max(3))
+}
+
+fn validate_identifier(field: &str, value: &str) -> Result<(), String> {
+    if value.trim().is_empty() {
+        return Err(format!("`{field}` must not be empty"));
+    }
+    if value != value.trim() {
+        return Err(format!("`{field}` must not contain surrounding whitespace"));
+    }
+    if value.len() > MAX_IDENTIFIER_BYTES {
+        return Err(format!("`{field}` is too long"));
+    }
+    Ok(())
+}
+
+fn validate_sha(value: &str) -> Result<(), String> {
+    if matches!(value.len(), 40 | 64) && value.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        Ok(())
+    } else {
+        Err("`headSha` must be a full hexadecimal commit SHA".to_string())
+    }
+}
+
+fn validate_path(value: &str) -> Result<(), String> {
+    validate_text("anchor.path", value, MAX_PATH_BYTES)?;
+    if value.starts_with('/')
+        || value.split('/').any(|segment| segment == "..")
+        || value.contains('\\')
+        || value.bytes().any(|byte| byte == 0)
+    {
+        return Err("`anchor.path` must be a relative repository path".to_string());
+    }
+    Ok(())
+}
+
+fn validate_text(field: &str, value: &str, maximum: usize) -> Result<(), String> {
+    if value.trim().is_empty() {
+        return Err(format!("`{field}` must not be empty"));
+    }
+    if value.len() > maximum {
+        return Err(format!("`{field}` is too long"));
+    }
+    Ok(())
+}
+
+fn invalid_request(message: String) -> FindingPublicationError {
+    FindingPublicationError {
+        code: FindingPublicationErrorCode::InvalidRequest,
+        retryable: false,
+        message,
+    }
+}
+
+fn publication_api_error(error: ProviderPublicationApiError) -> FindingPublicationError {
+    match error.kind {
+        ProviderPublicationApiErrorKind::InvalidAnchor => FindingPublicationError {
+            code: FindingPublicationErrorCode::AnchorRejected,
+            retryable: false,
+            message: error.message,
+        },
+        ProviderPublicationApiErrorKind::Unavailable => FindingPublicationError {
+            code: FindingPublicationErrorCode::ProviderUnavailable,
+            retryable: true,
+            message: error.message,
+        },
+    }
+}
+
+fn publication_state_error(message: String) -> FindingPublicationError {
+    FindingPublicationError {
+        code: FindingPublicationErrorCode::ProviderUnavailable,
+        retryable: true,
+        message,
+    }
+}
+
+fn next_lease_token() -> String {
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or(0);
+    let sequence = COUNTER.fetch_add(1, Ordering::Relaxed);
+    format!("lease:{}:{now}:{sequence}", std::process::id())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+    use std::sync::Mutex;
+
+    use super::*;
+
+    const HEAD_SHA: &str = "2222222222222222222222222222222222222222";
+
+    #[derive(Debug, Default)]
+    struct MockProviderApi {
+        state: Mutex<MockProviderState>,
+    }
+
+    #[derive(Debug)]
+    struct MockProviderState {
+        current_head_sha: String,
+        comments: HashMap<String, ProviderCommentIdentity>,
+        payloads: Vec<(PullRequestReviewEventProvider, ProviderInlineCommentPayload)>,
+        fail_next_write: bool,
+    }
+
+    impl Default for MockProviderState {
+        fn default() -> Self {
+            Self {
+                current_head_sha: HEAD_SHA.to_string(),
+                comments: HashMap::new(),
+                payloads: Vec::new(),
+                fail_next_write: false,
+            }
+        }
+    }
+
+    impl ProviderInlineCommentApi for MockProviderApi {
+        fn current_head_sha(
+            &self,
+            _target: &ProviderPublicationTarget,
+        ) -> Result<String, ProviderPublicationApiError> {
+            Ok(self.state.lock().unwrap().current_head_sha.clone())
+        }
+
+        fn find_inline_comment(
+            &self,
+            _target: &ProviderPublicationTarget,
+            marker: &str,
+        ) -> Result<Option<ProviderCommentIdentity>, ProviderPublicationApiError> {
+            Ok(self.state.lock().unwrap().comments.get(marker).cloned())
+        }
+
+        fn create_inline_comment(
+            &self,
+            target: &ProviderPublicationTarget,
+            payload: &ProviderInlineCommentPayload,
+        ) -> Result<ProviderCommentIdentity, ProviderPublicationApiError> {
+            let mut state = self.state.lock().unwrap();
+            if state.fail_next_write {
+                state.fail_next_write = false;
+                return Err(ProviderPublicationApiError::unavailable(
+                    "provider temporarily unavailable",
+                ));
+            }
+            let marker = payload
+                .markdown
+                .lines()
+                .last()
+                .expect("marker is the last line")
+                .to_string();
+            let identity = ProviderCommentIdentity {
+                comment_id: format!("comment-{}", state.payloads.len() + 1),
+            };
+            state.payloads.push((target.provider, payload.clone()));
+            state.comments.insert(marker, identity.clone());
+            Ok(identity)
+        }
+    }
+
+    #[derive(Debug, Default)]
+    struct MockPublicationStore {
+        state: Mutex<HashMap<String, MockPublicationState>>,
+    }
+
+    #[derive(Debug, Clone)]
+    enum MockPublicationState {
+        Publishing(FindingPublicationLease),
+        Published(ProviderCommentIdentity),
+    }
+
+    impl FindingPublicationStore for MockPublicationStore {
+        fn reserve(
+            &self,
+            _request: &FindingPublicationRequest,
+            marker: &str,
+        ) -> Result<FindingPublicationReservation, String> {
+            let mut state = self.state.lock().unwrap();
+            match state.get(marker) {
+                Some(MockPublicationState::Publishing(_)) => {
+                    Ok(FindingPublicationReservation::InProgress)
+                }
+                Some(MockPublicationState::Published(identity)) => {
+                    Ok(FindingPublicationReservation::Published(identity.clone()))
+                }
+                None => {
+                    let lease = FindingPublicationLease {
+                        marker: marker.to_string(),
+                        token: format!("test-lease-{}", state.len() + 1),
+                    };
+                    state.insert(
+                        marker.to_string(),
+                        MockPublicationState::Publishing(lease.clone()),
+                    );
+                    Ok(FindingPublicationReservation::Acquired(lease))
+                }
+            }
+        }
+
+        fn complete(
+            &self,
+            lease: &FindingPublicationLease,
+            identity: &ProviderCommentIdentity,
+        ) -> Result<(), String> {
+            let mut state = self.state.lock().unwrap();
+            match state.get(&lease.marker) {
+                Some(MockPublicationState::Publishing(current)) if current == lease => {
+                    state.insert(
+                        lease.marker.clone(),
+                        MockPublicationState::Published(identity.clone()),
+                    );
+                    Ok(())
+                }
+                _ => Err("publication lease was fenced".to_string()),
+            }
+        }
+
+        fn release(&self, lease: &FindingPublicationLease) -> Result<(), String> {
+            let mut state = self.state.lock().unwrap();
+            if matches!(
+                state.get(&lease.marker),
+                Some(MockPublicationState::Publishing(current)) if current == lease
+            ) {
+                state.remove(&lease.marker);
+            }
+            Ok(())
+        }
+    }
+
+    fn request(provider: PullRequestReviewEventProvider) -> FindingPublicationRequest {
+        FindingPublicationRequest {
+            schema_version: FindingPublicationSchemaVersion::V1,
+            tenant_id: "tenant-acme".to_string(),
+            provider,
+            workspace: "acme".to_string(),
+            repository: "payments".to_string(),
+            pull_request_id: 42,
+            head_sha: HEAD_SHA.to_string(),
+            finding_fingerprint: "finding:src/lib.rs:12:null-check".to_string(),
+            anchor: FindingLineRange {
+                path: "src/lib.rs".to_string(),
+                start_line: 12,
+                end_line: 14,
+                side: FindingAnchorSide::New,
+            },
+            title: "Guard the nullable value".to_string(),
+            body: "This value can be absent on the error path.".to_string(),
+            severity: FindingSeverity::High,
+            suggested_fix: Some("let value = value?;".to_string()),
+        }
+    }
+
+    #[test]
+    fn same_contract_publishes_through_github_and_bitbucket_adapters() {
+        for provider in [
+            PullRequestReviewEventProvider::Github,
+            PullRequestReviewEventProvider::Bitbucket,
+        ] {
+            let publisher =
+                FindingPublisher::new(MockProviderApi::default(), MockPublicationStore::default());
+            let published = publisher.publish(&request(provider)).expect("publication");
+
+            assert_eq!(published.tenant_id, "tenant-acme");
+            assert_eq!(published.provider, provider);
+            assert_eq!(published.comment_id, "comment-1");
+            let state = publisher.api.state.lock().unwrap();
+            assert_eq!(state.payloads.len(), 1);
+            assert_eq!(state.payloads[0].0, provider);
+            assert_eq!(state.payloads[0].1.start_line, 12);
+            assert_eq!(state.payloads[0].1.end_line, 14);
+            assert!(state.payloads[0].1.markdown.contains("```suggestion"));
+            assert!(state.payloads[0]
+                .1
+                .markdown
+                .contains("<!-- lachesi:finding:"));
+        }
+    }
+
+    #[test]
+    fn repeated_request_returns_existing_comment_without_another_write() {
+        let publisher =
+            FindingPublisher::new(MockProviderApi::default(), MockPublicationStore::default());
+        let request = request(PullRequestReviewEventProvider::Github);
+
+        let first = publisher.publish(&request).expect("first publication");
+        let repeated = publisher.publish(&request).expect("idempotent publication");
+
+        assert_eq!(repeated, first);
+        assert_eq!(publisher.api.state.lock().unwrap().payloads.len(), 1);
+    }
+
+    #[test]
+    fn live_reservation_prevents_a_concurrent_duplicate_write() {
+        let request = request(PullRequestReviewEventProvider::Github);
+        let marker = finding_marker(&request);
+        let store = MockPublicationStore::default();
+        let reservation = store.reserve(&request, &marker).expect("first reservation");
+        assert!(matches!(
+            reservation,
+            FindingPublicationReservation::Acquired(_)
+        ));
+        let publisher = FindingPublisher::new(MockProviderApi::default(), store);
+
+        let error = publisher
+            .publish(&request)
+            .expect_err("concurrent publication is fenced");
+
+        assert_eq!(
+            error.code,
+            FindingPublicationErrorCode::PublicationInProgress
+        );
+        assert!(error.retryable);
+        assert!(publisher.api.state.lock().unwrap().payloads.is_empty());
+    }
+
+    #[test]
+    fn invalid_and_outdated_anchors_never_create_comments() {
+        let publisher =
+            FindingPublisher::new(MockProviderApi::default(), MockPublicationStore::default());
+        let mut invalid = request(PullRequestReviewEventProvider::Github);
+        invalid.anchor.start_line = 15;
+        invalid.anchor.end_line = 14;
+
+        let invalid_error = publisher.publish(&invalid).expect_err("invalid anchor");
+        assert_eq!(
+            invalid_error.code,
+            FindingPublicationErrorCode::InvalidRequest
+        );
+
+        let outdated = request(PullRequestReviewEventProvider::Github);
+        publisher.api.state.lock().unwrap().current_head_sha =
+            "3333333333333333333333333333333333333333".to_string();
+        let outdated_error = publisher.publish(&outdated).expect_err("outdated anchor");
+        assert_eq!(
+            outdated_error.code,
+            FindingPublicationErrorCode::OutdatedAnchor
+        );
+        assert!(!outdated_error.retryable);
+        assert!(publisher.api.state.lock().unwrap().payloads.is_empty());
+    }
+
+    #[test]
+    fn provider_failure_is_retryable_and_does_not_mutate_the_request() {
+        let publisher =
+            FindingPublisher::new(MockProviderApi::default(), MockPublicationStore::default());
+        let request = request(PullRequestReviewEventProvider::Bitbucket);
+        let expected = request.clone();
+        publisher.api.state.lock().unwrap().fail_next_write = true;
+
+        let error = publisher.publish(&request).expect_err("first write fails");
+        assert_eq!(error.code, FindingPublicationErrorCode::ProviderUnavailable);
+        assert!(error.retryable);
+        assert_eq!(request, expected);
+
+        let published = publisher.publish(&request).expect("retry succeeds");
+        assert_eq!(published.comment_id, "comment-1");
+    }
+
+    #[test]
+    fn marker_is_stable_and_does_not_embed_the_raw_fingerprint() {
+        let mut request = request(PullRequestReviewEventProvider::Github);
+        request.finding_fingerprint = "sensitive/source/path:12".to_string();
+        let marker = finding_marker(&request);
+        assert_eq!(marker, finding_marker(&request));
+        assert!(!marker.contains("sensitive/source/path"));
+        assert_eq!(marker.len(), "<!-- lachesi:finding: -->".len() + 64);
+
+        request.head_sha = "3333333333333333333333333333333333333333".to_string();
+        assert_ne!(marker, finding_marker(&request));
+        request.head_sha = HEAD_SHA.to_string();
+        request.tenant_id = "tenant-other".to_string();
+        assert_ne!(marker, finding_marker(&request));
+    }
+
+    #[test]
+    fn suggestion_fence_is_longer_than_embedded_backtick_runs() {
+        let mut request = request(PullRequestReviewEventProvider::Github);
+        request.suggested_fix = Some("before\n````\nafter".to_string());
+        let markdown = render_finding_markdown(&request, "<!-- marker -->");
+
+        assert!(markdown.contains("`````suggestion\nbefore\n````\nafter\n`````"));
+    }
+
+    #[test]
+    fn v1_contract_round_trips_without_credentials() {
+        let request = request(PullRequestReviewEventProvider::Github);
+        let value = serde_json::to_value(&request).expect("serialize");
+        let decoded: FindingPublicationRequest =
+            serde_json::from_value(value.clone()).expect("deserialize");
+
+        assert_eq!(decoded, request);
+        assert!(value.get("token").is_none());
+        assert!(value.get("credentials").is_none());
+        assert_eq!(value["schemaVersion"], "v1");
+    }
+}

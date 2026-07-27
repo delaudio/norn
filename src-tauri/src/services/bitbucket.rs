@@ -6,7 +6,14 @@ use std::path::Path;
 use crate::config::{self, AppConfig, RepoRef, ReviewProvider};
 use crate::config::{AiProvider, ReviewTerminal};
 use crate::credentials::{self, Credentials};
+use crate::finding_publication::{
+    FindingAnchorSide, FindingPublicationError, FindingPublicationRequest, FindingPublisher,
+    ProviderCommentIdentity, ProviderInlineCommentApi, ProviderInlineCommentPayload,
+    ProviderPublicationApiError, ProviderPublicationTarget, PublishedCommentIdentity,
+    SqliteFindingPublicationStore,
+};
 use crate::repo_config::{self, RepoReviewConfigLoadResult};
+use crate::review_event::PullRequestReviewEventProvider;
 use crate::review_storage::{self, ClosedPrMetric};
 
 const BASE: &str = "https://api.bitbucket.org/2.0";
@@ -462,6 +469,22 @@ struct BbCommentPage {
 }
 
 #[derive(Deserialize)]
+struct BbPublicationComment {
+    id: serde_json::Value,
+    content: Option<BbContent>,
+    #[serde(default)]
+    deleted: bool,
+    inline: Option<serde_json::Value>,
+}
+
+#[derive(Deserialize)]
+struct BbPublicationCommentPage {
+    #[serde(default)]
+    values: Vec<BbPublicationComment>,
+    next: Option<String>,
+}
+
+#[derive(Deserialize)]
 struct BbUser {
     #[serde(default)]
     display_name: String,
@@ -573,6 +596,14 @@ struct GhIssueComment {
     user: Option<GhUser>,
     #[serde(default)]
     created_at: String,
+}
+
+#[derive(Deserialize)]
+struct GhPublicationComment {
+    id: serde_json::Value,
+    #[serde(default)]
+    body: String,
+    path: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -1003,41 +1034,44 @@ fn github_paginated_get<T: DeserializeOwned>(
     let mut out = Vec::new();
     loop {
         let resp = github_send_checked(client.get(&url))?;
-        let has_next = resp
+        let next = resp
             .headers()
             .get(reqwest::header::LINK)
             .and_then(|value| value.to_str().ok())
-            .map(|value| value.contains(r#"rel="next""#))
-            .unwrap_or(false);
+            .map(github_next_link)
+            .transpose()?
+            .flatten();
         out.extend(resp.json::<Vec<T>>().map_err(|e| e.to_string())?);
-        if !has_next {
-            break;
-        }
-        let separator = if url.contains('?') { '&' } else { '?' };
-        let page = url
-            .split("page=")
-            .nth(1)
-            .and_then(|tail| tail.split('&').next())
-            .and_then(|value| value.parse::<u32>().ok())
-            .unwrap_or(1)
-            + 1;
-        if url.contains("page=") {
-            url = url
-                .split('&')
-                .map(|part| {
-                    if part.contains("page=") {
-                        format!("page={page}")
-                    } else {
-                        part.to_string()
-                    }
-                })
-                .collect::<Vec<_>>()
-                .join("&");
-        } else {
-            url = format!("{url}{separator}page={page}");
+        match next {
+            Some(next) => url = next,
+            None => break,
         }
     }
     Ok(out)
+}
+
+fn github_next_link(value: &str) -> Result<Option<String>, String> {
+    for entry in value.split(',') {
+        let mut parts = entry.split(';');
+        let Some(target) = parts.next().map(str::trim) else {
+            continue;
+        };
+        let is_next = parts.any(|part| part.trim() == r#"rel="next""#);
+        if !is_next {
+            continue;
+        }
+        let Some(url) = target
+            .strip_prefix('<')
+            .and_then(|target| target.strip_suffix('>'))
+        else {
+            return Err("GitHub returned an invalid pagination link.".to_string());
+        };
+        if !url.starts_with("https://api.github.com/") {
+            return Err("GitHub returned an unsafe pagination link.".to_string());
+        }
+        return Ok(Some(url.to_string()));
+    }
+    Ok(None)
 }
 
 fn fetch_github_pull_request_detail(
@@ -1884,6 +1918,256 @@ pub async fn get_pr_file_preview(
 // Commands — comments
 // ---------------------------------------------------------------------------
 
+#[derive(Debug, Default, Clone, Copy)]
+pub struct StoredProviderInlineCommentApi;
+
+impl ProviderInlineCommentApi for StoredProviderInlineCommentApi {
+    fn current_head_sha(
+        &self,
+        target: &ProviderPublicationTarget,
+    ) -> Result<String, ProviderPublicationApiError> {
+        let head = match target.provider {
+            PullRequestReviewEventProvider::Bitbucket => {
+                let client = BitbucketClient::from_stored()
+                    .map_err(ProviderPublicationApiError::unavailable)?;
+                fetch_pull_request_detail(
+                    &client,
+                    &target.workspace,
+                    &target.repository,
+                    publication_pr_id(target.pull_request_id)?,
+                )
+                .map_err(ProviderPublicationApiError::unavailable)?
+                .source_commit_hash
+            }
+            PullRequestReviewEventProvider::Github => {
+                let client = GithubClient::from_stored()
+                    .map_err(ProviderPublicationApiError::unavailable)?;
+                fetch_github_pull_request_detail(
+                    &client,
+                    &target.workspace,
+                    &target.repository,
+                    publication_pr_id(target.pull_request_id)?,
+                )
+                .map_err(ProviderPublicationApiError::unavailable)?
+                .source_commit_hash
+            }
+        };
+        head.ok_or_else(|| {
+            ProviderPublicationApiError::unavailable(
+                "The provider did not return the pull request head commit.",
+            )
+        })
+    }
+
+    fn find_inline_comment(
+        &self,
+        target: &ProviderPublicationTarget,
+        marker: &str,
+    ) -> Result<Option<ProviderCommentIdentity>, ProviderPublicationApiError> {
+        find_published_finding_comment(target, marker)
+    }
+
+    fn create_inline_comment(
+        &self,
+        target: &ProviderPublicationTarget,
+        payload: &ProviderInlineCommentPayload,
+    ) -> Result<ProviderCommentIdentity, ProviderPublicationApiError> {
+        let pr_id = publication_pr_id(target.pull_request_id)?;
+        if dry_run() {
+            eprintln!(
+                "[dry-run] structured inline finding on PR #{} {}:{}-{}",
+                target.pull_request_id, payload.path, payload.start_line, payload.end_line
+            );
+            return Ok(ProviderCommentIdentity {
+                comment_id: "dry-run".to_string(),
+            });
+        }
+        let (comment_id, inline) = match target.provider {
+            PullRequestReviewEventProvider::Bitbucket => {
+                let client = BitbucketClient::from_stored()
+                    .map_err(ProviderPublicationApiError::unavailable)?;
+                let url = format!(
+                    "{}/pullrequests/{pr_id}/comments",
+                    repo_base(&target.workspace, &target.repository)
+                        .map_err(ProviderPublicationApiError::unavailable)?
+                );
+                let body = bitbucket_publication_body(payload);
+                let response = send_checked(client.post(&url).json(&body))
+                    .map_err(map_publication_write_error)?;
+                let comment: BbPublicationComment = response
+                    .json()
+                    .map_err(|error| ProviderPublicationApiError::unavailable(error.to_string()))?;
+                (
+                    publication_comment_id(comment.id)?,
+                    comment.inline.is_some(),
+                )
+            }
+            PullRequestReviewEventProvider::Github => {
+                let client = GithubClient::from_stored()
+                    .map_err(ProviderPublicationApiError::unavailable)?;
+                let base = github_repo_base(&target.workspace, &target.repository)
+                    .map_err(ProviderPublicationApiError::unavailable)?;
+                let body = github_publication_body(payload);
+                let url = format!("{base}/pulls/{pr_id}/comments");
+                let response = github_send_checked(client.post(&url).json(&body))
+                    .map_err(map_publication_write_error)?;
+                let comment: GhPublicationComment = response
+                    .json()
+                    .map_err(|error| ProviderPublicationApiError::unavailable(error.to_string()))?;
+                (publication_comment_id(comment.id)?, comment.path.is_some())
+            }
+        };
+        if !inline {
+            return Err(ProviderPublicationApiError::invalid_anchor(
+                "The provider did not create an inline comment.",
+            ));
+        }
+        Ok(ProviderCommentIdentity { comment_id })
+    }
+}
+
+pub fn publish_review_finding_native(
+    request: &FindingPublicationRequest,
+) -> Result<PublishedCommentIdentity, FindingPublicationError> {
+    FindingPublisher::new(
+        StoredProviderInlineCommentApi,
+        SqliteFindingPublicationStore,
+    )
+    .publish(request)
+}
+
+fn find_published_finding_comment(
+    target: &ProviderPublicationTarget,
+    marker: &str,
+) -> Result<Option<ProviderCommentIdentity>, ProviderPublicationApiError> {
+    let pr_id = publication_pr_id(target.pull_request_id)?;
+    match target.provider {
+        PullRequestReviewEventProvider::Bitbucket => {
+            let client =
+                BitbucketClient::from_stored().map_err(ProviderPublicationApiError::unavailable)?;
+            let mut url = format!(
+                "{}/pullrequests/{pr_id}/comments?pagelen=100&fields=next,values.id,values.deleted,values.content.raw,values.inline.path",
+                repo_base(&target.workspace, &target.repository)
+                    .map_err(ProviderPublicationApiError::unavailable)?
+            );
+            loop {
+                let page: BbPublicationCommentPage =
+                    get_json(client.get(&url)).map_err(ProviderPublicationApiError::unavailable)?;
+                if let Some(comment) = page.values.into_iter().find(|comment| {
+                    !comment.deleted
+                        && comment.inline.is_some()
+                        && comment
+                            .content
+                            .as_ref()
+                            .is_some_and(|content| content.raw.contains(marker))
+                }) {
+                    return Ok(Some(ProviderCommentIdentity {
+                        comment_id: publication_comment_id(comment.id)?,
+                    }));
+                }
+                match page.next {
+                    Some(next) => url = next,
+                    None => return Ok(None),
+                }
+            }
+        }
+        PullRequestReviewEventProvider::Github => {
+            let client =
+                GithubClient::from_stored().map_err(ProviderPublicationApiError::unavailable)?;
+            let url = format!(
+                "{}/pulls/{pr_id}/comments?per_page=100&page=1",
+                github_repo_base(&target.workspace, &target.repository)
+                    .map_err(ProviderPublicationApiError::unavailable)?
+            );
+            let comments: Vec<GhPublicationComment> = github_paginated_get(&client, url)
+                .map_err(ProviderPublicationApiError::unavailable)?;
+            comments
+                .into_iter()
+                .find(|comment| {
+                    comment.path.as_ref().is_some_and(|path| !path.is_empty())
+                        && comment.body.contains(marker)
+                })
+                .map(|comment| {
+                    Ok(ProviderCommentIdentity {
+                        comment_id: publication_comment_id(comment.id)?,
+                    })
+                })
+                .transpose()
+        }
+    }
+}
+
+fn publication_comment_id(value: serde_json::Value) -> Result<String, ProviderPublicationApiError> {
+    match value {
+        serde_json::Value::Number(number) if number.as_u64().is_some() => Ok(number.to_string()),
+        serde_json::Value::String(value) if !value.trim().is_empty() => Ok(value),
+        _ => Err(ProviderPublicationApiError::unavailable(
+            "The provider returned an invalid comment identifier.",
+        )),
+    }
+}
+
+fn publication_pr_id(pull_request_id: u64) -> Result<u32, ProviderPublicationApiError> {
+    u32::try_from(pull_request_id).map_err(|_| {
+        ProviderPublicationApiError::invalid_anchor(
+            "The pull request identifier is not supported by this provider adapter.",
+        )
+    })
+}
+
+fn bitbucket_publication_body(payload: &ProviderInlineCommentPayload) -> serde_json::Value {
+    let mut inline = serde_json::Map::new();
+    inline.insert("path".into(), json!(payload.path));
+    match payload.side {
+        FindingAnchorSide::New => {
+            inline.insert("to".into(), json!(payload.end_line));
+            if payload.start_line < payload.end_line {
+                inline.insert("start_to".into(), json!(payload.start_line));
+            }
+        }
+        FindingAnchorSide::Old => {
+            inline.insert("from".into(), json!(payload.end_line));
+            if payload.start_line < payload.end_line {
+                inline.insert("start_from".into(), json!(payload.start_line));
+            }
+        }
+    }
+    json!({
+        "content": { "raw": payload.markdown },
+        "inline": inline,
+    })
+}
+
+fn github_publication_body(payload: &ProviderInlineCommentPayload) -> serde_json::Value {
+    let side = match payload.side {
+        FindingAnchorSide::New => "RIGHT",
+        FindingAnchorSide::Old => "LEFT",
+    };
+    let mut body = json!({
+        "body": payload.markdown,
+        "commit_id": payload.head_sha,
+        "path": payload.path,
+        "line": payload.end_line,
+        "side": side,
+    });
+    if payload.start_line < payload.end_line {
+        body["start_line"] = json!(payload.start_line);
+        body["start_side"] = json!(side);
+    }
+    body
+}
+
+fn map_publication_write_error(error: String) -> ProviderPublicationApiError {
+    if error.contains("400 Bad Request")
+        || error.contains("409 Conflict")
+        || error.contains("422 Unprocessable Entity")
+    {
+        ProviderPublicationApiError::invalid_anchor(error)
+    } else {
+        ProviderPublicationApiError::unavailable(error)
+    }
+}
+
 #[tauri::command]
 pub async fn list_comments(
     provider: Option<ReviewProvider>,
@@ -2113,6 +2397,93 @@ mod tests {
     use std::sync::atomic::{AtomicU64, Ordering};
 
     static TEMP_REPO_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+    fn publication_payload(side: FindingAnchorSide) -> ProviderInlineCommentPayload {
+        ProviderInlineCommentPayload {
+            head_sha: "2222222222222222222222222222222222222222".to_string(),
+            path: "src/lib.rs".to_string(),
+            start_line: 12,
+            end_line: 14,
+            side,
+            markdown: "finding\n\n<!-- lachesi:finding:abc -->".to_string(),
+        }
+    }
+
+    #[test]
+    fn provider_publication_bodies_keep_inline_anchor_semantics() {
+        let github = github_publication_body(&publication_payload(FindingAnchorSide::New));
+        assert_eq!(
+            github["commit_id"],
+            "2222222222222222222222222222222222222222"
+        );
+        assert_eq!(github["path"], "src/lib.rs");
+        assert_eq!(github["start_line"], 12);
+        assert_eq!(github["start_side"], "RIGHT");
+        assert_eq!(github["line"], 14);
+        assert_eq!(github["side"], "RIGHT");
+
+        let bitbucket = bitbucket_publication_body(&publication_payload(FindingAnchorSide::Old));
+        assert_eq!(bitbucket["inline"]["path"], "src/lib.rs");
+        assert_eq!(bitbucket["inline"]["start_from"], 12);
+        assert_eq!(bitbucket["inline"]["from"], 14);
+        assert!(bitbucket["inline"].get("to").is_none());
+        assert!(bitbucket.get("content").is_some());
+    }
+
+    #[test]
+    fn provider_publication_comment_ids_are_not_limited_to_u32() {
+        let id = publication_comment_id(json!(9_223_372_036_854_775_000_u64))
+            .expect("large provider comment id");
+        assert_eq!(id, "9223372036854775000");
+        assert_eq!(
+            publication_comment_id(json!("opaque-comment-id")).expect("opaque id"),
+            "opaque-comment-id"
+        );
+    }
+
+    #[test]
+    fn github_pagination_follows_the_exact_safe_next_link() {
+        let link = concat!(
+            "<https://api.github.com/repos/acme/payments/pulls/42/comments?",
+            "per_page=100&page=3>; rel=\"next\", ",
+            "<https://api.github.com/repos/acme/payments/pulls/42/comments?",
+            "per_page=100&page=9>; rel=\"last\""
+        );
+        assert_eq!(
+            github_next_link(link).expect("valid pagination link"),
+            Some(
+                "https://api.github.com/repos/acme/payments/pulls/42/comments?per_page=100&page=3"
+                    .to_string()
+            )
+        );
+        assert!(
+            github_next_link("<https://attacker.invalid/comments?page=2>; rel=\"next\"").is_err()
+        );
+        assert_eq!(
+            github_next_link(
+                "<https://api.github.com/repos/acme/payments/pulls/42/comments?page=9>; rel=\"last\""
+            )
+            .expect("last-only link"),
+            None
+        );
+    }
+
+    #[test]
+    fn provider_anchor_rejections_are_terminal_publication_errors() {
+        let error =
+            map_publication_write_error("GitHub API error 422 Unprocessable Entity".to_string());
+        assert_eq!(
+            error.kind,
+            crate::finding_publication::ProviderPublicationApiErrorKind::InvalidAnchor
+        );
+
+        let error =
+            map_publication_write_error("GitHub API error 503 Service Unavailable".to_string());
+        assert_eq!(
+            error.kind,
+            crate::finding_publication::ProviderPublicationApiErrorKind::Unavailable
+        );
+    }
 
     #[test]
     fn pr_query_filter_combines_title_and_updated_window() {
