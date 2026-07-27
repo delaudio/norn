@@ -239,15 +239,14 @@ fn validate_commit(
         ));
     }
     let canonical_sha = sha.to_ascii_lowercase();
-    let object = format!("{canonical_sha}^{{commit}}");
-    let output = git(repo_path, &["cat-file", "-e", &object]).map_err(|_| {
+    let output = git(repo_path, &["cat-file", "-t", &canonical_sha]).map_err(|_| {
         setup_error(
             IncrementalReviewSetupErrorCode::CommitUnavailable,
             Some(role),
             commit_error_message(role, "is unavailable"),
         )
     })?;
-    if output.status.success() {
+    if output.status.success() && String::from_utf8_lossy(&output.stdout).trim() == "commit" {
         Ok(canonical_sha)
     } else {
         Err(setup_error(
@@ -305,7 +304,9 @@ fn repository_object_id_hex_len(repo_path: &Path) -> Result<usize, IncrementalRe
         )
     })?;
     if output.status.success() {
-        return object_id_hex_len_from_format(&output.stdout);
+        if let Some(object_id_hex_len) = object_id_hex_len_from_format(&output.stdout) {
+            return Ok(object_id_hex_len);
+        }
     }
 
     // Older Git versions do not expose --show-object-format. SHA-256 repositories
@@ -318,7 +319,9 @@ fn repository_object_id_hex_len(repo_path: &Path) -> Result<usize, IncrementalRe
         unsupported_object_format_error("Cannot determine the repository object format.")
     })?;
     if fallback.status.success() {
-        return object_id_hex_len_from_format(&fallback.stdout);
+        return object_id_hex_len_from_format(&fallback.stdout).ok_or_else(|| {
+            unsupported_object_format_error("Repository object format is unsupported.")
+        });
     }
     if fallback.status.code() == Some(1) && fallback.stdout.is_empty() {
         return Ok(40);
@@ -328,13 +331,11 @@ fn repository_object_id_hex_len(repo_path: &Path) -> Result<usize, IncrementalRe
     ))
 }
 
-fn object_id_hex_len_from_format(format: &[u8]) -> Result<usize, IncrementalReviewSetupError> {
+fn object_id_hex_len_from_format(format: &[u8]) -> Option<usize> {
     match String::from_utf8_lossy(format).trim() {
-        "sha1" => Ok(40),
-        "sha256" => Ok(64),
-        _ => Err(unsupported_object_format_error(
-            "Repository object format is unsupported.",
-        )),
+        "sha1" => Some(40),
+        "sha256" => Some(64),
+        _ => None,
     }
 }
 
@@ -828,17 +829,13 @@ mod tests {
 
     #[test]
     fn object_format_parser_accepts_supported_formats() {
-        assert_eq!(object_id_hex_len_from_format(b"sha1\n").expect("sha1"), 40);
+        assert_eq!(object_id_hex_len_from_format(b"sha1\n"), Some(40));
+        assert_eq!(object_id_hex_len_from_format(b"sha256\n"), Some(64));
         assert_eq!(
-            object_id_hex_len_from_format(b"sha256\n").expect("sha256"),
-            64
+            object_id_hex_len_from_format(b"--show-object-format\n"),
+            None
         );
-        assert_eq!(
-            object_id_hex_len_from_format(b"future-hash\n")
-                .expect_err("unsupported future format")
-                .code,
-            IncrementalReviewSetupErrorCode::UnsupportedObjectFormat
-        );
+        assert_eq!(object_id_hex_len_from_format(b"future-hash\n"), None);
     }
 
     #[test]
@@ -913,6 +910,31 @@ mod tests {
             materialize_changed_files(changed, stats).expect_err("missing matching stats"),
             diff_error()
         );
+    }
+
+    #[test]
+    fn annotated_tag_object_ids_are_not_accepted_as_commits() {
+        let fixture = RepoFixture::new();
+        fixture.write("file.txt", b"base\n");
+        let previous = fixture.commit("base");
+        run_git(
+            &fixture.path,
+            &["tag", "-a", "annotated", "-m", "annotated tag", &previous],
+        );
+        let tag_object = git_stdout(&fixture.path, &["rev-parse", "refs/tags/annotated"])
+            .trim()
+            .to_string();
+        fixture.write("file.txt", b"base\ncurrent\n");
+        let current = fixture.commit("current");
+
+        let error = build_incremental_review_scope(&fixture.path, &tag_object, &current)
+            .expect_err("annotated tag object");
+
+        assert_eq!(
+            error.code,
+            IncrementalReviewSetupErrorCode::CommitUnavailable
+        );
+        assert_eq!(error.commit_role, Some(IncrementalCommitRole::PreviousHead));
     }
 
     #[test]
