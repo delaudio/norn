@@ -3060,28 +3060,44 @@ fn build_claude_text_command(
     let tmp_path = temp_dir.path().join("prompt.md");
     fs::write(&tmp_path, payload).map_err(|e| e.to_string())?;
 
-    let resume_arg = resume_session_id
-        .map(|session_id| format!(" --resume {}", shell_quote(session_id)))
-        .unwrap_or_default();
-    let model_arg = claude_model
-        .and_then(normalize_claude_model)
-        .map(|model| format!(" --model {}", shell_quote(&model)))
-        .unwrap_or_default();
-    let effort_arg = claude_effort
-        .and_then(normalize_claude_effort)
-        .map(|effort| format!(" --effort {}", shell_quote(effort)))
-        .unwrap_or_default();
     let shell_cmd = format!(
-        "export PATH=\"$HOME/.local/bin:$HOME/.npm/bin:/opt/homebrew/bin:/usr/local/bin:$PATH\"; claude --print --verbose --permission-mode plan --allowedTools Read,Glob,Grep --output-format stream-json --include-partial-messages{model_arg}{effort_arg}{resume_arg} < {}",
+        "export PATH=\"$HOME/.local/bin:$HOME/.npm/bin:/opt/homebrew/bin:/usr/local/bin:$PATH\"; exec claude \"$@\" < {}",
         shell_quote(&tmp_path.to_string_lossy())
     );
     let mut command = Command::new("/bin/zsh");
     command
         .arg("-lc")
         .arg(shell_cmd)
+        .arg("lachesi-claude-review")
+        .args([
+            "--print",
+            "--verbose",
+            "--permission-mode",
+            "plan",
+            "--output-format",
+            "stream-json",
+            "--include-partial-messages",
+        ])
         .env("LACHESI_REVIEW_CHILD", "1");
+    if repo_path.is_some() {
+        command.args(["--allowedTools", "Read,Glob,Grep"]);
+    } else {
+        // Claude documents an empty --tools value as disabling all built-in tools.
+        command.args(["--tools", ""]);
+    }
+    if let Some(model) = claude_model.and_then(normalize_claude_model) {
+        command.args(["--model", &model]);
+    }
+    if let Some(effort) = claude_effort.and_then(normalize_claude_effort) {
+        command.args(["--effort", effort]);
+    }
+    if let Some(session_id) = resume_session_id {
+        command.args(["--resume", session_id]);
+    }
     if let Some(repo_path) = repo_path {
         command.current_dir(repo_path);
+    } else {
+        command.current_dir(temp_dir.path());
     }
     command.stdout(Stdio::piped()).stderr(Stdio::piped());
     Ok((command, temp_dir))
@@ -3152,13 +3168,13 @@ fn build_codex_text_command(
             )
         })
         .unwrap_or_default();
-    let repo_arg = if repo_path.is_some() {
+    let isolation_args = if repo_path.is_some() {
         String::new()
     } else {
-        " --skip-git-repo-check".to_string()
+        " --skip-git-repo-check --ephemeral --ignore-user-config --ignore-rules".to_string()
     };
     let shell_cmd = format!(
-        "export PATH=\"$HOME/.local/bin:$HOME/.npm/bin:/opt/homebrew/bin:/usr/local/bin:$PATH\"; codex exec --sandbox read-only --output-last-message {}{model_arg}{effort_arg}{repo_arg} - < {}",
+        "export PATH=\"$HOME/.local/bin:$HOME/.npm/bin:/opt/homebrew/bin:/usr/local/bin:$PATH\"; codex exec --sandbox read-only --output-last-message {}{model_arg}{effort_arg}{isolation_args} - < {}",
         shell_quote(&output_path.to_string_lossy()),
         shell_quote(&tmp_path.to_string_lossy())
     );
@@ -3169,6 +3185,8 @@ fn build_codex_text_command(
         .env("LACHESI_REVIEW_CHILD", "1");
     if let Some(repo_path) = repo_path {
         command.current_dir(repo_path);
+    } else {
+        command.current_dir(temp_dir.path());
     }
     command.stdout(Stdio::piped()).stderr(Stdio::piped());
     Ok((command, temp_dir, output_path))
@@ -4378,6 +4396,7 @@ fn run_inline_review_pipeline(
     codex_effort: Option<String>,
     skip_analyzers: bool,
     review_profile: Option<String>,
+    isolate_provider: bool,
     repo_path_override: Option<PathBuf>,
     review_provider_override: Option<ReviewProvider>,
 ) -> Result<(), ReviewPipelineFailure> {
@@ -4390,6 +4409,9 @@ fn run_inline_review_pipeline(
         AiProvider::Codex => ReviewEvidenceSource::Codex,
     };
     let repo_path = repo_path_override.or_else(|| resolve_local_repo(&workspace, &repo).ok());
+    let provider_repo_path = (!isolate_provider)
+        .then_some(repo_path.as_deref())
+        .flatten();
     let mut analyzer_artifacts = Vec::new();
     let mut effective_payload = payload.clone();
     let mut effective_fallback_payload = fallback_payload.clone();
@@ -4542,7 +4564,7 @@ fn run_inline_review_pipeline(
                           resume_id: Option<&str>|
      -> Result<Option<ParsedClaudeTextResponse>, String> {
         let (mut command, _temp_dir) = build_claude_text_command(
-            repo_path.as_deref(),
+            provider_repo_path,
             prompt,
             resume_id,
             claude_model.as_deref(),
@@ -4620,7 +4642,7 @@ fn run_inline_review_pipeline(
 
     let attempt_codex = |prompt: &str| -> Result<Option<ParsedClaudeTextResponse>, String> {
         let (mut command, _temp_dir, output_path) = build_codex_text_command(
-            repo_path.as_deref(),
+            provider_repo_path,
             prompt,
             codex_model.as_deref(),
             codex_effort.as_deref(),
@@ -4948,6 +4970,7 @@ pub fn start_inline_review_native(
             codex_effort,
             skip_analyzers,
             review_profile,
+            false,
             None,
             None,
         ) {
@@ -5030,6 +5053,7 @@ pub fn run_headless_review_native(
         codex_effort,
         !run_analyzers,
         review_profile,
+        true,
         Some(repo_path),
         Some(review_provider),
     ) {
@@ -5317,6 +5341,7 @@ pub async fn reply_inline_review(
             codex_effort,
             false,
             None,
+            false,
             None,
             None,
         ) {
@@ -5833,17 +5858,21 @@ mod tests {
         assert!(shell.contains("gpt-5-codex"));
         assert!(shell.contains("model_reasoning_effort=high"));
         assert!(shell.contains("--skip-git-repo-check"));
+        assert!(shell.contains("--ephemeral"));
+        assert!(shell.contains("--ignore-user-config"));
+        assert!(shell.contains("--ignore-rules"));
         assert!(command.get_envs().any(|(key, value)| {
             key == "LACHESI_REVIEW_CHILD"
                 && value.is_some_and(|value| value.to_string_lossy() == "1")
         }));
         assert!(temp_dir.path().join("prompt.md").is_file());
         assert_eq!(output_path, temp_dir.path().join("output.md"));
+        assert_eq!(command.get_current_dir(), Some(temp_dir.path()));
         assert_private_temp_dir(&temp_dir);
     }
 
     #[test]
-    fn builds_claude_review_command_with_read_only_tools() {
+    fn builds_isolated_claude_review_command_without_repository_tools() {
         let (command, temp_dir) =
             build_claude_text_command(None, "review prompt", None, None, None)
                 .expect("claude command should build");
@@ -5852,9 +5881,17 @@ mod tests {
             .nth(1)
             .expect("zsh command should include shell payload")
             .to_string_lossy();
+        let args = command
+            .get_args()
+            .map(|arg| arg.to_string_lossy().to_string())
+            .collect::<Vec<_>>();
 
-        assert!(shell.contains("--permission-mode plan"));
-        assert!(shell.contains("--allowedTools Read,Glob,Grep"));
+        assert!(shell.contains("exec claude \"$@\""));
+        assert!(args
+            .windows(2)
+            .any(|pair| pair == ["--permission-mode", "plan"]));
+        assert!(args.windows(2).any(|pair| pair == ["--tools", ""]));
+        assert!(!args.iter().any(|arg| arg == "--allowedTools"));
         assert!(shell.contains(" < "));
         assert!(!shell.contains("$(cat"));
         assert!(command.get_envs().any(|(key, value)| {
@@ -5862,7 +5899,84 @@ mod tests {
                 && value.is_some_and(|value| value.to_string_lossy() == "1")
         }));
         assert!(temp_dir.path().join("prompt.md").is_file());
+        assert_eq!(command.get_current_dir(), Some(temp_dir.path()));
         assert_private_temp_dir(&temp_dir);
+    }
+
+    #[test]
+    #[ignore = "requires the installed Claude CLI"]
+    fn installed_claude_cli_supports_empty_tools_flag() {
+        let output = std::process::Command::new("claude")
+            .args(["--tools", "", "--help"])
+            .output()
+            .expect("installed Claude CLI");
+
+        assert!(output.status.success());
+        let help = String::from_utf8_lossy(&output.stdout);
+        let normalized_help = help.split_whitespace().collect::<Vec<_>>().join(" ");
+        assert!(help.contains("--tools <tools...>"));
+        assert!(normalized_help.contains("Use \"\" to disable all tools"));
+    }
+
+    #[test]
+    #[ignore = "requires the installed Codex CLI"]
+    fn installed_codex_cli_supports_headless_isolation_flags() {
+        let output = std::process::Command::new("codex")
+            .args([
+                "exec",
+                "--skip-git-repo-check",
+                "--ephemeral",
+                "--ignore-user-config",
+                "--ignore-rules",
+                "--help",
+            ])
+            .output()
+            .expect("installed Codex CLI");
+
+        assert!(output.status.success());
+        let help = String::from_utf8_lossy(&output.stdout);
+        for flag in [
+            "--skip-git-repo-check",
+            "--ephemeral",
+            "--ignore-user-config",
+            "--ignore-rules",
+        ] {
+            assert!(help.contains(flag), "Codex help is missing {flag}");
+        }
+    }
+
+    #[test]
+    fn repository_backed_review_commands_keep_read_only_checkout_context() {
+        let repo_dir = tempfile::tempdir().expect("repo temp dir");
+        let (claude, _claude_temp_dir) =
+            build_claude_text_command(Some(repo_dir.path()), "review prompt", None, None, None)
+                .expect("claude command should build");
+        let (codex, _codex_temp_dir, _output_path) =
+            build_codex_text_command(Some(repo_dir.path()), "review prompt", None, None)
+                .expect("codex command should build");
+        let claude_shell = claude
+            .get_args()
+            .nth(1)
+            .expect("claude shell command")
+            .to_string_lossy();
+        let claude_args = claude
+            .get_args()
+            .map(|arg| arg.to_string_lossy().to_string())
+            .collect::<Vec<_>>();
+        let codex_shell = codex
+            .get_args()
+            .nth(1)
+            .expect("codex shell command")
+            .to_string_lossy();
+
+        assert_eq!(claude.get_current_dir(), Some(repo_dir.path()));
+        assert!(claude_shell.contains("exec claude \"$@\""));
+        assert!(claude_args
+            .windows(2)
+            .any(|pair| pair == ["--allowedTools", "Read,Glob,Grep"]));
+        assert_eq!(codex.get_current_dir(), Some(repo_dir.path()));
+        assert!(!codex_shell.contains("--skip-git-repo-check"));
+        assert!(!codex_shell.contains("--ignore-user-config"));
     }
 
     fn assert_private_temp_dir(temp_dir: &tempfile::TempDir) {

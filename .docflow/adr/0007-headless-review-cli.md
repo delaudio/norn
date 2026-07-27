@@ -64,8 +64,12 @@ orchestrated safely by coding agents and CI.
    policy packs. It skips local evidence analyzers by default because post-task
    automation has already run the repository gate; `--run-analyzers` opts into
    the shared native analyzer pipeline for standalone use.
-5. The AI reviewer runs read-only, and a `LACHESI_REVIEW_CHILD` environment
-   marker prevents skills or hooks from recursively enforcing another review.
+5. The AI reviewer runs read-only. Headless diff-only provider execution uses
+   private temporary storage as its working directory, disables Claude
+   repository tools, ignores repository-owned Codex configuration and rules,
+   and instructs the reviewer to use only the supplied payload. A
+   `LACHESI_REVIEW_CHILD` environment marker prevents skills or hooks from
+   recursively enforcing another review.
 6. JSON output uses the existing structured review finding semantics, never
    serializes credential sources or raw evidence payloads, and documents that
    summaries and findings can reflect content from the reviewed diff or model.
@@ -109,6 +113,7 @@ orchestrated safely by coding agents and CI.
 | 2026-07-24 | r3 | default-agent | Made headless storage ephemeral and agent execution one-shot. |
 | 2026-07-27 | r4 | default-agent | Excluded potentially sensitive untracked files from AI review payloads. |
 | 2026-07-27 | r5 | default-agent | Scoped the machine-output secrecy guarantee to credential sources and raw evidence. |
+| 2026-07-27 | r6 | default-agent | Isolated headless provider execution from the reviewed checkout. |
 
 ## Approvals
 
@@ -118,3 +123,4 @@ orchestrated safely by coding agents and CI.
 | Maintainer | fdg | 2026-07-24 | approved analyzer opt-in revision in chat |
 | Maintainer | fdg | 2026-07-24 | approved one-shot review refinement in chat |
 | Maintainer | fdg | 2026-07-27 | approved autonomous issue remediation in chat |
+| Maintainer | fdg | 2026-07-27 | approved autonomous security remediation in chat |

@@ -15,6 +15,7 @@ use crate::services::review::{
 };
 
 const DEFAULT_REVIEW_PROMPT: &str = include_str!("../../src/lib/defaultReviewPrompt.md");
+const HEADLESS_REVIEW_BOUNDARY: &str = "## Headless reviewer boundary\n\nReview only the supplied policy, context, evidence, and diff. Do not inspect the filesystem or run commands.";
 const MAX_UNTRACKED_FILE_BYTES: u64 = 512 * 1024;
 const MAX_UNTRACKED_TOTAL_BYTES: u64 = 2 * 1024 * 1024;
 
@@ -222,6 +223,7 @@ pub fn run(request: HeadlessReviewRequest) -> Result<HeadlessReviewExecution, He
         &resolved.diff,
         request.scope,
     );
+    let payload = format!("{payload}\n\n{HEADLESS_REVIEW_BOUNDARY}");
     let mut review_run = run_headless_review_native(HeadlessNativeReviewRequest {
         repo_path: repo_path.clone(),
         review_provider: review_run_provider(resolved.provider),
@@ -884,10 +886,12 @@ fn is_sensitive_untracked_path(relative: &str) -> bool {
     let file_name = path.file_name().and_then(OsStr::to_str).unwrap_or_default();
     let extension = path.extension().and_then(OsStr::to_str).unwrap_or_default();
     let normalized_file_name = file_name.replace('-', "_");
-    if normalized
-        .split('/')
-        .any(|component| matches!(component, ".ssh" | ".aws" | ".gnupg"))
-    {
+    if normalized.split('/').any(|component| {
+        matches!(
+            component,
+            ".ssh" | ".aws" | ".gnupg" | ".kube" | ".docker" | ".azure" | "gcloud" | ".configstore"
+        )
+    }) {
         return true;
     }
     if file_name == ".env"
@@ -901,6 +905,10 @@ fn is_sensitive_untracked_path(relative: &str) -> bool {
             ".npmrc"
                 | ".pypirc"
                 | ".netrc"
+                | ".git-credentials"
+                | ".authinfo"
+                | ".authinfo.gpg"
+                | ".boto"
                 | "id_rsa"
                 | "id_dsa"
                 | "id_ecdsa"
@@ -908,7 +916,14 @@ fn is_sensitive_untracked_path(relative: &str) -> bool {
                 | "credentials"
                 | "credentials.json"
                 | "auth.json"
+                | "application_default_credentials.json"
+                | "access_tokens.db"
+                | "accesstokens.json"
+                | "access_tokens.json"
         )
+        || file_name == "terraform.tfvars"
+        || file_name.ends_with(".auto.tfvars")
+        || file_name.ends_with(".tfvars.json")
     {
         return true;
     }
@@ -1057,6 +1072,7 @@ mod tests {
         requested_repo_identity, run, strip_private_evidence_payloads,
         validate_explicit_repo_identity, validate_requested_identity_shape, working_tree_diff,
         HeadlessReviewExecution, HeadlessReviewRequest, HeadlessReviewTarget, ReviewScope,
+        HEADLESS_REVIEW_BOUNDARY,
     };
     use crate::config::{RepoRef, ReviewProvider};
     use crate::services::review::{
@@ -1416,6 +1432,21 @@ mod tests {
     }
 
     #[test]
+    fn headless_payload_boundary_forbids_filesystem_inspection() {
+        let payload = build_review_payload(
+            "Review carefully.",
+            "Local changes",
+            "feature",
+            "HEAD",
+            "+change\n",
+            ReviewScope::WorkingTree,
+        );
+        let payload = format!("{payload}\n\n{HEADLESS_REVIEW_BOUNDARY}");
+
+        assert!(payload.contains("Do not inspect the filesystem or run commands."));
+    }
+
+    #[test]
     fn review_payload_preserves_diff_whitespace() {
         let diff = " diff header\n+trailing spaces  \n+   \n";
         let payload = build_review_payload(
@@ -1514,6 +1545,16 @@ mod tests {
         assert!(is_sensitive_untracked_path("config/env.production"));
         assert!(is_sensitive_untracked_path("config/service_account.json"));
         assert!(is_sensitive_untracked_path("config/client_secret.json"));
+        assert!(is_sensitive_untracked_path(".kube/config"));
+        assert!(is_sensitive_untracked_path(".docker/config.json"));
+        assert!(is_sensitive_untracked_path(".git-credentials"));
+        assert!(is_sensitive_untracked_path("terraform.tfvars"));
+        assert!(is_sensitive_untracked_path("production.auto.tfvars"));
+        assert!(is_sensitive_untracked_path(
+            ".config/gcloud/application_default_credentials.json"
+        ));
+        assert!(is_sensitive_untracked_path(".azure/accessTokens.json"));
+        assert!(is_sensitive_untracked_path("cache/accessTokens.json"));
         assert!(!is_sensitive_untracked_path("src/credentials.rs"));
         let _ = fs::remove_dir_all(repo);
     }
