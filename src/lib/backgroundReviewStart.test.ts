@@ -13,7 +13,7 @@ const detail: PullRequestDetail = {
   sourceBranch: "feature/publication",
   destinationBranch: "main",
   sourceCommitHash: "2222222222222222222222222222222222222222",
-  destinationCommitHash: null,
+  destinationCommitHash: "1111111111111111111111111111111111111111",
   createdOn: "",
   updatedOn: "",
 };
@@ -37,6 +37,7 @@ describe("buildBackgroundReviewStartArgs", () => {
       workspace: "acme",
       repo: "payments",
       id: 42,
+      reviewedBaseSha: "1111111111111111111111111111111111111111",
       reviewedHeadSha: "2222222222222222222222222222222222222222",
       sourceBranch: "feature/publication",
       destinationBranch: "main",

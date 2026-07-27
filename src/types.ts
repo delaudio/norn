@@ -310,6 +310,7 @@ export interface FindingPublicationRequest {
   workspace: string;
   repository: string;
   pullRequestId: number;
+  baseSha: string;
   headSha: string;
   findingFingerprint: string;
   anchor: {
@@ -393,6 +394,7 @@ export interface ReviewRun {
   prId: number;
   sourceBranch: string;
   destinationBranch: string;
+  reviewedBaseSha?: string | null;
   reviewedHeadSha?: string | null;
   status: AiReviewRunStatus;
   turnKind: AiReviewTurnKind;
@@ -714,6 +716,7 @@ export interface DraftComment {
   source?: "manual" | "aiFinding";
   findingRef?: ReviewFindingRef | null;
   publicationMode?: ReviewPublicationMode | null;
+  reviewBaseSha?: string | null;
   reviewHeadSha?: string | null;
 }
 

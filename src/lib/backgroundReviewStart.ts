@@ -39,6 +39,7 @@ export function buildBackgroundReviewStartArgs({
     payload,
     sourceBranch: detail.sourceBranch,
     destinationBranch: detail.destinationBranch,
+    reviewedBaseSha: detail.destinationCommitHash ?? null,
     reviewedHeadSha: detail.sourceCommitHash ?? null,
     aiProvider,
     claudeModel,

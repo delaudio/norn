@@ -30,6 +30,7 @@ describe("useDraftComments structured finding publication", () => {
             findingFingerprint: "fingerprint-1",
           },
           publicationMode: "inline",
+          reviewBaseSha: "1111111111111111111111111111111111111111",
           reviewHeadSha: "2222222222222222222222222222222222222222",
         })?.localId ?? "";
     });
@@ -75,6 +76,7 @@ describe("useDraftComments structured finding publication", () => {
             findingFingerprint: "fingerprint-1",
           },
           publicationMode: "inline",
+          reviewBaseSha: "1111111111111111111111111111111111111111",
           reviewHeadSha: "2222222222222222222222222222222222222222",
         })?.localId ?? "";
     });
@@ -117,6 +119,7 @@ describe("useDraftComments structured finding publication", () => {
           source: "manual",
           findingRef: null,
           publicationMode: null,
+          reviewBaseSha: null,
           reviewHeadSha: null,
         })?.localId ?? "";
     });

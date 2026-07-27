@@ -10,8 +10,8 @@ use crate::finding_publication::{
     dry_run_publication_identity, FindingAnchorSide, FindingPublicationError,
     FindingPublicationErrorCode, FindingPublicationRequest, FindingPublisher,
     ProviderCommentIdentity, ProviderInlineCommentApi, ProviderInlineCommentPayload,
-    ProviderPublicationApiError, ProviderPublicationTarget, PublishedCommentIdentity,
-    SqliteFindingPublicationStore,
+    ProviderPublicationApiError, ProviderPublicationTarget, ProviderPullRequestRevision,
+    PublishedCommentIdentity, SqliteFindingPublicationStore,
 };
 use crate::repo_config::{self, RepoReviewConfigLoadResult};
 use crate::review_event::PullRequestReviewEventProvider;
@@ -2088,11 +2088,11 @@ pub async fn get_pr_file_preview(
 pub struct StoredProviderInlineCommentApi;
 
 impl ProviderInlineCommentApi for StoredProviderInlineCommentApi {
-    fn current_head_sha(
+    fn current_revision(
         &self,
         target: &ProviderPublicationTarget,
-    ) -> Result<String, ProviderPublicationApiError> {
-        let head = match target.provider {
+    ) -> Result<ProviderPullRequestRevision, ProviderPublicationApiError> {
+        let detail = match target.provider {
             PullRequestReviewEventProvider::Bitbucket => {
                 let client = BitbucketClient::from_stored().map_err(map_publication_auth_error)?;
                 fetch_pull_request_detail(
@@ -2102,7 +2102,6 @@ impl ProviderInlineCommentApi for StoredProviderInlineCommentApi {
                     publication_pr_id(target.pull_request_id)?,
                 )
                 .map_err(map_publication_read_error)?
-                .source_commit_hash
             }
             PullRequestReviewEventProvider::Github => {
                 let client = GithubClient::from_stored().map_err(map_publication_auth_error)?;
@@ -2113,14 +2112,19 @@ impl ProviderInlineCommentApi for StoredProviderInlineCommentApi {
                     publication_pr_id(target.pull_request_id)?,
                 )
                 .map_err(map_publication_read_error)?
-                .source_commit_hash
             }
         };
-        head.ok_or_else(|| {
+        let head_sha = detail.source_commit_hash.ok_or_else(|| {
             ProviderPublicationApiError::unavailable(
                 "The provider did not return the pull request head commit.",
             )
-        })
+        })?;
+        let base_sha = detail.destination_commit_hash.ok_or_else(|| {
+            ProviderPublicationApiError::unavailable(
+                "The provider did not return the pull request destination commit.",
+            )
+        })?;
+        Ok(ProviderPullRequestRevision { head_sha, base_sha })
     }
 
     fn find_inline_comment(

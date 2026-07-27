@@ -667,6 +667,7 @@ impl TuiApp {
         let title = detail.title.clone();
         let source_branch = detail.source_branch.clone();
         let destination_branch = detail.destination_branch.clone();
+        let reviewed_base_sha = detail.destination_commit_hash.clone();
         let reviewed_head_sha = detail.source_commit_hash.clone();
         let prompt = match self.review_prompt_for_selected_repo() {
             Ok(prompt) => prompt,
@@ -687,6 +688,7 @@ impl TuiApp {
             title,
             source_branch,
             destination_branch,
+            reviewed_base_sha,
             reviewed_head_sha,
             payload,
             Some("Review this pull request from the terminal UI.".to_string()),

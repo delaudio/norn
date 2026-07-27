@@ -12,6 +12,7 @@ function publicationRequest(
     workspace: "Example-Workspace",
     repository: "Frontend-App",
     pullRequestId: 1731,
+    baseSha: "1111111111111111111111111111111111111111",
     headSha: "2222222222222222222222222222222222222222",
     findingFingerprint: `fingerprint-${crypto.randomUUID()}`,
     anchor: {
@@ -36,6 +37,7 @@ describe("publishMockReviewFinding", () => {
       ...request,
       workspace: request.workspace.toLowerCase(),
       repository: request.repository.toLowerCase(),
+      baseSha: request.baseSha.toUpperCase(),
       headSha: request.headSha.toUpperCase(),
     });
 
@@ -49,7 +51,17 @@ describe("publishMockReviewFinding", () => {
           headSha: "3333333333333333333333333333333333333333",
         }),
       ),
-    ).toThrow("head changed");
+    ).toThrow("pull request changed");
+  });
+
+  it("rejects publication against a stale reviewed base", () => {
+    expect(() =>
+      publishMockReviewFinding(
+        publicationRequest({
+          baseSha: "4444444444444444444444444444444444444444",
+        }),
+      ),
+    ).toThrow("pull request changed");
   });
 
   it("rejects oversized rendered markdown before creating a mock comment", () => {

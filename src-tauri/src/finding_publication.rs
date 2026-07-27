@@ -76,6 +76,8 @@ pub struct FindingPublicationRequest {
     pub pull_request_id: u64,
     /// Full immutable head SHA used by the review that produced the finding.
     pub head_sha: String,
+    /// Full immutable destination/base SHA used by the same review snapshot.
+    pub base_sha: String,
     pub finding_fingerprint: String,
     pub anchor: FindingLineRange,
     pub title: String,
@@ -107,6 +109,12 @@ pub struct ProviderCommentIdentity {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProviderPullRequestRevision {
+    pub head_sha: String,
+    pub base_sha: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProviderPublicationTarget {
     pub tenant_id: String,
     pub provider: PullRequestReviewEventProvider,
@@ -126,11 +134,11 @@ pub struct ProviderInlineCommentPayload {
 }
 
 pub trait ProviderInlineCommentApi {
-    /// Returns the provider's current pull-request head as a full commit SHA.
-    fn current_head_sha(
+    /// Returns the provider's current pull-request head and base commit IDs.
+    fn current_revision(
         &self,
         target: &ProviderPublicationTarget,
-    ) -> Result<String, ProviderPublicationApiError>;
+    ) -> Result<ProviderPullRequestRevision, ProviderPublicationApiError>;
 
     /// Finds an existing non-deleted inline comment containing `marker`.
     fn find_inline_comment(
@@ -344,11 +352,11 @@ where
         lease: &FindingPublicationLease,
     ) -> Result<PublishedCommentIdentity, FindingPublicationError> {
         let payload = request.provider_payload(marker);
-        let current_head = self
+        let current_revision = self
             .api
-            .current_head_sha(target)
+            .current_revision(target)
             .map_err(publication_api_error)?;
-        if !current_head.eq_ignore_ascii_case(&request.head_sha) {
+        if !request.matches_revision(&current_revision) {
             if let Some(stale) = self
                 .api
                 .find_comment_by_marker(target, marker)
@@ -384,22 +392,22 @@ where
                 .api
                 .create_inline_comment(target, &payload)
                 .map_err(publication_api_error)?;
-            let current_head = self
-                .api
-                .current_head_sha(target)
-                .map_err(publication_api_error)?;
-            if !current_head.eq_ignore_ascii_case(&request.head_sha) {
-                self.api
-                    .delete_comment(target, &published)
-                    .map_err(publication_api_error)?;
-                return Err(FindingPublicationError {
-                    code: FindingPublicationErrorCode::OutdatedAnchor,
-                    retryable: false,
-                    message: "The pull request changed while this finding was being published; the stale comment was removed.".to_string(),
-                });
-            }
             (published, true)
         };
+        let current_revision = self
+            .api
+            .current_revision(target)
+            .map_err(publication_api_error)?;
+        if !request.matches_revision(&current_revision) {
+            self.api
+                .delete_comment(target, &published)
+                .map_err(publication_api_error)?;
+            return Err(FindingPublicationError {
+                code: FindingPublicationErrorCode::OutdatedAnchor,
+                retryable: false,
+                message: "The pull request changed while this finding was being published; the stale comment was removed.".to_string(),
+            });
+        }
         if let Err(error) = self.store.complete(lease, &published) {
             if created_here {
                 let _ = self.api.delete_comment(target, &published);
@@ -419,6 +427,7 @@ impl FindingPublicationRequest {
             return Err("`pullRequestId` must be a positive integer".to_string());
         }
         validate_sha(&self.head_sha)?;
+        validate_sha(&self.base_sha)?;
         validate_identifier("findingFingerprint", &self.finding_fingerprint)?;
         validate_path(&self.anchor.path)?;
         if self.anchor.start_line == 0 || self.anchor.end_line == 0 {
@@ -460,6 +469,11 @@ impl FindingPublicationRequest {
         }
     }
 
+    fn matches_revision(&self, revision: &ProviderPullRequestRevision) -> bool {
+        revision.head_sha.eq_ignore_ascii_case(&self.head_sha)
+            && revision.base_sha.eq_ignore_ascii_case(&self.base_sha)
+    }
+
     fn published_identity(
         &self,
         comment_id: String,
@@ -484,6 +498,7 @@ impl FindingPublicationRequest {
 pub fn finding_marker(request: &FindingPublicationRequest) -> String {
     let pull_request_id = request.pull_request_id.to_string();
     let head_sha = request.head_sha.to_ascii_lowercase();
+    let base_sha = request.base_sha.to_ascii_lowercase();
     let workspace = request.workspace.to_ascii_lowercase();
     let repository = request.repository.to_ascii_lowercase();
     let mut hasher = Sha256::new();
@@ -493,6 +508,7 @@ pub fn finding_marker(request: &FindingPublicationRequest) -> String {
         workspace.as_str(),
         repository.as_str(),
         pull_request_id.as_str(),
+        base_sha.as_str(),
         head_sha.as_str(),
         request.finding_fingerprint.as_str(),
     ] {
@@ -638,6 +654,7 @@ mod tests {
 
     use super::*;
 
+    const BASE_SHA: &str = "1111111111111111111111111111111111111111";
     const HEAD_SHA: &str = "2222222222222222222222222222222222222222";
 
     #[derive(Debug, Default)]
@@ -648,6 +665,7 @@ mod tests {
     #[derive(Debug)]
     struct MockProviderState {
         current_head_sha: String,
+        current_base_sha: String,
         comments: HashMap<String, ProviderCommentIdentity>,
         mismatched_comments: HashMap<String, ProviderCommentIdentity>,
         payloads: Vec<(PullRequestReviewEventProvider, ProviderInlineCommentPayload)>,
@@ -655,6 +673,7 @@ mod tests {
         fail_next_delete: bool,
         orphan_next_write: bool,
         advance_head_on_write: bool,
+        advance_head_on_find: bool,
         deleted_comment_ids: Vec<String>,
     }
 
@@ -662,6 +681,7 @@ mod tests {
         fn default() -> Self {
             Self {
                 current_head_sha: HEAD_SHA.to_string(),
+                current_base_sha: BASE_SHA.to_string(),
                 comments: HashMap::new(),
                 mismatched_comments: HashMap::new(),
                 payloads: Vec::new(),
@@ -669,17 +689,22 @@ mod tests {
                 fail_next_delete: false,
                 orphan_next_write: false,
                 advance_head_on_write: false,
+                advance_head_on_find: false,
                 deleted_comment_ids: Vec::new(),
             }
         }
     }
 
     impl ProviderInlineCommentApi for MockProviderApi {
-        fn current_head_sha(
+        fn current_revision(
             &self,
             _target: &ProviderPublicationTarget,
-        ) -> Result<String, ProviderPublicationApiError> {
-            Ok(self.state.lock().unwrap().current_head_sha.clone())
+        ) -> Result<ProviderPullRequestRevision, ProviderPublicationApiError> {
+            let state = self.state.lock().unwrap();
+            Ok(ProviderPullRequestRevision {
+                head_sha: state.current_head_sha.clone(),
+                base_sha: state.current_base_sha.clone(),
+            })
         }
 
         fn find_inline_comment(
@@ -688,7 +713,13 @@ mod tests {
             marker: &str,
             _expected: &ProviderInlineCommentPayload,
         ) -> Result<Option<ProviderCommentIdentity>, ProviderPublicationApiError> {
-            Ok(self.state.lock().unwrap().comments.get(marker).cloned())
+            let mut state = self.state.lock().unwrap();
+            let existing = state.comments.get(marker).cloned();
+            if existing.is_some() && state.advance_head_on_find {
+                state.advance_head_on_find = false;
+                state.current_head_sha = "3333333333333333333333333333333333333333".to_string();
+            }
+            Ok(existing)
         }
 
         fn find_comment_by_marker(
@@ -864,6 +895,7 @@ mod tests {
             repository: "payments".to_string(),
             pull_request_id: 42,
             head_sha: HEAD_SHA.to_string(),
+            base_sha: BASE_SHA.to_string(),
             finding_fingerprint: "finding:src/lib.rs:12:null-check".to_string(),
             anchor: FindingLineRange {
                 path: "src/lib.rs".to_string(),
@@ -968,6 +1000,22 @@ mod tests {
     }
 
     #[test]
+    fn base_advance_before_write_rejects_the_review_snapshot() {
+        let publisher =
+            FindingPublisher::new(MockProviderApi::default(), MockPublicationStore::default());
+        publisher.api.state.lock().unwrap().current_base_sha =
+            "4444444444444444444444444444444444444444".to_string();
+
+        let error = publisher
+            .publish(&request(PullRequestReviewEventProvider::Github))
+            .expect_err("outdated base");
+
+        assert_eq!(error.code, FindingPublicationErrorCode::OutdatedAnchor);
+        assert!(!error.retryable);
+        assert!(publisher.api.state.lock().unwrap().payloads.is_empty());
+    }
+
+    #[test]
     fn oversized_rendered_markdown_is_rejected_before_publication_state_changes() {
         let publisher =
             FindingPublisher::new(MockProviderApi::default(), MockPublicationStore::default());
@@ -998,6 +1046,33 @@ mod tests {
         assert_eq!(error.code, FindingPublicationErrorCode::OutdatedAnchor);
         let state = publisher.api.state.lock().unwrap();
         assert_eq!(state.deleted_comment_ids, vec!["comment-1"]);
+        assert!(state.comments.is_empty());
+    }
+
+    #[test]
+    fn head_advance_during_existing_comment_recovery_deletes_the_stale_comment() {
+        let publisher =
+            FindingPublisher::new(MockProviderApi::default(), MockPublicationStore::default());
+        let request = request(PullRequestReviewEventProvider::Github);
+        let marker = finding_marker(&request);
+        {
+            let mut state = publisher.api.state.lock().unwrap();
+            state.comments.insert(
+                marker,
+                ProviderCommentIdentity {
+                    comment_id: "comment-existing".to_string(),
+                },
+            );
+            state.advance_head_on_find = true;
+        }
+
+        let error = publisher
+            .publish(&request)
+            .expect_err("recovered comment must be post-fenced");
+
+        assert_eq!(error.code, FindingPublicationErrorCode::OutdatedAnchor);
+        let state = publisher.api.state.lock().unwrap();
+        assert_eq!(state.deleted_comment_ids, vec!["comment-existing"]);
         assert!(state.comments.is_empty());
     }
 
@@ -1105,6 +1180,9 @@ mod tests {
         request.head_sha = "3333333333333333333333333333333333333333".to_string();
         assert_ne!(marker, finding_marker(&request));
         request.head_sha = HEAD_SHA.to_string();
+        request.base_sha = "4444444444444444444444444444444444444444".to_string();
+        assert_ne!(marker, finding_marker(&request));
+        request.base_sha = BASE_SHA.to_string();
         request.tenant_id = "tenant-other".to_string();
         assert_ne!(marker, finding_marker(&request));
 

@@ -280,6 +280,7 @@ mod tauri_ipc_smoke {
                         "workspace": "acme",
                         "repository": "payments",
                         "pullRequestId": 42,
+                        "baseSha": "1111111111111111111111111111111111111111",
                         "headSha": "2222222222222222222222222222222222222222",
                         "findingFingerprint": "finding-1",
                         "anchor": {

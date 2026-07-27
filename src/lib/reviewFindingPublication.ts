@@ -71,9 +71,17 @@ export function buildFindingPublicationRequest({
   if (!headSha) {
     throw new Error("The reviewed head commit is unavailable; refresh and restage the finding.");
   }
+  const baseSha = reviewRun.reviewedBaseSha?.trim();
+  if (!baseSha) {
+    throw new Error("The reviewed base commit is unavailable; refresh and restage the finding.");
+  }
   const draftHeadSha = draft.reviewHeadSha?.trim();
   if (!draftHeadSha || draftHeadSha.toLowerCase() !== headSha.toLowerCase()) {
     throw new Error("The staged draft does not belong to the reviewed head commit.");
+  }
+  const draftBaseSha = draft.reviewBaseSha?.trim();
+  if (!draftBaseSha || draftBaseSha.toLowerCase() !== baseSha.toLowerCase()) {
+    throw new Error("The staged draft does not belong to the reviewed base commit.");
   }
   const sameTarget =
     provider === reviewRun.provider &&
@@ -112,6 +120,7 @@ export function buildFindingPublicationRequest({
     workspace: reviewRun.workspace,
     repository: reviewRun.repo,
     pullRequestId: reviewRun.prId,
+    baseSha,
     headSha,
     findingFingerprint: finding.fingerprint,
     anchor: {

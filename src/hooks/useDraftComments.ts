@@ -35,6 +35,7 @@ export type NewDraft = Pick<
   | "source"
   | "findingRef"
   | "publicationMode"
+  | "reviewBaseSha"
   | "reviewHeadSha"
 >;
 export type DraftPatch = Partial<Pick<DraftComment, "raw">>;
@@ -87,6 +88,7 @@ function materializeDraft(prId: number, draft: NewDraft, index: number): DraftCo
     source: draft.source ?? "manual",
     findingRef: draft.findingRef ?? null,
     publicationMode: draft.publicationMode ?? null,
+    reviewBaseSha: draft.reviewBaseSha ?? null,
     reviewHeadSha: draft.reviewHeadSha ?? null,
   };
 }

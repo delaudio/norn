@@ -23,6 +23,7 @@ const request: FindingPublicationRequest = {
   workspace: "acme",
   repository: "payments",
   pullRequestId: 42,
+  baseSha: "1111111111111111111111111111111111111111",
   headSha: "2222222222222222222222222222222222222222",
   findingFingerprint: "finding-1",
   anchor: {
@@ -60,6 +61,7 @@ function trackedStore(): AiReviewStore {
         prId: 42,
         sourceBranch: "feature/review",
         destinationBranch: "main",
+        reviewedBaseSha: request.baseSha,
         reviewedHeadSha: request.headSha,
         status: "succeeded",
         turnKind: "initial",

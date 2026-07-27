@@ -16,6 +16,7 @@ const previousRun: ReviewRun = {
   prId: 1020,
   sourceBranch: "feature/invoice-lines-v2-bff-mock",
   destinationBranch: "develop",
+  reviewedBaseSha: "1111111111111111111111111111111111111111",
   reviewedHeadSha: "2222222222222222222222222222222222222222",
   status: "succeeded",
   turnKind: "initial",
@@ -66,6 +67,7 @@ const activeRun: ReviewRun = {
   prId: 1020,
   sourceBranch: "feature/invoice-lines-v2-bff-mock",
   destinationBranch: "develop",
+  reviewedBaseSha: "1111111111111111111111111111111111111111",
   reviewedHeadSha: "2222222222222222222222222222222222222222",
   status: "succeeded",
   turnKind: "reply",
@@ -153,6 +155,7 @@ describe("buildFindingPublicationRequest", () => {
         findingFingerprint: "fingerprint-1",
       },
       publicationMode: "inline",
+      reviewBaseSha: "1111111111111111111111111111111111111111",
       reviewHeadSha: "2222222222222222222222222222222222222222",
     };
 
@@ -171,7 +174,7 @@ describe("buildFindingPublicationRequest", () => {
         sourceBranch: "feature/invoice-lines",
         destinationBranch: "develop",
         sourceCommitHash: "2222222222222222222222222222222222222222",
-        destinationCommitHash: null,
+        destinationCommitHash: "1111111111111111111111111111111111111111",
         createdOn: "",
         updatedOn: "",
       },
@@ -186,6 +189,7 @@ describe("buildFindingPublicationRequest", () => {
       workspace: "example-workspace",
       repository: "backend-api",
       pullRequestId: 1020,
+      baseSha: "1111111111111111111111111111111111111111",
       headSha: "2222222222222222222222222222222222222222",
       findingFingerprint: "fingerprint-1",
       anchor: {
@@ -216,6 +220,7 @@ describe("buildFindingPublicationRequest", () => {
         findingFingerprint: "fingerprint-1",
       },
       publicationMode: "inline",
+      reviewBaseSha: "1111111111111111111111111111111111111111",
       reviewHeadSha: "3333333333333333333333333333333333333333",
     };
     const pr = {
@@ -229,7 +234,7 @@ describe("buildFindingPublicationRequest", () => {
       sourceBranch: "feature/invoice-lines",
       destinationBranch: "develop",
       sourceCommitHash: "2222222222222222222222222222222222222222",
-      destinationCommitHash: null,
+      destinationCommitHash: "1111111111111111111111111111111111111111",
       createdOn: "",
       updatedOn: "",
     };
@@ -247,6 +252,21 @@ describe("buildFindingPublicationRequest", () => {
 
     expect(() =>
       buildFindingPublicationRequest({
+        provider: "bitbucket",
+        workspace: "example-workspace",
+        repo: "backend-api",
+        pr,
+        reviewRun: activeRun,
+        draft: {
+          ...draft,
+          reviewBaseSha: "4444444444444444444444444444444444444444",
+          reviewHeadSha: activeRun.reviewedHeadSha ?? null,
+        },
+      }),
+    ).toThrow("does not belong to the reviewed base");
+
+    expect(() =>
+      buildFindingPublicationRequest({
         provider: "github",
         workspace: "other-workspace",
         repo: "backend-api",
@@ -254,6 +274,7 @@ describe("buildFindingPublicationRequest", () => {
         reviewRun: activeRun,
         draft: {
           ...draft,
+          reviewBaseSha: activeRun.reviewedBaseSha ?? null,
           reviewHeadSha: activeRun.reviewedHeadSha ?? null,
         },
       }),

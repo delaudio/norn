@@ -698,6 +698,7 @@ function findingPublicationKey(request: FindingPublicationRequest): string {
     request.workspace.toLowerCase(),
     request.repository.toLowerCase(),
     request.pullRequestId,
+    request.baseSha.toLowerCase(),
     request.headSha.toLowerCase(),
     request.findingFingerprint,
   ]);
@@ -720,7 +721,11 @@ export function publishMockReviewFinding(
   }
 
   const headSha = request.headSha.toLowerCase();
-  if (!/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(headSha)) {
+  const baseSha = request.baseSha.toLowerCase();
+  if (
+    !/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(headSha) ||
+    !/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(baseSha)
+  ) {
     throw new Error("Structured finding publication requires a full commit SHA.");
   }
   if (request.pullRequestId <= 0 || !Number.isInteger(request.pullRequestId)) {
@@ -746,12 +751,13 @@ export function publishMockReviewFinding(
   }
 
   const currentHead = mockPullRequestDetailState.sourceCommitHash?.toLowerCase();
-  if (!currentHead) {
-    throw new Error("The current pull request head is unavailable in the browser mock.");
+  const currentBase = mockPullRequestDetailState.destinationCommitHash?.toLowerCase();
+  if (!currentHead || !currentBase) {
+    throw new Error("The current pull request revision is unavailable in the browser mock.");
   }
-  if (headSha !== currentHead) {
+  if (headSha !== currentHead || baseSha !== currentBase) {
     throw new Error(
-      "The pull request head changed after this review. Refresh and rerun the review before publishing.",
+      "The pull request changed after this review. Refresh and rerun the review before publishing.",
     );
   }
 

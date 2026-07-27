@@ -641,6 +641,45 @@ fn migrate(conn: &mut Connection) -> Result<(), String> {
         )
         .map_err(|error| error.to_string())?;
     migration.commit().map_err(|error| error.to_string())?;
+
+    let migration = conn
+        .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+        .map_err(|error| error.to_string())?;
+    let has_publication_base_sha = migration
+        .prepare("PRAGMA table_info(shared_finding_publications)")
+        .and_then(|mut statement| {
+            let names = statement
+                .query_map([], |row| row.get::<_, String>(1))?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            Ok(names.iter().any(|name| name == "base_sha"))
+        })
+        .map_err(|error| error.to_string())?;
+    if !has_publication_base_sha {
+        migration
+            .execute(
+                "ALTER TABLE shared_finding_publications ADD COLUMN base_sha TEXT NOT NULL DEFAULT ''",
+                [],
+            )
+            .map_err(|error| error.to_string())?;
+    }
+    migration
+        .execute_batch(
+            r#"
+            DROP INDEX IF EXISTS idx_shared_finding_publications_target;
+            CREATE INDEX idx_shared_finding_publications_target
+              ON shared_finding_publications(
+                tenant_id, provider, workspace, repo, pr_id, base_sha, head_sha
+              );
+            "#,
+        )
+        .map_err(|error| error.to_string())?;
+    migration
+        .execute(
+            "INSERT OR IGNORE INTO schema_migrations(version) VALUES (7)",
+            [],
+        )
+        .map_err(|error| error.to_string())?;
+    migration.commit().map_err(|error| error.to_string())?;
     Ok(())
 }
 
@@ -2353,6 +2392,7 @@ pub(crate) fn reserve_finding_publication(
         return Err("Publication marker and lease token are required.".to_string());
     }
     let pr_id = shared_review_pr_id(request.pull_request_id)?;
+    let canonical_base_sha = request.base_sha.to_ascii_lowercase();
     let canonical_head_sha = request.head_sha.to_ascii_lowercase();
     let canonical_workspace = request.workspace.to_ascii_lowercase();
     let canonical_repository = request.repository.to_ascii_lowercase();
@@ -2365,7 +2405,7 @@ pub(crate) fn reserve_finding_publication(
     let existing = transaction
         .query_row(
             r#"
-            SELECT tenant_id, provider, workspace, repo, pr_id, head_sha,
+            SELECT tenant_id, provider, workspace, repo, pr_id, base_sha, head_sha,
                    finding_fingerprint, status, lease_expires_at_ms, comment_id
             FROM shared_finding_publications
             WHERE marker = ?1
@@ -2381,8 +2421,9 @@ pub(crate) fn reserve_finding_publication(
                     row.get::<_, String>(5)?,
                     row.get::<_, String>(6)?,
                     row.get::<_, String>(7)?,
-                    row.get::<_, Option<i64>>(8)?,
-                    row.get::<_, Option<String>>(9)?,
+                    row.get::<_, String>(8)?,
+                    row.get::<_, Option<i64>>(9)?,
+                    row.get::<_, Option<String>>(10)?,
                 ))
             },
         )
@@ -2395,6 +2436,7 @@ pub(crate) fn reserve_finding_publication(
         workspace,
         repo,
         stored_pr_id,
+        base_sha,
         head_sha,
         finding_fingerprint,
         status,
@@ -2407,6 +2449,7 @@ pub(crate) fn reserve_finding_publication(
             || !workspace.eq_ignore_ascii_case(&request.workspace)
             || !repo.eq_ignore_ascii_case(&request.repository)
             || stored_pr_id != pr_id
+            || !base_sha.eq_ignore_ascii_case(&request.base_sha)
             || !head_sha.eq_ignore_ascii_case(&request.head_sha)
             || finding_fingerprint != request.finding_fingerprint
         {
@@ -2446,13 +2489,13 @@ pub(crate) fn reserve_finding_publication(
             .execute(
                 r#"
                 INSERT INTO shared_finding_publications (
-                  marker, tenant_id, provider, workspace, repo, pr_id, head_sha,
-                  finding_fingerprint, status, lease_token, lease_expires_at_ms,
-                  comment_id, created_at_ms, updated_at_ms
+                  marker, tenant_id, provider, workspace, repo, pr_id, base_sha,
+                  head_sha, finding_fingerprint, status, lease_token,
+                  lease_expires_at_ms, comment_id, created_at_ms, updated_at_ms
                 )
                 VALUES (
-                  ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'publishing', ?9, ?10,
-                  NULL, ?11, ?11
+                  ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 'publishing', ?10, ?11,
+                  NULL, ?12, ?12
                 )
                 "#,
                 params![
@@ -2462,6 +2505,7 @@ pub(crate) fn reserve_finding_publication(
                     canonical_workspace,
                     canonical_repository,
                     pr_id,
+                    canonical_base_sha,
                     canonical_head_sha,
                     request.finding_fingerprint,
                     lease_token,
@@ -3232,6 +3276,7 @@ mod tests {
             workspace: "acme".to_string(),
             repository: "payments".to_string(),
             pull_request_id: 42,
+            base_sha: "1111111111111111111111111111111111111111".to_string(),
             head_sha: "2222222222222222222222222222222222222222".to_string(),
             finding_fingerprint: "finding:src/lib.rs:12".to_string(),
             anchor: FindingLineRange {
@@ -4015,7 +4060,91 @@ mod tests {
                 .expect("query migrations")
                 .collect::<rusqlite::Result<_>>()
                 .expect("read migration versions");
-            assert_eq!(versions, vec![1, 2, 3, 4, 5, 6]);
+            assert_eq!(versions, vec![1, 2, 3, 4, 5, 6, 7]);
+        });
+    }
+
+    #[test]
+    fn v6_publication_database_adds_base_sha_without_losing_rows() {
+        with_test_data_dir("finding-publication-v6-migration", |dir| {
+            fs::create_dir_all(dir).expect("create v6 data directory");
+            let db = dir.join(DB_FILE);
+            let conn = Connection::open(&db).expect("open v6 database");
+            conn.execute_batch(
+                r#"
+                CREATE TABLE schema_migrations (
+                  version INTEGER PRIMARY KEY,
+                  applied_at TEXT NOT NULL DEFAULT (strftime('%s','now') || '000')
+                );
+                INSERT INTO schema_migrations(version)
+                VALUES (1), (2), (3), (4), (5), (6);
+
+                CREATE TABLE shared_finding_publications (
+                  marker TEXT PRIMARY KEY,
+                  tenant_id TEXT NOT NULL,
+                  provider TEXT NOT NULL,
+                  workspace TEXT NOT NULL,
+                  repo TEXT NOT NULL,
+                  pr_id INTEGER NOT NULL,
+                  head_sha TEXT NOT NULL,
+                  finding_fingerprint TEXT NOT NULL,
+                  status TEXT NOT NULL,
+                  lease_token TEXT,
+                  lease_expires_at_ms INTEGER,
+                  comment_id TEXT,
+                  created_at_ms INTEGER NOT NULL,
+                  updated_at_ms INTEGER NOT NULL
+                );
+                CREATE INDEX idx_shared_finding_publications_target
+                  ON shared_finding_publications(
+                    tenant_id, provider, workspace, repo, pr_id, head_sha
+                  );
+                INSERT INTO shared_finding_publications (
+                  marker, tenant_id, provider, workspace, repo, pr_id, head_sha,
+                  finding_fingerprint, status, lease_token, lease_expires_at_ms,
+                  comment_id, created_at_ms, updated_at_ms
+                ) VALUES (
+                  'legacy-marker', 'tenant-acme', 'github', 'acme', 'payments',
+                  42, '2222222222222222222222222222222222222222',
+                  'legacy-finding', 'published', NULL, NULL, 'comment-1', 1000, 1000
+                );
+                "#,
+            )
+            .expect("create v6 publication schema");
+            drop(conn);
+
+            let migrated = open().expect("migrate v6 publication schema");
+            let (base_sha, comment_id): (String, String) = migrated
+                .query_row(
+                    r#"
+                    SELECT base_sha, comment_id
+                    FROM shared_finding_publications
+                    WHERE marker = 'legacy-marker'
+                    "#,
+                    [],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .expect("load migrated publication");
+            assert_eq!(base_sha, "");
+            assert_eq!(comment_id, "comment-1");
+            let index_sql: String = migrated
+                .query_row(
+                    r#"
+                    SELECT sql FROM sqlite_master
+                    WHERE type = 'index'
+                      AND name = 'idx_shared_finding_publications_target'
+                    "#,
+                    [],
+                    |row| row.get(0),
+                )
+                .expect("load migrated publication index");
+            assert!(index_sql.contains("base_sha"));
+            let version: i64 = migrated
+                .query_row("SELECT MAX(version) FROM schema_migrations", [], |row| {
+                    row.get(0)
+                })
+                .expect("load latest migration");
+            assert_eq!(version, 7);
         });
     }
 
