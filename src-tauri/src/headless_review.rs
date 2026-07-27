@@ -9,7 +9,7 @@ use serde::Serialize;
 use crate::config::{self, AiProvider, ReviewProvider};
 use crate::local_repo;
 use crate::repo_config::{self, ReviewSeverity};
-use crate::services::bitbucket::{get_pr_diff_native, get_pull_request_native};
+use crate::services::bitbucket::get_stable_pull_request_review_snapshot_native;
 use crate::services::review::{
     run_headless_review_native, HeadlessNativeReviewError, HeadlessNativeReviewRequest,
     ReviewFinding, ReviewFindingSeverity, ReviewProvider as ReviewRunProvider, ReviewRun,
@@ -630,10 +630,14 @@ fn resolve_target(
             let pr_id = request
                 .pr_id
                 .ok_or_else(|| HeadlessReviewError::target("`--pr` is required for PR scope."))?;
-            let detail = get_pull_request_native(Some(provider), &workspace, &repo, pr_id)
-                .map_err(map_provider_target_error)?;
-            let diff = get_pr_diff_native(Some(provider), &workspace, &repo, pr_id)
-                .map_err(map_provider_target_error)?;
+            let snapshot = get_stable_pull_request_review_snapshot_native(
+                Some(provider),
+                &workspace,
+                &repo,
+                pr_id,
+            )
+            .map_err(map_provider_target_error)?;
+            let detail = snapshot.detail;
             Ok(ResolvedTarget {
                 target: HeadlessReviewTarget {
                     scope: request.scope.label().to_string(),
@@ -652,7 +656,7 @@ fn resolve_target(
                 reviewed_head_sha: detail.source_commit_hash,
                 source_branch: detail.source_branch,
                 destination_branch: detail.destination_branch,
-                diff,
+                diff: snapshot.diff,
                 warnings: Vec::new(),
             })
         }

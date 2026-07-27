@@ -779,6 +779,11 @@ pub struct PullRequestDetail {
     pub updated_on: String,
 }
 
+pub struct PullRequestReviewSnapshot {
+    pub detail: PullRequestDetail,
+    pub diff: String,
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DiffstatEntry {
@@ -1988,6 +1993,59 @@ pub fn get_pr_diff_native(
     }
 }
 
+fn required_commit_matches(left: &Option<String>, right: &Option<String>) -> bool {
+    match (
+        left.as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty()),
+        right
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty()),
+    ) {
+        (Some(left), Some(right)) => left.eq_ignore_ascii_case(right),
+        _ => false,
+    }
+}
+
+fn validate_stable_pull_request_snapshot(
+    before: &PullRequestDetail,
+    after: &PullRequestDetail,
+) -> Result<(), String> {
+    let stable = before.id == after.id
+        && before.source_branch == after.source_branch
+        && before.destination_branch == after.destination_branch
+        && required_commit_matches(&before.source_commit_hash, &after.source_commit_hash)
+        && required_commit_matches(
+            &before.destination_commit_hash,
+            &after.destination_commit_hash,
+        );
+    if stable {
+        Ok(())
+    } else {
+        Err(
+            "The pull request changed while its review snapshot was loading; rerun the review."
+                .to_string(),
+        )
+    }
+}
+
+pub fn get_stable_pull_request_review_snapshot_native(
+    provider: Option<ReviewProvider>,
+    workspace: &str,
+    repo: &str,
+    id: u32,
+) -> Result<PullRequestReviewSnapshot, String> {
+    let before = get_pull_request_native(provider, workspace, repo, id)?;
+    let diff = get_pr_diff_native(provider, workspace, repo, id)?;
+    let after = get_pull_request_native(provider, workspace, repo, id)?;
+    validate_stable_pull_request_snapshot(&before, &after)?;
+    Ok(PullRequestReviewSnapshot {
+        detail: after,
+        diff,
+    })
+}
+
 #[tauri::command]
 pub async fn get_pr_file_preview(
     provider: Option<ReviewProvider>,
@@ -3125,5 +3183,78 @@ mod tests {
             detail.destination_commit_hash.as_deref(),
             Some("destination-sha")
         );
+    }
+
+    fn review_snapshot_detail(
+        source_branch: &str,
+        destination_branch: &str,
+        source_commit_hash: Option<&str>,
+        destination_commit_hash: Option<&str>,
+    ) -> PullRequestDetail {
+        PullRequestDetail {
+            id: 42,
+            title: "Stable review".to_string(),
+            description_raw: String::new(),
+            state: "OPEN".to_string(),
+            draft: false,
+            author_display_name: "Reviewer".to_string(),
+            reviewers: Vec::new(),
+            source_branch: source_branch.to_string(),
+            destination_branch: destination_branch.to_string(),
+            source_commit_hash: source_commit_hash.map(ToOwned::to_owned),
+            destination_commit_hash: destination_commit_hash.map(ToOwned::to_owned),
+            created_on: String::new(),
+            updated_on: String::new(),
+        }
+    }
+
+    #[test]
+    fn stable_review_snapshot_requires_matching_head_base_and_branches() {
+        let before = review_snapshot_detail(
+            "feature/review",
+            "main",
+            Some("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"),
+            Some("BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"),
+        );
+        let same = review_snapshot_detail(
+            "feature/review",
+            "main",
+            Some("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
+            Some("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"),
+        );
+        assert!(validate_stable_pull_request_snapshot(&before, &same).is_ok());
+
+        for changed in [
+            review_snapshot_detail(
+                "feature/review",
+                "main",
+                Some("cccccccccccccccccccccccccccccccccccccccc"),
+                Some("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"),
+            ),
+            review_snapshot_detail(
+                "feature/review",
+                "main",
+                Some("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
+                Some("dddddddddddddddddddddddddddddddddddddddd"),
+            ),
+            review_snapshot_detail(
+                "feature/review",
+                "release",
+                Some("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
+                Some("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"),
+            ),
+        ] {
+            assert!(validate_stable_pull_request_snapshot(&before, &changed)
+                .unwrap_err()
+                .contains("changed while its review snapshot was loading"));
+        }
+    }
+
+    #[test]
+    fn stable_review_snapshot_rejects_missing_provider_commit_ids() {
+        let before = review_snapshot_detail("feature/review", "main", None, None);
+        let after = review_snapshot_detail("feature/review", "main", None, None);
+
+        assert!(validate_stable_pull_request_snapshot(&before, &after).is_err());
     }
 }
