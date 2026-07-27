@@ -5,9 +5,13 @@ const ALLOWED_FILES = new Set([
   "src/mock-tauri/mock-handlers.ts",
 ]);
 
-function extractArgumentObject(source: string, start: number): string | null {
-  const openingBrace = source.indexOf("{", start);
-  if (openingBrace === -1) return null;
+function extractInlineObjectArgument(source: string, start: number): string | null {
+  let openingBrace = start;
+  while (/\s/.test(source[openingBrace] ?? "")) openingBrace += 1;
+  if (source[openingBrace] !== ",") return null;
+  openingBrace += 1;
+  while (/\s/.test(source[openingBrace] ?? "")) openingBrace += 1;
+  if (source[openingBrace] !== "{") return null;
 
   let depth = 0;
   let quote: "'" | '"' | "`" | null = null;
@@ -74,7 +78,7 @@ export default {
 
             for (const call of calls) {
               const callIndex = call.index ?? 0;
-              const argument = extractArgumentObject(source, callIndex + call[0].length);
+              const argument = extractInlineObjectArgument(source, callIndex + call[0].length);
               if (!argument || !/\bskipAnalyzers\s*:\s*true\b/.test(argument)) {
                 ctx.report.violation({
                   message: "Every GUI start_inline_review call must send skipAnalyzers: true.",

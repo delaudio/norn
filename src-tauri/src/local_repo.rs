@@ -293,13 +293,33 @@ pub fn configured_or_discovered_repo(workspace: &str, repo: &str) -> Option<Path
 
 pub fn resolve_local_repo(workspace: &str, repo: &str) -> Result<PathBuf, String> {
     let cfg = config::load();
-    let configured = cfg
+    let provider = cfg
         .repos
         .iter()
-        .find(|candidate| candidate.workspace == workspace && candidate.repo == repo);
-    let provider = configured
+        .find(|candidate| candidate.workspace == workspace && candidate.repo == repo)
         .map(|candidate| candidate.provider)
         .unwrap_or(cfg.review_provider);
+    resolve_local_repo_for_provider_with_config(&cfg, provider, workspace, repo)
+}
+
+pub fn resolve_local_repo_for_provider(
+    provider: ReviewProvider,
+    workspace: &str,
+    repo: &str,
+) -> Result<PathBuf, String> {
+    let cfg = config::load();
+    resolve_local_repo_for_provider_with_config(&cfg, provider, workspace, repo)
+}
+
+fn resolve_local_repo_for_provider_with_config(
+    cfg: &config::AppConfig,
+    provider: ReviewProvider,
+    workspace: &str,
+    repo: &str,
+) -> Result<PathBuf, String> {
+    let configured = cfg.repos.iter().find(|candidate| {
+        candidate.provider == provider && candidate.workspace == workspace && candidate.repo == repo
+    });
     let configured = configured.and_then(configured_repo_path);
     let mut configured_error = None;
 
@@ -430,6 +450,52 @@ mod tests {
             fs::canonicalize(&path).expect("expected path")
         );
 
+        fs::remove_dir_all(path).expect("cleanup temp repo");
+    }
+
+    #[test]
+    fn resolves_configured_repo_for_explicit_provider() {
+        let path = temp_path("configured-provider");
+        fs::create_dir_all(&path).expect("temp repo dir");
+        Command::new("/usr/bin/git")
+            .arg("init")
+            .arg(&path)
+            .output()
+            .expect("git init");
+        Command::new("/usr/bin/git")
+            .arg("-C")
+            .arg(&path)
+            .args([
+                "remote",
+                "add",
+                "origin",
+                "git@github.com:lachesi-hq/lachesi.git",
+            ])
+            .output()
+            .expect("git remote add");
+        let cfg = config::AppConfig {
+            repos: vec![config::RepoRef {
+                provider: ReviewProvider::Github,
+                workspace: "lachesi-hq".to_string(),
+                repo: "lachesi".to_string(),
+                local_path: Some(path.display().to_string()),
+            }],
+            review_provider: ReviewProvider::Bitbucket,
+            ..config::AppConfig::default()
+        };
+
+        let resolved = resolve_local_repo_for_provider_with_config(
+            &cfg,
+            ReviewProvider::Github,
+            "lachesi-hq",
+            "lachesi",
+        )
+        .expect("configured GitHub repo");
+
+        assert_eq!(
+            fs::canonicalize(resolved).expect("resolved path"),
+            fs::canonicalize(&path).expect("expected path")
+        );
         fs::remove_dir_all(path).expect("cleanup temp repo");
     }
 

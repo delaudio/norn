@@ -37,7 +37,7 @@ impl ReviewScope {
 
 #[derive(Debug, Clone)]
 pub struct HeadlessReviewRequest {
-    pub repo_path: PathBuf,
+    pub repo_path: Option<PathBuf>,
     pub scope: ReviewScope,
     pub base: Option<String>,
     pub workspace: Option<String>,
@@ -68,6 +68,13 @@ impl HeadlessReviewError {
     fn target(message: impl Into<String>) -> Self {
         Self {
             exit_code: 4,
+            message: message.into(),
+        }
+    }
+
+    fn auth(message: impl Into<String>) -> Self {
+        Self {
+            exit_code: 3,
             message: message.into(),
         }
     }
@@ -139,7 +146,7 @@ struct ResolvedTarget {
 }
 
 pub fn run(request: HeadlessReviewRequest) -> Result<HeadlessReviewExecution, HeadlessReviewError> {
-    let repo_path = resolve_repo_root(&request.repo_path)?;
+    let repo_path = resolve_repo_root_for_request(&request)?;
     let config_result =
         repo_config::load_from_repo_path_with_profile(&repo_path, request.profile.as_deref())
             .map_err(HeadlessReviewError::config)?;
@@ -322,6 +329,39 @@ fn resolve_repo_root(path: &Path) -> Result<PathBuf, HeadlessReviewError> {
     Ok(PathBuf::from(output.trim()))
 }
 
+fn resolve_repo_root_for_request(
+    request: &HeadlessReviewRequest,
+) -> Result<PathBuf, HeadlessReviewError> {
+    if let Some(repo_path) = request.repo_path.as_deref() {
+        return resolve_repo_root(repo_path);
+    }
+
+    let cwd = std::env::current_dir().map_err(|error| {
+        HeadlessReviewError::target(format!("Cannot read current directory: {error}"))
+    })?;
+    if request.scope != ReviewScope::PullRequest {
+        return resolve_repo_root(&cwd);
+    }
+
+    let (Some(workspace), Some(repo)) = (request.workspace.as_deref(), request.repo.as_deref())
+    else {
+        return resolve_repo_root(&cwd);
+    };
+    let discovered = match request.provider {
+        Some(provider) => local_repo::resolve_local_repo_for_provider(provider, workspace, repo),
+        None => local_repo::resolve_local_repo(workspace, repo),
+    };
+    match discovered {
+        Ok(path) => resolve_repo_root(&path),
+        Err(discovery_error) => resolve_repo_root(&cwd).map_err(|cwd_error| {
+            HeadlessReviewError::target(format!(
+                "{discovery_error} Current-directory fallback failed: {}",
+                cwd_error.message
+            ))
+        }),
+    }
+}
+
 fn resolve_target(
     request: &HeadlessReviewRequest,
     repo_path: &Path,
@@ -403,9 +443,9 @@ fn resolve_target(
                 )
             })?;
             let detail = get_pull_request_native(Some(provider), &workspace, &repo, pr_id)
-                .map_err(HeadlessReviewError::target)?;
+                .map_err(map_provider_target_error)?;
             let diff = get_pr_diff_native(Some(provider), &workspace, &repo, pr_id)
-                .map_err(HeadlessReviewError::target)?;
+                .map_err(map_provider_target_error)?;
             Ok(ResolvedTarget {
                 target: HeadlessReviewTarget {
                     scope: request.scope.label().to_string(),
@@ -426,6 +466,21 @@ fn resolve_target(
                 warnings: Vec::new(),
             })
         }
+    }
+}
+
+fn map_provider_target_error(message: String) -> HeadlessReviewError {
+    let normalized = message.to_ascii_lowercase();
+    let is_auth_error = normalized.contains("no bitbucket credentials configured")
+        || normalized.contains("no github token configured")
+        || normalized.contains("api error 401")
+        || normalized.contains("api error 403")
+        || normalized.contains("401 unauthorized")
+        || normalized.contains("403 forbidden");
+    if is_auth_error {
+        HeadlessReviewError::auth(message)
+    } else {
+        HeadlessReviewError::target(message)
     }
 }
 
@@ -662,8 +717,8 @@ mod tests {
     use std::sync::atomic::{AtomicU64, Ordering};
 
     use super::{
-        build_review_payload, map_native_review_error, new_file_patch, working_tree_diff,
-        ReviewScope,
+        build_review_payload, map_native_review_error, map_provider_target_error, new_file_patch,
+        working_tree_diff, ReviewScope,
     };
     use crate::services::review::HeadlessNativeReviewError;
 
@@ -789,6 +844,22 @@ mod tests {
         assert_eq!(
             map_native_review_error(HeadlessNativeReviewError::Cancelled).exit_code,
             130
+        );
+    }
+
+    #[test]
+    fn provider_auth_errors_map_to_auth_exit_code() {
+        for message in [
+            "No Bitbucket credentials configured.",
+            "No GitHub token configured.",
+            "Bitbucket API error 401 Unauthorized: denied",
+            "GitHub API error 403 Forbidden: denied",
+        ] {
+            assert_eq!(map_provider_target_error(message.to_string()).exit_code, 3);
+        }
+        assert_eq!(
+            map_provider_target_error("GitHub API error 404 Not Found".to_string()).exit_code,
+            4
         );
     }
 }

@@ -22,7 +22,7 @@ enum ReviewOutputFormat {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct ReviewArgs {
-    repo_path: PathBuf,
+    repo_path: Option<PathBuf>,
     scope: ReviewScope,
     base: Option<String>,
     workspace: Option<String>,
@@ -133,14 +133,14 @@ fn run_args(args: &[String], stdout: &mut dyn Write, stderr: &mut dyn Write) -> 
             Ok(args) => run_review(args, stdout, stderr),
             Err(error) => {
                 let _ = writeln!(stderr, "{error}\n\n{}", usage());
-                1
+                2
             }
         },
         _ => match parse_config_validate_args(args) {
             Ok(args) => run_config_validate(args, stdout, stderr),
             Err(error) => {
                 let _ = writeln!(stderr, "{error}\n\n{}", usage());
-                1
+                2
             }
         },
     }
@@ -151,7 +151,7 @@ fn parse_review_args(args: &[String]) -> Result<ReviewArgs, String> {
         return Err("Expected `lachesi review`.".to_string());
     }
     let mut parsed = ReviewArgs {
-        repo_path: PathBuf::from("."),
+        repo_path: None,
         scope: ReviewScope::WorkingTree,
         base: None,
         workspace: None,
@@ -172,7 +172,9 @@ fn parse_review_args(args: &[String]) -> Result<ReviewArgs, String> {
     let mut index = 1;
     while index < args.len() {
         match args[index].as_str() {
-            "--repo-path" => parsed.repo_path = PathBuf::from(next_value(args, &mut index)?),
+            "--repo-path" => {
+                parsed.repo_path = Some(PathBuf::from(next_value(args, &mut index)?));
+            }
             "--scope" => {
                 parsed.scope = match next_value(args, &mut index)?.as_str() {
                     "working-tree" | "worktree" | "local" => ReviewScope::WorkingTree,
@@ -602,6 +604,27 @@ token: unsafe
     }
 
     #[test]
+    fn config_usage_errors_return_config_exit_code() {
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+        let code = run_args(
+            &[
+                "config".to_string(),
+                "validate".to_string(),
+                "--unknown".to_string(),
+            ],
+            &mut stdout,
+            &mut stderr,
+        );
+
+        assert_eq!(code, 2);
+        assert!(stdout.is_empty());
+        assert!(String::from_utf8(stderr)
+            .expect("stderr")
+            .contains("Unknown option"));
+    }
+
+    #[test]
     fn config_validate_accepts_profile_override() {
         let repo = temp_repo();
         fs::write(
@@ -642,7 +665,7 @@ profiles:
         let args = parse_review_args(&["review".to_string()]).expect("parse review args");
         assert_eq!(args.scope, ReviewScope::WorkingTree);
         assert_eq!(args.format, ReviewOutputFormat::Markdown);
-        assert_eq!(args.repo_path, PathBuf::from("."));
+        assert_eq!(args.repo_path, None);
         assert!(!args.run_analyzers);
     }
 
@@ -675,6 +698,23 @@ profiles:
             .expect_err("zero should not be accepted as a pull request id");
 
         assert!(error.contains("positive integer"));
+    }
+
+    #[test]
+    fn review_usage_errors_return_config_exit_code() {
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+        let code = run_args(
+            &["review".to_string(), "--unknown".to_string()],
+            &mut stdout,
+            &mut stderr,
+        );
+
+        assert_eq!(code, 2);
+        assert!(stdout.is_empty());
+        assert!(String::from_utf8(stderr)
+            .expect("stderr")
+            .contains("Unknown review option"));
     }
 
     #[test]
