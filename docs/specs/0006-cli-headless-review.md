@@ -135,6 +135,7 @@ lachesi review \
   [--evidence-only] \
   [--fail-on-findings] \
   [--min-severity info|low|medium|high|critical] \
+  [--run-analyzers] \
   [--session-instruction <text>] \
   [--no-jira] \
   [--no-notion]
@@ -150,6 +151,11 @@ Defaults:
 - local `.lachesi.local.yaml` is loaded when present
 - manual publication is not attempted
 - findings do not fail the process unless `--fail-on-findings` is set
+- local analyzers are skipped by default because agent-driven review follows
+  the repository validation gate; `--run-analyzers` opts in for standalone use
+- headless review uses temporary local storage by default and removes it after
+  completion; setting `LACHESI_DATA_DIR` explicitly opts into a chosen
+  persistent location
 
 ### `lachesi config validate`
 
@@ -199,6 +205,7 @@ The top-level JSON object should be:
   "schemaVersion": "v0.1",
   "status": "succeeded",
   "exitCode": 1,
+  "analyzersRan": false,
   "warnings": [],
   "analyzerFailures": [],
   "reviewRun": {
@@ -244,8 +251,9 @@ ship first.
 130 cancelled by user
 ```
 
-Analyzer failures are non-fatal by default. They use exit code `5` only when the
-effective config marks the analyzer as required.
+Analyzer failures are relevant only when `--run-analyzers` is set. They are
+non-fatal by default and use exit code `5` only when the effective config marks
+the analyzer as required.
 
 Findings use exit code `1` only when `--fail-on-findings` is set. The threshold
 is controlled by `--min-severity` or repo config.
@@ -265,7 +273,7 @@ Expected behavior:
 - load `.lachesi.yaml` and `.lachesi.local.yaml`
 - print progress to stderr
 - print markdown result to stdout unless `--output` is set
-- write structured review state to the same local review store if configured
+- keep review state ephemeral unless `LACHESI_DATA_DIR` is explicitly configured
 
 ## CI Usage
 

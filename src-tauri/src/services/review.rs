@@ -265,6 +265,77 @@ pub struct ReviewRun {
     pub findings: Vec<ReviewFinding>,
 }
 
+#[derive(Debug, Clone)]
+pub struct HeadlessNativeReviewRequest {
+    pub repo_path: PathBuf,
+    pub workspace: String,
+    pub repo: String,
+    pub pr_id: u32,
+    pub title: String,
+    pub source_branch: String,
+    pub destination_branch: String,
+    pub payload: String,
+    pub ai_provider: AiProvider,
+    pub claude_model: Option<String>,
+    pub claude_effort: Option<String>,
+    pub codex_model: Option<String>,
+    pub codex_effort: Option<String>,
+    pub review_profile: Option<String>,
+    pub run_analyzers: bool,
+}
+
+#[derive(Debug)]
+pub enum HeadlessNativeReviewError {
+    Analyzer(String),
+    Provider(String),
+    Internal(String),
+    Cancelled,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ReviewPipelineFailureKind {
+    Analyzer,
+    Provider,
+    Internal,
+}
+
+#[derive(Debug)]
+struct ReviewPipelineFailure {
+    kind: ReviewPipelineFailureKind,
+    message: String,
+}
+
+impl ReviewPipelineFailure {
+    fn analyzer(message: impl Into<String>) -> Self {
+        Self {
+            kind: ReviewPipelineFailureKind::Analyzer,
+            message: message.into(),
+        }
+    }
+
+    fn provider(message: impl Into<String>) -> Self {
+        Self {
+            kind: ReviewPipelineFailureKind::Provider,
+            message: message.into(),
+        }
+    }
+}
+
+impl std::fmt::Display for ReviewPipelineFailure {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(&self.message)
+    }
+}
+
+impl From<String> for ReviewPipelineFailure {
+    fn from(message: String) -> Self {
+        Self {
+            kind: ReviewPipelineFailureKind::Internal,
+            message,
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, Default, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub enum AiReviewRunStatus {
@@ -488,6 +559,7 @@ struct AnalyzerSpec {
     command: String,
     timeout_seconds: u64,
     source: ReviewEvidenceSource,
+    required: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -698,6 +770,7 @@ fn default_analyzer_specs(repo_path: &Path) -> Vec<AnalyzerSpec> {
                 command,
                 timeout_seconds: 120,
                 source,
+                required: false,
             });
         }
     }
@@ -712,6 +785,7 @@ fn default_analyzer_specs(repo_path: &Path) -> Vec<AnalyzerSpec> {
             command: format!("{manager} audit --audit-level moderate"),
             timeout_seconds: 120,
             source: ReviewEvidenceSource::Other,
+            required: false,
         });
     }
 
@@ -722,6 +796,7 @@ fn default_analyzer_specs(repo_path: &Path) -> Vec<AnalyzerSpec> {
             command: "semgrep --config auto --error --quiet .".to_string(),
             timeout_seconds: 120,
             source: ReviewEvidenceSource::Semgrep,
+            required: false,
         });
     } else if command_available(repo_path, "opengrep") {
         specs.push(AnalyzerSpec {
@@ -730,6 +805,7 @@ fn default_analyzer_specs(repo_path: &Path) -> Vec<AnalyzerSpec> {
             command: "opengrep --config auto --error --quiet .".to_string(),
             timeout_seconds: 120,
             source: ReviewEvidenceSource::Semgrep,
+            required: false,
         });
     }
 
@@ -766,6 +842,7 @@ fn configured_analyzer_specs_with_profile(
                 id,
                 command,
                 timeout_seconds: analyzer.timeout_seconds.unwrap_or(120).clamp(1, 900),
+                required: analyzer.required,
             });
         }
     }
@@ -902,7 +979,10 @@ fn trim_evidence_output(value: &str) -> String {
     if value.len() <= MAX_BYTES {
         return value.trim().to_string();
     }
-    let start = value.len().saturating_sub(MAX_BYTES);
+    let mut start = value.len().saturating_sub(MAX_BYTES);
+    while start < value.len() && !value.is_char_boundary(start) {
+        start += 1;
+    }
     format!(
         "[truncated to last {MAX_BYTES} bytes]\n{}",
         value[start..].trim()
@@ -2990,11 +3070,14 @@ fn build_claude_text_command(
         .map(|effort| format!(" --effort {}", shell_quote(effort)))
         .unwrap_or_default();
     let shell_cmd = format!(
-        "export PATH=\"$HOME/.local/bin:$HOME/.npm/bin:/opt/homebrew/bin:/usr/local/bin:$PATH\"; claude --print --verbose --output-format stream-json --include-partial-messages{model_arg}{effort_arg}{resume_arg} \"$(cat {})\"",
+        "export PATH=\"$HOME/.local/bin:$HOME/.npm/bin:/opt/homebrew/bin:/usr/local/bin:$PATH\"; claude --print --verbose --permission-mode plan --allowedTools Read,Glob,Grep --output-format stream-json --include-partial-messages{model_arg}{effort_arg}{resume_arg} \"$(cat {})\"",
         shell_quote(&tmp_path.to_string_lossy())
     );
     let mut command = Command::new("/bin/zsh");
-    command.arg("-lc").arg(shell_cmd);
+    command
+        .arg("-lc")
+        .arg(shell_cmd)
+        .env("LACHESI_REVIEW_CHILD", "1");
     if let Some(repo_path) = repo_path {
         command.current_dir(repo_path);
     }
@@ -3063,7 +3146,10 @@ fn build_codex_text_command(
         shell_quote(&tmp_path.to_string_lossy())
     );
     let mut command = Command::new("/bin/zsh");
-    command.arg("-lc").arg(shell_cmd);
+    command
+        .arg("-lc")
+        .arg(shell_cmd)
+        .env("LACHESI_REVIEW_CHILD", "1");
     if let Some(repo_path) = repo_path {
         command.current_dir(repo_path);
     }
@@ -4275,7 +4361,8 @@ fn run_inline_review_pipeline(
     codex_effort: Option<String>,
     skip_analyzers: bool,
     review_profile: Option<String>,
-) -> Result<(), String> {
+    repo_path_override: Option<PathBuf>,
+) -> Result<(), ReviewPipelineFailure> {
     let provider_label = match ai_provider {
         AiProvider::Claude => "Claude",
         AiProvider::Codex => "Codex",
@@ -4284,7 +4371,7 @@ fn run_inline_review_pipeline(
         AiProvider::Claude => ReviewEvidenceSource::Claude,
         AiProvider::Codex => ReviewEvidenceSource::Codex,
     };
-    let repo_path = resolve_local_repo(&workspace, &repo).ok();
+    let repo_path = repo_path_override.or_else(|| resolve_local_repo(&workspace, &repo).ok());
     let mut analyzer_artifacts = Vec::new();
     let mut effective_payload = payload.clone();
     let mut effective_fallback_payload = fallback_payload.clone();
@@ -4346,6 +4433,7 @@ fn run_inline_review_pipeline(
                             command: "load .lachesi.yaml".to_string(),
                             timeout_seconds: 0,
                             source: ReviewEvidenceSource::Other,
+                            required: true,
                         },
                         status: AnalyzerStatus::Errored,
                         code: None,
@@ -4356,6 +4444,23 @@ fn run_inline_review_pipeline(
                     }]
                 }
             };
+            let required_failures = results
+                .iter()
+                .filter(|result| result.spec.required && result.status != AnalyzerStatus::Passed)
+                .map(|result| {
+                    format!(
+                        "`{}` {}",
+                        result.spec.id,
+                        analyzer_status_label(result.status)
+                    )
+                })
+                .collect::<Vec<_>>();
+            if !required_failures.is_empty() {
+                return Err(ReviewPipelineFailure::analyzer(format!(
+                    "Required analyzer failure: {}.",
+                    required_failures.join(", ")
+                )));
+            }
             let evidence_section = analyzer_prompt_section(&results);
             if !evidence_section.is_empty() {
                 effective_payload = format!("{payload}\n\n{evidence_section}");
@@ -4587,47 +4692,44 @@ fn run_inline_review_pipeline(
         }))
     };
 
-    let response = match ai_provider {
-        AiProvider::Claude => {
-            if let Some(resume_session_id) = resume_session_id.as_deref() {
-                match attempt_claude(&effective_payload, Some(resume_session_id)) {
-                    Ok(Some(response)) => response,
-                    Ok(None) => return Ok(()),
-                    Err(error) => {
-                        let fallback_payload =
-                            effective_fallback_payload.as_deref().ok_or(error.clone())?;
-                        append_inline_review_log(
-                            &store,
-                            &key,
-                            run_id,
-                            format!(
-                                "Could not resume Claude session {}; retrying with a fresh session.",
-                                resume_session_id
-                            ),
-                        );
-                        append_inline_review_log(
-                            &store,
-                            &key,
-                            run_id,
-                            format!("Resume error: {error}"),
-                        );
-                        match attempt_claude(fallback_payload, None)? {
-                            Some(response) => response,
-                            None => return Ok(()),
+    let response = (|| -> Result<Option<ParsedClaudeTextResponse>, String> {
+        match ai_provider {
+            AiProvider::Claude => {
+                if let Some(resume_session_id) = resume_session_id.as_deref() {
+                    match attempt_claude(&effective_payload, Some(resume_session_id)) {
+                        Ok(Some(response)) => Ok(Some(response)),
+                        Ok(None) => Ok(None),
+                        Err(error) => {
+                            let fallback_payload =
+                                effective_fallback_payload.as_deref().ok_or(error.clone())?;
+                            append_inline_review_log(
+                                &store,
+                                &key,
+                                run_id,
+                                format!(
+                                    "Could not resume Claude session {}; retrying with a fresh session.",
+                                    resume_session_id
+                                ),
+                            );
+                            append_inline_review_log(
+                                &store,
+                                &key,
+                                run_id,
+                                format!("Resume error: {error}"),
+                            );
+                            attempt_claude(fallback_payload, None)
                         }
                     }
-                }
-            } else {
-                match attempt_claude(&effective_payload, None)? {
-                    Some(response) => response,
-                    None => return Ok(()),
+                } else {
+                    attempt_claude(&effective_payload, None)
                 }
             }
+            AiProvider::Codex => attempt_codex(&effective_payload),
         }
-        AiProvider::Codex => match attempt_codex(&effective_payload)? {
-            Some(response) => response,
-            None => return Ok(()),
-        },
+    })()
+    .map_err(ReviewPipelineFailure::provider)?;
+    let Some(response) = response else {
+        return Ok(());
     };
 
     if response.permission_denials > 0 {
@@ -4824,11 +4926,130 @@ pub fn start_inline_review_native(
             codex_effort,
             skip_analyzers,
             review_profile,
+            None,
         ) {
-            set_inline_review_failed(&store_clone, &key, run_id, error);
+            set_inline_review_failed(&store_clone, &key, run_id, error.to_string());
         }
     });
     Ok(initial)
+}
+
+pub fn run_headless_review_native(
+    request: HeadlessNativeReviewRequest,
+) -> Result<ReviewRun, HeadlessNativeReviewError> {
+    let HeadlessNativeReviewRequest {
+        repo_path,
+        workspace,
+        repo,
+        pr_id,
+        title,
+        source_branch,
+        destination_branch,
+        payload,
+        ai_provider,
+        claude_model,
+        claude_effort,
+        codex_model,
+        codex_effort,
+        review_profile,
+        run_analyzers,
+    } = request;
+    let store = AiReviewRunStore::default();
+    let key = pr_key(&workspace, &repo, pr_id);
+    let thread_id = now_id("thread");
+    let (initial, run_id) = begin_inline_review_run(
+        &store,
+        &key,
+        title,
+        thread_id.clone(),
+        AiReviewTurnKind::Initial,
+        Some("headless"),
+    )
+    .map_err(HeadlessNativeReviewError::Internal)?;
+    let started_at = initial.started_at.clone().unwrap_or_else(now_ms);
+    let created_at = now_ms();
+    let mut review_store = load_review_store(&workspace, &repo, pr_id)
+        .map_err(HeadlessNativeReviewError::Internal)?
+        .unwrap_or_default();
+    review_store.active_thread_id = Some(thread_id.clone());
+    review_store.threads.push(AiReviewThread {
+        id: thread_id.clone(),
+        title: "Headless review".to_string(),
+        created_at: created_at.clone(),
+        updated_at: created_at,
+        claude_session_id: None,
+        messages: Vec::new(),
+    });
+    save_review_store(&workspace, &repo, pr_id, &review_store)
+        .map_err(HeadlessNativeReviewError::Internal)?;
+
+    if let Err(error) = run_inline_review_pipeline(
+        store.clone(),
+        key.clone(),
+        run_id,
+        workspace.clone(),
+        repo.clone(),
+        pr_id,
+        source_branch,
+        destination_branch,
+        thread_id.clone(),
+        AiReviewTurnKind::Initial,
+        started_at,
+        payload.clone(),
+        payload,
+        None,
+        None,
+        ai_provider,
+        claude_model,
+        claude_effort,
+        codex_model,
+        codex_effort,
+        !run_analyzers,
+        review_profile,
+        Some(repo_path),
+    ) {
+        let message = error.to_string();
+        set_inline_review_failed(&store, &key, run_id, message.clone());
+        return Err(match error.kind {
+            ReviewPipelineFailureKind::Analyzer => HeadlessNativeReviewError::Analyzer(message),
+            ReviewPipelineFailureKind::Provider => HeadlessNativeReviewError::Provider(message),
+            ReviewPipelineFailureKind::Internal => HeadlessNativeReviewError::Internal(message),
+        });
+    }
+
+    let state =
+        get_ai_review_run_state_native(&store, &workspace, &repo, pr_id).ok_or_else(|| {
+            HeadlessNativeReviewError::Internal(
+                "Headless review finished without a run state.".to_string(),
+            )
+        })?;
+    if state.status == AiReviewRunStatus::Cancelled {
+        return Err(HeadlessNativeReviewError::Cancelled);
+    }
+    if state.status != AiReviewRunStatus::Succeeded {
+        return Err(HeadlessNativeReviewError::Internal(
+            state
+                .error
+                .unwrap_or_else(|| "Headless review did not complete successfully.".to_string()),
+        ));
+    }
+    let review_store = load_review_store(&workspace, &repo, pr_id)
+        .map_err(HeadlessNativeReviewError::Internal)?
+        .ok_or_else(|| {
+            HeadlessNativeReviewError::Internal(
+                "Headless review finished without a saved result.".to_string(),
+            )
+        })?;
+    review_store
+        .review_runs
+        .into_iter()
+        .rev()
+        .find(|run| run.thread_id.as_deref() == Some(thread_id.as_str()))
+        .ok_or_else(|| {
+            HeadlessNativeReviewError::Internal(
+                "Headless review result could not be found.".to_string(),
+            )
+        })
 }
 
 #[tauri::command]
@@ -4956,7 +5177,7 @@ pub async fn start_inline_review(
     review_profile: Option<String>,
 ) -> Result<AiReviewRunState, String> {
     let ai_provider = ai_provider.unwrap_or_default();
-    let skip_analyzers = skip_analyzers.unwrap_or(false);
+    let skip_analyzers = resolve_skip_analyzers(skip_analyzers);
     start_inline_review_native(
         store.inner().clone(),
         workspace,
@@ -4977,6 +5198,10 @@ pub async fn start_inline_review(
         codex_effort,
         review_profile,
     )
+}
+
+fn resolve_skip_analyzers(value: Option<bool>) -> bool {
+    value.unwrap_or(true)
 }
 
 #[tauri::command]
@@ -5067,8 +5292,9 @@ pub async fn reply_inline_review(
             codex_effort,
             false,
             None,
+            None,
         ) {
-            set_inline_review_failed(&store_clone, &key, run_id, error);
+            set_inline_review_failed(&store_clone, &key, run_id, error.to_string());
         }
     });
     Ok(initial)
@@ -5492,15 +5718,16 @@ pub fn reset_ai_review_fix_state(
 #[cfg(test)]
 mod tests {
     use super::{
-        apply_review_finding_publication_event, begin_inline_review_run, build_codex_text_command,
-        extract_review_findings, format_claude_stream_log_line, get_ai_review_run_state_native,
-        human_duration, materialize_review_run, normalize_codex_effort, normalize_codex_model,
-        parse_claude_fix_result, parse_claude_structured_json, parse_claude_text_result,
-        parse_review_resources, review_findings_from_output, AiReviewDraftCommentResult,
-        AiReviewRunStatus, AiReviewRunStore, AiReviewTurnKind, ReviewEvidenceArtifact,
-        ReviewEvidenceKind, ReviewEvidenceSource, ReviewFindingCategory, ReviewFindingConfidence,
-        ReviewFindingPublicationEvent, ReviewFindingPublicationEventKind, ReviewFindingSeverity,
-        ReviewPublicationMode, STRUCTURED_REVIEW_SCHEMA_VERSION,
+        apply_review_finding_publication_event, begin_inline_review_run, build_claude_text_command,
+        build_codex_text_command, extract_review_findings, format_claude_stream_log_line,
+        get_ai_review_run_state_native, human_duration, materialize_review_run,
+        normalize_codex_effort, normalize_codex_model, parse_claude_fix_result,
+        parse_claude_structured_json, parse_claude_text_result, parse_review_resources,
+        resolve_skip_analyzers, review_findings_from_output, trim_evidence_output,
+        AiReviewDraftCommentResult, AiReviewRunStatus, AiReviewRunStore, AiReviewTurnKind,
+        ReviewEvidenceArtifact, ReviewEvidenceKind, ReviewEvidenceSource, ReviewFindingCategory,
+        ReviewFindingConfidence, ReviewFindingPublicationEvent, ReviewFindingPublicationEventKind,
+        ReviewFindingSeverity, ReviewPublicationMode, STRUCTURED_REVIEW_SCHEMA_VERSION,
     };
 
     #[test]
@@ -5579,9 +5806,41 @@ mod tests {
         assert!(shell.contains("gpt-5-codex"));
         assert!(shell.contains("model_reasoning_effort=high"));
         assert!(shell.contains("--skip-git-repo-check"));
+        assert!(command.get_envs().any(|(key, value)| {
+            key == "LACHESI_REVIEW_CHILD"
+                && value.is_some_and(|value| value.to_string_lossy() == "1")
+        }));
 
         let _ = std::fs::remove_file(prompt_path);
         let _ = std::fs::remove_file(output_path);
+    }
+
+    #[test]
+    fn builds_claude_review_command_with_read_only_tools() {
+        let (command, prompt_path) =
+            build_claude_text_command(None, "review prompt", None, None, None)
+                .expect("claude command should build");
+        let shell = command
+            .get_args()
+            .nth(1)
+            .expect("zsh command should include shell payload")
+            .to_string_lossy();
+
+        assert!(shell.contains("--permission-mode plan"));
+        assert!(shell.contains("--allowedTools Read,Glob,Grep"));
+        assert!(command.get_envs().any(|(key, value)| {
+            key == "LACHESI_REVIEW_CHILD"
+                && value.is_some_and(|value| value.to_string_lossy() == "1")
+        }));
+
+        let _ = std::fs::remove_file(prompt_path);
+    }
+
+    #[test]
+    fn gui_review_defaults_to_skipping_analyzers() {
+        assert!(resolve_skip_analyzers(None));
+        assert!(resolve_skip_analyzers(Some(true)));
+        assert!(!resolve_skip_analyzers(Some(false)));
     }
 
     #[test]
@@ -5729,6 +5988,15 @@ mod tests {
         assert_eq!(human_duration(900), "0s");
         assert_eq!(human_duration(12_000), "12s");
         assert_eq!(human_duration(355_960), "5m 55s");
+    }
+
+    #[test]
+    fn truncates_analyzer_output_on_a_utf8_boundary() {
+        let value = format!("{}️{}", "a".repeat(20_000), "tail");
+        let truncated = trim_evidence_output(&value);
+
+        assert!(truncated.starts_with("[truncated to last 16000 bytes]"));
+        assert!(truncated.ends_with("tail"));
     }
 
     #[test]

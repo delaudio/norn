@@ -27,5 +27,32 @@ export default {
         }
       },
     },
+    "gui-ai-review-skips-analyzers": {
+      description:
+        "GUI AI review entry points must skip repository analyzers already run by the development flow",
+      async check(ctx) {
+        const entryPoints = ["src/App.tsx", "src/hooks/useAiReview.ts"];
+
+        for (const file of entryPoints) {
+          const source = await ctx.readFile(file);
+          if (!/skipAnalyzers\s*:\s*true/.test(source)) {
+            ctx.report.violation({
+              message:
+                "GUI AI review must send skipAnalyzers: true so it does not rerun repository gates.",
+              file,
+            });
+          }
+          const unsafeMatches = await ctx.grep(file, /skipAnalyzers\s*:\s*false/g);
+          for (const match of unsafeMatches) {
+            ctx.report.violation({
+              message:
+                "Do not enable analyzers from GUI AI review; validation runs before Lachesi review.",
+              file: match.file,
+              line: match.line,
+            });
+          }
+        }
+      },
+    },
   },
 } satisfies RuleSet;

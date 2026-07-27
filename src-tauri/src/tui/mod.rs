@@ -22,6 +22,8 @@ use crate::services::review::{
     get_ai_review_run_state_native, load_ai_review_store_native, start_inline_review_native,
     AiReviewRunState, AiReviewRunStatus, AiReviewRunStore,
 };
+
+const TUI_SKIP_AI_REVIEW_ANALYZERS: bool = true;
 use render::{
     detail_view_target, diff_content_width_for_area, mouse_target, render,
     selected_diff_file_patch, DetailView, DiffViewMode, DraftComment, FocusPane, MouseTarget,
@@ -696,7 +698,7 @@ impl TuiApp {
             Some("Review this pull request from the terminal UI.".to_string()),
             None,
             Some("Review".to_string()),
-            false,
+            TUI_SKIP_AI_REVIEW_ANALYZERS,
             self.ai_provider,
             self.claude_model.clone(),
             self.claude_effort.clone(),
@@ -1430,6 +1432,11 @@ mod tests {
 
         assert!(app.ai_review_running_pr_ids.is_empty());
         assert_eq!(app.ai_reviewed_pr_ids, vec![7]);
+    }
+
+    #[test]
+    fn tui_ai_review_skips_duplicate_analyzers() {
+        assert!(TUI_SKIP_AI_REVIEW_ANALYZERS);
     }
 
     #[test]

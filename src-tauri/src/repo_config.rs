@@ -604,6 +604,7 @@ fn apply_review_profile(
             ProfileAnalyzerRequirement::Required => {
                 if let Some(analyzer) = config.analyzers.get_mut(&id) {
                     analyzer.enabled = true;
+                    analyzer.required = true;
                 } else {
                     warnings.push(message(
                         config_path,
@@ -1257,6 +1258,13 @@ analyzers:
         );
         assert_eq!(
             config.analyzers.get("tsc").map(|analyzer| analyzer.enabled),
+            Some(true)
+        );
+        assert_eq!(
+            config
+                .analyzers
+                .get("tsc")
+                .map(|analyzer| analyzer.required),
             Some(true)
         );
     }

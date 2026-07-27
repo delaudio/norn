@@ -256,6 +256,7 @@ export default function App() {
           codexModel: config?.codexModel ?? null,
           codexEffort: config?.codexEffort ?? null,
           reviewProfile: null,
+          skipAnalyzers: true,
         });
         await updateJob("running", started.threadId);
 
@@ -702,7 +703,6 @@ export default function App() {
     options: {
       reviewKind?: "lineQuestion";
       threadTitle?: string;
-      skipAnalyzers?: boolean;
       reviewProfile?: string | null;
     } = {},
   ) => {
@@ -740,7 +740,6 @@ export default function App() {
           displayMessage,
           reviewKind: options.reviewKind ?? null,
           threadTitle: options.threadTitle ?? null,
-          skipAnalyzers: options.skipAnalyzers ?? false,
           title: contextForReview.pr.title || `PR #${selectionForReview.prId}`,
           sourceBranch: contextForReview.pr.sourceBranch,
           destinationBranch: contextForReview.pr.destinationBranch,
@@ -839,7 +838,6 @@ export default function App() {
       handleRunInlineReview(request.payload, request.displayMessage, {
         reviewKind: "lineQuestion",
         threadTitle: "Line question",
-        skipAnalyzers: true,
       });
     } catch (error) {
       window.alert(error instanceof Error ? error.message : String(error));
