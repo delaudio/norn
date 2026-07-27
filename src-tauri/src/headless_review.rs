@@ -441,12 +441,7 @@ fn resolve_repo_root_for_request(
     let cwd = std::env::current_dir().map_err(|error| {
         HeadlessReviewError::target(format!("Cannot read current directory: {error}"))
     })?;
-    if request.scope != ReviewScope::PullRequest {
-        return resolve_repo_root(&cwd);
-    }
-
-    let (Some(workspace), Some(repo)) = (request.workspace.as_deref(), request.repo.as_deref())
-    else {
+    let Some((workspace, repo)) = requested_repo_identity(request) else {
         return resolve_repo_root(&cwd);
     };
     let discovered = match request.provider {
@@ -470,6 +465,10 @@ fn resolve_repo_root_for_request(
             resolve_repo_root(&cwd)
         }
     }
+}
+
+fn requested_repo_identity(request: &HeadlessReviewRequest) -> Option<(&str, &str)> {
+    Some((request.workspace.as_deref()?, request.repo.as_deref()?))
 }
 
 fn repo_identity_matches_target(
@@ -853,8 +852,8 @@ mod tests {
     use super::{
         build_review_payload, format_findings_markdown, map_native_review_error,
         map_provider_target_error, new_file_patch, public_provider_error,
-        repo_identity_matches_target, run, strip_private_evidence_payloads, working_tree_diff,
-        HeadlessReviewRequest, ReviewScope,
+        repo_identity_matches_target, requested_repo_identity, run,
+        strip_private_evidence_payloads, working_tree_diff, HeadlessReviewRequest, ReviewScope,
     };
     use crate::config::{RepoRef, ReviewProvider};
     use crate::services::review::{
@@ -940,6 +939,35 @@ mod tests {
             "other",
             "lachesi",
         ));
+    }
+
+    #[test]
+    fn explicit_repo_identity_drives_discovery_for_every_scope() {
+        for scope in [
+            ReviewScope::WorkingTree,
+            ReviewScope::Branch,
+            ReviewScope::PullRequest,
+        ] {
+            let request = HeadlessReviewRequest {
+                repo_path: None,
+                scope,
+                base: None,
+                workspace: Some("lachesi-hq".to_string()),
+                repo: Some("lachesi".to_string()),
+                pr_id: None,
+                provider: Some(ReviewProvider::Github),
+                profile: None,
+                ai_provider: None,
+                model: None,
+                effort: None,
+                run_analyzers: false,
+            };
+
+            assert_eq!(
+                requested_repo_identity(&request),
+                Some(("lachesi-hq", "lachesi"))
+            );
+        }
     }
 
     #[test]

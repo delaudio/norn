@@ -195,13 +195,13 @@ export function useAiReview(
           destinationBranch,
           reviewKind,
           threadTitle,
-          skipAnalyzers: true,
           aiProvider,
           claudeModel,
           claudeEffort,
           codexModel,
           codexEffort,
           reviewProfile: reviewProfile?.trim() || null,
+          skipAnalyzers: true,
         });
         if (keyRef.current === key) {
           setState(result);

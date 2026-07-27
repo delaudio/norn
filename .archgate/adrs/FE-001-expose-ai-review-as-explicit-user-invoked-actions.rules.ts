@@ -42,13 +42,14 @@ function extractInlineObjectArgument(source: string, start: number): string | nu
   return null;
 }
 
-function hasTopLevelTrueProperty(objectSource: string, propertyName: string): boolean {
+function hasFinalTopLevelTrueProperty(objectSource: string, propertyName: string): boolean {
   let depth = 0;
   let quote: "'" | '"' | "`" | null = null;
   let escaped = false;
   let lineComment = false;
   let blockComment = false;
   let segmentStart = 1;
+  let finalSegment = "";
 
   const matchesProperty = (segment: string) => {
     const normalized = segment.trim();
@@ -96,12 +97,15 @@ function hasTopLevelTrueProperty(objectSource: string, propertyName: string): bo
     } else if (character === "}" || character === "]" || character === ")") {
       depth -= 1;
     } else if (character === "," && depth === 0) {
-      if (matchesProperty(objectSource.slice(segmentStart, index))) return true;
+      const segment = objectSource.slice(segmentStart, index);
+      if (segment.trim()) finalSegment = segment;
       segmentStart = index + 1;
     }
   }
 
-  return matchesProperty(objectSource.slice(segmentStart, -1));
+  const trailingSegment = objectSource.slice(segmentStart, -1);
+  if (trailingSegment.trim()) finalSegment = trailingSegment;
+  return matchesProperty(finalSegment);
 }
 
 export default {
@@ -141,9 +145,10 @@ export default {
             for (const call of calls) {
               const callIndex = call.index ?? 0;
               const argument = extractInlineObjectArgument(source, callIndex + call[0].length);
-              if (!argument || !hasTopLevelTrueProperty(argument, "skipAnalyzers")) {
+              if (!argument || !hasFinalTopLevelTrueProperty(argument, "skipAnalyzers")) {
                 ctx.report.violation({
-                  message: "Every GUI start_inline_review call must send skipAnalyzers: true.",
+                  message:
+                    "Every GUI start_inline_review call must end its argument object with skipAnalyzers: true.",
                   file,
                   line: source.slice(0, callIndex).split("\n").length,
                 });
