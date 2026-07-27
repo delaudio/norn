@@ -67,11 +67,13 @@ struct HeadlessDataDirGuard {
 
 impl HeadlessDataDirGuard {
     fn install() -> Result<Self, String> {
-        if std::env::var_os("LACHESI_DATA_DIR").is_some() {
+        if std::env::var_os("LACHESI_REVIEW_DATA_DIR").is_some()
+            || std::env::var_os("LACHESI_DATA_DIR").is_some()
+        {
             return Ok(Self { temp_dir: None });
         }
         let temp_dir = create_headless_data_dir()?;
-        std::env::set_var("LACHESI_DATA_DIR", temp_dir.path());
+        std::env::set_var("LACHESI_REVIEW_DATA_DIR", temp_dir.path());
         Ok(Self {
             temp_dir: Some(temp_dir),
         })
@@ -97,7 +99,7 @@ fn create_headless_data_dir() -> Result<tempfile::TempDir, String> {
 impl Drop for HeadlessDataDirGuard {
     fn drop(&mut self) {
         if self.temp_dir.is_some() {
-            std::env::remove_var("LACHESI_DATA_DIR");
+            std::env::remove_var("LACHESI_REVIEW_DATA_DIR");
         }
     }
 }
@@ -110,7 +112,7 @@ pub fn run_from_env_if_cli() -> Option<i32> {
 
     let mut stdout = io::stdout();
     let mut stderr = io::stderr();
-    let _headless_data_dir = if args.first().map(String::as_str) == Some("review") {
+    let _headless_data_dir = if review_needs_headless_storage(&args) {
         match HeadlessDataDirGuard::install() {
             Ok(guard) => Some(guard),
             Err(error) => {
@@ -122,6 +124,15 @@ pub fn run_from_env_if_cli() -> Option<i32> {
         None
     };
     Some(run_args(&args, &mut stdout, &mut stderr))
+}
+
+fn review_needs_headless_storage(args: &[String]) -> bool {
+    args.first().map(String::as_str) == Some("review")
+        && !args
+            .iter()
+            .skip(1)
+            .any(|arg| arg == "--help" || arg == "-h")
+        && parse_review_args(args).is_ok()
 }
 
 fn is_cli_command(args: &[String]) -> bool {
@@ -178,11 +189,30 @@ fn write_review_parse_failure(
             "exitCode": 2,
             "error": error,
         });
-        let _ = writeln!(stdout, "{rendered}");
+        if let Some(path) = review_parse_output_path(args) {
+            if let Err(write_error) = std::fs::write(&path, format!("{rendered}\n")) {
+                let _ = writeln!(
+                    stderr,
+                    "Failed to write review failure to {}: {write_error}",
+                    path.display()
+                );
+                return 7;
+            }
+            let _ = writeln!(stderr, "Review failure written to {}.", path.display());
+        } else {
+            let _ = writeln!(stdout, "{rendered}");
+        }
     } else {
         let _ = writeln!(stderr, "{error}\n\n{}", review_usage());
     }
     2
+}
+
+fn review_parse_output_path(args: &[String]) -> Option<PathBuf> {
+    args.windows(2)
+        .rev()
+        .find(|pair| pair[0] == "--output")
+        .map(|pair| PathBuf::from(&pair[1]))
 }
 
 fn parse_review_args(args: &[String]) -> Result<ReviewArgs, String> {
@@ -586,7 +616,10 @@ fn review_usage() -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use super::{create_headless_data_dir, parse_review_args, run_args, ReviewOutputFormat};
+    use super::{
+        create_headless_data_dir, parse_review_args, review_needs_headless_storage, run_args,
+        ReviewOutputFormat,
+    };
     use crate::config::AiProvider;
     use crate::headless_review::ReviewScope;
     use crate::services::review::ReviewFindingSeverity;
@@ -852,6 +885,49 @@ profiles:
         assert!(output["error"]
             .as_str()
             .is_some_and(|error| error.contains("Unknown review option")));
+    }
+
+    #[test]
+    fn review_usage_errors_write_json_to_requested_output() {
+        let temp_dir = tempfile::tempdir().expect("output temp dir");
+        let output_path = temp_dir.path().join("review.json");
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+        let code = run_args(
+            &[
+                "review".to_string(),
+                "--json".to_string(),
+                "--output".to_string(),
+                output_path.to_string_lossy().to_string(),
+                "--unknown".to_string(),
+            ],
+            &mut stdout,
+            &mut stderr,
+        );
+
+        assert_eq!(code, 2);
+        assert!(stdout.is_empty());
+        assert!(String::from_utf8(stderr)
+            .expect("stderr")
+            .contains("Review failure written"));
+        let output: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(output_path).expect("JSON usage failure output"))
+                .expect("JSON usage failure");
+        assert_eq!(output["status"], "failed");
+        assert_eq!(output["exitCode"], 2);
+    }
+
+    #[test]
+    fn headless_storage_is_only_needed_for_valid_review_runs() {
+        assert!(review_needs_headless_storage(&["review".to_string()]));
+        assert!(!review_needs_headless_storage(&[
+            "review".to_string(),
+            "--help".to_string()
+        ]));
+        assert!(!review_needs_headless_storage(&[
+            "review".to_string(),
+            "--unknown".to_string()
+        ]));
     }
 
     #[test]

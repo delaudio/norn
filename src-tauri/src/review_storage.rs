@@ -137,6 +137,11 @@ struct StoredReviewRun {
 }
 
 fn local_data_dir() -> Result<PathBuf, String> {
+    if let Some(dir) = std::env::var_os("LACHESI_REVIEW_DATA_DIR") {
+        let dir = PathBuf::from(dir);
+        fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+        return Ok(dir);
+    }
     if let Some(dir) = std::env::var_os("LACHESI_DATA_DIR") {
         let dir = PathBuf::from(dir);
         fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
@@ -943,6 +948,20 @@ mod tests {
         std::env::remove_var("LACHESI_DATA_DIR");
         let _ = fs::remove_dir_all(&dir);
         result
+    }
+
+    #[test]
+    fn dedicated_review_data_dir_is_created() {
+        let _guard = ENV_LOCK.lock().expect("test env lock");
+        let dir = test_dir("dedicated-review-data");
+        std::env::set_var("LACHESI_REVIEW_DATA_DIR", &dir);
+
+        let resolved = local_data_dir().expect("resolve dedicated review data dir");
+
+        std::env::remove_var("LACHESI_REVIEW_DATA_DIR");
+        assert_eq!(resolved, dir);
+        assert!(dir.is_dir());
+        let _ = fs::remove_dir_all(dir);
     }
 
     #[test]

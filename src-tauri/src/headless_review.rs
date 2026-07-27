@@ -866,7 +866,24 @@ fn working_tree_diff(repo_path: &Path) -> Result<(String, Vec<String>), Headless
                 )));
             }
         };
-        if !file.metadata().is_ok_and(|metadata| metadata.is_file()) {
+        let opened_metadata = match file.metadata() {
+            Ok(metadata) if metadata.is_file() => metadata,
+            _ => continue,
+        };
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt;
+
+            if opened_metadata.nlink() > 1 {
+                warnings.push(format!(
+                    "Skipped untracked file with multiple hard links `{display_relative}`."
+                ));
+                continue;
+            }
+        }
+        #[cfg(not(unix))]
+        let _ = opened_metadata;
+        if included_bytes >= MAX_UNTRACKED_TOTAL_BYTES {
             continue;
         }
         let remaining_bytes = MAX_UNTRACKED_TOTAL_BYTES.saturating_sub(included_bytes);
@@ -1733,6 +1750,24 @@ mod tests {
             .any(|warning| warning.contains("Skipped untracked symlink")));
         let _ = fs::remove_dir_all(repo);
         let _ = fs::remove_file(secret_path);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn working_tree_diff_skips_untracked_hard_links() {
+        let repo = temp_git_repo();
+        let outside_dir = tempfile::tempdir().expect("outside temp dir");
+        let outside_file = outside_dir.path().join("outside.txt");
+        fs::write(&outside_file, "outside secret\n").expect("write outside fixture");
+        fs::hard_link(&outside_file, repo.join("notes.txt")).expect("create hard link");
+
+        let (diff, warnings) = working_tree_diff(&repo).expect("collect working tree diff");
+
+        assert!(!diff.contains("outside secret"));
+        assert!(warnings
+            .iter()
+            .any(|warning| warning.contains("multiple hard links")));
+        let _ = fs::remove_dir_all(repo);
     }
 
     #[test]
