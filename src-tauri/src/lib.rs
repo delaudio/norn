@@ -8,13 +8,15 @@ mod launch;
 mod local_repo;
 mod repo_config;
 pub mod review_event;
+pub mod review_feedback;
 mod review_storage;
 mod services;
 pub mod tui;
 
 pub use review_storage::{
-    get_review_cursor, record_review_completion, ReviewCursor, ReviewCursorIdentity,
-    ReviewCursorState, ReviewRunCompletion, ReviewRunOutcome,
+    get_finding_feedback_state, get_review_cursor, record_finding_feedback,
+    record_review_completion, ReviewCursor, ReviewCursorIdentity, ReviewCursorState,
+    ReviewRunCompletion, ReviewRunOutcome,
 };
 
 use commands::{bitbucket, context, repositories, review};
