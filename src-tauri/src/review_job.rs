@@ -341,12 +341,20 @@ where
             let _ = stop_tx.send(());
             execution
         });
-        if let Ok(error) = renewal_error_rx.try_recv() {
-            return Err(format!("Failed to renew shared review job lease: {error}"));
-        }
-        self.store
+        let renewal_error = renewal_error_rx.try_recv().ok();
+        match self
+            .store
             .finish(&job.request.id, job.attempt_count, &execution)
-            .map(Some)
+        {
+            Ok(finished) => Ok(Some(finished)),
+            Err(finish_error) => match renewal_error {
+                Some(renewal_error) => Err(format!(
+                    "Failed to finish shared review job after lease renewal error: \
+                     {finish_error}; renewal: {renewal_error}"
+                )),
+                None => Err(finish_error),
+            },
+        }
     }
 }
 
@@ -365,6 +373,7 @@ mod tests {
     struct RecordingStore {
         calls: Mutex<Vec<&'static str>>,
         claimed: Mutex<Option<ReviewJobRecord>>,
+        fail_renewal: bool,
     }
 
     impl ReviewJobStore for RecordingStore {
@@ -405,7 +414,11 @@ mod tests {
 
         fn renew_lease(&self, _: &str, _: u32) -> Result<ReviewJobRecord, String> {
             self.calls.lock().expect("calls").push("renew");
-            Ok(job())
+            if self.fail_renewal {
+                Err("temporary_storage_error".to_string())
+            } else {
+                Ok(job())
+            }
         }
 
         fn get(&self, _: &str) -> Result<Option<ReviewJobRecord>, String> {
@@ -599,6 +612,32 @@ mod tests {
 
         let calls = coordinator.store.calls.lock().expect("calls");
         assert_eq!(calls.first(), Some(&"claim"));
+        assert!(calls.contains(&"renew"));
+        assert_eq!(calls.last(), Some(&"finish"));
+    }
+
+    #[test]
+    fn run_next_attempts_fenced_finish_after_a_renewal_error() {
+        let store = RecordingStore {
+            claimed: Mutex::new(Some(job())),
+            fail_renewal: true,
+            ..RecordingStore::default()
+        };
+        let coordinator = ReviewJobCoordinator::new(
+            store,
+            SlowSuccessfulExecutor,
+            ReviewConcurrencyLimits::default(),
+        )
+        .expect("coordinator")
+        .with_lease_heartbeat_interval(Duration::from_millis(2));
+
+        let completed = coordinator
+            .run_next()
+            .expect("fenced finish succeeds")
+            .expect("completed job");
+
+        assert_eq!(completed.status, ReviewJobStatus::Completed);
+        let calls = coordinator.store.calls.lock().expect("calls");
         assert!(calls.contains(&"renew"));
         assert_eq!(calls.last(), Some(&"finish"));
     }
