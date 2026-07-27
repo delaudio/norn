@@ -132,6 +132,15 @@ fn is_cli_command(args: &[String]) -> bool {
 }
 
 fn run_args(args: &[String], stdout: &mut dyn Write, stderr: &mut dyn Write) -> i32 {
+    if args.first().map(String::as_str) == Some("review")
+        && args
+            .iter()
+            .skip(1)
+            .any(|arg| arg == "--help" || arg == "-h")
+    {
+        let _ = writeln!(stdout, "{}", review_usage());
+        return 0;
+    }
     if args.iter().any(|arg| arg == "--help" || arg == "-h") {
         let _ = writeln!(stdout, "{}", usage());
         return 0;
@@ -530,15 +539,28 @@ fn write_human_output(output: &ConfigValidateOutput, out: &mut dyn Write) -> io:
 
 fn usage() -> &'static str {
     "Usage:
+Review:
   lachesi review [--repo-path <path>] [--scope working-tree|branch|pr]
                  [--base <ref>] [--pr <id>] [--workspace <name>] [--repo <slug>]
                  [--provider github|bitbucket] [--profile <name>]
                  [--ai-provider codex|claude] [--model <name>] [--effort <level>]
-                 [--format markdown|json] [--output <path>]
+                 [--format markdown|json] [--json] [--output <path>]
                  [--fail-on-findings] [--min-severity info|low|medium|high|critical]
                  [--run-analyzers]
+Config validation:
   lachesi config validate [--repo-path <path>] [--profile <name>]
                           [--format human|json] [--json]"
+}
+
+fn review_usage() -> &'static str {
+    "Usage:
+  lachesi review [--repo-path <path>] [--scope working-tree|branch|pr]
+                 [--base <ref>] [--pr <id>] [--workspace <name>] [--repo <slug>]
+                 [--provider github|bitbucket] [--profile <name>]
+                 [--ai-provider codex|claude] [--model <name>] [--effort <level>]
+                 [--format markdown|json] [--json] [--output <path>]
+                 [--fail-on-findings] [--min-severity info|low|medium|high|critical]
+                 [--run-analyzers]"
 }
 
 #[cfg(test)]
@@ -801,6 +823,8 @@ profiles:
         assert!(output.contains("lachesi review"));
         assert!(output.contains("--scope working-tree|branch|pr"));
         assert!(output.contains("--run-analyzers"));
+        assert!(output.contains("--json"));
+        assert!(!output.contains("config validate"));
     }
 
     #[test]

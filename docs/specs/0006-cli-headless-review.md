@@ -148,6 +148,9 @@ Defaults:
 - `--workspace` and `--repo` must be provided together; explicit identity
   values must match the selected local checkout
 - `--pr` is valid only for PR scope and `--base` only for branch scope
+- branch scope reviews committed changes from merge base through `HEAD`; when
+  local changes are present, Lachesi warns that working-tree scope must be run
+  separately
 - `.lachesi.yaml` is loaded from repo root when present
 - `--profile` overrides `review.profile`; if omitted, `review.profile` or a
   `default` profile is used when configured

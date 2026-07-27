@@ -3049,8 +3049,15 @@ fn resolve_branch(repo_path: &Path, branch: &str) -> Result<(), String> {
     Ok(())
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ProviderExecutionContext {
+    Repository,
+    Isolated,
+}
+
 fn build_claude_text_command(
     repo_path: Option<&Path>,
+    execution_context: ProviderExecutionContext,
     payload: &str,
     resume_session_id: Option<&str>,
     claude_model: Option<&str>,
@@ -3079,7 +3086,9 @@ fn build_claude_text_command(
             "--include-partial-messages",
         ])
         .env("LACHESI_REVIEW_CHILD", "1");
-    if repo_path.is_some() {
+    let repository_access =
+        execution_context == ProviderExecutionContext::Repository && repo_path.is_some();
+    if repository_access {
         command.args(["--allowedTools", "Read,Glob,Grep"]);
     } else {
         // Claude documents an empty --tools value as disabling all built-in tools.
@@ -3094,8 +3103,8 @@ fn build_claude_text_command(
     if let Some(session_id) = resume_session_id {
         command.args(["--resume", session_id]);
     }
-    if let Some(repo_path) = repo_path {
-        command.current_dir(repo_path);
+    if repository_access {
+        command.current_dir(repo_path.expect("repository access requires a path"));
     } else {
         command.current_dir(temp_dir.path());
     }
@@ -3146,6 +3155,7 @@ fn normalize_claude_effort(value: &str) -> Option<&'static str> {
 
 fn build_codex_text_command(
     repo_path: Option<&Path>,
+    execution_context: ProviderExecutionContext,
     payload: &str,
     codex_model: Option<&str>,
     codex_effort: Option<&str>,
@@ -3168,7 +3178,9 @@ fn build_codex_text_command(
             )
         })
         .unwrap_or_default();
-    let isolation_args = if repo_path.is_some() {
+    let repository_access =
+        execution_context == ProviderExecutionContext::Repository && repo_path.is_some();
+    let isolation_args = if repository_access {
         String::new()
     } else {
         " --skip-git-repo-check --ephemeral --ignore-user-config --ignore-rules".to_string()
@@ -3183,8 +3195,8 @@ fn build_codex_text_command(
         .arg("-lc")
         .arg(shell_cmd)
         .env("LACHESI_REVIEW_CHILD", "1");
-    if let Some(repo_path) = repo_path {
-        command.current_dir(repo_path);
+    if repository_access {
+        command.current_dir(repo_path.expect("repository access requires a path"));
     } else {
         command.current_dir(temp_dir.path());
     }
@@ -4409,9 +4421,11 @@ fn run_inline_review_pipeline(
         AiProvider::Codex => ReviewEvidenceSource::Codex,
     };
     let repo_path = repo_path_override.or_else(|| resolve_local_repo(&workspace, &repo).ok());
-    let provider_repo_path = (!isolate_provider)
-        .then_some(repo_path.as_deref())
-        .flatten();
+    let provider_execution_context = if isolate_provider {
+        ProviderExecutionContext::Isolated
+    } else {
+        ProviderExecutionContext::Repository
+    };
     let mut analyzer_artifacts = Vec::new();
     let mut effective_payload = payload.clone();
     let mut effective_fallback_payload = fallback_payload.clone();
@@ -4564,7 +4578,8 @@ fn run_inline_review_pipeline(
                           resume_id: Option<&str>|
      -> Result<Option<ParsedClaudeTextResponse>, String> {
         let (mut command, _temp_dir) = build_claude_text_command(
-            provider_repo_path,
+            repo_path.as_deref(),
+            provider_execution_context,
             prompt,
             resume_id,
             claude_model.as_deref(),
@@ -4642,7 +4657,8 @@ fn run_inline_review_pipeline(
 
     let attempt_codex = |prompt: &str| -> Result<Option<ParsedClaudeTextResponse>, String> {
         let (mut command, _temp_dir, output_path) = build_codex_text_command(
-            provider_repo_path,
+            repo_path.as_deref(),
+            provider_execution_context,
             prompt,
             codex_model.as_deref(),
             codex_effort.as_deref(),
@@ -5776,10 +5792,10 @@ mod tests {
         parse_claude_structured_json, parse_claude_text_result, parse_review_resources,
         resolve_gui_skip_analyzers, review_findings_from_output, trim_evidence_output,
         AiReviewDraftCommentResult, AiReviewRunStatus, AiReviewRunStore, AiReviewTurnKind,
-        ReviewEvidenceArtifact, ReviewEvidenceKind, ReviewEvidenceSource, ReviewFindingCategory,
-        ReviewFindingConfidence, ReviewFindingPublicationEvent, ReviewFindingPublicationEventKind,
-        ReviewFindingSeverity, ReviewProvider, ReviewPublicationMode,
-        STRUCTURED_REVIEW_SCHEMA_VERSION,
+        ProviderExecutionContext, ReviewEvidenceArtifact, ReviewEvidenceKind, ReviewEvidenceSource,
+        ReviewFindingCategory, ReviewFindingConfidence, ReviewFindingPublicationEvent,
+        ReviewFindingPublicationEventKind, ReviewFindingSeverity, ReviewProvider,
+        ReviewPublicationMode, STRUCTURED_REVIEW_SCHEMA_VERSION,
     };
 
     #[test]
@@ -5842,9 +5858,14 @@ mod tests {
 
     #[test]
     fn builds_codex_review_command_with_model_effort_and_read_only_sandbox() {
-        let (command, temp_dir, output_path) =
-            build_codex_text_command(None, "review prompt", Some("gpt-5-codex"), Some("high"))
-                .expect("codex command should build");
+        let (command, temp_dir, output_path) = build_codex_text_command(
+            Some(std::path::Path::new("/reviewed/repository")),
+            ProviderExecutionContext::Isolated,
+            "review prompt",
+            Some("gpt-5-codex"),
+            Some("high"),
+        )
+        .expect("codex command should build");
         let shell = command
             .get_args()
             .nth(1)
@@ -5873,9 +5894,15 @@ mod tests {
 
     #[test]
     fn builds_isolated_claude_review_command_without_repository_tools() {
-        let (command, temp_dir) =
-            build_claude_text_command(None, "review prompt", None, None, None)
-                .expect("claude command should build");
+        let (command, temp_dir) = build_claude_text_command(
+            Some(std::path::Path::new("/reviewed/repository")),
+            ProviderExecutionContext::Isolated,
+            "review prompt",
+            None,
+            None,
+            None,
+        )
+        .expect("claude command should build");
         let shell = command
             .get_args()
             .nth(1)
@@ -5948,12 +5975,23 @@ mod tests {
     #[test]
     fn repository_backed_review_commands_keep_read_only_checkout_context() {
         let repo_dir = tempfile::tempdir().expect("repo temp dir");
-        let (claude, _claude_temp_dir) =
-            build_claude_text_command(Some(repo_dir.path()), "review prompt", None, None, None)
-                .expect("claude command should build");
-        let (codex, _codex_temp_dir, _output_path) =
-            build_codex_text_command(Some(repo_dir.path()), "review prompt", None, None)
-                .expect("codex command should build");
+        let (claude, _claude_temp_dir) = build_claude_text_command(
+            Some(repo_dir.path()),
+            ProviderExecutionContext::Repository,
+            "review prompt",
+            None,
+            None,
+            None,
+        )
+        .expect("claude command should build");
+        let (codex, _codex_temp_dir, _output_path) = build_codex_text_command(
+            Some(repo_dir.path()),
+            ProviderExecutionContext::Repository,
+            "review prompt",
+            None,
+            None,
+        )
+        .expect("codex command should build");
         let claude_shell = claude
             .get_args()
             .nth(1)

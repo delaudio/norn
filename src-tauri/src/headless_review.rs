@@ -609,6 +609,7 @@ fn resolve_target(
                     "--",
                 ],
             )?;
+            let warnings = branch_scope_warnings(repo_path)?;
             Ok(local_target(
                 repo_path,
                 workspace,
@@ -617,7 +618,7 @@ fn resolve_target(
                 base,
                 "Current branch changes".to_string(),
                 diff,
-                Vec::new(),
+                warnings,
                 request.scope,
                 provider,
             ))
@@ -651,6 +652,21 @@ fn resolve_target(
                 warnings: Vec::new(),
             })
         }
+    }
+}
+
+fn branch_scope_warnings(repo_path: &Path) -> Result<Vec<String>, HeadlessReviewError> {
+    let status = git_output(
+        repo_path,
+        ["status", "--porcelain=v1", "--untracked-files=normal"],
+    )?;
+    if status.is_empty() {
+        Ok(Vec::new())
+    } else {
+        Ok(vec![
+            "Branch scope reviews committed changes only; staged, unstaged, and untracked files were excluded. Run `--scope working-tree` separately to review them."
+                .to_string(),
+        ])
     }
 }
 
@@ -1066,7 +1082,7 @@ mod tests {
     use std::sync::atomic::{AtomicU64, Ordering};
 
     use super::{
-        build_review_payload, format_findings_markdown, format_markdown,
+        branch_scope_warnings, build_review_payload, format_findings_markdown, format_markdown,
         is_sensitive_untracked_path, map_native_review_error, map_provider_target_error,
         markdown_fence, new_file_patch, public_provider_error, repo_identity_matches_target,
         requested_repo_identity, run, strip_private_evidence_payloads,
@@ -1495,6 +1511,23 @@ mod tests {
         assert!(diff.contains("+after unstaged"));
         assert!(diff.contains("diff --git a/untracked.txt b/untracked.txt"));
         assert!(diff.contains("+new untracked"));
+        let _ = fs::remove_dir_all(repo);
+    }
+
+    #[test]
+    fn branch_scope_warns_when_local_changes_are_excluded() {
+        let repo = temp_git_repo();
+        assert!(branch_scope_warnings(&repo)
+            .expect("clean warnings")
+            .is_empty());
+        fs::write(repo.join("unstaged.txt"), "after unstaged\n")
+            .expect("write local branch change");
+
+        let warnings = branch_scope_warnings(&repo).expect("dirty warnings");
+
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].contains("committed changes only"));
+        assert!(warnings[0].contains("--scope working-tree"));
         let _ = fs::remove_dir_all(repo);
     }
 
