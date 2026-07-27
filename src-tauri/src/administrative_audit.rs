@@ -237,10 +237,13 @@ fn validate_redactable_stored(
 }
 
 fn validate_timestamp(value: &str) -> Result<(), AdministrativeAuditValidationError> {
+    if value.is_empty() || !value.bytes().all(|byte| byte.is_ascii_digit()) {
+        return Err(AdministrativeAuditValidationError::InvalidTimestamp);
+    }
     let timestamp = value
         .parse::<i64>()
         .map_err(|_| AdministrativeAuditValidationError::InvalidTimestamp)?;
-    if !(0..=MAX_OCCURRED_AT_MILLIS).contains(&timestamp) {
+    if !(0..=MAX_OCCURRED_AT_MILLIS).contains(&timestamp) || timestamp.to_string() != value {
         return Err(AdministrativeAuditValidationError::InvalidTimestamp);
     }
     Ok(())
@@ -491,6 +494,18 @@ mod tests {
         assert_eq!(prepared.target.id, REDACTED_AUDIT_VALUE);
         assert_eq!(prepared.correlation_id, REDACTED_AUDIT_VALUE);
         prepared.validate_stored().expect("stored event is valid");
+    }
+
+    #[test]
+    fn timestamps_must_use_canonical_unsigned_decimal_milliseconds() {
+        for occurred_at in ["+1000", "01000", "-1", "1.0"] {
+            let mut event = audit_event();
+            event.occurred_at = occurred_at.to_string();
+            assert_eq!(
+                event.prepare_for_storage(),
+                Err(AdministrativeAuditValidationError::InvalidTimestamp)
+            );
+        }
     }
 
     #[test]

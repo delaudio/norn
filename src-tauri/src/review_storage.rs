@@ -616,7 +616,8 @@ pub fn append_administrative_audit_event(
     Ok(AdministrativeAuditAppendResult::Appended)
 }
 
-pub fn export_administrative_audit_jsonl(tenant_id: &str) -> Result<String, String> {
+#[cfg(test)]
+fn export_administrative_audit_jsonl(tenant_id: &str) -> Result<String, String> {
     let mut output = Vec::new();
     write_administrative_audit_jsonl(tenant_id, &mut output)?;
     String::from_utf8(output).map_err(|_| "Administrative audit export is not UTF-8.".to_string())
@@ -704,15 +705,6 @@ pub fn purge_administrative_audit_events_before(
         .execute(
             r#"
             DELETE FROM administrative_audit_events
-            WHERE tenant_id = ?1 AND occurred_at_ms < ?2
-            "#,
-            params![tenant_id, occurred_before_ms],
-        )
-        .map_err(|error| error.to_string())?;
-    transaction
-        .execute(
-            r#"
-            DELETE FROM administrative_audit_delivery_receipts
             WHERE tenant_id = ?1 AND occurred_at_ms < ?2
             "#,
             params![tenant_id, occurred_before_ms],
@@ -1908,7 +1900,7 @@ mod tests {
                 .expect("export other tenant")
                 .contains("delivery-other"));
             assert_eq!(
-                append_administrative_audit_event(&audit_event("delivery-old", "1000"))
+                append_administrative_audit_event(&audit_event("delivery-old", "3000"))
                     .expect("reject purged event resurrection"),
                 AdministrativeAuditAppendResult::Duplicate
             );
