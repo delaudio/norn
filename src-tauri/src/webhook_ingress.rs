@@ -8,6 +8,7 @@ use std::sync::Mutex;
 use hmac::{Hmac, Mac};
 use serde::Deserialize;
 use sha2::Sha256;
+use time::{format_description::well_known::Rfc3339, OffsetDateTime};
 
 use crate::review_event::{
     PullRequestClosedOutcome, PullRequestEventActor, PullRequestReviewEvent,
@@ -384,6 +385,7 @@ struct GithubPullRequest {
     #[serde(default)]
     draft: bool,
     merged: Option<bool>,
+    updated_at: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -463,6 +465,7 @@ fn normalize_github(
             ref_name: payload.pull_request.head.ref_name,
             sha: payload.pull_request.head.sha,
         },
+        provider_updated_at_ms: provider_timestamp_ms(&payload.pull_request.updated_at)?,
         draft: payload.pull_request.draft,
         closed_outcome,
         actor: PullRequestEventActor {
@@ -496,6 +499,7 @@ struct BitbucketPullRequest {
     destination: BitbucketRevision,
     #[serde(default)]
     draft: bool,
+    updated_on: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -587,6 +591,7 @@ fn normalize_bitbucket<C: WebhookCommitResolver>(
             ref_name: payload.pullrequest.source.branch.name,
             sha: head_sha,
         },
+        provider_updated_at_ms: provider_timestamp_ms(&payload.pullrequest.updated_on)?,
         draft: payload.pullrequest.draft,
         closed_outcome,
         actor: PullRequestEventActor {
@@ -596,6 +601,13 @@ fn normalize_bitbucket<C: WebhookCommitResolver>(
         },
         delivery_id: delivery_id.to_string(),
     }))
+}
+
+fn provider_timestamp_ms(value: &str) -> Result<i64, WebhookIngressRejection> {
+    let timestamp = OffsetDateTime::parse(value, &Rfc3339)
+        .map_err(|_| WebhookIngressRejection::InvalidPayload)?;
+    i64::try_from(timestamp.unix_timestamp_nanos() / 1_000_000)
+        .map_err(|_| WebhookIngressRejection::InvalidPayload)
 }
 
 fn resolve_bitbucket_commit<C: WebhookCommitResolver>(
@@ -711,6 +723,7 @@ mod tests {
                     "sha": BASE_SHA
                 },
                 "head": {"ref": "feature/retry", "sha": HEAD_SHA},
+                "updated_at": "2026-07-27T17:00:00Z",
                 "draft": action == "converted_to_draft",
                 "merged": action == "closed"
             },
@@ -732,6 +745,7 @@ mod tests {
             },
             "pullrequest": {
                 "id": 42,
+                "updated_on": "2026-07-27T17:00:00.000Z",
                 "source": {
                     "branch": {"name": "feature/retry"},
                     "commit": {"hash": &HEAD_SHA[..12]},

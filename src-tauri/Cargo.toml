@@ -37,6 +37,7 @@ crossterm = "0.28"
 ctrlc = "3"
 tempfile = "3"
 libc = "0.2"
+time = { version = "0.3", features = ["parsing"] }
 
 [dev-dependencies]
 tauri = { version = "2", features = ["test"] }
