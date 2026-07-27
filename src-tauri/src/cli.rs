@@ -211,7 +211,7 @@ fn write_review_parse_failure(
 fn review_parse_output_path(args: &[String]) -> Option<PathBuf> {
     args.windows(2)
         .rev()
-        .find(|pair| pair[0] == "--output")
+        .find(|pair| pair[0] == "--output" && !pair[1].starts_with('-'))
         .map(|pair| PathBuf::from(&pair[1]))
 }
 
@@ -932,6 +932,31 @@ profiles:
                 .expect("JSON usage failure");
         assert_eq!(output["status"], "failed");
         assert_eq!(output["exitCode"], 2);
+    }
+
+    #[test]
+    fn review_usage_errors_do_not_treat_an_option_as_output_path() {
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+        let code = run_args(
+            &[
+                "review".to_string(),
+                "--json".to_string(),
+                "--output".to_string(),
+                "--unknown".to_string(),
+            ],
+            &mut stdout,
+            &mut stderr,
+        );
+
+        assert_eq!(code, 2);
+        assert!(stderr.is_empty());
+        let output: serde_json::Value =
+            serde_json::from_slice(&stdout).expect("JSON usage failure");
+        assert_eq!(output["status"], "failed");
+        assert!(output["error"]
+            .as_str()
+            .is_some_and(|error| error.contains("`--output` requires a value")));
     }
 
     #[test]

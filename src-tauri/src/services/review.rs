@@ -3141,6 +3141,7 @@ fn private_provider_temp_dir(prefix: &str) -> Result<tempfile::TempDir, String> 
     Ok(temp_dir)
 }
 
+#[cfg(test)]
 fn validate_isolated_provider_cli(ai_provider: AiProvider) -> Result<(), String> {
     let (label, program, args, required_help_text): (&str, &str, &[&str], &[&str]) =
         match ai_provider {
@@ -4620,9 +4621,6 @@ fn run_inline_review_pipeline(
         .filter(|profile| !profile.is_empty())
     {
         append_inline_review_log(&store, &key, run_id, format!("Review profile: {profile}"));
-    }
-    if isolate_provider {
-        validate_isolated_provider_cli(ai_provider).map_err(ReviewPipelineFailure::provider)?;
     }
     match ai_provider {
         AiProvider::Claude => {

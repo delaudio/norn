@@ -1013,11 +1013,23 @@ fn is_sensitive_untracked_path(relative: &str) -> bool {
     let file_name = path.file_name().and_then(OsStr::to_str).unwrap_or_default();
     let extension = path.extension().and_then(OsStr::to_str).unwrap_or_default();
     let normalized_file_name = file_name.replace('-', "_");
-    let normalized_stem = file_name
-        .split('.')
-        .next()
-        .unwrap_or_default()
-        .replace('-', "_");
+    let has_sensitive_name_token = file_name
+        .trim_start_matches('.')
+        .split(['.', '_', '-'])
+        .any(|part| {
+            matches!(
+                part,
+                "secret"
+                    | "secrets"
+                    | "password"
+                    | "passwords"
+                    | "passwd"
+                    | "token"
+                    | "tokens"
+                    | "credential"
+                    | "credentials"
+            )
+        });
     if normalized.split('/').any(|component| {
         matches!(
             component,
@@ -1069,7 +1081,8 @@ fn is_sensitive_untracked_path(relative: &str) -> bool {
     ) {
         return true;
     }
-    let likely_secret_text = extension.is_empty()
+    let likely_secret_text = file_name.starts_with('.')
+        || extension.is_empty()
         || matches!(
             extension,
             "txt"
@@ -1085,24 +1098,17 @@ fn is_sensitive_untracked_path(relative: &str) -> bool {
                 | "csv"
                 | "log"
         );
+    let first_name_segment = normalized_file_name
+        .trim_start_matches('.')
+        .split('.')
+        .next()
+        .unwrap_or_default();
     if likely_secret_text
-        && (normalized_stem.split('_').any(|part| {
-            matches!(
-                part,
-                "secret" | "secrets" | "password" | "passwords" | "passwd"
-            )
-        }) || matches!(
-            normalized_stem.as_str(),
-            "token"
-                | "tokens"
-                | "credential"
-                | "credentials"
-                | "api_key"
-                | "private_key"
-                | "access_token"
-                | "auth_token"
-                | "refresh_token"
-        ))
+        && (has_sensitive_name_token
+            || matches!(
+                first_name_segment,
+                "api_key" | "private_key" | "access_token" | "auth_token" | "refresh_token"
+            ))
     {
         return true;
     }
@@ -1761,6 +1767,10 @@ mod tests {
         assert!(is_sensitive_untracked_path("token.txt"));
         assert!(is_sensitive_untracked_path("client-secrets.ini"));
         assert!(is_sensitive_untracked_path(".npmrc.local"));
+        assert!(is_sensitive_untracked_path(".secret"));
+        assert!(is_sensitive_untracked_path(".token"));
+        assert!(is_sensitive_untracked_path(".credentials"));
+        assert!(is_sensitive_untracked_path("client.secret.txt"));
         assert!(!is_sensitive_untracked_path("src/token.rs"));
         assert!(!is_sensitive_untracked_path("src/credentials.rs"));
         let _ = fs::remove_dir_all(repo);
