@@ -5339,7 +5339,7 @@ pub async fn reply_inline_review(
             claude_effort,
             codex_model,
             codex_effort,
-            false,
+            true,
             None,
             false,
             None,

@@ -786,6 +786,24 @@ profiles:
     }
 
     #[test]
+    fn review_help_returns_zero_and_advertises_review_options() {
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+        let code = run_args(
+            &["review".to_string(), "--help".to_string()],
+            &mut stdout,
+            &mut stderr,
+        );
+
+        assert_eq!(code, 0);
+        assert!(stderr.is_empty());
+        let output = String::from_utf8(stdout).expect("help output");
+        assert!(output.contains("lachesi review"));
+        assert!(output.contains("--scope working-tree|branch|pr"));
+        assert!(output.contains("--run-analyzers"));
+    }
+
+    #[test]
     fn review_analyzers_are_explicit_opt_in() {
         let args = parse_review_args(&["review".to_string(), "--run-analyzers".to_string()])
             .expect("parse analyzer opt-in");
