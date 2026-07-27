@@ -131,35 +131,6 @@ interface ConversationThreadItem {
   draft: DraftComment | null;
 }
 
-function diffPrefixForChange(change: ChangeData): string {
-  if (change.type === "insert") return "+";
-  if (change.type === "delete") return "-";
-  return " ";
-}
-
-function buildTargetedHunkDiff(file: FileData, change: ChangeData): string {
-  const changeKey = getChangeKey(change);
-  const hunk = file.hunks.find((candidate) =>
-    candidate.changes.some((item) => getChangeKey(item) === changeKey),
-  );
-  const oldPath = file.oldPath || "/dev/null";
-  const newPath = file.newPath || "/dev/null";
-  const lines = [
-    `diff --git a/${file.oldPath || newPath} b/${file.newPath || oldPath}`,
-    oldPath === "/dev/null" ? "--- /dev/null" : `--- a/${oldPath}`,
-    newPath === "/dev/null" ? "+++ /dev/null" : `+++ b/${newPath}`,
-  ];
-  if (hunk) {
-    lines.push(hunk.content);
-    for (const hunkChange of hunk.changes) {
-      lines.push(`${diffPrefixForChange(hunkChange)}${hunkChange.content}`);
-    }
-  } else {
-    lines.push(`${diffPrefixForChange(change)}${change.content}`);
-  }
-  return lines.join("\n");
-}
-
 function aiLineQuestionLabel(context: Pick<AiLineQuestionContext, "path" | "to" | "from">): string {
   const line = context.to ?? context.from;
   return line == null ? context.path : `${context.path}:${line}`;
@@ -797,7 +768,6 @@ export function PrDetailPanel({
       to: anchor.to,
       from: anchor.from,
       lineText: anchor.change.content,
-      hunkDiff: buildTargetedHunkDiff(file, anchor.change),
     };
     setLineAskTarget({ context, label: aiLineQuestionLabel(context) });
     setLineAskQuestion("");

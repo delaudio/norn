@@ -201,7 +201,6 @@ export interface AiLineQuestionContext {
   to: number | null;
   from: number | null;
   lineText: string;
-  hunkDiff: string;
 }
 
 export type AiReviewRunStatus = "idle" | "running" | "succeeded" | "failed" | "cancelled";

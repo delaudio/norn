@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import type { PullRequestDetail } from "@/types";
 import {
-  assertLineQuestionMatchesReviewSnapshot,
   assertStablePullRequestSnapshot,
+  resolveLineQuestionHunkFromReviewSnapshot,
 } from "./buildAiReviewPayloadForPr";
 
 const detail: PullRequestDetail = {
@@ -44,7 +44,7 @@ describe("assertStablePullRequestSnapshot", () => {
   });
 });
 
-describe("assertLineQuestionMatchesReviewSnapshot", () => {
+describe("resolveLineQuestionHunkFromReviewSnapshot", () => {
   const rawDiff = [
     "diff --git a/src/review.ts b/src/review.ts",
     "--- a/src/review.ts",
@@ -56,27 +56,38 @@ describe("assertLineQuestionMatchesReviewSnapshot", () => {
   ].join("\n");
 
   it("accepts a selected line that still exists at the same anchor", () => {
-    expect(() =>
-      assertLineQuestionMatchesReviewSnapshot(rawDiff, {
+    expect(
+      resolveLineQuestionHunkFromReviewSnapshot(rawDiff, {
         path: "src/review.ts",
         side: "new",
         to: 10,
         from: null,
         lineText: "const state = 'new';",
-        hunkDiff: rawDiff,
       }),
-    ).not.toThrow();
+    ).toContain(" keep();");
+  });
+
+  it("rebuilds surrounding context from the verified snapshot", () => {
+    const currentDiff = rawDiff.replace(" keep();", " changedContext();");
+    const resolved = resolveLineQuestionHunkFromReviewSnapshot(currentDiff, {
+      path: "src/review.ts",
+      side: "new",
+      to: 10,
+      from: null,
+      lineText: "const state = 'new';",
+    });
+    expect(resolved).toContain(" changedContext();");
+    expect(resolved).not.toContain(" keep();");
   });
 
   it("rejects a selected line whose content or anchor changed", () => {
     expect(() =>
-      assertLineQuestionMatchesReviewSnapshot(rawDiff, {
+      resolveLineQuestionHunkFromReviewSnapshot(rawDiff, {
         path: "src/review.ts",
         side: "new",
         to: 11,
         from: null,
         lineText: "const state = 'new';",
-        hunkDiff: rawDiff,
       }),
     ).toThrow("selected line changed");
   });

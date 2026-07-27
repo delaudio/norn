@@ -1,5 +1,5 @@
 import { buildReviewPayload } from "@/lib/buildReviewPayload";
-import { changeNewLine, changeOldLine, parseUnifiedDiff } from "@/lib/diff";
+import { buildTargetedHunkDiff, changeNewLine, changeOldLine, parseUnifiedDiff } from "@/lib/diff";
 import { extractIssueKeys } from "@/lib/jira";
 import { resolveReviewPrompt } from "@/lib/reviewPrompt";
 import { loadReviewReferences } from "@/lib/reviewReferencesStorage";
@@ -54,27 +54,27 @@ export function assertStablePullRequestSnapshot(
   }
 }
 
-export function assertLineQuestionMatchesReviewSnapshot(
+export function resolveLineQuestionHunkFromReviewSnapshot(
   rawDiff: string,
   context: AiLineQuestionContext,
-): void {
-  const matches = parseUnifiedDiff(rawDiff).some((file) => {
+): string {
+  for (const file of parseUnifiedDiff(rawDiff)) {
     const path =
       context.side === "old" ? file.oldPath || file.newPath : file.newPath || file.oldPath;
-    if (path !== context.path) return false;
-    return file.hunks.some((hunk) =>
-      hunk.changes.some((change) => {
+    if (path !== context.path) continue;
+    for (const hunk of file.hunks) {
+      for (const change of hunk.changes) {
         const line = context.side === "old" ? changeOldLine(change) : changeNewLine(change);
         const expectedLine = context.side === "old" ? context.from : context.to;
-        return line === expectedLine && change.content === context.lineText;
-      }),
-    );
-  });
-  if (!matches) {
-    throw new Error(
-      "The selected line changed while its review snapshot was loading; select the line again.",
-    );
+        if (line === expectedLine && change.content === context.lineText) {
+          return buildTargetedHunkDiff(file, change);
+        }
+      }
+    }
   }
+  throw new Error(
+    "The selected line changed while its review snapshot was loading; select the line again.",
+  );
 }
 
 export async function loadStablePullRequestReviewSnapshot({

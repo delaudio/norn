@@ -34,9 +34,9 @@ import { buildReviewPromptDisplayMessage } from "@/lib/aiReviewPromptDisplay";
 import { buildBackgroundReviewStartArgs } from "@/lib/backgroundReviewStart";
 import { buildAiFixPayload } from "@/lib/buildAiFixPayload";
 import {
-  assertLineQuestionMatchesReviewSnapshot,
   buildAiReviewPayloadForPr,
   loadStablePullRequestReviewSnapshot,
+  resolveLineQuestionHunkFromReviewSnapshot,
 } from "@/lib/buildAiReviewPayloadForPr";
 import { shouldIgnoreShortcut } from "@/lib/keyboard";
 import {
@@ -683,7 +683,10 @@ export default function App() {
       provider: activeRepo?.provider ?? reviewProvider,
       prId: activeSel.prId,
     });
-    assertLineQuestionMatchesReviewSnapshot(snapshot.rawDiff, lineContext);
+    const currentHunkDiff = resolveLineQuestionHunkFromReviewSnapshot(
+      snapshot.rawDiff,
+      lineContext,
+    );
     const label = lineQuestionLabel(lineContext);
     const displayMessage = [`Question about \`${label}\``, "", question.trim()].join("\n");
     const payload = [
@@ -703,7 +706,7 @@ export default function App() {
       "",
       "## Diff hunk",
       "```diff",
-      lineContext.hunkDiff.trim(),
+      currentHunkDiff.trim(),
       "```",
       "",
       "## Reviewer question",
