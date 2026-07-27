@@ -8,15 +8,15 @@ If status files and git disagree, git is authoritative; correct this file.
 
 ## Active state
 
-- **Branch:** `agent/ship-headless-review`
-- **Active item:** `.docflow/plan/done/2026-07-27-headless-review-cli.md`
+- **Branch:** `agent/shared-service-boundary`
+- **Active item:** GitHub issue #89 and `.docflow/adr/0008-shared-review-service-boundary.md`
 - **Blockers:** none; use the available SSH key for signed commits.
-- **Uncommitted work:** completion metadata for the shipped headless review CLI.
+- **Uncommitted work:** accepted shared-service trust boundary and program plan.
 
 ## Last shipped
 
-`7b35c16` - ship the headless review CLI through PR #115.
+`f0cc40b` - close the shipped headless review plan through PR #116.
 
 ## Next item
 
-Inspect and implement GitHub issue #89 after the closeout PR merges.
+Implement GitHub issue #90 after the trust-boundary PR merges.
