@@ -122,8 +122,8 @@ export const mockPullRequestDetail: PullRequestDetail = {
   ],
   sourceBranch: "APP-2066-saved-view-filter",
   destinationBranch: "develop",
-  sourceCommitHash: "mock-source-commit",
-  destinationCommitHash: "mock-destination-commit",
+  sourceCommitHash: "2222222222222222222222222222222222222222",
+  destinationCommitHash: "1111111111111111111111111111111111111111",
   createdOn: "2026-06-16T09:00:00.000Z",
   updatedOn: "2026-06-16T15:40:00.000Z",
 };

@@ -98,8 +98,14 @@ async function publishDraftToServer(
   prId: number,
   draft: DraftComment,
   publishFindingDraft?: (draft: DraftComment) => Promise<PublishedDraftComment>,
+  canTrackFindingPublication = false,
 ): Promise<PublishedDraftComment> {
   if (draft.findingRef) {
+    if (!canTrackFindingPublication) {
+      throw new Error(
+        "Structured finding tracking is unavailable; refresh the review before publishing.",
+      );
+    }
     if (!publishFindingDraft) {
       throw new Error("Structured finding publication is unavailable; refresh the review.");
     }
@@ -148,12 +154,8 @@ export function useDraftComments(
   const [drafts, setDrafts] = useState<DraftComment[]>([]);
   const [publishing, setPublishing] = useState(false);
   const [publishingDraftId, setPublishingDraftId] = useState<string | null>(null);
-  const {
-    publishFindingDraft,
-    onFindingDraftPublished,
-    onDraftRemoved,
-    onDraftsDiscarded,
-  } = options;
+  const { publishFindingDraft, onFindingDraftPublished, onDraftRemoved, onDraftsDiscarded } =
+    options;
 
   const active = provider != null && workspace != null && repo != null && prId != null;
 
@@ -238,6 +240,7 @@ export function useDraftComments(
           prId,
           draft,
           publishFindingDraft,
+          onFindingDraftPublished != null,
         );
         if (draft.findingRef && onFindingDraftPublished) {
           await onFindingDraftPublished(draft, comment);
@@ -255,16 +258,7 @@ export function useDraftComments(
         setPublishing(false);
       }
     },
-    [
-      active,
-      provider,
-      workspace,
-      repo,
-      prId,
-      drafts,
-      publishFindingDraft,
-      onFindingDraftPublished,
-    ],
+    [active, provider, workspace, repo, prId, drafts, publishFindingDraft, onFindingDraftPublished],
   );
 
   const publishAll = useCallback(async (): Promise<PublishResult> => {
@@ -282,6 +276,7 @@ export function useDraftComments(
           prId,
           draft,
           publishFindingDraft,
+          onFindingDraftPublished != null,
         );
         if (draft.findingRef && onFindingDraftPublished) {
           await onFindingDraftPublished(draft, comment);

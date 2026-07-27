@@ -8,10 +8,10 @@ import type {
   BranchStatus,
   BranchSyncResult,
   FindingPublicationRequest,
-  PublishedCommentIdentity,
   PrComment,
   PrFilePreview,
   PrListFilter,
+  PublishedCommentIdentity,
   PullRequestPage,
   RepositoryBlameLine,
   RepositoryFileContent,
@@ -40,6 +40,7 @@ interface SavedReview {
 
 let mockCommentId = 100000;
 let mockPullRequestDetailState = mockPullRequestDetail;
+const mockPublishedFindings = new Map<string, PublishedCommentIdentity>();
 const mockFixStates = new Map<string, AiReviewFixState>();
 const mockReviewRunStates = new Map<string, AiReviewRunState>();
 const mockReviewRunTimers = new Map<string, number[]>();
@@ -649,6 +650,114 @@ interface NewInlineCommentArgs {
   parentId: number | null;
 }
 
+function publicationByteLength(value: string): number {
+  return new TextEncoder().encode(value).length;
+}
+
+function validatePublicationIdentifier(value: string, field: string): void {
+  if (!value.trim()) {
+    throw new Error(`Structured finding publication requires ${field}.`);
+  }
+  if (value !== value.trim()) {
+    throw new Error(`Structured finding publication ${field} must not contain whitespace.`);
+  }
+  if (publicationByteLength(value) > 512) {
+    throw new Error(`Structured finding publication ${field} is too long.`);
+  }
+}
+
+function validatePublicationText(value: string, field: string, maximum: number): void {
+  if (!value.trim()) {
+    throw new Error(`Structured finding publication requires ${field}.`);
+  }
+  if (publicationByteLength(value) > maximum) {
+    throw new Error(`Structured finding publication ${field} is too long.`);
+  }
+}
+
+function findingPublicationKey(request: FindingPublicationRequest): string {
+  return JSON.stringify([
+    request.tenantId,
+    request.provider,
+    request.workspace.toLowerCase(),
+    request.repository.toLowerCase(),
+    request.pullRequestId,
+    request.headSha.toLowerCase(),
+    request.findingFingerprint,
+  ]);
+}
+
+export function publishMockReviewFinding(
+  request: FindingPublicationRequest,
+): PublishedCommentIdentity {
+  validatePublicationIdentifier(request.tenantId, "tenantId");
+  validatePublicationIdentifier(request.workspace, "workspace");
+  validatePublicationIdentifier(request.repository, "repository");
+  validatePublicationIdentifier(request.findingFingerprint, "findingFingerprint");
+  validatePublicationText(request.title, "title", 1024);
+  validatePublicationText(request.body, "body", 64 * 1024);
+  if (request.suggestedFix != null) {
+    validatePublicationText(request.suggestedFix, "suggestedFix", 64 * 1024);
+  }
+
+  const headSha = request.headSha.toLowerCase();
+  if (!/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(headSha)) {
+    throw new Error("Structured finding publication requires a full commit SHA.");
+  }
+  if (request.pullRequestId <= 0 || !Number.isInteger(request.pullRequestId)) {
+    throw new Error("Structured finding publication requires a valid pull request id.");
+  }
+  if (request.pullRequestId !== mockPullRequestDetailState.id) {
+    throw new Error("The pull request is unavailable in the browser mock.");
+  }
+  const anchor = request.anchor;
+  if (
+    !anchor?.path.trim() ||
+    anchor.path.startsWith("/") ||
+    anchor.path.includes("\\") ||
+    anchor.path.split("/").includes("..") ||
+    anchor.path.includes("\0") ||
+    publicationByteLength(anchor.path) > 4096 ||
+    !Number.isInteger(anchor.startLine) ||
+    !Number.isInteger(anchor.endLine) ||
+    anchor.startLine <= 0 ||
+    anchor.endLine < anchor.startLine
+  ) {
+    throw new Error("Structured finding publication requires a valid inline anchor.");
+  }
+
+  const currentHead = mockPullRequestDetailState.sourceCommitHash?.toLowerCase();
+  if (!currentHead) {
+    throw new Error("The current pull request head is unavailable in the browser mock.");
+  }
+  if (headSha !== currentHead) {
+    throw new Error(
+      "The pull request head changed after this review. Refresh and rerun the review before publishing.",
+    );
+  }
+
+  const key = findingPublicationKey(request);
+  const existing = mockPublishedFindings.get(key);
+  if (existing) return existing;
+
+  mockCommentId += 1;
+  const published = {
+    tenantId: request.tenantId,
+    provider: request.provider,
+    workspace: request.workspace,
+    repository: request.repository,
+    pullRequestId: request.pullRequestId,
+    commentId: String(mockCommentId),
+    findingMarker: `<!-- lachesi:finding:mock-${mockCommentId} -->`,
+    path: request.anchor.path,
+    startLine: request.anchor.startLine,
+    endLine: request.anchor.endLine,
+    side: request.anchor.side,
+  } satisfies PublishedCommentIdentity;
+  mockPublishedFindings.set(key, published);
+  return published;
+}
+
 /**
  * Mock implementations of the Rust IPC commands, used when running outside
  * Tauri (browser dev, Storybook, Vitest). Keep the keys in sync with the
@@ -930,21 +1039,11 @@ export const mockHandlers: Record<string, Handler> = {
   list_comments: () => mockComments,
 
   publish_review_finding: (args) => {
-    const request = args?.request as FindingPublicationRequest;
-    mockCommentId += 1;
-    return {
-      tenantId: request.tenantId,
-      provider: request.provider,
-      workspace: request.workspace,
-      repository: request.repository,
-      pullRequestId: request.pullRequestId,
-      commentId: String(mockCommentId),
-      findingMarker: "<!-- lachesi:finding:mock -->",
-      path: request.anchor.path,
-      startLine: request.anchor.startLine,
-      endLine: request.anchor.endLine,
-      side: request.anchor.side,
-    } satisfies PublishedCommentIdentity;
+    const request = args?.request as FindingPublicationRequest | undefined;
+    if (!request) {
+      throw new Error("Structured finding publication requires a request.");
+    }
+    return publishMockReviewFinding(request);
   },
   create_inline_comment: (args) => {
     const req = (args?.req ?? {}) as NewInlineCommentArgs;
