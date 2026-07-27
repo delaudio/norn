@@ -1,11 +1,13 @@
 //! Read-only incremental review scope construction between immutable commits.
 
-use std::collections::HashMap;
 use std::fmt;
+use std::io::Read;
 use std::path::Path;
-use std::process::{Command, Output};
+use std::process::{Command, Output, Stdio};
 
 use serde::{Deserialize, Serialize};
+
+const MAX_INCREMENTAL_PATCH_BYTES: usize = 2 * 1024 * 1024;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -30,7 +32,9 @@ pub struct IncrementalChangedFile {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct IncrementalReviewScope {
+    /// Full Git commit object ID: 40 hex characters for SHA-1 or 64 for SHA-256.
     pub previous_head_sha: String,
+    /// Full Git commit object ID: 40 hex characters for SHA-1 or 64 for SHA-256.
     pub current_head_sha: String,
     pub files: Vec<IncrementalChangedFile>,
     pub patch: String,
@@ -44,6 +48,7 @@ pub enum IncrementalReviewSetupErrorCode {
     CommitUnavailable,
     NonUtf8Patch,
     NonUtf8Path,
+    PatchTooLarge,
     DiffFailed,
 }
 
@@ -119,16 +124,11 @@ pub fn build_incremental_review_scope(
         &["--numstat", "-z"],
     )?;
     let stats = parse_numstat(&numstat.stdout)?;
-    let patch = git_diff(
-        repo_path,
-        previous_head_sha,
-        current_head_sha,
-        &["--patch", "--full-index"],
-    )?;
+    let patch = git_diff_patch(repo_path, previous_head_sha, current_head_sha)?;
 
     let files = materialize_changed_files(changed_files, stats)?;
 
-    let patch = String::from_utf8(patch.stdout).map_err(|_| {
+    let patch = String::from_utf8(patch).map_err(|_| {
         setup_error(
             IncrementalReviewSetupErrorCode::NonUtf8Patch,
             None,
@@ -146,16 +146,22 @@ pub fn build_incremental_review_scope(
 
 fn materialize_changed_files(
     changed_files: Vec<RawChangedFile>,
-    stats: HashMap<GitPath, DiffStats>,
+    stats: Vec<(GitPath, DiffStats)>,
 ) -> Result<Vec<IncrementalChangedFile>, IncrementalReviewSetupError> {
     if stats.len() != changed_files.len() {
         return Err(diff_error());
     }
     changed_files
         .into_iter()
+        .zip(stats)
         .map(
-            |file| -> Result<IncrementalChangedFile, IncrementalReviewSetupError> {
-                let stats = stats.get(&file.path).copied().ok_or_else(diff_error)?;
+            |(file, (stats_path, stats))| -> Result<
+                IncrementalChangedFile,
+                IncrementalReviewSetupError,
+            > {
+                if file.path != stats_path {
+                    return Err(diff_error());
+                }
                 let path = display_git_path(&file.path)?;
                 let previous_path = file
                     .previous_path
@@ -199,11 +205,14 @@ fn validate_commit(
     sha: &str,
     role: IncrementalCommitRole,
 ) -> Result<(), IncrementalReviewSetupError> {
-    if !is_full_commit_sha(sha) {
+    if !is_full_commit_object_id(sha) {
         return Err(setup_error(
             IncrementalReviewSetupErrorCode::InvalidCommitSha,
             Some(role),
-            commit_error_message(role, "is not a full hexadecimal commit SHA"),
+            commit_error_message(
+                role,
+                "is not a full Git commit object ID (40-character SHA-1 or 64-character SHA-256)",
+            ),
         ));
     }
     let object = format!("{sha}^{{commit}}");
@@ -225,7 +234,7 @@ fn validate_commit(
     }
 }
 
-fn is_full_commit_sha(value: &str) -> bool {
+fn is_full_commit_object_id(value: &str) -> bool {
     matches!(value.len(), 40 | 64) && value.bytes().all(|byte| byte.is_ascii_hexdigit())
 }
 
@@ -254,16 +263,65 @@ fn git_diff(
     }
 }
 
+fn git_diff_patch(
+    repo_path: &Path,
+    previous_head_sha: &str,
+    current_head_sha: &str,
+) -> Result<Vec<u8>, IncrementalReviewSetupError> {
+    let mut child = git_command(repo_path)
+        .args([
+            "diff",
+            "--no-ext-diff",
+            "--no-textconv",
+            "--find-renames",
+            "--patch",
+            "--full-index",
+            previous_head_sha,
+            current_head_sha,
+            "--",
+        ])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(|_| diff_error())?;
+    let mut patch = Vec::new();
+    child
+        .stdout
+        .take()
+        .ok_or_else(diff_error)?
+        .take((MAX_INCREMENTAL_PATCH_BYTES + 1) as u64)
+        .read_to_end(&mut patch)
+        .map_err(|_| diff_error())?;
+    if patch.len() > MAX_INCREMENTAL_PATCH_BYTES {
+        let _ = child.kill();
+        let _ = child.wait();
+        return Err(setup_error(
+            IncrementalReviewSetupErrorCode::PatchTooLarge,
+            None,
+            "Incremental patch exceeds the supported size limit.",
+        ));
+    }
+    let status = child.wait().map_err(|_| diff_error())?;
+    if !status.success() {
+        return Err(diff_error());
+    }
+    Ok(patch)
+}
+
 fn git(repo_path: &Path, args: &[&str]) -> std::io::Result<Output> {
-    Command::new("git")
+    git_command(repo_path).args(args).output()
+}
+
+fn git_command(repo_path: &Path) -> Command {
+    let mut command = Command::new("git");
+    command
         .arg("-c")
         .arg("core.quotePath=true")
         .arg("-c")
         .arg("diff.renames=true")
         .arg("-C")
-        .arg(repo_path)
-        .args(args)
-        .output()
+        .arg(repo_path);
+    command
 }
 
 fn parse_name_status(bytes: &[u8]) -> Result<Vec<RawChangedFile>, IncrementalReviewSetupError> {
@@ -308,9 +366,9 @@ fn parse_name_status(bytes: &[u8]) -> Result<Vec<RawChangedFile>, IncrementalRev
     Ok(files)
 }
 
-fn parse_numstat(bytes: &[u8]) -> Result<HashMap<GitPath, DiffStats>, IncrementalReviewSetupError> {
+fn parse_numstat(bytes: &[u8]) -> Result<Vec<(GitPath, DiffStats)>, IncrementalReviewSetupError> {
     let mut fields = nul_terminated_fields(bytes).into_iter();
-    let mut stats = HashMap::new();
+    let mut stats = Vec::new();
     while let Some(record) = fields.next() {
         let mut parts = record.splitn(3, |byte| *byte == b'\t');
         let additions = parts.next().ok_or_else(diff_error)?;
@@ -329,20 +387,14 @@ fn parse_numstat(bytes: &[u8]) -> Result<HashMap<GitPath, DiffStats>, Incrementa
         if additions.is_none() != deletions.is_none() {
             return Err(diff_error());
         }
-        let path = GitPath(path.to_vec());
-        if stats
-            .insert(
-                path,
-                DiffStats {
-                    additions,
-                    deletions,
-                    binary: additions.is_none(),
-                },
-            )
-            .is_some()
-        {
-            return Err(diff_error());
-        }
+        stats.push((
+            GitPath(path.to_vec()),
+            DiffStats {
+                additions,
+                deletions,
+                binary: additions.is_none(),
+            },
+        ));
     }
     Ok(stats)
 }
@@ -603,7 +655,7 @@ mod tests {
     }
 
     #[test]
-    fn parsers_reject_unsupported_statuses_and_missing_numstat_rows() {
+    fn parsers_reject_unsupported_statuses_and_mismatched_numstat_rows() {
         assert_eq!(
             parse_name_status(b"MM\0file.txt\0").expect_err("combined status"),
             diff_error()
@@ -613,11 +665,6 @@ mod tests {
         let stats = parse_numstat(b"1\t0\tother.txt\0").expect("numstat");
         assert_eq!(
             materialize_changed_files(changed, stats).expect_err("missing matching stats"),
-            diff_error()
-        );
-        assert_eq!(
-            parse_numstat(b"1\t0\tfile.txt\0\x32\t0\tfile.txt\0")
-                .expect_err("duplicate numstat path"),
             diff_error()
         );
     }
@@ -630,19 +677,33 @@ mod tests {
             previous_path: None,
             kind: IncrementalChangedFileKind::Modified,
         }];
-        let stats = HashMap::from([(
+        let stats = vec![(
             path,
             DiffStats {
                 additions: Some(1),
                 deletions: Some(0),
                 binary: false,
             },
-        )]);
+        )];
 
         let error =
             materialize_changed_files(changed, stats).expect_err("non-utf8 changed-file path");
 
         assert_eq!(error.code, IncrementalReviewSetupErrorCode::NonUtf8Path);
+    }
+
+    #[test]
+    fn oversized_patch_returns_a_structured_error() {
+        let fixture = RepoFixture::new();
+        fixture.write("large.txt", b"base\n");
+        let previous = fixture.commit("base");
+        fixture.write("large.txt", &vec![b'a'; MAX_INCREMENTAL_PATCH_BYTES + 1024]);
+        let current = fixture.commit("large patch");
+
+        let error = build_incremental_review_scope(&fixture.path, &previous, &current)
+            .expect_err("oversized patch");
+
+        assert_eq!(error.code, IncrementalReviewSetupErrorCode::PatchTooLarge);
     }
 
     #[test]
