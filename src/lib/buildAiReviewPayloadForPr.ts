@@ -1,9 +1,11 @@
 import { buildReviewPayload } from "@/lib/buildReviewPayload";
+import { changeNewLine, changeOldLine, parseUnifiedDiff } from "@/lib/diff";
 import { extractIssueKeys } from "@/lib/jira";
 import { resolveReviewPrompt } from "@/lib/reviewPrompt";
 import { loadReviewReferences } from "@/lib/reviewReferencesStorage";
 import { tauriCall } from "@/lib/tauri";
 import type {
+  AiLineQuestionContext,
   BranchStatus,
   JiraIssue,
   NotionPage,
@@ -19,6 +21,12 @@ export interface AiReviewPayloadForPr {
   jiraKeys: string[];
   rawDiff: string;
   reviewProfile: string | null;
+}
+
+export interface StablePullRequestReviewSnapshot {
+  pr: PullRequestDetail;
+  branchStatus: BranchStatus | null;
+  rawDiff: string;
 }
 
 function normalizedSha(value: string | null | undefined): string | null {
@@ -44,6 +52,66 @@ export function assertStablePullRequestSnapshot(
       "The pull request changed while its review snapshot was loading; rerun the review.",
     );
   }
+}
+
+export function assertLineQuestionMatchesReviewSnapshot(
+  rawDiff: string,
+  context: AiLineQuestionContext,
+): void {
+  const matches = parseUnifiedDiff(rawDiff).some((file) => {
+    const path =
+      context.side === "old" ? file.oldPath || file.newPath : file.newPath || file.oldPath;
+    if (path !== context.path) return false;
+    return file.hunks.some((hunk) =>
+      hunk.changes.some((change) => {
+        const line = context.side === "old" ? changeOldLine(change) : changeNewLine(change);
+        const expectedLine = context.side === "old" ? context.from : context.to;
+        return line === expectedLine && change.content === context.lineText;
+      }),
+    );
+  });
+  if (!matches) {
+    throw new Error(
+      "The selected line changed while its review snapshot was loading; select the line again.",
+    );
+  }
+}
+
+export async function loadStablePullRequestReviewSnapshot({
+  workspace,
+  repo,
+  provider = "bitbucket",
+  prId,
+}: {
+  workspace: string;
+  repo: string;
+  provider?: ReviewProvider;
+  prId: number;
+}): Promise<StablePullRequestReviewSnapshot> {
+  const pr = await tauriCall<PullRequestDetail>("get_pull_request", {
+    provider,
+    workspace,
+    repo,
+    id: prId,
+  });
+  const [rawDiff, branchStatus] = await Promise.all([
+    tauriCall<string>("get_pr_diff", { provider, workspace, repo, id: prId }),
+    tauriCall<BranchStatus>("get_branch_status", {
+      provider,
+      workspace,
+      repo,
+      source: pr.sourceBranch,
+      destination: pr.destinationBranch,
+    }).catch(() => null),
+  ]);
+  const verifiedPr = await tauriCall<PullRequestDetail>("get_pull_request", {
+    provider,
+    workspace,
+    repo,
+    id: prId,
+  });
+  assertStablePullRequestSnapshot(pr, verifiedPr);
+  return { pr: verifiedPr, branchStatus, rawDiff };
 }
 
 async function fetchReviewContext(jiraKeys: string[], enabled: boolean): Promise<string | null> {
@@ -89,22 +157,12 @@ export async function buildAiReviewPayloadForPr({
   jiraContextEnabled: boolean;
   reviewProfile?: string | null;
 }): Promise<AiReviewPayloadForPr> {
-  const pr = await tauriCall<PullRequestDetail>("get_pull_request", {
-    provider,
+  const { pr, rawDiff, branchStatus } = await loadStablePullRequestReviewSnapshot({
     workspace,
     repo,
-    id: prId,
+    provider,
+    prId,
   });
-  const [rawDiff, branchStatus] = await Promise.all([
-    tauriCall<string>("get_pr_diff", { provider, workspace, repo, id: prId }),
-    tauriCall<BranchStatus>("get_branch_status", {
-      provider,
-      workspace,
-      repo,
-      source: pr.sourceBranch,
-      destination: pr.destinationBranch,
-    }).catch(() => null),
-  ]);
   const jiraKeys = extractIssueKeys(pr.sourceBranch, pr.title);
   const jiraContext = await fetchReviewContext(jiraKeys, jiraContextEnabled);
   const { prompt, warnings } = await resolveReviewPrompt(
@@ -115,16 +173,16 @@ export async function buildAiReviewPayloadForPr({
   if (warnings.length > 0) {
     console.warn("Lachesi repo config warnings:", warnings);
   }
-  const verifiedPr = await tauriCall<PullRequestDetail>("get_pull_request", {
+  const finalPr = await tauriCall<PullRequestDetail>("get_pull_request", {
     provider,
     workspace,
     repo,
     id: prId,
   });
-  assertStablePullRequestSnapshot(pr, verifiedPr);
+  assertStablePullRequestSnapshot(pr, finalPr);
   const payload = buildReviewPayload({
     prompt,
-    pr: verifiedPr,
+    pr: finalPr,
     branchStatus,
     rawDiff,
     jiraKeys,
@@ -134,7 +192,7 @@ export async function buildAiReviewPayloadForPr({
   });
   return {
     payload,
-    pr: verifiedPr,
+    pr: finalPr,
     branchStatus,
     jiraKeys,
     rawDiff,

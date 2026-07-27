@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import type { PullRequestDetail } from "@/types";
-import { assertStablePullRequestSnapshot } from "./buildAiReviewPayloadForPr";
+import {
+  assertLineQuestionMatchesReviewSnapshot,
+  assertStablePullRequestSnapshot,
+} from "./buildAiReviewPayloadForPr";
 
 const detail: PullRequestDetail = {
   id: 42,
@@ -38,5 +41,43 @@ describe("assertStablePullRequestSnapshot", () => {
         "changed while its review snapshot was loading",
       );
     }
+  });
+});
+
+describe("assertLineQuestionMatchesReviewSnapshot", () => {
+  const rawDiff = [
+    "diff --git a/src/review.ts b/src/review.ts",
+    "--- a/src/review.ts",
+    "+++ b/src/review.ts",
+    "@@ -10,2 +10,2 @@",
+    "-const state = 'old';",
+    "+const state = 'new';",
+    " keep();",
+  ].join("\n");
+
+  it("accepts a selected line that still exists at the same anchor", () => {
+    expect(() =>
+      assertLineQuestionMatchesReviewSnapshot(rawDiff, {
+        path: "src/review.ts",
+        side: "new",
+        to: 10,
+        from: null,
+        lineText: "const state = 'new';",
+        hunkDiff: rawDiff,
+      }),
+    ).not.toThrow();
+  });
+
+  it("rejects a selected line whose content or anchor changed", () => {
+    expect(() =>
+      assertLineQuestionMatchesReviewSnapshot(rawDiff, {
+        path: "src/review.ts",
+        side: "new",
+        to: 11,
+        from: null,
+        lineText: "const state = 'new';",
+        hunkDiff: rawDiff,
+      }),
+    ).toThrow("selected line changed");
   });
 });

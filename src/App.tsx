@@ -33,15 +33,17 @@ import {
 import { buildReviewPromptDisplayMessage } from "@/lib/aiReviewPromptDisplay";
 import { buildBackgroundReviewStartArgs } from "@/lib/backgroundReviewStart";
 import { buildAiFixPayload } from "@/lib/buildAiFixPayload";
-import { buildAiReviewPayloadForPr } from "@/lib/buildAiReviewPayloadForPr";
-import { buildReviewPayload } from "@/lib/buildReviewPayload";
+import {
+  assertLineQuestionMatchesReviewSnapshot,
+  buildAiReviewPayloadForPr,
+  loadStablePullRequestReviewSnapshot,
+} from "@/lib/buildAiReviewPayloadForPr";
 import { shouldIgnoreShortcut } from "@/lib/keyboard";
 import {
   buildFindingPublicationRequest,
   filterStageableAiReviewDraftComments,
   summarizeActiveReviewFindings,
 } from "@/lib/reviewFindingPublication";
-import { resolveReviewPrompt } from "@/lib/reviewPrompt";
 import { publishReviewFinding, recordReviewFindingPublicationEvents } from "@/lib/reviewService";
 import { tauriCall } from "@/lib/tauri";
 import type {
@@ -54,6 +56,7 @@ import type {
   AppSelection,
   DraftComment,
   PrListFilter,
+  PullRequestDetail,
   PullRequestSummary,
   RepoRef,
   RepoReviewConfigLoadResult,
@@ -649,41 +652,38 @@ export default function App() {
   const buildActiveReviewRequest = async (): Promise<{
     payload: string;
     displayMessage: string;
+    pr: PullRequestDetail;
   } | null> => {
-    if (!activeSel || !aiReviewContext) return null;
-    const { prompt, warnings } = await resolveReviewPrompt(
-      `${activeSel.workspace}/${activeSel.repo}`,
-      activeRepo?.localPath,
-      selectedReviewProfile || null,
-    );
-    if (warnings.length > 0) {
-      console.warn("Lachesi repo config warnings:", warnings);
-    }
-    const payload = buildReviewPayload({
-      prompt,
-      pr: aiReviewContext.pr,
-      branchStatus: aiReviewContext.branchStatus,
-      rawDiff: aiReviewContext.rawDiff,
-      jiraKeys: aiReviewContext.jiraKeys,
-      jiraBaseUrl: aiReviewContext.jiraBaseUrl,
-      jiraContext: aiReviewContext.jiraContext,
-      reviewReferences: reviewReferences.references,
+    if (!activeSel) return null;
+    const { payload, pr } = await buildAiReviewPayloadForPr({
+      workspace: activeSel.workspace,
+      repo: activeSel.repo,
+      provider: activeRepo?.provider ?? reviewProvider,
+      prId: activeSel.prId,
+      repoConfig: activeRepo,
+      jiraBaseUrl: config?.jiraBaseUrl ?? null,
+      jiraContextEnabled: Boolean(config?.hasJira && config?.jiraBaseUrl),
+      reviewProfile: selectedReviewProfile || null,
     });
     return {
       payload,
       displayMessage: buildReviewPromptDisplayMessage(payload),
+      pr,
     };
-  };
-
-  const buildActiveReviewPayload = async (): Promise<string | null> => {
-    return (await buildActiveReviewRequest())?.payload ?? null;
   };
 
   const buildLineQuestionRequest = async (
     lineContext: AiLineQuestionContext,
     question: string,
-  ): Promise<{ payload: string; displayMessage: string } | null> => {
-    if (!activeSel || !aiReviewContext) return null;
+  ): Promise<{ payload: string; displayMessage: string; pr: PullRequestDetail } | null> => {
+    if (!activeSel) return null;
+    const snapshot = await loadStablePullRequestReviewSnapshot({
+      workspace: activeSel.workspace,
+      repo: activeSel.repo,
+      provider: activeRepo?.provider ?? reviewProvider,
+      prId: activeSel.prId,
+    });
+    assertLineQuestionMatchesReviewSnapshot(snapshot.rawDiff, lineContext);
     const label = lineQuestionLabel(lineContext);
     const displayMessage = [`Question about \`${label}\``, "", question.trim()].join("\n");
     const payload = [
@@ -691,8 +691,8 @@ export default function App() {
       "Answer directly and concisely.",
       "",
       "## Pull request",
-      `${aiReviewContext.pr.title} (#${aiReviewContext.pr.id})`,
-      `Branch: ${aiReviewContext.pr.sourceBranch} -> ${aiReviewContext.pr.destinationBranch}`,
+      `${snapshot.pr.title} (#${snapshot.pr.id})`,
+      `Branch: ${snapshot.pr.sourceBranch} -> ${snapshot.pr.destinationBranch}`,
       "",
       "## Selected line",
       `File: ${lineContext.path}`,
@@ -711,7 +711,7 @@ export default function App() {
     ]
       .filter((line): line is string => line != null)
       .join("\n");
-    return { payload, displayMessage };
+    return { payload, displayMessage, pr: snapshot.pr };
   };
 
   const hasAssistantReview =
@@ -731,6 +731,7 @@ export default function App() {
       : null;
 
   const handleRunInlineReview = (
+    reviewTarget: PullRequestDetail,
     payload: string,
     displayMessage?: string | null,
     options: {
@@ -739,9 +740,8 @@ export default function App() {
       reviewProfile?: string | null;
     } = {},
   ) => {
-    if (!activeSel || !aiReviewContext) return;
+    if (!activeSel) return;
     const selectionForReview = activeSel;
-    const contextForReview = aiReviewContext;
     setReviewPanelOpen(true);
     void (async () => {
       let job: AiReviewJob | null = null;
@@ -763,9 +763,9 @@ export default function App() {
           workspace: selectionForReview.workspace,
           repo: selectionForReview.repo,
           prId: selectionForReview.prId,
-          prTitle: contextForReview.pr.title || `PR #${selectionForReview.prId}`,
-          sourceBranch: contextForReview.pr.sourceBranch,
-          destinationBranch: contextForReview.pr.destinationBranch,
+          prTitle: reviewTarget.title || `PR #${selectionForReview.prId}`,
+          sourceBranch: reviewTarget.sourceBranch,
+          destinationBranch: reviewTarget.destinationBranch,
           trigger: "manual",
         });
         await aiReview.run({
@@ -773,10 +773,10 @@ export default function App() {
           displayMessage,
           reviewKind: options.reviewKind ?? null,
           threadTitle: options.threadTitle ?? null,
-          title: contextForReview.pr.title || `PR #${selectionForReview.prId}`,
-          sourceBranch: contextForReview.pr.sourceBranch,
-          destinationBranch: contextForReview.pr.destinationBranch,
-          reviewedHeadSha: contextForReview.pr.sourceCommitHash ?? null,
+          title: reviewTarget.title || `PR #${selectionForReview.prId}`,
+          sourceBranch: reviewTarget.sourceBranch,
+          destinationBranch: reviewTarget.destinationBranch,
+          reviewedHeadSha: reviewTarget.sourceCommitHash ?? null,
           aiProvider: config?.aiProvider ?? "claude",
           claudeModel: config?.claudeModel ?? null,
           claudeEffort: config?.claudeEffort ?? null,
@@ -827,10 +827,10 @@ export default function App() {
       if (aiReview.activeThread?.id) {
         setReviewPanelOpen(true);
         void aiReview.reply({
-          title: aiReviewContext.pr.title || `PR #${activeSel.prId}`,
-          sourceBranch: aiReviewContext.pr.sourceBranch,
-          destinationBranch: aiReviewContext.pr.destinationBranch,
-          reviewedHeadSha: aiReviewContext.pr.sourceCommitHash ?? null,
+          title: request.pr.title || `PR #${activeSel.prId}`,
+          sourceBranch: request.pr.sourceBranch,
+          destinationBranch: request.pr.destinationBranch,
+          reviewedHeadSha: request.pr.sourceCommitHash ?? null,
           threadId: aiReview.activeThread.id,
           userMessage: request.displayMessage,
           basePayload: request.payload,
@@ -841,7 +841,7 @@ export default function App() {
           codexEffort: config?.codexEffort ?? null,
         });
       } else {
-        handleRunInlineReview(request.payload, request.displayMessage, {
+        handleRunInlineReview(request.pr, request.payload, request.displayMessage, {
           reviewProfile: selectedReviewProfile || null,
         });
       }
@@ -852,15 +852,15 @@ export default function App() {
 
   const handleAskClaude = async (userMessage: string) => {
     try {
-      const basePayload = await buildActiveReviewPayload();
-      if (!basePayload) return;
+      const request = await buildActiveReviewRequest();
+      if (!request) return;
       const payload = [
-        basePayload.trim(),
+        request.payload.trim(),
         "",
         "## Initial question from the reviewer",
         userMessage.trim(),
       ].join("\n");
-      handleRunInlineReview(payload, userMessage.trim());
+      handleRunInlineReview(request.pr, payload, userMessage.trim());
     } catch (error) {
       window.alert(error instanceof Error ? error.message : String(error));
     }
@@ -870,7 +870,7 @@ export default function App() {
     try {
       const request = await buildLineQuestionRequest(lineContext, question);
       if (!request) return;
-      handleRunInlineReview(request.payload, request.displayMessage, {
+      handleRunInlineReview(request.pr, request.payload, request.displayMessage, {
         reviewKind: "lineQuestion",
         threadTitle: "Line question",
       });
@@ -882,17 +882,17 @@ export default function App() {
   const handleReplyToReview = async (threadId: string, userMessage: string) => {
     if (!activeSel || !aiReviewContext) return;
     try {
-      const basePayload = await buildActiveReviewPayload();
-      if (!basePayload) return;
+      const request = await buildActiveReviewRequest();
+      if (!request) return;
       setReviewPanelOpen(true);
       void aiReview.reply({
-        title: aiReviewContext.pr.title || `PR #${activeSel.prId}`,
-        sourceBranch: aiReviewContext.pr.sourceBranch,
-        destinationBranch: aiReviewContext.pr.destinationBranch,
-        reviewedHeadSha: aiReviewContext.pr.sourceCommitHash ?? null,
+        title: request.pr.title || `PR #${activeSel.prId}`,
+        sourceBranch: request.pr.sourceBranch,
+        destinationBranch: request.pr.destinationBranch,
+        reviewedHeadSha: request.pr.sourceCommitHash ?? null,
         threadId,
         userMessage,
-        basePayload,
+        basePayload: request.payload,
         aiProvider: config?.aiProvider ?? "claude",
         claudeModel: config?.claudeModel ?? null,
         claudeEffort: config?.claudeEffort ?? null,
