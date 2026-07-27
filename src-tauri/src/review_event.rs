@@ -84,6 +84,9 @@ pub struct PullRequestReviewEvent {
     pub pull_request_id: u64,
     pub base: PullRequestRevision,
     pub head: PullRequestRevision,
+    /// Provider-supplied pull-request update time normalized to Unix milliseconds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_updated_at_ms: Option<i64>,
     pub draft: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub closed_outcome: Option<PullRequestClosedOutcome>,
@@ -106,6 +109,7 @@ pub struct PullRequestReviewKey {
     pub workspace: String,
     pub repository: String,
     pub pull_request_id: u64,
+    pub base_sha: String,
     pub head_sha: String,
     pub closed_outcome: Option<PullRequestClosedOutcome>,
 }
@@ -122,6 +126,9 @@ impl PullRequestReviewEvent {
         validate_sha("base.sha", &self.base.sha)?;
         require_value("head.refName", &self.head.ref_name)?;
         validate_sha("head.sha", &self.head.sha)?;
+        if self.provider_updated_at_ms.is_some_and(|value| value < 0) {
+            return Err(PullRequestReviewEventValidationError::InvalidProviderTimestamp);
+        }
         match (self.kind, self.closed_outcome) {
             (PullRequestReviewEventKind::Closed, None) => {
                 return Err(PullRequestReviewEventValidationError::MissingField(
@@ -155,6 +162,7 @@ impl PullRequestReviewEvent {
             workspace: self.workspace.clone(),
             repository: self.repository.clone(),
             pull_request_id: self.pull_request_id,
+            base_sha: self.base.sha.clone(),
             head_sha: self.head.sha.clone(),
             closed_outcome: self.closed_outcome,
         }
@@ -166,6 +174,7 @@ pub enum PullRequestReviewEventValidationError {
     MissingField(&'static str),
     InvalidPullRequestId,
     InvalidCommitSha(&'static str),
+    InvalidProviderTimestamp,
     UnexpectedClosedOutcome,
 }
 
@@ -178,6 +187,9 @@ impl fmt::Display for PullRequestReviewEventValidationError {
             }
             Self::InvalidCommitSha(field) => {
                 write!(formatter, "`{field}` must be a full hexadecimal commit SHA")
+            }
+            Self::InvalidProviderTimestamp => {
+                formatter.write_str("`providerUpdatedAtMs` must be non-negative")
             }
             Self::UnexpectedClosedOutcome => {
                 formatter.write_str("`closedOutcome` is only valid for closed events")
@@ -243,6 +255,7 @@ mod tests {
                 ref_name: "feature/retry".to_string(),
                 sha: HEAD_SHA.to_string(),
             },
+            provider_updated_at_ms: Some(1_785_168_000_000),
             draft: false,
             closed_outcome: (kind == PullRequestReviewEventKind::Closed)
                 .then_some(PullRequestClosedOutcome::Merged),
@@ -295,6 +308,7 @@ mod tests {
                     "refName": "feature/retry",
                     "sha": HEAD_SHA
                 },
+                "providerUpdatedAtMs": 1785168000000_i64,
                 "draft": false,
                 "actor": {
                     "id": "user-7",
@@ -309,6 +323,16 @@ mod tests {
         assert!(!rendered.contains("secret"));
         assert!(!rendered.contains("token"));
         assert!(!rendered.contains("webhook"));
+
+        let mut legacy_v1 = value;
+        legacy_v1
+            .as_object_mut()
+            .expect("event object")
+            .remove("providerUpdatedAtMs");
+        let decoded: PullRequestReviewEvent =
+            serde_json::from_value(legacy_v1).expect("decode legacy v1 event");
+        assert_eq!(decoded.provider_updated_at_ms, None);
+        decoded.validate().expect("legacy v1 event remains valid");
     }
 
     #[test]
@@ -344,6 +368,7 @@ mod tests {
         assert_eq!(delivery_key.delivery_id, "delivery-123");
         assert_eq!(delivery_key.tenant_id, "tenant-acme");
         assert_eq!(review_key.head_sha, HEAD_SHA);
+        assert_eq!(review_key.base_sha, BASE_SHA);
         assert_eq!(review_key.tenant_id, "tenant-acme");
         assert_eq!(review_key.kind, PullRequestReviewEventKind::Synchronized);
         assert_eq!(review_key.pull_request_id, 42);
@@ -352,6 +377,10 @@ mod tests {
         redelivery.delivery_id = "delivery-456".to_string();
         assert_ne!(redelivery.delivery_key(), delivery_key);
         assert_eq!(redelivery.review_key(), review_key);
+
+        let mut retargeted = redelivery;
+        retargeted.base.sha = "3333333333333333333333333333333333333333".to_string();
+        assert_ne!(retargeted.review_key(), review_key);
     }
 
     #[test]
@@ -389,6 +418,13 @@ mod tests {
             Err(PullRequestReviewEventValidationError::InvalidCommitSha(
                 "head.sha"
             ))
+        );
+
+        let mut invalid_timestamp = event(PullRequestReviewEventKind::Opened);
+        invalid_timestamp.provider_updated_at_ms = Some(-1);
+        assert_eq!(
+            invalid_timestamp.validate(),
+            Err(PullRequestReviewEventValidationError::InvalidProviderTimestamp)
         );
 
         let mut missing_closed_outcome = event(PullRequestReviewEventKind::Closed);
