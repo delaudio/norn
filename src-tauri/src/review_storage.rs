@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 use serde::{Deserialize, Serialize};
 
 use crate::review_event::PullRequestReviewEventProvider;
@@ -102,6 +102,7 @@ pub struct ReviewRunCompletion {
     pub identity: ReviewCursorIdentity,
     pub reviewed_head_sha: String,
     pub current_head_sha: String,
+    pub expected_previous_head_sha: Option<String>,
     pub run_id: String,
     pub completed_at: String,
     pub outcome: ReviewRunOutcome,
@@ -354,18 +355,29 @@ pub fn record_review_completion(
     completion: &ReviewRunCompletion,
 ) -> Result<ReviewCursorState, String> {
     validate_cursor_identity(&completion.identity)?;
+    validate_review_completion(completion)?;
     if completion.outcome != ReviewRunOutcome::Succeeded {
         let conn = open()?;
         return get_review_cursor_from(&conn, &completion.identity);
     }
-    validate_review_completion(completion)?;
     if completion.reviewed_head_sha != completion.current_head_sha {
         let conn = open()?;
         return get_review_cursor_from(&conn, &completion.identity);
     }
 
     let mut conn = open()?;
-    let transaction = conn.transaction().map_err(|e| e.to_string())?;
+    let transaction = conn
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .map_err(|e| e.to_string())?;
+    let current = get_review_cursor_from(&transaction, &completion.identity)?;
+    let current_head_sha = match &current {
+        ReviewCursorState::NotReviewed => None,
+        ReviewCursorState::Reviewed(cursor) => Some(cursor.reviewed_head_sha.as_str()),
+    };
+    if current_head_sha != completion.expected_previous_head_sha.as_deref() {
+        transaction.commit().map_err(|e| e.to_string())?;
+        return Ok(current);
+    }
     transaction
         .execute(
             r#"
@@ -378,8 +390,6 @@ pub fn record_review_completion(
               reviewed_head_sha = excluded.reviewed_head_sha,
               run_id = excluded.run_id,
               completed_at = excluded.completed_at
-            WHERE CAST(excluded.completed_at AS INTEGER)
-              > CAST(review_cursors.completed_at AS INTEGER)
             "#,
             params![
                 completion.identity.tenant_id,
@@ -449,6 +459,9 @@ fn validate_review_completion(completion: &ReviewRunCompletion) -> Result<(), St
     require_cursor_value("runId", &completion.run_id)?;
     validate_cursor_sha("reviewedHeadSha", &completion.reviewed_head_sha)?;
     validate_cursor_sha("currentHeadSha", &completion.current_head_sha)?;
+    if let Some(previous_head_sha) = &completion.expected_previous_head_sha {
+        validate_cursor_sha("expectedPreviousHeadSha", previous_head_sha)?;
+    }
     let completed_at = completion
         .completed_at
         .parse::<i64>()
@@ -1167,6 +1180,7 @@ mod tests {
     fn completion(
         outcome: ReviewRunOutcome,
         head_sha: &str,
+        expected_previous_head_sha: Option<&str>,
         run_id: &str,
         completed_at: &str,
     ) -> ReviewRunCompletion {
@@ -1174,6 +1188,7 @@ mod tests {
             identity: cursor_identity(),
             reviewed_head_sha: head_sha.to_string(),
             current_head_sha: head_sha.to_string(),
+            expected_previous_head_sha: expected_previous_head_sha.map(str::to_string),
             run_id: run_id.to_string(),
             completed_at: completed_at.to_string(),
             outcome,
@@ -1235,14 +1250,16 @@ mod tests {
     }
 
     #[test]
-    fn successful_review_atomically_advances_only_to_the_latest_completion() {
+    fn successful_review_atomically_advances_only_from_the_expected_cursor() {
         const FIRST_SHA: &str = "1111111111111111111111111111111111111111";
         const SECOND_SHA: &str = "2222222222222222222222222222222222222222";
+        const THIRD_SHA: &str = "3333333333333333333333333333333333333333";
 
         with_test_data_dir("review-cursor-success", |_| {
             let first = record_review_completion(&completion(
                 ReviewRunOutcome::Succeeded,
                 FIRST_SHA,
+                None,
                 "run-1",
                 "1000",
             ))
@@ -1260,40 +1277,52 @@ mod tests {
             let latest = record_review_completion(&completion(
                 ReviewRunOutcome::Succeeded,
                 SECOND_SHA,
+                Some(FIRST_SHA),
                 "run-2",
                 "2000",
             ))
             .expect("record latest completion");
             let stale = record_review_completion(&completion(
                 ReviewRunOutcome::Succeeded,
-                FIRST_SHA,
+                THIRD_SHA,
+                Some(FIRST_SHA),
                 "run-stale",
-                "1500",
+                "3000",
             ))
-            .expect("ignore stale completion");
-            let same_timestamp = record_review_completion(&completion(
-                ReviewRunOutcome::Succeeded,
-                FIRST_SHA,
-                "run-same-timestamp",
-                "2000",
-            ))
-            .expect("ignore completion with ambiguous ordering");
+            .expect("reject stale compare-and-swap");
             let mut obsolete = completion(
                 ReviewRunOutcome::Succeeded,
                 FIRST_SHA,
+                Some(SECOND_SHA),
                 "run-obsolete",
                 "3000",
             );
             obsolete.current_head_sha = SECOND_SHA.to_string();
             let obsolete = record_review_completion(&obsolete)
                 .expect("ignore completion for an obsolete pull-request head");
+            let advanced = record_review_completion(&completion(
+                ReviewRunOutcome::Succeeded,
+                THIRD_SHA,
+                Some(SECOND_SHA),
+                "run-3",
+                "500",
+            ))
+            .expect("advance regardless of caller clock ordering");
 
             assert_eq!(stale, latest);
-            assert_eq!(same_timestamp, latest);
             assert_eq!(obsolete, latest);
             assert_eq!(
+                advanced,
+                ReviewCursorState::Reviewed(ReviewCursor {
+                    identity: cursor_identity(),
+                    reviewed_head_sha: THIRD_SHA.to_string(),
+                    run_id: "run-3".to_string(),
+                    completed_at: "500".to_string(),
+                })
+            );
+            assert_eq!(
                 get_review_cursor(&cursor_identity()).expect("reload cursor"),
-                latest
+                advanced
             );
         });
     }
@@ -1307,6 +1336,7 @@ mod tests {
             let successful = record_review_completion(&completion(
                 ReviewRunOutcome::Succeeded,
                 HEAD_SHA,
+                None,
                 "run-successful",
                 "1000",
             ))
@@ -1316,6 +1346,7 @@ mod tests {
                 let state = record_review_completion(&completion(
                     outcome,
                     OTHER_SHA,
+                    Some(HEAD_SHA),
                     "run-unsuccessful",
                     "2000",
                 ))
