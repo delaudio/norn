@@ -1,5 +1,6 @@
 //! Read-only incremental review scope construction between immutable commits.
 
+use std::collections::HashMap;
 use std::fmt;
 use std::io::Read;
 use std::path::Path;
@@ -88,6 +89,12 @@ struct RawChangedFile {
     kind: IncrementalChangedFileKind,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct DiffPathKey {
+    path: GitPath,
+    previous_path: Option<GitPath>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct DiffStats {
     additions: Option<u64>,
@@ -103,13 +110,13 @@ pub fn build_incremental_review_scope(
     let repo_path = repo_path.as_ref();
     validate_repository(repo_path)?;
     let object_id_hex_len = repository_object_id_hex_len(repo_path)?;
-    validate_commit(
+    let previous_head_sha = validate_commit(
         repo_path,
         previous_head_sha,
         IncrementalCommitRole::PreviousHead,
         object_id_hex_len,
     )?;
-    validate_commit(
+    let current_head_sha = validate_commit(
         repo_path,
         current_head_sha,
         IncrementalCommitRole::CurrentHead,
@@ -118,19 +125,19 @@ pub fn build_incremental_review_scope(
 
     let name_status = git_diff(
         repo_path,
-        previous_head_sha,
-        current_head_sha,
+        &previous_head_sha,
+        &current_head_sha,
         &["--name-status", "-z"],
     )?;
     let changed_files = parse_name_status(&name_status)?;
     let numstat = git_diff(
         repo_path,
-        previous_head_sha,
-        current_head_sha,
+        &previous_head_sha,
+        &current_head_sha,
         &["--numstat", "-z"],
     )?;
     let stats = parse_numstat(&numstat)?;
-    let patch = git_diff_patch(repo_path, previous_head_sha, current_head_sha)?;
+    let patch = git_diff_patch(repo_path, &previous_head_sha, &current_head_sha)?;
 
     let files = materialize_changed_files(changed_files, stats)?;
 
@@ -143,8 +150,8 @@ pub fn build_incremental_review_scope(
     })?;
 
     Ok(IncrementalReviewScope {
-        previous_head_sha: previous_head_sha.to_string(),
-        current_head_sha: current_head_sha.to_string(),
+        previous_head_sha,
+        current_head_sha,
         files,
         patch,
     })
@@ -152,22 +159,23 @@ pub fn build_incremental_review_scope(
 
 fn materialize_changed_files(
     changed_files: Vec<RawChangedFile>,
-    stats: Vec<(GitPath, DiffStats)>,
+    stats: Vec<(DiffPathKey, DiffStats)>,
 ) -> Result<Vec<IncrementalChangedFile>, IncrementalReviewSetupError> {
-    if stats.len() != changed_files.len() {
-        return Err(diff_error());
+    let mut stats_by_path = HashMap::with_capacity(stats.len());
+    for (path_key, file_stats) in stats {
+        if stats_by_path.insert(path_key, file_stats).is_some() {
+            return Err(diff_error());
+        }
     }
-    changed_files
+    let files = changed_files
         .into_iter()
-        .zip(stats)
         .map(
-            |(file, (stats_path, stats))| -> Result<
-                IncrementalChangedFile,
-                IncrementalReviewSetupError,
-            > {
-                if file.path != stats_path {
-                    return Err(diff_error());
-                }
+            |file| -> Result<IncrementalChangedFile, IncrementalReviewSetupError> {
+                let path_key = DiffPathKey {
+                    path: file.path.clone(),
+                    previous_path: file.previous_path.clone(),
+                };
+                let stats = stats_by_path.remove(&path_key).ok_or_else(diff_error)?;
                 let path = display_git_path(&file.path)?;
                 let previous_path = file
                     .previous_path
@@ -184,7 +192,11 @@ fn materialize_changed_files(
                 })
             },
         )
-        .collect()
+        .collect::<Result<Vec<_>, _>>()?;
+    if !stats_by_path.is_empty() {
+        return Err(diff_error());
+    }
+    Ok(files)
 }
 
 fn validate_repository(repo_path: &Path) -> Result<(), IncrementalReviewSetupError> {
@@ -211,7 +223,7 @@ fn validate_commit(
     sha: &str,
     role: IncrementalCommitRole,
     object_id_hex_len: usize,
-) -> Result<(), IncrementalReviewSetupError> {
+) -> Result<String, IncrementalReviewSetupError> {
     if sha.len() != object_id_hex_len || !sha.bytes().all(|byte| byte.is_ascii_hexdigit()) {
         return Err(setup_error(
             IncrementalReviewSetupErrorCode::InvalidCommitSha,
@@ -224,7 +236,8 @@ fn validate_commit(
             ),
         ));
     }
-    let object = format!("{sha}^{{commit}}");
+    let canonical_sha = sha.to_ascii_lowercase();
+    let object = format!("{canonical_sha}^{{commit}}");
     let output = git(repo_path, &["cat-file", "-e", &object]).map_err(|_| {
         setup_error(
             IncrementalReviewSetupErrorCode::CommitUnavailable,
@@ -233,7 +246,7 @@ fn validate_commit(
         )
     })?;
     if output.status.success() {
-        Ok(())
+        Ok(canonical_sha)
     } else {
         Err(setup_error(
             IncrementalReviewSetupErrorCode::CommitUnavailable,
@@ -438,7 +451,9 @@ fn parse_name_status(bytes: &[u8]) -> Result<Vec<RawChangedFile>, IncrementalRev
     Ok(files)
 }
 
-fn parse_numstat(bytes: &[u8]) -> Result<Vec<(GitPath, DiffStats)>, IncrementalReviewSetupError> {
+fn parse_numstat(
+    bytes: &[u8],
+) -> Result<Vec<(DiffPathKey, DiffStats)>, IncrementalReviewSetupError> {
     let mut fields = nul_terminated_fields(bytes).into_iter();
     let mut stats = Vec::new();
     while let Some(record) = fields.next() {
@@ -448,11 +463,12 @@ fn parse_numstat(bytes: &[u8]) -> Result<Vec<(GitPath, DiffStats)>, IncrementalR
         let path = parts.next().ok_or_else(diff_error)?;
         // With `--numstat -z`, a rename has an empty third tab-delimited
         // field in this header, followed by old and new NUL-delimited paths.
-        let path = if path.is_empty() {
-            let _previous_path = fields.next().ok_or_else(diff_error)?;
-            fields.next().ok_or_else(diff_error)?
+        let (previous_path, path) = if path.is_empty() {
+            let previous_path = fields.next().ok_or_else(diff_error)?;
+            let path = fields.next().ok_or_else(diff_error)?;
+            (Some(GitPath(previous_path.to_vec())), path)
         } else {
-            path
+            (None, path)
         };
         let additions = parse_stat(additions)?;
         let deletions = parse_stat(deletions)?;
@@ -460,7 +476,10 @@ fn parse_numstat(bytes: &[u8]) -> Result<Vec<(GitPath, DiffStats)>, IncrementalR
             return Err(diff_error());
         }
         stats.push((
-            GitPath(path.to_vec()),
+            DiffPathKey {
+                path: GitPath(path.to_vec()),
+                previous_path,
+            },
             DiffStats {
                 additions,
                 deletions,
@@ -783,6 +802,21 @@ mod tests {
     }
 
     #[test]
+    fn commit_ids_are_returned_in_canonical_lowercase() {
+        let (fixture, previous, current) = fixture_with_incremental_changes();
+
+        let scope = build_incremental_review_scope(
+            &fixture.path,
+            &previous.to_ascii_uppercase(),
+            &current.to_ascii_uppercase(),
+        )
+        .expect("scope from uppercase object IDs");
+
+        assert_eq!(scope.previous_head_sha, previous);
+        assert_eq!(scope.current_head_sha, current);
+    }
+
+    #[test]
     fn non_utf8_text_patch_returns_a_structured_error() {
         let fixture = RepoFixture::new();
         fixture.write("non-utf8.txt", b"base\n");
@@ -813,6 +847,19 @@ mod tests {
     }
 
     #[test]
+    fn changed_files_match_stats_by_path_instead_of_output_order() {
+        let changed = parse_name_status(b"M\0first.txt\0M\0second.txt\0").expect("name status");
+        let stats = parse_numstat(b"2\t0\tsecond.txt\x001\t0\tfirst.txt\x00").expect("numstat");
+
+        let files = materialize_changed_files(changed, stats).expect("materialized files");
+
+        assert_eq!(files[0].path, "first.txt");
+        assert_eq!(files[0].additions, Some(1));
+        assert_eq!(files[1].path, "second.txt");
+        assert_eq!(files[1].additions, Some(2));
+    }
+
+    #[test]
     fn non_utf8_paths_return_a_structured_error() {
         let path = GitPath(vec![0xff]);
         let changed = vec![RawChangedFile {
@@ -821,7 +868,10 @@ mod tests {
             kind: IncrementalChangedFileKind::Modified,
         }];
         let stats = vec![(
-            path,
+            DiffPathKey {
+                path,
+                previous_path: None,
+            },
             DiffStats {
                 additions: Some(1),
                 deletions: Some(0),
