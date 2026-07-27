@@ -125,19 +125,33 @@ impl AdministrativeAuditEvent {
         validate_redactable_input("target.id", &self.target.id)?;
         validate_redactable_input("correlationId", &self.correlation_id)?;
 
-        let mut event = self.clone();
-        event.actor.id = redact_value_v1(
-            &event.actor.id,
-            actor_id_is_safe_v1(event.actor.kind, &event.actor.id),
-        );
-        event.target.id = redact_value_v1(
-            &event.target.id,
-            target_id_is_safe_v1(event.target.kind, &event.target.id),
-        );
-        event.correlation_id = redact_value_v1(
-            &event.correlation_id,
-            correlation_id_is_safe_v1(&event.correlation_id),
-        );
+        let event = AdministrativeAuditEvent {
+            schema_version: self.schema_version,
+            delivery_id: self.delivery_id.clone(),
+            tenant_id: self.tenant_id.clone(),
+            occurred_at: self.occurred_at.clone(),
+            actor: AdministrativeAuditActor {
+                kind: self.actor.kind,
+                id: redact_value_v1(
+                    &self.actor.id,
+                    actor_id_is_safe_v1(self.actor.kind, &self.actor.id),
+                ),
+            },
+            repository: self.repository.clone(),
+            action: self.action,
+            target: AdministrativeAuditTarget {
+                kind: self.target.kind,
+                id: redact_value_v1(
+                    &self.target.id,
+                    target_id_is_safe_v1(self.target.kind, &self.target.id),
+                ),
+            },
+            outcome: self.outcome,
+            correlation_id: redact_value_v1(
+                &self.correlation_id,
+                correlation_id_is_safe_v1(&self.correlation_id),
+            ),
+        };
         event.validate_stored()?;
         Ok(event)
     }
