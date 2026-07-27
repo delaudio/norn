@@ -321,10 +321,15 @@ fn parse_review_args(args: &[String]) -> Result<ReviewArgs, String> {
 }
 
 fn next_value(args: &[String], index: &mut usize) -> Result<String, String> {
-    *index += 1;
-    args.get(*index)
+    let option = args
+        .get(*index)
         .cloned()
-        .ok_or_else(|| format!("`{}` requires a value.", args[index.saturating_sub(1)]))
+        .unwrap_or_else(|| "option".to_string());
+    *index += 1;
+    match args.get(*index) {
+        Some(value) if !value.starts_with('-') => Ok(value.clone()),
+        _ => Err(format!("`{option}` requires a value.")),
+    }
 }
 
 fn parse_severity(value: &str) -> Result<ReviewFindingSeverity, String> {
@@ -813,6 +818,18 @@ profiles:
             .expect_err("zero should not be accepted as a pull request id");
 
         assert!(error.contains("positive integer"));
+    }
+
+    #[test]
+    fn review_rejects_an_option_token_as_a_value() {
+        let error = parse_review_args(&[
+            "review".to_string(),
+            "--repo-path".to_string(),
+            "--json".to_string(),
+        ])
+        .expect_err("option token must not be accepted as a value");
+
+        assert_eq!(error, "`--repo-path` requires a value.");
     }
 
     #[test]

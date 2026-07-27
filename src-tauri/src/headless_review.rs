@@ -965,7 +965,7 @@ fn open_untracked_file(path: &Path) -> io::Result<File> {
 fn is_safe_synthetic_diff_path(relative: &str) -> bool {
     !relative
         .chars()
-        .any(|character| character.is_control() || character == '"')
+        .any(|character| character.is_control() || matches!(character, '"' | '\\'))
 }
 
 fn untracked_relative_path(raw_path: &[u8]) -> PathBuf {
@@ -1304,6 +1304,7 @@ mod tests {
         assert!(!is_safe_synthetic_diff_path("src/tab\tfile.ts"));
         assert!(!is_safe_synthetic_diff_path("src/quoted\"file.ts"));
         assert!(!is_safe_synthetic_diff_path("src/newline\nfile.ts"));
+        assert!(!is_safe_synthetic_diff_path("src\\config.txt"));
     }
 
     #[test]

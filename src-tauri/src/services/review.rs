@@ -3186,10 +3186,7 @@ fn validate_isolated_provider_cli(ai_provider: AiProvider) -> Result<(), String>
     .split_whitespace()
     .collect::<Vec<_>>()
     .join(" ");
-    let claude_documents_empty_tools = ai_provider != AiProvider::Claude
-        || (help.contains("\"\"") && help.to_ascii_lowercase().contains("disable all"));
     if output.status.success()
-        && claude_documents_empty_tools
         && required_help_text
             .iter()
             .all(|required| help.contains(required))
