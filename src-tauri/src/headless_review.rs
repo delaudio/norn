@@ -822,14 +822,21 @@ fn working_tree_diff(repo_path: &Path) -> Result<(String, Vec<String>), Headless
         .filter(|path| !path.is_empty())
     {
         let relative = String::from_utf8_lossy(raw_path).to_string();
+        let display_relative = relative.escape_default().to_string();
         if std::str::from_utf8(raw_path).is_err() {
             warnings.push(format!(
-                "Untracked file path `{relative}` is not UTF-8 and was rendered lossily."
+                "Untracked file path `{display_relative}` is not UTF-8 and was rendered lossily."
             ));
         }
         if is_sensitive_untracked_path(&relative) {
             warnings.push(format!(
-                "Skipped potentially sensitive untracked file `{relative}`."
+                "Skipped potentially sensitive untracked file `{display_relative}`."
+            ));
+            continue;
+        }
+        if !is_safe_synthetic_diff_path(&relative) {
+            warnings.push(format!(
+                "Skipped untracked file with a path that cannot be represented safely in a synthetic diff: `{display_relative}`."
             ));
             continue;
         }
@@ -838,7 +845,7 @@ fn working_tree_diff(repo_path: &Path) -> Result<(String, Vec<String>), Headless
         let metadata = match fs::symlink_metadata(&path) {
             Ok(metadata) if metadata.is_file() => metadata,
             Ok(metadata) if metadata.file_type().is_symlink() => {
-                warnings.push(format!("Skipped untracked symlink `{relative}`."));
+                warnings.push(format!("Skipped untracked symlink `{display_relative}`."));
                 continue;
             }
             _ => continue,
@@ -846,22 +853,28 @@ fn working_tree_diff(repo_path: &Path) -> Result<(String, Vec<String>), Headless
         if metadata.len() > MAX_UNTRACKED_FILE_BYTES
             || included_bytes.saturating_add(metadata.len()) > MAX_UNTRACKED_TOTAL_BYTES
         {
-            warnings.push(format!("Skipped large untracked file `{relative}`."));
+            warnings.push(format!(
+                "Skipped large untracked file `{display_relative}`."
+            ));
             continue;
         }
         let contents = fs::read(&path).map_err(|error| {
             HeadlessReviewError::target(format!(
-                "Failed to read untracked file `{relative}`: {error}"
+                "Failed to read untracked file `{display_relative}`: {error}"
             ))
         })?;
         if contents.contains(&0) {
-            warnings.push(format!("Skipped binary untracked file `{relative}`."));
+            warnings.push(format!(
+                "Skipped binary untracked file `{display_relative}`."
+            ));
             continue;
         }
         let text = match std::str::from_utf8(&contents) {
             Ok(text) => text,
             Err(_) => {
-                warnings.push(format!("Skipped non-UTF-8 untracked file `{relative}`."));
+                warnings.push(format!(
+                    "Skipped non-UTF-8 untracked file `{display_relative}`."
+                ));
                 continue;
             }
         };
@@ -873,6 +886,12 @@ fn working_tree_diff(repo_path: &Path) -> Result<(String, Vec<String>), Headless
         included_bytes = included_bytes.saturating_add(metadata.len());
     }
     Ok((diff, warnings))
+}
+
+fn is_safe_synthetic_diff_path(relative: &str) -> bool {
+    !relative
+        .chars()
+        .any(|character| character.is_control() || character == '"')
 }
 
 fn untracked_relative_path(raw_path: &[u8]) -> PathBuf {
@@ -1102,12 +1121,12 @@ mod tests {
 
     use super::{
         branch_scope_warnings, build_review_payload, format_findings_markdown, format_markdown,
-        is_sensitive_untracked_path, map_native_review_error, map_provider_target_error,
-        markdown_fence, new_file_patch, public_provider_error, repo_identity_matches_target,
-        requested_repo_identity, run, strip_private_evidence_payloads, untracked_relative_path,
-        validate_explicit_repo_identity, validate_requested_identity_shape, working_tree_diff,
-        HeadlessReviewExecution, HeadlessReviewRequest, HeadlessReviewTarget, ReviewScope,
-        HEADLESS_REVIEW_BOUNDARY,
+        is_safe_synthetic_diff_path, is_sensitive_untracked_path, map_native_review_error,
+        map_provider_target_error, markdown_fence, new_file_patch, public_provider_error,
+        repo_identity_matches_target, requested_repo_identity, run,
+        strip_private_evidence_payloads, untracked_relative_path, validate_explicit_repo_identity,
+        validate_requested_identity_shape, working_tree_diff, HeadlessReviewExecution,
+        HeadlessReviewRequest, HeadlessReviewTarget, ReviewScope, HEADLESS_REVIEW_BOUNDARY,
     };
     use crate::config::{RepoRef, ReviewProvider};
     use crate::services::review::{
@@ -1157,6 +1176,14 @@ mod tests {
         assert!(patch.contains("diff --git a/src/new file.ts b/src/new file.ts"));
         assert!(patch.contains("@@ -0,0 +1,2 @@"));
         assert!(patch.contains("+one\n+two\n"));
+    }
+
+    #[test]
+    fn synthetic_diff_paths_reject_ambiguous_header_characters() {
+        assert!(is_safe_synthetic_diff_path("src/new file.ts"));
+        assert!(!is_safe_synthetic_diff_path("src/tab\tfile.ts"));
+        assert!(!is_safe_synthetic_diff_path("src/quoted\"file.ts"));
+        assert!(!is_safe_synthetic_diff_path("src/newline\nfile.ts"));
     }
 
     #[test]

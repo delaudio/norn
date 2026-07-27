@@ -3055,6 +3055,24 @@ enum ProviderExecutionContext {
     Isolated,
 }
 
+fn user_installed_cli_command(program: &str) -> Command {
+    #[cfg(target_os = "macos")]
+    {
+        let mut command = Command::new("/bin/zsh");
+        command.args([
+            "-lc",
+            "export PATH=\"$HOME/.local/bin:$HOME/.npm/bin:/opt/homebrew/bin:/usr/local/bin:$PATH\"; exec \"$@\"",
+            "lachesi-user-cli",
+            program,
+        ]);
+        command
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        Command::new(program)
+    }
+}
+
 fn build_claude_text_command(
     repo_path: Option<&Path>,
     execution_context: ProviderExecutionContext,
@@ -3066,16 +3084,11 @@ fn build_claude_text_command(
     let temp_dir = private_provider_temp_dir("lachesi-claude-review-")?;
     let tmp_path = temp_dir.path().join("prompt.md");
     fs::write(&tmp_path, payload).map_err(|e| e.to_string())?;
+    let prompt_file = fs::File::open(&tmp_path)
+        .map_err(|error| format!("Failed to open Claude review prompt: {error}"))?;
 
-    let shell_cmd = format!(
-        "export PATH=\"$HOME/.local/bin:$HOME/.npm/bin:/opt/homebrew/bin:/usr/local/bin:$PATH\"; exec claude \"$@\" < {}",
-        shell_quote(&tmp_path.to_string_lossy())
-    );
-    let mut command = Command::new("/bin/zsh");
+    let mut command = user_installed_cli_command("claude");
     command
-        .arg("-lc")
-        .arg(shell_cmd)
-        .arg("lachesi-claude-review")
         .args([
             "--print",
             "--verbose",
@@ -3085,7 +3098,8 @@ fn build_claude_text_command(
             "stream-json",
             "--include-partial-messages",
         ])
-        .env("LACHESI_REVIEW_CHILD", "1");
+        .env("LACHESI_REVIEW_CHILD", "1")
+        .stdin(Stdio::from(prompt_file));
     let repository_access =
         execution_context == ProviderExecutionContext::Repository && repo_path.is_some();
     if repository_access {
@@ -3127,6 +3141,59 @@ fn private_provider_temp_dir(prefix: &str) -> Result<tempfile::TempDir, String> 
     Ok(temp_dir)
 }
 
+fn validate_isolated_provider_cli(ai_provider: AiProvider) -> Result<(), String> {
+    let (label, program, args, required_help_text): (&str, &str, &[&str], &[&str]) =
+        match ai_provider {
+            AiProvider::Claude => (
+                "Claude",
+                "claude",
+                &["--tools", "", "--help"],
+                &["--tools", "Use \"\" to disable all tools"],
+            ),
+            AiProvider::Codex => (
+                "Codex",
+                "codex",
+                &[
+                    "exec",
+                    "--skip-git-repo-check",
+                    "--ephemeral",
+                    "--ignore-user-config",
+                    "--ignore-rules",
+                    "--help",
+                ],
+                &[
+                    "--skip-git-repo-check",
+                    "--ephemeral",
+                    "--ignore-user-config",
+                    "--ignore-rules",
+                ],
+            ),
+        };
+    let output = user_installed_cli_command(program)
+        .args(args)
+        .output()
+        .map_err(|error| format!("Failed to validate the installed {label} CLI: {error}"))?;
+    let help = format!(
+        "{}\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    )
+    .split_whitespace()
+    .collect::<Vec<_>>()
+    .join(" ");
+    if output.status.success()
+        && required_help_text
+            .iter()
+            .all(|required| help.contains(required))
+    {
+        Ok(())
+    } else {
+        Err(format!(
+            "The installed {label} CLI does not support Lachesi's required headless isolation flags."
+        ))
+    }
+}
+
 fn normalize_claude_model(value: &str) -> Option<String> {
     let trimmed = value.trim();
     if trimmed.is_empty() {
@@ -3164,37 +3231,31 @@ fn build_codex_text_command(
     let tmp_path = temp_dir.path().join("prompt.md");
     let output_path = temp_dir.path().join("output.md");
     fs::write(&tmp_path, payload).map_err(|e| e.to_string())?;
+    let prompt_file = fs::File::open(&tmp_path)
+        .map_err(|error| format!("Failed to open Codex review prompt: {error}"))?;
 
-    let model_arg = codex_model
-        .and_then(normalize_codex_model)
-        .map(|model| format!(" --model {}", shell_quote(&model)))
-        .unwrap_or_default();
-    let effort_arg = codex_effort
-        .and_then(normalize_codex_effort)
-        .map(|effort| {
-            format!(
-                " -c {}",
-                shell_quote(&format!("model_reasoning_effort={effort}"))
-            )
-        })
-        .unwrap_or_default();
     let repository_access =
         execution_context == ProviderExecutionContext::Repository && repo_path.is_some();
-    let isolation_args = if repository_access {
-        String::new()
-    } else {
-        " --skip-git-repo-check --ephemeral --ignore-user-config --ignore-rules".to_string()
-    };
-    let shell_cmd = format!(
-        "export PATH=\"$HOME/.local/bin:$HOME/.npm/bin:/opt/homebrew/bin:/usr/local/bin:$PATH\"; codex exec --sandbox read-only --output-last-message {}{model_arg}{effort_arg}{isolation_args} - < {}",
-        shell_quote(&output_path.to_string_lossy()),
-        shell_quote(&tmp_path.to_string_lossy())
-    );
-    let mut command = Command::new("/bin/zsh");
+    let mut command = user_installed_cli_command("codex");
     command
-        .arg("-lc")
-        .arg(shell_cmd)
+        .args(["exec", "--sandbox", "read-only", "--output-last-message"])
+        .arg(&output_path)
         .env("LACHESI_REVIEW_CHILD", "1");
+    if let Some(model) = codex_model.and_then(normalize_codex_model) {
+        command.args(["--model", &model]);
+    }
+    if let Some(effort) = codex_effort.and_then(normalize_codex_effort) {
+        command.args(["-c", &format!("model_reasoning_effort={effort}")]);
+    }
+    if !repository_access {
+        command.args([
+            "--skip-git-repo-check",
+            "--ephemeral",
+            "--ignore-user-config",
+            "--ignore-rules",
+        ]);
+    }
+    command.arg("-").stdin(Stdio::from(prompt_file));
     if repository_access {
         command.current_dir(repo_path.expect("repository access requires a path"));
     } else {
@@ -4555,6 +4616,9 @@ fn run_inline_review_pipeline(
     {
         append_inline_review_log(&store, &key, run_id, format!("Review profile: {profile}"));
     }
+    if isolate_provider {
+        validate_isolated_provider_cli(ai_provider).map_err(ReviewPipelineFailure::provider)?;
+    }
     match ai_provider {
         AiProvider::Claude => {
             if let Some(model) = claude_model.as_deref().and_then(normalize_claude_model) {
@@ -5791,11 +5855,12 @@ mod tests {
         normalize_codex_effort, normalize_codex_model, parse_claude_fix_result,
         parse_claude_structured_json, parse_claude_text_result, parse_review_resources,
         resolve_gui_skip_analyzers, review_findings_from_output, trim_evidence_output,
-        AiReviewDraftCommentResult, AiReviewRunStatus, AiReviewRunStore, AiReviewTurnKind,
-        ProviderExecutionContext, ReviewEvidenceArtifact, ReviewEvidenceKind, ReviewEvidenceSource,
-        ReviewFindingCategory, ReviewFindingConfidence, ReviewFindingPublicationEvent,
-        ReviewFindingPublicationEventKind, ReviewFindingSeverity, ReviewProvider,
-        ReviewPublicationMode, STRUCTURED_REVIEW_SCHEMA_VERSION,
+        user_installed_cli_command, validate_isolated_provider_cli, AiReviewDraftCommentResult,
+        AiReviewRunStatus, AiReviewRunStore, AiReviewTurnKind, ProviderExecutionContext,
+        ReviewEvidenceArtifact, ReviewEvidenceKind, ReviewEvidenceSource, ReviewFindingCategory,
+        ReviewFindingConfidence, ReviewFindingPublicationEvent, ReviewFindingPublicationEventKind,
+        ReviewFindingSeverity, ReviewProvider, ReviewPublicationMode,
+        STRUCTURED_REVIEW_SCHEMA_VERSION,
     };
 
     #[test]
@@ -5866,22 +5931,23 @@ mod tests {
             Some("high"),
         )
         .expect("codex command should build");
-        let shell = command
+        let args = command
             .get_args()
-            .nth(1)
-            .expect("zsh command should include shell payload")
-            .to_string_lossy();
+            .map(|arg| arg.to_string_lossy().to_string())
+            .collect::<Vec<_>>();
 
-        assert!(shell.contains("codex exec"));
-        assert!(shell.contains("--sandbox read-only"));
-        assert!(!shell.contains("--ask-for-approval"));
-        assert!(shell.contains("--output-last-message"));
-        assert!(shell.contains("gpt-5-codex"));
-        assert!(shell.contains("model_reasoning_effort=high"));
-        assert!(shell.contains("--skip-git-repo-check"));
-        assert!(shell.contains("--ephemeral"));
-        assert!(shell.contains("--ignore-user-config"));
-        assert!(shell.contains("--ignore-rules"));
+        assert!(args.iter().any(|arg| arg == "exec"));
+        assert!(args
+            .windows(2)
+            .any(|pair| pair == ["--sandbox", "read-only"]));
+        assert!(!args.iter().any(|arg| arg == "--ask-for-approval"));
+        assert!(args.iter().any(|arg| arg == "--output-last-message"));
+        assert!(args.iter().any(|arg| arg == "gpt-5-codex"));
+        assert!(args.iter().any(|arg| arg == "model_reasoning_effort=high"));
+        assert!(args.iter().any(|arg| arg == "--skip-git-repo-check"));
+        assert!(args.iter().any(|arg| arg == "--ephemeral"));
+        assert!(args.iter().any(|arg| arg == "--ignore-user-config"));
+        assert!(args.iter().any(|arg| arg == "--ignore-rules"));
         assert!(command.get_envs().any(|(key, value)| {
             key == "LACHESI_REVIEW_CHILD"
                 && value.is_some_and(|value| value.to_string_lossy() == "1")
@@ -5903,24 +5969,16 @@ mod tests {
             None,
         )
         .expect("claude command should build");
-        let shell = command
-            .get_args()
-            .nth(1)
-            .expect("zsh command should include shell payload")
-            .to_string_lossy();
         let args = command
             .get_args()
             .map(|arg| arg.to_string_lossy().to_string())
             .collect::<Vec<_>>();
 
-        assert!(shell.contains("exec claude \"$@\""));
         assert!(args
             .windows(2)
             .any(|pair| pair == ["--permission-mode", "plan"]));
         assert!(args.windows(2).any(|pair| pair == ["--tools", ""]));
         assert!(!args.iter().any(|arg| arg == "--allowedTools"));
-        assert!(shell.contains(" < "));
-        assert!(!shell.contains("$(cat"));
         assert!(command.get_envs().any(|(key, value)| {
             key == "LACHESI_REVIEW_CHILD"
                 && value.is_some_and(|value| value.to_string_lossy() == "1")
@@ -5933,43 +5991,15 @@ mod tests {
     #[test]
     #[ignore = "requires the installed Claude CLI"]
     fn installed_claude_cli_supports_empty_tools_flag() {
-        let output = std::process::Command::new("claude")
-            .args(["--tools", "", "--help"])
-            .output()
-            .expect("installed Claude CLI");
-
-        assert!(output.status.success());
-        let help = String::from_utf8_lossy(&output.stdout);
-        let normalized_help = help.split_whitespace().collect::<Vec<_>>().join(" ");
-        assert!(help.contains("--tools <tools...>"));
-        assert!(normalized_help.contains("Use \"\" to disable all tools"));
+        validate_isolated_provider_cli(crate::config::AiProvider::Claude)
+            .expect("Claude isolation contract");
     }
 
     #[test]
     #[ignore = "requires the installed Codex CLI"]
     fn installed_codex_cli_supports_headless_isolation_flags() {
-        let output = std::process::Command::new("codex")
-            .args([
-                "exec",
-                "--skip-git-repo-check",
-                "--ephemeral",
-                "--ignore-user-config",
-                "--ignore-rules",
-                "--help",
-            ])
-            .output()
-            .expect("installed Codex CLI");
-
-        assert!(output.status.success());
-        let help = String::from_utf8_lossy(&output.stdout);
-        for flag in [
-            "--skip-git-repo-check",
-            "--ephemeral",
-            "--ignore-user-config",
-            "--ignore-rules",
-        ] {
-            assert!(help.contains(flag), "Codex help is missing {flag}");
-        }
+        validate_isolated_provider_cli(crate::config::AiProvider::Codex)
+            .expect("Codex isolation contract");
     }
 
     #[test]
@@ -5992,29 +6022,39 @@ mod tests {
             None,
         )
         .expect("codex command should build");
-        let claude_shell = claude
-            .get_args()
-            .nth(1)
-            .expect("claude shell command")
-            .to_string_lossy();
         let claude_args = claude
             .get_args()
             .map(|arg| arg.to_string_lossy().to_string())
             .collect::<Vec<_>>();
-        let codex_shell = codex
+        let codex_args = codex
             .get_args()
-            .nth(1)
-            .expect("codex shell command")
-            .to_string_lossy();
+            .map(|arg| arg.to_string_lossy().to_string())
+            .collect::<Vec<_>>();
 
         assert_eq!(claude.get_current_dir(), Some(repo_dir.path()));
-        assert!(claude_shell.contains("exec claude \"$@\""));
         assert!(claude_args
             .windows(2)
             .any(|pair| pair == ["--allowedTools", "Read,Glob,Grep"]));
         assert_eq!(codex.get_current_dir(), Some(repo_dir.path()));
-        assert!(!codex_shell.contains("--skip-git-repo-check"));
-        assert!(!codex_shell.contains("--ignore-user-config"));
+        assert!(!codex_args.iter().any(|arg| arg == "--skip-git-repo-check"));
+        assert!(!codex_args.iter().any(|arg| arg == "--ignore-user-config"));
+    }
+
+    #[test]
+    fn provider_cli_launcher_matches_the_host_platform() {
+        let command = user_installed_cli_command("codex");
+        #[cfg(target_os = "macos")]
+        {
+            assert_eq!(command.get_program(), "/bin/zsh");
+            let args = command
+                .get_args()
+                .map(|arg| arg.to_string_lossy().to_string())
+                .collect::<Vec<_>>();
+            assert!(args.iter().any(|arg| arg == "-lc"));
+            assert!(args.iter().any(|arg| arg == "codex"));
+        }
+        #[cfg(not(target_os = "macos"))]
+        assert_eq!(command.get_program(), "codex");
     }
 
     fn assert_private_temp_dir(temp_dir: &tempfile::TempDir) {
