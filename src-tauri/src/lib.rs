@@ -3,6 +3,7 @@ mod commands;
 mod config;
 mod credentials;
 mod headless_review;
+pub mod incremental_review;
 mod launch;
 mod local_repo;
 mod repo_config;
