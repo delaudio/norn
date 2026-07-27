@@ -326,9 +326,16 @@ fn supported_event_kind(
 #[derive(Debug, Deserialize)]
 struct GithubPayload {
     action: String,
+    #[serde(default)]
+    changes: Option<GithubChanges>,
     pull_request: GithubPullRequest,
     repository: GithubRepository,
     sender: GithubActor,
+}
+
+#[derive(Debug, Deserialize)]
+struct GithubChanges {
+    base: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -376,6 +383,15 @@ fn normalize_github(
         "opened" => (PullRequestReviewEventKind::Opened, None),
         "reopened" => (PullRequestReviewEventKind::Reopened, None),
         "synchronize" => (PullRequestReviewEventKind::Synchronized, None),
+        "converted_to_draft" => (PullRequestReviewEventKind::Synchronized, None),
+        "edited"
+            if payload
+                .changes
+                .as_ref()
+                .is_some_and(|changes| changes.base.is_some()) =>
+        {
+            (PullRequestReviewEventKind::Synchronized, None)
+        }
         "ready_for_review" => (PullRequestReviewEventKind::ReadyForReview, None),
         "closed" => (
             PullRequestReviewEventKind::Closed,
@@ -624,13 +640,22 @@ mod tests {
     }
 
     fn github_body(action: &str) -> Vec<u8> {
+        let base_changed = action == "edited";
         serde_json::to_vec(&serde_json::json!({
             "action": action,
+            "changes": if base_changed {
+                Some(serde_json::json!({"base": {"ref": {"from": "develop"}}}))
+            } else {
+                None
+            },
             "pull_request": {
                 "number": 42,
-                "base": {"ref": "main", "sha": BASE_SHA},
+                "base": {
+                    "ref": if base_changed { "release" } else { "main" },
+                    "sha": BASE_SHA
+                },
                 "head": {"ref": "feature/retry", "sha": HEAD_SHA},
-                "draft": false,
+                "draft": action == "converted_to_draft",
                 "merged": action == "closed"
             },
             "repository": {
@@ -754,6 +779,12 @@ mod tests {
                 None,
             ),
             (
+                "converted_to_draft",
+                PullRequestReviewEventKind::Synchronized,
+                None,
+            ),
+            ("edited", PullRequestReviewEventKind::Synchronized, None),
+            (
                 "ready_for_review",
                 PullRequestReviewEventKind::ReadyForReview,
                 None,
@@ -782,6 +813,12 @@ mod tests {
             };
             assert_eq!(event.kind, expected_kind);
             assert_eq!(event.closed_outcome, expected_outcome);
+            if action == "converted_to_draft" {
+                assert!(event.draft);
+            }
+            if action == "edited" {
+                assert_eq!(event.base.ref_name, "release");
+            }
         }
 
         for (event_name, expected_kind, expected_outcome) in [
@@ -892,6 +929,29 @@ mod tests {
         assert_eq!(outcome, WebhookIngressOutcome::Ignored);
         assert_eq!(outcome.status_code(), 200);
         assert_eq!(outcome.code(), "ignored");
+    }
+
+    #[test]
+    fn github_edits_without_a_base_change_are_ignored() {
+        let mut payload: serde_json::Value =
+            serde_json::from_slice(&github_body("edited")).expect("GitHub edited fixture");
+        payload["changes"] = serde_json::json!({"title": {"from": "Old title"}});
+        let body = serde_json::to_vec(&payload).expect("GitHub title edit fixture");
+        let signature = signature(&body);
+        let headers = github_headers(&signature);
+
+        let outcome = ingress().handle(
+            PullRequestReviewEventProvider::Github,
+            "tenant-acme",
+            SECRET,
+            WebhookHttpRequest {
+                method: "POST",
+                headers: &headers,
+                body: &body,
+            },
+        );
+
+        assert_eq!(outcome, WebhookIngressOutcome::Ignored);
     }
 
     #[test]
