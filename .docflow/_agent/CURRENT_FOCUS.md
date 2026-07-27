@@ -11,7 +11,7 @@ If status files and git disagree, git is authoritative; correct this file.
 - **Branch:** `agent/provider-inline-publication`
 - **Active item:** GitHub issue #97 and `.docflow/plan/todo/0004-shared-review-service-program.md`
 - **Blockers:** none; use the available SSH key for signed commits.
-- **Uncommitted work:** provider-neutral structured finding publication contract, provider adapters, and idempotency tests.
+- **Uncommitted work:** issue #97 coordination closeout after implementation commit `78ef4ff`; final branch review and PR integration remain.
 
 ## Last shipped
 
