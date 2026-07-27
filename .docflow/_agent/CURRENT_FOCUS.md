@@ -11,7 +11,7 @@ If status files and git disagree, git is authoritative; correct this file.
 - **Branch:** `agent/administrative-audit-events`
 - **Active item:** GitHub issue #94 and `.docflow/plan/todo/0004-shared-review-service-program.md`
 - **Blockers:** none; use the available SSH key for signed commits.
-- **Uncommitted work:** coordination log only; commits `ff9bea6` and `88b7872` await final branch review and PR.
+- **Uncommitted work:** coordination log only; implementation commits through `bf70442` await push and PR.
 
 ## Last shipped
 
