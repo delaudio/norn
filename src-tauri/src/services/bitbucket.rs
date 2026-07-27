@@ -2041,7 +2041,15 @@ impl ProviderInlineCommentApi for StoredProviderInlineCommentApi {
         marker: &str,
         expected: &ProviderInlineCommentPayload,
     ) -> Result<Option<ProviderCommentIdentity>, ProviderPublicationApiError> {
-        find_published_finding_comment(target, marker, expected)
+        find_published_finding_comment(target, marker, Some(expected))
+    }
+
+    fn find_comment_by_marker(
+        &self,
+        target: &ProviderPublicationTarget,
+        marker: &str,
+    ) -> Result<Option<ProviderCommentIdentity>, ProviderPublicationApiError> {
+        find_published_finding_comment(target, marker, None)
     }
 
     fn create_inline_comment(
@@ -2168,7 +2176,7 @@ pub async fn publish_review_finding(
 fn find_published_finding_comment(
     target: &ProviderPublicationTarget,
     marker: &str,
-    expected: &ProviderInlineCommentPayload,
+    expected: Option<&ProviderInlineCommentPayload>,
 ) -> Result<Option<ProviderCommentIdentity>, ProviderPublicationApiError> {
     let pr_id = publication_pr_id(target.pull_request_id)?;
     match target.provider {
@@ -2183,15 +2191,7 @@ fn find_published_finding_comment(
                 let page: BbPublicationCommentPage =
                     get_json(client.get(&url)).map_err(map_publication_read_error)?;
                 if let Some(comment) = page.values.into_iter().find(|comment| {
-                    !comment.deleted
-                        && comment
-                            .inline
-                            .as_ref()
-                            .is_some_and(|anchor| bitbucket_anchor_matches(anchor, expected))
-                        && comment
-                            .content
-                            .as_ref()
-                            .is_some_and(|content| comment_has_marker(&content.raw, marker))
+                    bitbucket_publication_comment_matches(comment, marker, expected)
                 }) {
                     return Ok(Some(ProviderCommentIdentity {
                         comment_id: publication_comment_id(comment.id)?,
@@ -2214,10 +2214,7 @@ fn find_published_finding_comment(
                 github_paginated_get(&client, url).map_err(map_publication_read_error)?;
             comments
                 .into_iter()
-                .find(|comment| {
-                    github_anchor_matches(comment, expected)
-                        && comment_has_marker(&comment.body, marker)
-                })
+                .find(|comment| github_publication_comment_matches(comment, marker, expected))
                 .map(|comment| {
                     Ok(ProviderCommentIdentity {
                         comment_id: publication_comment_id(comment.id)?,
@@ -2338,6 +2335,37 @@ fn github_anchor_matches(
         } else {
             comment.start_line.is_none()
         }
+}
+
+fn bitbucket_publication_comment_matches(
+    comment: &BbPublicationComment,
+    marker: &str,
+    expected: Option<&ProviderInlineCommentPayload>,
+) -> bool {
+    !comment.deleted
+        && expected
+            .map(|expected| {
+                comment
+                    .inline
+                    .as_ref()
+                    .is_some_and(|anchor| bitbucket_anchor_matches(anchor, expected))
+            })
+            .unwrap_or(true)
+        && comment
+            .content
+            .as_ref()
+            .is_some_and(|content| comment_has_marker(&content.raw, marker))
+}
+
+fn github_publication_comment_matches(
+    comment: &GhPublicationComment,
+    marker: &str,
+    expected: Option<&ProviderInlineCommentPayload>,
+) -> bool {
+    expected
+        .map(|expected| github_anchor_matches(comment, expected))
+        .unwrap_or(true)
+        && comment_has_marker(&comment.body, marker)
 }
 
 fn comment_has_marker(body: &str, marker: &str) -> bool {
@@ -2678,6 +2706,24 @@ mod tests {
         assert!(bitbucket_anchor_matches(
             bitbucket_response,
             &publication_payload(FindingAnchorSide::Old)
+        ));
+        let orphan: BbPublicationComment = serde_json::from_value(json!({
+            "id": 100,
+            "deleted": false,
+            "content": {
+                "raw": "finding\n\n<!-- lachesi:finding:abc -->"
+            }
+        }))
+        .expect("marker-only Bitbucket comment");
+        assert!(bitbucket_publication_comment_matches(
+            &orphan,
+            "<!-- lachesi:finding:abc -->",
+            None
+        ));
+        assert!(!bitbucket_publication_comment_matches(
+            &orphan,
+            "<!-- lachesi:finding:abc -->",
+            Some(&publication_payload(FindingAnchorSide::Old))
         ));
         let github_response = GhPublicationComment {
             id: json!(99),

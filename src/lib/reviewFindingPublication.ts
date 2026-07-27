@@ -76,6 +76,18 @@ export function buildFindingPublicationRequest({
   if (!draft.path.trim() || line == null || side == null) {
     throw new Error("The structured finding draft no longer has a valid inline anchor.");
   }
+  const findingAnchor = finding.anchor;
+  const findingEndLine = findingAnchor?.endLine ?? findingAnchor?.startLine;
+  if (
+    !findingAnchor ||
+    findingEndLine == null ||
+    draft.path !== findingAnchor.path ||
+    side !== findingAnchor.side ||
+    line < findingAnchor.startLine ||
+    line > findingEndLine
+  ) {
+    throw new Error("The staged draft no longer matches the structured finding anchor.");
+  }
   if (!draft.raw.trim()) {
     throw new Error("The structured finding draft cannot be empty.");
   }
@@ -90,10 +102,10 @@ export function buildFindingPublicationRequest({
     headSha,
     findingFingerprint: finding.fingerprint,
     anchor: {
-      path: draft.path,
-      startLine: line,
-      endLine: line,
-      side,
+      path: findingAnchor.path,
+      startLine: findingAnchor.startLine,
+      endLine: findingEndLine,
+      side: findingAnchor.side,
     },
     title: finding.title,
     body: draft.raw,

@@ -90,7 +90,7 @@ const activeRun: ReviewRun = {
       anchor: {
         path: "src/app/modules/invoice-lines/invoice-lines-v2.controller.ts",
         startLine: 29,
-        endLine: null,
+        endLine: 30,
         side: "new",
       },
       suggestedFix: null,
@@ -189,7 +189,7 @@ describe("buildFindingPublicationRequest", () => {
       anchor: {
         path: "src/app/modules/invoice-lines/invoice-lines-v2.controller.ts",
         startLine: 29,
-        endLine: 29,
+        endLine: 30,
         side: "new",
       },
       body: "Publish the edited reviewer-facing explanation.",

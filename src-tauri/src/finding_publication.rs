@@ -139,6 +139,15 @@ pub trait ProviderInlineCommentApi {
         expected: &ProviderInlineCommentPayload,
     ) -> Result<Option<ProviderCommentIdentity>, ProviderPublicationApiError>;
 
+    /// Finds any non-deleted comment containing `marker`, regardless of its
+    /// provider-returned anchor. This is used only to remove failed writes
+    /// before retrying, never to declare a publication successful.
+    fn find_comment_by_marker(
+        &self,
+        target: &ProviderPublicationTarget,
+        marker: &str,
+    ) -> Result<Option<ProviderCommentIdentity>, ProviderPublicationApiError>;
+
     /// Creates an inline comment. Implementations must never fall back to a
     /// file-level or top-level comment when the anchor is rejected.
     fn create_inline_comment(
@@ -341,7 +350,7 @@ where
         if !current_head.eq_ignore_ascii_case(&request.head_sha) {
             if let Some(stale) = self
                 .api
-                .find_inline_comment(target, marker, &payload)
+                .find_comment_by_marker(target, marker)
                 .map_err(publication_api_error)?
             {
                 self.api
@@ -361,6 +370,15 @@ where
         {
             (existing, false)
         } else {
+            if let Some(orphan) = self
+                .api
+                .find_comment_by_marker(target, marker)
+                .map_err(publication_api_error)?
+            {
+                self.api
+                    .delete_comment(target, &orphan)
+                    .map_err(publication_api_error)?;
+            }
             let published = self
                 .api
                 .create_inline_comment(target, &payload)
@@ -626,9 +644,11 @@ mod tests {
     struct MockProviderState {
         current_head_sha: String,
         comments: HashMap<String, ProviderCommentIdentity>,
+        mismatched_comments: HashMap<String, ProviderCommentIdentity>,
         payloads: Vec<(PullRequestReviewEventProvider, ProviderInlineCommentPayload)>,
         fail_next_write: bool,
         fail_next_delete: bool,
+        orphan_next_write: bool,
         advance_head_on_write: bool,
         deleted_comment_ids: Vec<String>,
     }
@@ -638,9 +658,11 @@ mod tests {
             Self {
                 current_head_sha: HEAD_SHA.to_string(),
                 comments: HashMap::new(),
+                mismatched_comments: HashMap::new(),
                 payloads: Vec::new(),
                 fail_next_write: false,
                 fail_next_delete: false,
+                orphan_next_write: false,
                 advance_head_on_write: false,
                 deleted_comment_ids: Vec::new(),
             }
@@ -662,6 +684,19 @@ mod tests {
             _expected: &ProviderInlineCommentPayload,
         ) -> Result<Option<ProviderCommentIdentity>, ProviderPublicationApiError> {
             Ok(self.state.lock().unwrap().comments.get(marker).cloned())
+        }
+
+        fn find_comment_by_marker(
+            &self,
+            _target: &ProviderPublicationTarget,
+            marker: &str,
+        ) -> Result<Option<ProviderCommentIdentity>, ProviderPublicationApiError> {
+            let state = self.state.lock().unwrap();
+            Ok(state
+                .comments
+                .get(marker)
+                .or_else(|| state.mismatched_comments.get(marker))
+                .cloned())
         }
 
         fn create_inline_comment(
@@ -686,6 +721,13 @@ mod tests {
                 comment_id: format!("comment-{}", state.payloads.len() + 1),
             };
             state.payloads.push((target.provider, payload.clone()));
+            if state.orphan_next_write {
+                state.orphan_next_write = false;
+                state.mismatched_comments.insert(marker, identity);
+                return Err(ProviderPublicationApiError::unavailable(
+                    "provider created a wrong-anchor comment and cleanup failed",
+                ));
+            }
             state.comments.insert(marker, identity.clone());
             if state.advance_head_on_write {
                 state.current_head_sha = "3333333333333333333333333333333333333333".to_string();
@@ -706,6 +748,9 @@ mod tests {
                 ));
             }
             state.comments.retain(|_, current| current != identity);
+            state
+                .mismatched_comments
+                .retain(|_, current| current != identity);
             state.deleted_comment_ids.push(identity.comment_id.clone());
             Ok(())
         }
@@ -959,6 +1004,36 @@ mod tests {
         let state = publisher.api.state.lock().unwrap();
         assert_eq!(state.deleted_comment_ids, vec!["comment-1"]);
         assert!(state.comments.is_empty());
+    }
+
+    #[test]
+    fn retry_removes_wrong_anchor_marker_before_creating_again() {
+        let publisher =
+            FindingPublisher::new(MockProviderApi::default(), MockPublicationStore::default());
+        publisher.api.state.lock().unwrap().orphan_next_write = true;
+        let request = request(PullRequestReviewEventProvider::Github);
+
+        let first = publisher
+            .publish(&request)
+            .expect_err("provider cleanup failure");
+        assert_eq!(first.code, FindingPublicationErrorCode::ProviderUnavailable);
+        assert_eq!(
+            publisher
+                .api
+                .state
+                .lock()
+                .unwrap()
+                .mismatched_comments
+                .len(),
+            1
+        );
+
+        let published = publisher.publish(&request).expect("clean retry");
+        assert_eq!(published.comment_id, "comment-2");
+        let state = publisher.api.state.lock().unwrap();
+        assert_eq!(state.deleted_comment_ids, vec!["comment-1"]);
+        assert!(state.mismatched_comments.is_empty());
+        assert_eq!(state.comments.len(), 1);
     }
 
     #[test]

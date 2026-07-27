@@ -201,7 +201,7 @@ describe("linkAiReviewDraftCommentsToFindings", () => {
     const linked = linkAiReviewDraftCommentsToFindings(reviewRun, [
       {
         path: "src/app/views/utils/buildRecordsUrlFromSavedView.ts",
-        to: 17,
+        to: 16,
         from: null,
         raw: "Guard the `filterId` path here or add a regression test for the empty-results case.",
       },

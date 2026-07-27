@@ -180,9 +180,19 @@ export function linkAiReviewDraftCommentsToFindings(
     if (match) {
       usedFindingIds.add(match.id);
     }
+    const matchLine = match?.anchor?.endLine ?? match?.anchor?.startLine ?? null;
+    const anchoredComment =
+      match?.anchor && matchLine != null
+        ? {
+            ...comment,
+            path: match.anchor.path,
+            to: match.anchor.side === "new" ? matchLine : null,
+            from: match.anchor.side === "old" ? matchLine : null,
+          }
+        : comment;
 
     return {
-      ...comment,
+      ...anchoredComment,
       findingRef: match
         ? {
             reviewRunId: reviewRun.id,
