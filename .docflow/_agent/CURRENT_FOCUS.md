@@ -11,7 +11,7 @@ If status files and git disagree, git is authoritative; correct this file.
 - **Branch:** `agent/provider-webhook-ingress`
 - **Active item:** GitHub issue #95 and `.docflow/plan/todo/0004-shared-review-service-program.md`
 - **Blockers:** none; use the available SSH key for signed commits.
-- **Uncommitted work:** coordination log only; implementation commit `6dd5204` awaits review and push.
+- **Uncommitted work:** coordination log only; implementation commits through `fbbd332` await final review and push.
 
 ## Last shipped
 
