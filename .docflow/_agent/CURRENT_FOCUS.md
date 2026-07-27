@@ -8,15 +8,15 @@ If status files and git disagree, git is authoritative; correct this file.
 
 ## Active state
 
-- **Branch:** `agent/review-event-contract`
-- **Active item:** GitHub issue #90 and `.docflow/plan/todo/0004-shared-review-service-program.md`
+- **Branch:** `agent/review-cursor-storage`
+- **Active item:** GitHub issue #91 and `.docflow/plan/todo/0004-shared-review-service-program.md`
 - **Blockers:** none; use the available SSH key for signed commits.
-- **Uncommitted work:** provider-neutral Rust pull-request review event contract.
+- **Uncommitted work:** tenant-scoped last-reviewed-head cursor persistence.
 
 ## Last shipped
 
-`f7119f1` - accept the shared-service trust boundary through PR #117.
+`93ee0a8` - add the provider-neutral PR event contract through PR #118.
 
 ## Next item
 
-Implement GitHub issue #91 after the event-contract PR merges.
+Implement GitHub issue #92 after the review-cursor PR merges.

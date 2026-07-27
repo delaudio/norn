@@ -11,6 +11,11 @@ mod review_storage;
 mod services;
 pub mod tui;
 
+pub use review_storage::{
+    get_review_cursor, record_review_completion, ReviewCursor, ReviewCursorIdentity,
+    ReviewCursorState, ReviewRunCompletion, ReviewRunOutcome,
+};
+
 use commands::{bitbucket, context, repositories, review};
 use tauri::{
     menu::{Menu, MenuItem, PredefinedMenuItem},
