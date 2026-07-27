@@ -816,7 +816,13 @@ fn working_tree_diff(repo_path: &Path) -> Result<(String, Vec<String>), Headless
             warnings.push(format!("Skipped binary untracked file `{relative}`."));
             continue;
         }
-        let text = String::from_utf8_lossy(&contents);
+        let text = match std::str::from_utf8(&contents) {
+            Ok(text) => text,
+            Err(_) => {
+                warnings.push(format!("Skipped non-UTF-8 untracked file `{relative}`."));
+                continue;
+            }
+        };
         if !diff.is_empty() && !diff.ends_with('\n') {
             diff.push('\n');
         }
@@ -948,6 +954,8 @@ fn build_review_payload(
     diff: &str,
     scope: ReviewScope,
 ) -> String {
+    let fence = markdown_fence(diff);
+    let opening_fence = format!("{fence}diff");
     let scope_note = match scope {
         ReviewScope::WorkingTree => {
             "This target can contain staged, unstaged, and untracked files. Do not describe a file as committed unless the supplied evidence proves that it is committed."
@@ -968,7 +976,7 @@ fn build_review_payload(
         scope_note,
         "",
         "## Diff",
-        "```diff",
+        &opening_fence,
     ]
     .join("\n");
     payload.push('\n');
@@ -976,8 +984,17 @@ fn build_review_payload(
     if !diff.ends_with('\n') {
         payload.push('\n');
     }
-    payload.push_str("```");
+    payload.push_str(&fence);
     payload
+}
+
+fn markdown_fence(content: &str) -> String {
+    let max_run = content
+        .split(|character| character != '`')
+        .map(str::len)
+        .max()
+        .unwrap_or(0);
+    "`".repeat(max_run.saturating_add(1).max(3))
 }
 
 #[cfg(test)]
@@ -990,7 +1007,7 @@ mod tests {
     use super::{
         build_review_payload, format_findings_markdown, format_markdown,
         is_sensitive_untracked_path, map_native_review_error, map_provider_target_error,
-        new_file_patch, public_provider_error, repo_identity_matches_target,
+        markdown_fence, new_file_patch, public_provider_error, repo_identity_matches_target,
         requested_repo_identity, run, strip_private_evidence_payloads,
         validate_explicit_repo_identity, validate_requested_identity_shape, working_tree_diff,
         HeadlessReviewExecution, HeadlessReviewRequest, HeadlessReviewTarget, ReviewScope,
@@ -1368,6 +1385,22 @@ mod tests {
     }
 
     #[test]
+    fn review_payload_uses_a_fence_longer_than_diff_backticks() {
+        let diff = "+const example = \"```\";\n";
+        let payload = build_review_payload(
+            "Review carefully.",
+            "Fence changes",
+            "feature",
+            "main",
+            diff,
+            ReviewScope::Branch,
+        );
+
+        assert_eq!(markdown_fence(diff), "````");
+        assert!(payload.contains(&format!("````diff\n{diff}````")));
+    }
+
+    #[test]
     fn working_tree_diff_includes_staged_unstaged_and_untracked_text() {
         let repo = temp_git_repo();
         fs::write(repo.join("staged.txt"), "after staged\n").expect("update staged file");
@@ -1391,6 +1424,8 @@ mod tests {
         fs::write(repo.join(".env.local"), "API_TOKEN=must-not-leak\n")
             .expect("write sensitive untracked file");
         fs::write(repo.join("notes.txt"), "review this\n").expect("write safe untracked file");
+        fs::write(repo.join("invalid.txt"), [0xff, 0xfe, 0xfd])
+            .expect("write invalid UTF-8 fixture");
 
         let (diff, warnings) = working_tree_diff(&repo).expect("collect working tree diff");
 
@@ -1399,6 +1434,8 @@ mod tests {
         assert!(warnings
             .iter()
             .any(|warning| warning.contains(".env.local")));
+        assert!(warnings.iter().any(|warning| warning.contains("non-UTF-8")));
+        assert!(!diff.contains("invalid.txt"));
         assert!(is_sensitive_untracked_path("config/client-secrets.json"));
         assert!(is_sensitive_untracked_path("certs/signing.key"));
         assert!(is_sensitive_untracked_path(".envrc"));
