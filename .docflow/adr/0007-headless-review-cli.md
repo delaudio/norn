@@ -66,8 +66,9 @@ orchestrated safely by coding agents and CI.
    the shared native analyzer pipeline for standalone use.
 5. The AI reviewer runs read-only, and a `LACHESI_REVIEW_CHILD` environment
    marker prevents skills or hooks from recursively enforcing another review.
-6. JSON output uses the existing structured review finding semantics and never
-   includes credentials or other secrets.
+6. JSON output uses the existing structured review finding semantics, never
+   serializes credential sources or raw evidence payloads, and documents that
+   summaries and findings can reflect content from the reviewed diff or model.
 7. Exit codes distinguish successful review, threshold findings, invalid
    configuration, unresolved repository/target, required analyzer failure, AI
    provider failure, internal failure, and cancellation.
@@ -107,6 +108,7 @@ orchestrated safely by coding agents and CI.
 | 2026-07-24 | r2 | default-agent | Made analyzers opt-in for post-task headless review. |
 | 2026-07-24 | r3 | default-agent | Made headless storage ephemeral and agent execution one-shot. |
 | 2026-07-27 | r4 | default-agent | Excluded potentially sensitive untracked files from AI review payloads. |
+| 2026-07-27 | r5 | default-agent | Scoped the machine-output secrecy guarantee to credential sources and raw evidence. |
 
 ## Approvals
 

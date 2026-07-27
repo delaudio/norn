@@ -250,7 +250,9 @@ schema with `status: "failed"`, `exitCode`, and `error`.
 Headless output retains evidence identifiers, kinds, sources, titles, and
 summaries, but omits raw evidence payloads. Analyzer stdout and stderr can
 contain credentials or other sensitive process output and are never serialized
-to terminal or CI output.
+to terminal or CI output. Summaries and findings are derived from the reviewed
+diff and model response, so consumers must protect them like source code rather
+than treating the complete review artifact as secret-free.
 
 ### JSONL
 
@@ -343,7 +345,9 @@ Bitbucket-linked review requires:
 The core should preserve the existing security boundary:
 
 - secrets are not read from `.lachesi.yaml`
-- secrets are not included in JSON output
+- credential sources and raw analyzer evidence are not included in JSON output
+- model-derived summaries and findings can reflect reviewed source content and
+  must be handled with the same confidentiality as the diff
 - webview-only assumptions must not leak into CLI
 
 Jira and Notion enrichment are optional. Missing enrichment credentials should

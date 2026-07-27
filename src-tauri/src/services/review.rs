@@ -3055,8 +3055,9 @@ fn build_claude_text_command(
     resume_session_id: Option<&str>,
     claude_model: Option<&str>,
     claude_effort: Option<&str>,
-) -> Result<(Command, PathBuf), String> {
-    let tmp_path = std::env::temp_dir().join(format!("lachesi-review-turn-{}.md", now_ms()));
+) -> Result<(Command, tempfile::TempDir), String> {
+    let temp_dir = private_provider_temp_dir("lachesi-claude-review-")?;
+    let tmp_path = temp_dir.path().join("prompt.md");
     fs::write(&tmp_path, payload).map_err(|e| e.to_string())?;
 
     let resume_arg = resume_session_id
@@ -3083,7 +3084,22 @@ fn build_claude_text_command(
         command.current_dir(repo_path);
     }
     command.stdout(Stdio::piped()).stderr(Stdio::piped());
-    Ok((command, tmp_path))
+    Ok((command, temp_dir))
+}
+
+fn private_provider_temp_dir(prefix: &str) -> Result<tempfile::TempDir, String> {
+    let temp_dir = tempfile::Builder::new()
+        .prefix(prefix)
+        .tempdir()
+        .map_err(|error| format!("Failed to create private provider storage: {error}"))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+
+        fs::set_permissions(temp_dir.path(), fs::Permissions::from_mode(0o700))
+            .map_err(|error| format!("Failed to secure provider storage: {error}"))?;
+    }
+    Ok(temp_dir)
 }
 
 fn normalize_claude_model(value: &str) -> Option<String> {
@@ -3117,10 +3133,10 @@ fn build_codex_text_command(
     payload: &str,
     codex_model: Option<&str>,
     codex_effort: Option<&str>,
-) -> Result<(Command, PathBuf, PathBuf), String> {
-    let tmp_path = std::env::temp_dir().join(format!("lachesi-codex-review-turn-{}.md", now_ms()));
-    let output_path =
-        std::env::temp_dir().join(format!("lachesi-codex-review-output-{}.md", now_ms()));
+) -> Result<(Command, tempfile::TempDir, PathBuf), String> {
+    let temp_dir = private_provider_temp_dir("lachesi-codex-review-")?;
+    let tmp_path = temp_dir.path().join("prompt.md");
+    let output_path = temp_dir.path().join("output.md");
     fs::write(&tmp_path, payload).map_err(|e| e.to_string())?;
 
     let model_arg = codex_model
@@ -3155,7 +3171,7 @@ fn build_codex_text_command(
         command.current_dir(repo_path);
     }
     command.stdout(Stdio::piped()).stderr(Stdio::piped());
-    Ok((command, tmp_path, output_path))
+    Ok((command, temp_dir, output_path))
 }
 
 fn normalize_codex_model(value: &str) -> Option<String> {
@@ -4525,7 +4541,7 @@ fn run_inline_review_pipeline(
     let attempt_claude = |prompt: &str,
                           resume_id: Option<&str>|
      -> Result<Option<ParsedClaudeTextResponse>, String> {
-        let (mut command, tmp_path) = build_claude_text_command(
+        let (mut command, _temp_dir) = build_claude_text_command(
             repo_path.as_deref(),
             prompt,
             resume_id,
@@ -4572,7 +4588,6 @@ fn run_inline_review_pipeline(
             .map_err(|e| format!("Failed while waiting for claude: {e}"))?;
         let _ = stdout_thread.join();
         let _ = stderr_thread.join();
-        let _ = fs::remove_file(&tmp_path);
         clear_inline_review_pid(&store, &key, run_id);
 
         let output = CommandOutput {
@@ -4604,7 +4619,7 @@ fn run_inline_review_pipeline(
     };
 
     let attempt_codex = |prompt: &str| -> Result<Option<ParsedClaudeTextResponse>, String> {
-        let (mut command, tmp_path, output_path) = build_codex_text_command(
+        let (mut command, _temp_dir, output_path) = build_codex_text_command(
             repo_path.as_deref(),
             prompt,
             codex_model.as_deref(),
@@ -4661,8 +4676,6 @@ fn run_inline_review_pipeline(
         };
 
         let file_content = fs::read_to_string(&output_path).unwrap_or_default();
-        let _ = fs::remove_file(&tmp_path);
-        let _ = fs::remove_file(&output_path);
 
         if inline_review_cancel_requested(&store, &key, run_id) {
             mark_inline_review_cancelled(&store, &key, run_id);
@@ -5804,7 +5817,7 @@ mod tests {
 
     #[test]
     fn builds_codex_review_command_with_model_effort_and_read_only_sandbox() {
-        let (command, prompt_path, output_path) =
+        let (command, temp_dir, output_path) =
             build_codex_text_command(None, "review prompt", Some("gpt-5-codex"), Some("high"))
                 .expect("codex command should build");
         let shell = command
@@ -5824,14 +5837,14 @@ mod tests {
             key == "LACHESI_REVIEW_CHILD"
                 && value.is_some_and(|value| value.to_string_lossy() == "1")
         }));
-
-        let _ = std::fs::remove_file(prompt_path);
-        let _ = std::fs::remove_file(output_path);
+        assert!(temp_dir.path().join("prompt.md").is_file());
+        assert_eq!(output_path, temp_dir.path().join("output.md"));
+        assert_private_temp_dir(&temp_dir);
     }
 
     #[test]
     fn builds_claude_review_command_with_read_only_tools() {
-        let (command, prompt_path) =
+        let (command, temp_dir) =
             build_claude_text_command(None, "review prompt", None, None, None)
                 .expect("claude command should build");
         let shell = command
@@ -5848,8 +5861,21 @@ mod tests {
             key == "LACHESI_REVIEW_CHILD"
                 && value.is_some_and(|value| value.to_string_lossy() == "1")
         }));
+        assert!(temp_dir.path().join("prompt.md").is_file());
+        assert_private_temp_dir(&temp_dir);
+    }
 
-        let _ = std::fs::remove_file(prompt_path);
+    fn assert_private_temp_dir(temp_dir: &tempfile::TempDir) {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+
+            let mode = std::fs::metadata(temp_dir.path())
+                .expect("private temp dir metadata")
+                .permissions()
+                .mode();
+            assert_eq!(mode & 0o777, 0o700);
+        }
     }
 
     #[test]
