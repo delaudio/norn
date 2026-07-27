@@ -8,15 +8,15 @@ If status files and git disagree, git is authoritative; correct this file.
 
 ## Active state
 
-- **Branch:** `agent/provider-webhook-ingress`
-- **Active item:** GitHub issue #95 and `.docflow/plan/todo/0004-shared-review-service-program.md`
+- **Branch:** `agent/headless-review-jobs`
+- **Active item:** GitHub issue #96 and `.docflow/plan/todo/0004-shared-review-service-program.md`
 - **Blockers:** none; use the available SSH key for signed commits.
-- **Uncommitted work:** coordination log only; implementation commits through `3a51207` await push.
+- **Uncommitted work:** issue #96 coordination closeout for implementation commit `e136bc8`; branch review and PR integration remain.
 
 ## Last shipped
 
-`d2f0fae` - store administrative audit events through PR #122.
+`2bf6483` - receive authenticated provider webhooks through PR #123.
 
 ## Next item
 
-Implement GitHub issue #96 after the provider webhook ingress PR merges.
+Implement GitHub issue #97 after the headless review job coordinator PR merges.
