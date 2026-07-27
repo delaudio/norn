@@ -5,6 +5,39 @@ const ALLOWED_FILES = new Set([
   "src/mock-tauri/mock-handlers.ts",
 ]);
 
+function extractArgumentObject(source: string, start: number): string | null {
+  const openingBrace = source.indexOf("{", start);
+  if (openingBrace === -1) return null;
+
+  let depth = 0;
+  let quote: "'" | '"' | "`" | null = null;
+  let escaped = false;
+
+  for (let index = openingBrace; index < source.length; index += 1) {
+    const character = source[index];
+    if (quote) {
+      if (escaped) {
+        escaped = false;
+      } else if (character === "\\") {
+        escaped = true;
+      } else if (character === quote) {
+        quote = null;
+      }
+      continue;
+    }
+    if (character === "'" || character === '"' || character === "`") {
+      quote = character;
+    } else if (character === "{") {
+      depth += 1;
+    } else if (character === "}") {
+      depth -= 1;
+      if (depth === 0) return source.slice(openingBrace, index + 1);
+    }
+  }
+
+  return null;
+}
+
 export default {
   rules: {
     "claude-launch-remains-explicit": {
@@ -33,25 +66,31 @@ export default {
       async check(ctx) {
         const entryPoints = ["src/App.tsx", "src/hooks/useAiReview.ts"];
 
-        for (const file of entryPoints) {
-          const source = await ctx.readFile(file);
-          if (!/skipAnalyzers\s*:\s*true/.test(source)) {
-            ctx.report.violation({
-              message:
-                "GUI AI review must send skipAnalyzers: true so it does not rerun repository gates.",
-              file,
-            });
-          }
-          const unsafeMatches = await ctx.grep(file, /skipAnalyzers\s*:\s*false/g);
-          for (const match of unsafeMatches) {
-            ctx.report.violation({
-              message:
-                "Do not enable analyzers from GUI AI review; validation runs before Lachesi review.",
-              file: match.file,
-              line: match.line,
-            });
-          }
-        }
+        await Promise.all(
+          entryPoints.map(async (file) => {
+            const source = await ctx.readFile(file);
+            const callPattern = /tauriCall(?:<[^>]*>)?\s*\(\s*["']start_inline_review["']/g;
+            const calls = [...source.matchAll(callPattern)];
+
+            for (const call of calls) {
+              const callIndex = call.index ?? 0;
+              const argument = extractArgumentObject(source, callIndex + call[0].length);
+              if (!argument || !/\bskipAnalyzers\s*:\s*true\b/.test(argument)) {
+                ctx.report.violation({
+                  message: "Every GUI start_inline_review call must send skipAnalyzers: true.",
+                  file,
+                  line: source.slice(0, callIndex).split("\n").length,
+                });
+              }
+            }
+            if (calls.length === 0) {
+              ctx.report.violation({
+                message: "Expected this GUI AI review entry point to invoke start_inline_review.",
+                file,
+              });
+            }
+          }),
+        );
       },
     },
   },

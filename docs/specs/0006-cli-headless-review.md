@@ -202,12 +202,21 @@ The top-level JSON object should be:
 
 ```json
 {
-  "schemaVersion": "v0.1",
+  "schemaVersion": "lachesi.headless-review.v1",
   "status": "succeeded",
   "exitCode": 1,
-  "analyzersRan": false,
   "warnings": [],
-  "analyzerFailures": [],
+  "minimumSeverity": "high",
+  "analyzersRan": false,
+  "target": {
+    "scope": "branch",
+    "repoPath": "/workspace/frontend-app",
+    "workspace": null,
+    "repo": "frontend-app",
+    "prId": null,
+    "source": "feature/example",
+    "destination": "main"
+  },
   "reviewRun": {
     "id": "run-1",
     "schemaVersion": "v0.1",
@@ -219,7 +228,10 @@ The top-level JSON object should be:
 }
 ```
 
-`reviewRun` must use the same contract documented in the findings spec.
+The top-level headless envelope uses `lachesi.headless-review.v1`.
+`reviewRun` independently uses the same `v0.1` contract documented in the
+findings spec. Setup and runtime failures use the same top-level headless
+schema with `status: "failed"`, `exitCode`, and `error`.
 
 ### JSONL
 

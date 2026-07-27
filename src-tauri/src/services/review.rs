@@ -5177,7 +5177,7 @@ pub async fn start_inline_review(
     review_profile: Option<String>,
 ) -> Result<AiReviewRunState, String> {
     let ai_provider = ai_provider.unwrap_or_default();
-    let skip_analyzers = resolve_skip_analyzers(skip_analyzers);
+    let skip_analyzers = resolve_gui_skip_analyzers(skip_analyzers);
     start_inline_review_native(
         store.inner().clone(),
         workspace,
@@ -5200,8 +5200,8 @@ pub async fn start_inline_review(
     )
 }
 
-fn resolve_skip_analyzers(value: Option<bool>) -> bool {
-    value.unwrap_or(true)
+fn resolve_gui_skip_analyzers(_requested: Option<bool>) -> bool {
+    true
 }
 
 #[tauri::command]
@@ -5723,7 +5723,7 @@ mod tests {
         get_ai_review_run_state_native, human_duration, materialize_review_run,
         normalize_codex_effort, normalize_codex_model, parse_claude_fix_result,
         parse_claude_structured_json, parse_claude_text_result, parse_review_resources,
-        resolve_skip_analyzers, review_findings_from_output, trim_evidence_output,
+        resolve_gui_skip_analyzers, review_findings_from_output, trim_evidence_output,
         AiReviewDraftCommentResult, AiReviewRunStatus, AiReviewRunStore, AiReviewTurnKind,
         ReviewEvidenceArtifact, ReviewEvidenceKind, ReviewEvidenceSource, ReviewFindingCategory,
         ReviewFindingConfidence, ReviewFindingPublicationEvent, ReviewFindingPublicationEventKind,
@@ -5837,10 +5837,10 @@ mod tests {
     }
 
     #[test]
-    fn gui_review_defaults_to_skipping_analyzers() {
-        assert!(resolve_skip_analyzers(None));
-        assert!(resolve_skip_analyzers(Some(true)));
-        assert!(!resolve_skip_analyzers(Some(false)));
+    fn gui_review_always_skips_analyzers() {
+        assert!(resolve_gui_skip_analyzers(None));
+        assert!(resolve_gui_skip_analyzers(Some(true)));
+        assert!(resolve_gui_skip_analyzers(Some(false)));
     }
 
     #[test]
