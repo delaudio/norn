@@ -8,15 +8,15 @@ If status files and git disagree, git is authoritative; correct this file.
 
 ## Active state
 
-- **Branch:** `agent/review-cursor-storage`
-- **Active item:** GitHub issue #91 and `.docflow/plan/todo/0004-shared-review-service-program.md`
+- **Branch:** `agent/incremental-review-scope`
+- **Active item:** GitHub issue #92 and `.docflow/plan/todo/0004-shared-review-service-program.md`
 - **Blockers:** none; use the available SSH key for signed commits.
-- **Uncommitted work:** tenant-scoped last-reviewed-head cursor persistence.
+- **Uncommitted work:** read-only incremental review scope between explicit commit SHAs.
 
 ## Last shipped
 
-`93ee0a8` - add the provider-neutral PR event contract through PR #118.
+`a28aca8` - persist last-reviewed-head cursors through PR #119.
 
 ## Next item
 
-Implement GitHub issue #92 after the review-cursor PR merges.
+Implement GitHub issue #93 after the incremental-scope PR merges.
