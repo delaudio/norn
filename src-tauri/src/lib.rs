@@ -6,6 +6,7 @@ mod headless_review;
 mod launch;
 mod local_repo;
 mod repo_config;
+pub mod review_event;
 mod review_storage;
 mod services;
 pub mod tui;

@@ -8,15 +8,15 @@ If status files and git disagree, git is authoritative; correct this file.
 
 ## Active state
 
-- **Branch:** `agent/shared-service-boundary`
-- **Active item:** GitHub issue #89 and `.docflow/adr/0008-shared-review-service-boundary.md`
+- **Branch:** `agent/review-event-contract`
+- **Active item:** GitHub issue #90 and `.docflow/plan/todo/0004-shared-review-service-program.md`
 - **Blockers:** none; use the available SSH key for signed commits.
-- **Uncommitted work:** accepted shared-service trust boundary and program plan.
+- **Uncommitted work:** provider-neutral Rust pull-request review event contract.
 
 ## Last shipped
 
-`f0cc40b` - close the shipped headless review plan through PR #116.
+`f7119f1` - accept the shared-service trust boundary through PR #117.
 
 ## Next item
 
-Implement GitHub issue #90 after the trust-boundary PR merges.
+Implement GitHub issue #91 after the event-contract PR merges.
