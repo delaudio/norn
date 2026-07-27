@@ -8,15 +8,15 @@ If status files and git disagree, git is authoritative; correct this file.
 
 ## Active state
 
-- **Branch:** `agent/reviewer-feedback-events`
-- **Active item:** GitHub issue #93 and `.docflow/plan/todo/0004-shared-review-service-program.md`
+- **Branch:** `agent/administrative-audit-events`
+- **Active item:** GitHub issue #94 and `.docflow/plan/todo/0004-shared-review-service-program.md`
 - **Blockers:** none; use the available SSH key for signed commits.
-- **Uncommitted work:** append-only reviewer feedback events and derived finding dispositions.
+- **Uncommitted work:** coordination log only; feature commit `ff9bea6` awaits branch review and PR.
 
 ## Last shipped
 
-`786a457` - build incremental review scope through PR #120.
+`be374eb` - record reviewer feedback events through PR #121.
 
 ## Next item
 
-Implement GitHub issue #94 after the reviewer-feedback PR merges.
+Implement GitHub issue #95 after the administrative-audit PR merges.
