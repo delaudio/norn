@@ -1,3 +1,4 @@
+pub mod administrative_audit;
 pub mod cli;
 mod commands;
 mod config;
@@ -14,9 +15,11 @@ mod services;
 pub mod tui;
 
 pub use review_storage::{
-    get_finding_feedback_state, get_review_cursor, record_finding_feedback,
-    record_review_completion, ReviewCursor, ReviewCursorIdentity, ReviewCursorState,
-    ReviewRunCompletion, ReviewRunOutcome,
+    append_administrative_audit_event, export_administrative_audit_jsonl,
+    get_finding_feedback_state, get_review_cursor, purge_administrative_audit_events_before,
+    record_finding_feedback, record_review_completion, set_team_audit_collection_enabled,
+    team_audit_collection_enabled, write_administrative_audit_jsonl, ReviewCursor,
+    ReviewCursorIdentity, ReviewCursorState, ReviewRunCompletion, ReviewRunOutcome,
 };
 
 use commands::{bitbucket, context, repositories, review};

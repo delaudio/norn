@@ -1,10 +1,15 @@
 use std::collections::{HashMap, HashSet};
 use std::fs;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 use serde::{Deserialize, Serialize};
 
+use crate::administrative_audit::{
+    validate_identifier as validate_audit_identifier, AdministrativeAuditAppendResult,
+    AdministrativeAuditEvent,
+};
 use crate::review_event::PullRequestReviewEventProvider;
 use crate::review_feedback::{
     derive_finding_feedback_state, ReviewFindingFeedbackAction, ReviewFindingFeedbackEvent,
@@ -14,6 +19,7 @@ use crate::review_feedback::{
 const APP_DIR: &str = "lachesi";
 const DB_FILE: &str = "lachesi.sqlite3";
 const LEGACY_REVIEWS_DIR: &str = "reviews";
+const MAX_ADMINISTRATIVE_AUDIT_TIMESTAMP_MS: i64 = 4_102_444_800_000;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -379,6 +385,88 @@ fn migrate(conn: &mut Connection) -> Result<(), String> {
         )
         .map_err(|error| error.to_string())?;
     migration.commit().map_err(|error| error.to_string())?;
+
+    let migration = conn
+        .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+        .map_err(|error| error.to_string())?;
+    migration
+        .execute_batch(
+            r#"
+            CREATE TABLE IF NOT EXISTS team_audit_settings (
+              tenant_id TEXT PRIMARY KEY,
+              enabled INTEGER NOT NULL CHECK (enabled IN (0, 1))
+            );
+
+            CREATE TABLE IF NOT EXISTS administrative_audit_delivery_receipts (
+              tenant_id TEXT NOT NULL,
+              delivery_id TEXT NOT NULL,
+              occurred_at_ms INTEGER NOT NULL CHECK (
+                typeof(occurred_at_ms) = 'integer'
+                AND occurred_at_ms BETWEEN 0 AND 4102444800000
+              ),
+              PRIMARY KEY (tenant_id, delivery_id)
+            );
+
+            CREATE TABLE IF NOT EXISTS administrative_audit_events (
+              tenant_id TEXT NOT NULL,
+              delivery_id TEXT NOT NULL,
+              occurred_at_ms INTEGER NOT NULL CHECK (
+                typeof(occurred_at_ms) = 'integer'
+                AND occurred_at_ms BETWEEN 0 AND 4102444800000
+              ),
+              event_json TEXT NOT NULL,
+              PRIMARY KEY (tenant_id, delivery_id),
+              FOREIGN KEY (tenant_id, delivery_id)
+                REFERENCES administrative_audit_delivery_receipts(tenant_id, delivery_id)
+                ON DELETE RESTRICT
+            );
+
+            CREATE TABLE IF NOT EXISTS administrative_audit_purge_authorizations (
+              tenant_id TEXT PRIMARY KEY,
+              occurred_before_ms INTEGER NOT NULL CHECK (
+                typeof(occurred_before_ms) = 'integer'
+                AND occurred_before_ms BETWEEN 0 AND 4102444800000
+              )
+            );
+
+            CREATE TABLE IF NOT EXISTS administrative_audit_retention_watermarks (
+              tenant_id TEXT PRIMARY KEY,
+              occurred_before_ms INTEGER NOT NULL CHECK (
+                typeof(occurred_before_ms) = 'integer'
+                AND occurred_before_ms BETWEEN 0 AND 4102444800000
+              )
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_administrative_audit_export
+              ON administrative_audit_events(tenant_id, occurred_at_ms, delivery_id);
+
+            CREATE TRIGGER IF NOT EXISTS administrative_audit_events_immutable
+            BEFORE UPDATE ON administrative_audit_events
+            BEGIN
+              SELECT RAISE(ABORT, 'administrative audit events are immutable');
+            END;
+
+            CREATE TRIGGER IF NOT EXISTS administrative_audit_events_append_only
+            BEFORE DELETE ON administrative_audit_events
+            WHEN NOT EXISTS (
+              SELECT 1
+              FROM administrative_audit_purge_authorizations
+              WHERE tenant_id = OLD.tenant_id
+                AND OLD.occurred_at_ms < occurred_before_ms
+            )
+            BEGIN
+              SELECT RAISE(ABORT, 'administrative audit events are append-only');
+            END;
+            "#,
+        )
+        .map_err(|error| error.to_string())?;
+    migration
+        .execute(
+            "INSERT OR IGNORE INTO schema_migrations(version) VALUES (4)",
+            [],
+        )
+        .map_err(|error| error.to_string())?;
+    migration.commit().map_err(|error| error.to_string())?;
     Ok(())
 }
 
@@ -387,6 +475,257 @@ fn now_ms() -> String {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis().to_string())
         .unwrap_or_else(|_| "0".to_string())
+}
+
+pub fn set_team_audit_collection_enabled(tenant_id: &str, enabled: bool) -> Result<(), String> {
+    validate_audit_identifier("tenantId", tenant_id).map_err(|error| error.to_string())?;
+    let conn = open()?;
+    conn.execute(
+        r#"
+        INSERT INTO team_audit_settings (tenant_id, enabled)
+        VALUES (?1, ?2)
+        ON CONFLICT(tenant_id) DO UPDATE SET enabled = excluded.enabled
+        "#,
+        params![tenant_id, if enabled { 1 } else { 0 }],
+    )
+    .map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+pub fn team_audit_collection_enabled(tenant_id: &str) -> Result<bool, String> {
+    validate_audit_identifier("tenantId", tenant_id).map_err(|error| error.to_string())?;
+    let conn = open()?;
+    team_audit_collection_enabled_from(&conn, tenant_id)
+}
+
+fn team_audit_collection_enabled_from(conn: &Connection, tenant_id: &str) -> Result<bool, String> {
+    let enabled = conn
+        .query_row(
+            "SELECT enabled FROM team_audit_settings WHERE tenant_id = ?1",
+            params![tenant_id],
+            |row| row.get::<_, i64>(0),
+        )
+        .optional()
+        .map_err(|error| error.to_string())?;
+    Ok(enabled.unwrap_or(1) == 1)
+}
+
+pub fn append_administrative_audit_event(
+    event: &AdministrativeAuditEvent,
+) -> Result<AdministrativeAuditAppendResult, String> {
+    let event = event
+        .prepare_for_storage()
+        .map_err(|error| error.to_string())?;
+    // The redacted v1 event is the idempotency payload. Sensitive raw values are
+    // intentionally neither stored nor hashed into the audit trail.
+    let event_json = serde_json::to_string(&event).map_err(|error| error.to_string())?;
+    let mut conn = open()?;
+    let transaction = conn
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .map_err(|error| error.to_string())?;
+    let occurred_at_ms = event
+        .occurred_at
+        .parse::<i64>()
+        .expect("prepared audit timestamp must parse");
+    let retention_watermark = transaction
+        .query_row(
+            r#"
+            SELECT occurred_before_ms
+            FROM administrative_audit_retention_watermarks
+            WHERE tenant_id = ?1
+            "#,
+            params![event.tenant_id],
+            |row| row.get::<_, i64>(0),
+        )
+        .optional()
+        .map_err(|error| error.to_string())?;
+    if retention_watermark.is_some_and(|watermark| occurred_at_ms < watermark) {
+        transaction.commit().map_err(|error| error.to_string())?;
+        return Ok(AdministrativeAuditAppendResult::Duplicate);
+    }
+    let existing = transaction
+        .query_row(
+            r#"
+            SELECT 1
+            FROM administrative_audit_delivery_receipts
+            WHERE tenant_id = ?1 AND delivery_id = ?2
+            "#,
+            params![event.tenant_id, event.delivery_id],
+            |_| Ok(()),
+        )
+        .optional()
+        .map_err(|error| error.to_string())?;
+    if existing.is_some() {
+        let collected_event = transaction
+            .query_row(
+                r#"
+                SELECT event_json
+                FROM administrative_audit_events
+                WHERE tenant_id = ?1 AND delivery_id = ?2
+                "#,
+                params![event.tenant_id, event.delivery_id],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()
+            .map_err(|error| error.to_string())?;
+        if collected_event
+            .as_ref()
+            .is_some_and(|existing| existing != &event_json)
+        {
+            return Err(
+                "`deliveryId` is already associated with a different audit event".to_string(),
+            );
+        }
+        transaction.commit().map_err(|error| error.to_string())?;
+        return Ok(AdministrativeAuditAppendResult::Duplicate);
+    }
+    transaction
+        .execute(
+            r#"
+            INSERT INTO administrative_audit_delivery_receipts (
+              tenant_id, delivery_id, occurred_at_ms
+            )
+            VALUES (?1, ?2, ?3)
+            "#,
+            params![event.tenant_id, event.delivery_id, occurred_at_ms],
+        )
+        .map_err(|error| error.to_string())?;
+    if !team_audit_collection_enabled_from(&transaction, &event.tenant_id)? {
+        // A content-free receipt preserves at-least-once delivery semantics
+        // without collecting an administrative audit event.
+        transaction.commit().map_err(|error| error.to_string())?;
+        return Ok(AdministrativeAuditAppendResult::CollectionDisabled);
+    }
+    transaction
+        .execute(
+            r#"
+            INSERT INTO administrative_audit_events (
+              tenant_id, delivery_id, occurred_at_ms, event_json
+            )
+            VALUES (?1, ?2, ?3, ?4)
+            "#,
+            params![
+                event.tenant_id,
+                event.delivery_id,
+                occurred_at_ms,
+                event_json
+            ],
+        )
+        .map_err(|error| error.to_string())?;
+    transaction.commit().map_err(|error| error.to_string())?;
+    Ok(AdministrativeAuditAppendResult::Appended)
+}
+
+pub fn export_administrative_audit_jsonl(tenant_id: &str) -> Result<String, String> {
+    let mut output = Vec::new();
+    write_administrative_audit_jsonl(tenant_id, &mut output)?;
+    String::from_utf8(output).map_err(|_| "Administrative audit export is not UTF-8.".to_string())
+}
+
+pub fn write_administrative_audit_jsonl<W: Write>(
+    tenant_id: &str,
+    writer: &mut W,
+) -> Result<(), String> {
+    validate_audit_identifier("tenantId", tenant_id).map_err(|error| error.to_string())?;
+    let conn = open()?;
+    let mut statement = conn
+        .prepare(
+            r#"
+            SELECT delivery_id, event_json
+            FROM administrative_audit_events
+            WHERE tenant_id = ?1
+            ORDER BY occurred_at_ms ASC, delivery_id ASC
+            "#,
+        )
+        .map_err(|error| error.to_string())?;
+    let rows = statement
+        .query_map(params![tenant_id], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })
+        .map_err(|error| error.to_string())?;
+    for row in rows {
+        let (delivery_id, event_json) = row.map_err(|error| error.to_string())?;
+        let event: AdministrativeAuditEvent =
+            serde_json::from_str(&event_json).map_err(|_| "Stored audit event is invalid.")?;
+        event
+            .validate_stored()
+            .map_err(|_| "Stored audit event is invalid.")?;
+        if event.tenant_id != tenant_id || event.delivery_id != delivery_id {
+            return Err("Stored audit event is invalid.".to_string());
+        }
+        serde_json::to_writer(&mut *writer, &event).map_err(|error| error.to_string())?;
+        writer.write_all(b"\n").map_err(|error| error.to_string())?;
+    }
+    Ok(())
+}
+
+pub fn purge_administrative_audit_events_before(
+    tenant_id: &str,
+    occurred_before_ms: i64,
+) -> Result<usize, String> {
+    validate_audit_identifier("tenantId", tenant_id).map_err(|error| error.to_string())?;
+    if !(0..=MAX_ADMINISTRATIVE_AUDIT_TIMESTAMP_MS).contains(&occurred_before_ms) {
+        return Err("Audit purge cutoff is outside the supported epoch range.".to_string());
+    }
+    let mut conn = open()?;
+    let transaction = conn
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .map_err(|error| error.to_string())?;
+    transaction
+        .execute(
+            r#"
+            INSERT INTO administrative_audit_retention_watermarks (
+              tenant_id, occurred_before_ms
+            )
+            VALUES (?1, ?2)
+            ON CONFLICT(tenant_id) DO UPDATE SET
+              occurred_before_ms = MAX(
+                administrative_audit_retention_watermarks.occurred_before_ms,
+                excluded.occurred_before_ms
+              )
+            "#,
+            params![tenant_id, occurred_before_ms],
+        )
+        .map_err(|error| error.to_string())?;
+    transaction
+        .execute(
+            r#"
+            INSERT INTO administrative_audit_purge_authorizations (
+              tenant_id, occurred_before_ms
+            )
+            VALUES (?1, ?2)
+            ON CONFLICT(tenant_id) DO UPDATE
+              SET occurred_before_ms = excluded.occurred_before_ms
+            "#,
+            params![tenant_id, occurred_before_ms],
+        )
+        .map_err(|error| error.to_string())?;
+    let deleted = transaction
+        .execute(
+            r#"
+            DELETE FROM administrative_audit_events
+            WHERE tenant_id = ?1 AND occurred_at_ms < ?2
+            "#,
+            params![tenant_id, occurred_before_ms],
+        )
+        .map_err(|error| error.to_string())?;
+    transaction
+        .execute(
+            r#"
+            DELETE FROM administrative_audit_delivery_receipts
+            WHERE tenant_id = ?1 AND occurred_at_ms < ?2
+            "#,
+            params![tenant_id, occurred_before_ms],
+        )
+        .map_err(|error| error.to_string())?;
+    transaction
+        .execute(
+            "DELETE FROM administrative_audit_purge_authorizations WHERE tenant_id = ?1",
+            params![tenant_id],
+        )
+        .map_err(|error| error.to_string())?;
+    transaction.commit().map_err(|error| error.to_string())?;
+    Ok(deleted)
 }
 
 pub fn record_finding_feedback(
@@ -1372,6 +1711,13 @@ fn _assert_path_send_sync(_: &Path) {}
 mod tests {
     use std::sync::Mutex;
 
+    use crate::administrative_audit::{
+        AdministrativeAuditAction, AdministrativeAuditActor, AdministrativeAuditActorKind,
+        AdministrativeAuditOutcome, AdministrativeAuditRepositoryScope,
+        AdministrativeAuditSchemaVersion, AdministrativeAuditTarget, AdministrativeAuditTargetKind,
+        REDACTED_AUDIT_VALUE,
+    };
+
     use super::*;
 
     static ENV_LOCK: Mutex<()> = Mutex::new(());
@@ -1445,6 +1791,32 @@ mod tests {
         }
     }
 
+    fn audit_event(delivery_id: &str, occurred_at: &str) -> AdministrativeAuditEvent {
+        AdministrativeAuditEvent {
+            schema_version: AdministrativeAuditSchemaVersion::V1,
+            delivery_id: delivery_id.to_string(),
+            tenant_id: "tenant-acme".to_string(),
+            occurred_at: occurred_at.to_string(),
+            actor: AdministrativeAuditActor {
+                kind: AdministrativeAuditActorKind::User,
+                id: "user:reviewer-1".to_string(),
+            },
+            repository: AdministrativeAuditRepositoryScope {
+                provider: PullRequestReviewEventProvider::Github,
+                workspace: "acme".to_string(),
+                repo: "payments".to_string(),
+                pr_id: Some(42),
+            },
+            action: AdministrativeAuditAction::AutomatedReviewTriggered,
+            target: AdministrativeAuditTarget {
+                kind: AdministrativeAuditTargetKind::ReviewRun,
+                id: "run:1".to_string(),
+            },
+            outcome: AdministrativeAuditOutcome::Succeeded,
+            correlation_id: "correlation:1".to_string(),
+        }
+    }
+
     #[test]
     fn dedicated_review_data_dir_is_created() {
         let _guard = ENV_LOCK.lock().expect("test env lock");
@@ -1467,6 +1839,197 @@ mod tests {
             assert!(dir.join(DB_FILE).exists());
             let loaded = load_review_json("workspace", "repo", 123).expect("load review");
             assert_eq!(loaded.as_deref(), Some(r#"{"threads":[]}"#));
+        });
+    }
+
+    #[test]
+    fn administrative_audit_append_is_idempotent_and_immutable() {
+        with_test_data_dir("administrative-audit-immutable", |dir| {
+            let event = audit_event("delivery-1", "1000");
+
+            assert_eq!(
+                append_administrative_audit_event(&event).expect("append event"),
+                AdministrativeAuditAppendResult::Appended
+            );
+            assert_eq!(
+                append_administrative_audit_event(&event).expect("duplicate event"),
+                AdministrativeAuditAppendResult::Duplicate
+            );
+
+            let mut conflicting = event;
+            conflicting.outcome = AdministrativeAuditOutcome::Failed;
+            assert_eq!(
+                append_administrative_audit_event(&conflicting).expect_err("conflicting delivery"),
+                "`deliveryId` is already associated with a different audit event"
+            );
+
+            let conn = Connection::open(dir.join(DB_FILE)).expect("open audit database");
+            conn.execute(
+                r#"
+                UPDATE administrative_audit_events
+                SET event_json = '{}'
+                WHERE tenant_id = 'tenant-acme' AND delivery_id = 'delivery-1'
+                "#,
+                [],
+            )
+            .expect_err("audit row is immutable");
+            conn.execute(
+                r#"
+                DELETE FROM administrative_audit_events
+                WHERE tenant_id = 'tenant-acme' AND delivery_id = 'delivery-1'
+                "#,
+                [],
+            )
+            .expect_err("audit row is append-only");
+        });
+    }
+
+    #[test]
+    fn administrative_audit_retention_purge_is_tenant_scoped_and_controlled() {
+        with_test_data_dir("administrative-audit-purge", |_| {
+            append_administrative_audit_event(&audit_event("delivery-old", "1000"))
+                .expect("append old event");
+            append_administrative_audit_event(&audit_event("delivery-current", "2000"))
+                .expect("append current event");
+            let mut other_tenant = audit_event("delivery-other", "500");
+            other_tenant.tenant_id = "tenant-other".to_string();
+            append_administrative_audit_event(&other_tenant).expect("append other tenant event");
+
+            assert_eq!(
+                purge_administrative_audit_events_before("tenant-acme", 2000)
+                    .expect("purge expired events"),
+                1
+            );
+            let tenant_export =
+                export_administrative_audit_jsonl("tenant-acme").expect("export tenant");
+            assert!(!tenant_export.contains("delivery-old"));
+            assert!(tenant_export.contains("delivery-current"));
+            assert!(export_administrative_audit_jsonl("tenant-other")
+                .expect("export other tenant")
+                .contains("delivery-other"));
+            assert_eq!(
+                append_administrative_audit_event(&audit_event("delivery-old", "1000"))
+                    .expect("reject purged event resurrection"),
+                AdministrativeAuditAppendResult::Duplicate
+            );
+            assert!(!export_administrative_audit_jsonl("tenant-acme")
+                .expect("export after retry")
+                .contains("delivery-old"));
+        });
+    }
+
+    #[test]
+    fn administrative_audit_jsonl_export_is_stable_ordered_and_tenant_scoped() {
+        with_test_data_dir("administrative-audit-export", |_| {
+            let mut later = audit_event("delivery-a", "2000");
+            later.action = AdministrativeAuditAction::ReviewPublished;
+            later.target = AdministrativeAuditTarget {
+                kind: AdministrativeAuditTargetKind::Publication,
+                id: "publication:remote-comment-1".to_string(),
+            };
+            let earlier = audit_event("delivery-b", "1000");
+            let mut other_tenant = audit_event("delivery-other", "500");
+            other_tenant.tenant_id = "tenant-other".to_string();
+
+            append_administrative_audit_event(&later).expect("append later event");
+            append_administrative_audit_event(&other_tenant).expect("append other tenant event");
+            append_administrative_audit_event(&earlier).expect("append earlier event");
+
+            let expected = concat!(
+                "{\"schemaVersion\":\"v1\",\"deliveryId\":\"delivery-b\",\"tenantId\":\"tenant-acme\",\"occurredAt\":\"1000\",\"actor\":{\"kind\":\"user\",\"id\":\"user:reviewer-1\"},\"repository\":{\"provider\":\"github\",\"workspace\":\"acme\",\"repo\":\"payments\",\"prId\":42},\"action\":\"automated_review_triggered\",\"target\":{\"kind\":\"review_run\",\"id\":\"run:1\"},\"outcome\":\"succeeded\",\"correlationId\":\"correlation:1\"}\n",
+                "{\"schemaVersion\":\"v1\",\"deliveryId\":\"delivery-a\",\"tenantId\":\"tenant-acme\",\"occurredAt\":\"2000\",\"actor\":{\"kind\":\"user\",\"id\":\"user:reviewer-1\"},\"repository\":{\"provider\":\"github\",\"workspace\":\"acme\",\"repo\":\"payments\",\"prId\":42},\"action\":\"review_published\",\"target\":{\"kind\":\"publication\",\"id\":\"publication:remote-comment-1\"},\"outcome\":\"succeeded\",\"correlationId\":\"correlation:1\"}\n"
+            );
+            assert_eq!(
+                export_administrative_audit_jsonl("tenant-acme").expect("export JSONL"),
+                expected
+            );
+            let mut streamed = Vec::new();
+            write_administrative_audit_jsonl("tenant-acme", &mut streamed).expect("stream JSONL");
+            assert_eq!(streamed, expected.as_bytes());
+        });
+    }
+
+    #[test]
+    fn administrative_audit_redacts_sensitive_values_in_storage_and_export() {
+        with_test_data_dir("administrative-audit-redaction", |dir| {
+            let mut event = audit_event("delivery-1", "1000");
+            event.actor.id = "Bearer secret-token".to_string();
+            event.target.id = "/Users/alice/private/repo".to_string();
+            event.correlation_id = "diff --git a/secret.rs b/secret.rs".to_string();
+
+            append_administrative_audit_event(&event).expect("append redacted event");
+
+            let conn = Connection::open(dir.join(DB_FILE)).expect("open audit database");
+            let stored: String = conn
+                .query_row(
+                    "SELECT event_json FROM administrative_audit_events",
+                    [],
+                    |row| row.get(0),
+                )
+                .expect("read stored event");
+            let exported =
+                export_administrative_audit_jsonl("tenant-acme").expect("export audit log");
+            for output in [&stored, &exported] {
+                assert!(output.contains(REDACTED_AUDIT_VALUE));
+                for sensitive in ["secret-token", "/Users/alice", "secret.rs", "diff --git"] {
+                    assert!(!output.contains(sensitive));
+                }
+                assert!(!output.contains("sourceCode"));
+                assert!(!output.contains("promptContents"));
+            }
+        });
+    }
+
+    #[test]
+    fn disabling_team_audit_does_not_disable_local_review_history() {
+        with_test_data_dir("administrative-audit-disabled", |dir| {
+            set_team_audit_collection_enabled("tenant-acme", false).expect("disable audit");
+            assert!(!team_audit_collection_enabled("tenant-acme").expect("read setting"));
+            assert_eq!(
+                append_administrative_audit_event(&audit_event("delivery-1", "1000"))
+                    .expect("skip disabled audit"),
+                AdministrativeAuditAppendResult::CollectionDisabled
+            );
+            assert_eq!(
+                export_administrative_audit_jsonl("tenant-acme").expect("empty export"),
+                ""
+            );
+            let conn = Connection::open(dir.join(DB_FILE)).expect("open audit database");
+            let receipt_count: i64 = conn
+                .query_row(
+                    "SELECT COUNT(*) FROM administrative_audit_delivery_receipts",
+                    [],
+                    |row| row.get(0),
+                )
+                .expect("count delivery receipts");
+            let event_count: i64 = conn
+                .query_row(
+                    "SELECT COUNT(*) FROM administrative_audit_events",
+                    [],
+                    |row| row.get(0),
+                )
+                .expect("count audit events");
+            assert_eq!(receipt_count, 1);
+            assert_eq!(event_count, 0);
+
+            save_review_json("acme", "payments", 42, r#"{"reviewRuns":[]}"#)
+                .expect("save ordinary local review history");
+            assert_eq!(
+                load_review_json("acme", "payments", 42).expect("load local review history"),
+                Some(r#"{"reviewRuns":[]}"#.to_string())
+            );
+
+            set_team_audit_collection_enabled("tenant-acme", true).expect("enable audit");
+            assert_eq!(
+                append_administrative_audit_event(&audit_event("delivery-1", "1000"))
+                    .expect("deduplicate previously skipped delivery"),
+                AdministrativeAuditAppendResult::Duplicate
+            );
+            assert_eq!(
+                append_administrative_audit_event(&audit_event("delivery-2", "2000"))
+                    .expect("collect new delivery"),
+                AdministrativeAuditAppendResult::Appended
+            );
         });
     }
 
@@ -1845,7 +2408,7 @@ mod tests {
                 .expect("query migrations")
                 .collect::<rusqlite::Result<_>>()
                 .expect("read migration versions");
-            assert_eq!(versions, vec![1, 2, 3]);
+            assert_eq!(versions, vec![1, 2, 3, 4]);
         });
     }
 
