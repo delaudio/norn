@@ -804,7 +804,9 @@ fn is_sensitive_untracked_path(relative: &str) -> bool {
         return true;
     }
     if file_name == ".env"
+        || file_name == ".envrc"
         || file_name.starts_with(".env.")
+        || file_name.ends_with(".env")
         || matches!(
             file_name,
             ".npmrc"
@@ -1300,6 +1302,8 @@ mod tests {
             .any(|warning| warning.contains(".env.local")));
         assert!(is_sensitive_untracked_path("config/client-secrets.json"));
         assert!(is_sensitive_untracked_path("certs/signing.key"));
+        assert!(is_sensitive_untracked_path(".envrc"));
+        assert!(is_sensitive_untracked_path("config/prod.env"));
         assert!(!is_sensitive_untracked_path("src/credentials.rs"));
         let _ = fs::remove_dir_all(repo);
     }

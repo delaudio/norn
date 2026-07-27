@@ -3071,7 +3071,7 @@ fn build_claude_text_command(
         .map(|effort| format!(" --effort {}", shell_quote(effort)))
         .unwrap_or_default();
     let shell_cmd = format!(
-        "export PATH=\"$HOME/.local/bin:$HOME/.npm/bin:/opt/homebrew/bin:/usr/local/bin:$PATH\"; claude --print --verbose --permission-mode plan --allowedTools Read,Glob,Grep --output-format stream-json --include-partial-messages{model_arg}{effort_arg}{resume_arg} \"$(cat {})\"",
+        "export PATH=\"$HOME/.local/bin:$HOME/.npm/bin:/opt/homebrew/bin:/usr/local/bin:$PATH\"; claude --print --verbose --permission-mode plan --allowedTools Read,Glob,Grep --output-format stream-json --include-partial-messages{model_arg}{effort_arg}{resume_arg} < {}",
         shell_quote(&tmp_path.to_string_lossy())
     );
     let mut command = Command::new("/bin/zsh");
@@ -5842,6 +5842,8 @@ mod tests {
 
         assert!(shell.contains("--permission-mode plan"));
         assert!(shell.contains("--allowedTools Read,Glob,Grep"));
+        assert!(shell.contains(" < "));
+        assert!(!shell.contains("$(cat"));
         assert!(command.get_envs().any(|(key, value)| {
             key == "LACHESI_REVIEW_CHILD"
                 && value.is_some_and(|value| value.to_string_lossy() == "1")
