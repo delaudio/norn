@@ -1,7 +1,7 @@
 //! Authenticated HTTP boundary for provider pull-request webhooks.
 
 #[cfg(test)]
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 #[cfg(test)]
 use std::sync::Mutex;
 
@@ -98,13 +98,17 @@ impl WebhookIngressOutcome {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WebhookEventAcceptance {
     Accepted,
-    Duplicate,
+    DuplicateDelivery,
+    UnchangedReviewState,
 }
 
 pub trait WebhookEventSink {
-    /// Atomically deduplicates and durably accepts the normalized event.
+    /// Atomically records a delivery receipt and durably accepts changed review state.
     ///
-    /// An error must leave the delivery key unclaimed so provider retry remains safe.
+    /// Review state consists of base, head, draft status, and terminal outcome for
+    /// one tenant/provider/repository/pull request. A new delivery with unchanged
+    /// review state is recorded without creating review work. An error must leave
+    /// both the delivery receipt and review state unchanged so provider retry is safe.
     fn accept(&self, event: &PullRequestReviewEvent) -> Result<WebhookEventAcceptance, String>;
 }
 
@@ -123,28 +127,61 @@ pub trait WebhookCommitResolver {
 #[cfg(test)]
 #[derive(Debug, Default)]
 struct InMemoryWebhookEventSink {
-    events:
-        Mutex<HashMap<(String, PullRequestReviewEventProvider, String), PullRequestReviewEvent>>,
+    state: Mutex<InMemoryWebhookEventSinkState>,
+}
+
+#[cfg(test)]
+#[derive(Debug, Default)]
+struct InMemoryWebhookEventSinkState {
+    deliveries: HashSet<(String, PullRequestReviewEventProvider, String)>,
+    pull_requests:
+        HashMap<(String, PullRequestReviewEventProvider, String, String, u64), InMemoryReviewState>,
+}
+
+#[cfg(test)]
+#[derive(Debug, PartialEq, Eq)]
+struct InMemoryReviewState {
+    base: PullRequestRevision,
+    head: PullRequestRevision,
+    draft: bool,
+    closed_outcome: Option<PullRequestClosedOutcome>,
 }
 
 #[cfg(test)]
 impl WebhookEventSink for InMemoryWebhookEventSink {
     fn accept(&self, event: &PullRequestReviewEvent) -> Result<WebhookEventAcceptance, String> {
-        let mut events = self
-            .events
+        let mut state = self
+            .state
             .lock()
             .map_err(|_| "webhook event sink lock is poisoned".to_string())?;
-        let key = (
+        let delivery_key = (
             event.tenant_id.clone(),
             event.provider,
             event.delivery_id.clone(),
         );
-        if events.contains_key(&key) {
-            Ok(WebhookEventAcceptance::Duplicate)
-        } else {
-            events.insert(key, event.clone());
-            Ok(WebhookEventAcceptance::Accepted)
+        if state.deliveries.contains(&delivery_key) {
+            return Ok(WebhookEventAcceptance::DuplicateDelivery);
         }
+
+        let pull_request_key = (
+            event.tenant_id.clone(),
+            event.provider,
+            event.workspace.clone(),
+            event.repository.clone(),
+            event.pull_request_id,
+        );
+        let review_state = InMemoryReviewState {
+            base: event.base.clone(),
+            head: event.head.clone(),
+            draft: event.draft,
+            closed_outcome: event.closed_outcome,
+        };
+        state.deliveries.insert(delivery_key);
+        if state.pull_requests.get(&pull_request_key) == Some(&review_state) {
+            return Ok(WebhookEventAcceptance::UnchangedReviewState);
+        }
+        state.pull_requests.insert(pull_request_key, review_state);
+        Ok(WebhookEventAcceptance::Accepted)
     }
 }
 
@@ -253,7 +290,8 @@ where
             Ok(WebhookEventAcceptance::Accepted) => {
                 WebhookIngressOutcome::Accepted(Box::new(event))
             }
-            Ok(WebhookEventAcceptance::Duplicate) => WebhookIngressOutcome::Duplicate,
+            Ok(WebhookEventAcceptance::DuplicateDelivery) => WebhookIngressOutcome::Duplicate,
+            Ok(WebhookEventAcceptance::UnchangedReviewState) => WebhookIngressOutcome::Ignored,
             Err(_) => rejected(WebhookIngressRejection::Unavailable),
         }
     }
@@ -445,8 +483,9 @@ struct BitbucketPayload {
 
 #[derive(Debug, Deserialize)]
 struct BitbucketActor {
-    uuid: String,
-    nickname: String,
+    uuid: Option<String>,
+    account_id: Option<String>,
+    nickname: Option<String>,
     display_name: Option<String>,
 }
 
@@ -515,6 +554,23 @@ fn normalize_bitbucket<C: WebhookCommitResolver>(
         "pullrequest:rejected" => Some(PullRequestClosedOutcome::ClosedWithoutMerge),
         _ => None,
     };
+    let actor_id = payload
+        .actor
+        .uuid
+        .or(payload.actor.account_id)
+        .filter(|value| !value.trim().is_empty())
+        .ok_or(WebhookIngressRejection::InvalidPayload)?;
+    let display_name = payload.actor.display_name;
+    let actor_login = payload
+        .actor
+        .nickname
+        .filter(|value| !value.trim().is_empty())
+        .or_else(|| {
+            display_name
+                .clone()
+                .filter(|value| !value.trim().is_empty())
+        })
+        .unwrap_or_else(|| actor_id.clone());
     Ok(Some(PullRequestReviewEvent {
         schema_version: PullRequestReviewEventSchemaVersion::V1,
         kind,
@@ -534,9 +590,9 @@ fn normalize_bitbucket<C: WebhookCommitResolver>(
         draft: payload.pullrequest.draft,
         closed_outcome,
         actor: PullRequestEventActor {
-            id: payload.actor.uuid,
-            login: payload.actor.nickname,
-            display_name: payload.actor.display_name,
+            id: actor_id,
+            login: actor_login,
+            display_name,
         },
         delivery_id: delivery_id.to_string(),
     }))
@@ -712,11 +768,19 @@ mod tests {
     }
 
     fn bitbucket_headers<'a>(signature: &'a str, event_name: &'a str) -> Vec<(&'a str, &'a str)> {
+        bitbucket_headers_with_delivery(signature, event_name, "delivery-1")
+    }
+
+    fn bitbucket_headers_with_delivery<'a>(
+        signature: &'a str,
+        event_name: &'a str,
+        delivery_id: &'a str,
+    ) -> Vec<(&'a str, &'a str)> {
         vec![
             ("content-type", "application/json"),
             ("x-hub-signature", signature),
             ("x-event-key", event_name),
-            ("x-request-uuid", "delivery-1"),
+            ("x-request-uuid", delivery_id),
         ]
     }
 
@@ -952,6 +1016,117 @@ mod tests {
         );
 
         assert_eq!(outcome, WebhookIngressOutcome::Ignored);
+    }
+
+    #[test]
+    fn bitbucket_metadata_updates_do_not_create_duplicate_review_work() {
+        let ingress = ingress();
+        let body = bitbucket_body();
+        let initial_signature = signature(&body);
+        let created_headers = bitbucket_headers_with_delivery(
+            &initial_signature,
+            "pullrequest:created",
+            "delivery-created",
+        );
+        let updated_headers = bitbucket_headers_with_delivery(
+            &initial_signature,
+            "pullrequest:updated",
+            "delivery-updated",
+        );
+
+        assert!(matches!(
+            ingress.handle(
+                PullRequestReviewEventProvider::Bitbucket,
+                "tenant-acme",
+                SECRET,
+                WebhookHttpRequest {
+                    method: "POST",
+                    headers: &created_headers,
+                    body: &body,
+                },
+            ),
+            WebhookIngressOutcome::Accepted(_)
+        ));
+        assert_eq!(
+            ingress.handle(
+                PullRequestReviewEventProvider::Bitbucket,
+                "tenant-acme",
+                SECRET,
+                WebhookHttpRequest {
+                    method: "POST",
+                    headers: &updated_headers,
+                    body: &body,
+                },
+            ),
+            WebhookIngressOutcome::Ignored
+        );
+        assert_eq!(
+            ingress.handle(
+                PullRequestReviewEventProvider::Bitbucket,
+                "tenant-acme",
+                SECRET,
+                WebhookHttpRequest {
+                    method: "POST",
+                    headers: &updated_headers,
+                    body: &body,
+                },
+            ),
+            WebhookIngressOutcome::Duplicate
+        );
+
+        let mut changed: serde_json::Value =
+            serde_json::from_slice(&body).expect("Bitbucket fixture");
+        changed["pullrequest"]["source"]["commit"]["hash"] =
+            serde_json::json!("3333333333333333333333333333333333333333");
+        let changed_body = serde_json::to_vec(&changed).expect("Bitbucket changed-head fixture");
+        let changed_signature = signature(&changed_body);
+        let changed_headers = bitbucket_headers_with_delivery(
+            &changed_signature,
+            "pullrequest:updated",
+            "delivery-new-head",
+        );
+        assert!(matches!(
+            ingress.handle(
+                PullRequestReviewEventProvider::Bitbucket,
+                "tenant-acme",
+                SECRET,
+                WebhookHttpRequest {
+                    method: "POST",
+                    headers: &changed_headers,
+                    body: &changed_body,
+                },
+            ),
+            WebhookIngressOutcome::Accepted(_)
+        ));
+    }
+
+    #[test]
+    fn bitbucket_actor_uses_stable_identity_fallbacks() {
+        let mut payload: serde_json::Value =
+            serde_json::from_slice(&bitbucket_body()).expect("Bitbucket fixture");
+        payload["actor"] = serde_json::json!({
+            "account_id": "account-7",
+            "display_name": "Review User"
+        });
+        let body = serde_json::to_vec(&payload).expect("Bitbucket actor fallback fixture");
+        let signature = signature(&body);
+        let headers = bitbucket_headers(&signature, "pullrequest:created");
+
+        let outcome = ingress().handle(
+            PullRequestReviewEventProvider::Bitbucket,
+            "tenant-acme",
+            SECRET,
+            WebhookHttpRequest {
+                method: "POST",
+                headers: &headers,
+                body: &body,
+            },
+        );
+        let WebhookIngressOutcome::Accepted(event) = outcome else {
+            panic!("Bitbucket actor fallback fixture should be accepted");
+        };
+        assert_eq!(event.actor.id, "account-7");
+        assert_eq!(event.actor.login, "Review User");
     }
 
     #[test]
