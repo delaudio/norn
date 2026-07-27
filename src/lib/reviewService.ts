@@ -1,5 +1,10 @@
 import { tauriCall } from "@/lib/tauri";
-import type { AiReviewJob, AiReviewJobStatus } from "@/types";
+import type {
+  AiReviewJob,
+  AiReviewJobStatus,
+  FindingPublicationRequest,
+  PublishedCommentIdentity,
+} from "@/types";
 
 export interface ListAiReviewJobsInput {
   limit: number;
@@ -37,4 +42,10 @@ export function updateAiReviewJobStatus(input: UpdateAiReviewJobStatusInput): Pr
     threadId: input.threadId,
     error: input.error,
   });
+}
+
+export function publishReviewFinding(
+  request: FindingPublicationRequest,
+): Promise<PublishedCommentIdentity> {
+  return tauriCall<PublishedCommentIdentity>("publish_review_finding", { request });
 }

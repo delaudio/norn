@@ -280,6 +280,29 @@ fn github_rate_limit_wait(
 fn send_checked(
     req: reqwest::blocking::RequestBuilder,
 ) -> Result<reqwest::blocking::Response, String> {
+    send_checked_with_policy(req, BitbucketRetryPolicy::RetryTransient)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BitbucketRetryPolicy {
+    RetryTransient,
+    AtMostOnce,
+}
+
+fn should_retry_bitbucket_request(
+    policy: BitbucketRetryPolicy,
+    status: reqwest::StatusCode,
+    attempt: u32,
+) -> bool {
+    policy == BitbucketRetryPolicy::RetryTransient
+        && attempt < 3
+        && (status.as_u16() == 429 || status.is_server_error())
+}
+
+fn send_checked_with_policy(
+    req: reqwest::blocking::RequestBuilder,
+    policy: BitbucketRetryPolicy,
+) -> Result<reqwest::blocking::Response, String> {
     let mut attempt: u32 = 0;
     loop {
         let this = req
@@ -287,8 +310,7 @@ fn send_checked(
             .ok_or_else(|| "request is not retryable".to_string())?;
         let resp = this.send().map_err(|e| e.to_string())?;
         let status = resp.status();
-        let retryable = status.as_u16() == 429 || status.is_server_error();
-        if retryable && attempt < 3 {
+        if should_retry_bitbucket_request(policy, status, attempt) {
             let wait = resp
                 .headers()
                 .get(reqwest::header::RETRY_AFTER)
@@ -301,6 +323,12 @@ fn send_checked(
         }
         return check(resp);
     }
+}
+
+fn send_once_checked(
+    req: reqwest::blocking::RequestBuilder,
+) -> Result<reqwest::blocking::Response, String> {
+    send_checked_with_policy(req, BitbucketRetryPolicy::AtMostOnce)
 }
 
 fn get_json<T: DeserializeOwned>(req: reqwest::blocking::RequestBuilder) -> Result<T, String> {
@@ -2067,7 +2095,7 @@ impl ProviderInlineCommentApi for StoredProviderInlineCommentApi {
                         .map_err(ProviderPublicationApiError::unavailable)?
                 );
                 let body = bitbucket_publication_body(payload);
-                let response = send_checked(client.post(&url).json(&body))
+                let response = send_once_checked(client.post(&url).json(&body))
                     .map_err(map_publication_write_error)?;
                 let comment: BbPublicationComment = response
                     .json()
@@ -2789,6 +2817,31 @@ mod tests {
             publication_comment_id(json!("opaque-comment-id")).expect("opaque id"),
             "opaque-comment-id"
         );
+    }
+
+    #[test]
+    fn bitbucket_publication_post_is_not_retried_after_a_server_error() {
+        for status in [
+            reqwest::StatusCode::TOO_MANY_REQUESTS,
+            reqwest::StatusCode::INTERNAL_SERVER_ERROR,
+            reqwest::StatusCode::SERVICE_UNAVAILABLE,
+        ] {
+            assert!(!should_retry_bitbucket_request(
+                BitbucketRetryPolicy::AtMostOnce,
+                status,
+                0
+            ));
+            assert!(should_retry_bitbucket_request(
+                BitbucketRetryPolicy::RetryTransient,
+                status,
+                0
+            ));
+        }
+        assert!(!should_retry_bitbucket_request(
+            BitbucketRetryPolicy::RetryTransient,
+            reqwest::StatusCode::SERVICE_UNAVAILABLE,
+            3
+        ));
     }
 
     #[test]

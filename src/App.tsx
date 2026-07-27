@@ -31,9 +31,9 @@ import {
   normalizeAiReviewDraftComments,
 } from "@/lib/aiReviewDraftComments";
 import { buildReviewPromptDisplayMessage } from "@/lib/aiReviewPromptDisplay";
+import { buildBackgroundReviewStartArgs } from "@/lib/backgroundReviewStart";
 import { buildAiFixPayload } from "@/lib/buildAiFixPayload";
 import { buildAiReviewPayloadForPr } from "@/lib/buildAiReviewPayloadForPr";
-import { buildBackgroundReviewStartArgs } from "@/lib/backgroundReviewStart";
 import { buildReviewPayload } from "@/lib/buildReviewPayload";
 import { shouldIgnoreShortcut } from "@/lib/keyboard";
 import {
@@ -42,6 +42,7 @@ import {
   summarizeActiveReviewFindings,
 } from "@/lib/reviewFindingPublication";
 import { resolveReviewPrompt } from "@/lib/reviewPrompt";
+import { publishReviewFinding } from "@/lib/reviewService";
 import { tauriCall } from "@/lib/tauri";
 import type {
   AiLineQuestionContext,
@@ -52,13 +53,12 @@ import type {
   AiReviewRunState,
   AppSelection,
   DraftComment,
-  PublishedCommentIdentity,
   PrListFilter,
   PullRequestSummary,
   RepoRef,
-  ReviewProvider,
-  ReviewFindingPublicationEvent,
   RepoReviewConfigLoadResult,
+  ReviewFindingPublicationEvent,
+  ReviewProvider,
 } from "@/types";
 import { repoKey } from "@/types";
 
@@ -244,24 +244,21 @@ export default function App() {
           destinationBranch: detail.destinationBranch,
           trigger: "menuBar",
         });
-        const started = await tauriCall<AiReviewRunState>(
-          "start_inline_review",
-          {
-            ...buildBackgroundReviewStartArgs({
-              workspace: pr.workspace,
-              repo: pr.repo,
-              prId: pr.id,
-              detail,
-              payload,
-              aiProvider: config?.aiProvider ?? "claude",
-              claudeModel: config?.claudeModel ?? null,
-              claudeEffort: config?.claudeEffort ?? null,
-              codexModel: config?.codexModel ?? null,
-              codexEffort: config?.codexEffort ?? null,
-            }),
-            skipAnalyzers: true,
-          },
-        );
+        const started = await tauriCall<AiReviewRunState>("start_inline_review", {
+          ...buildBackgroundReviewStartArgs({
+            workspace: pr.workspace,
+            repo: pr.repo,
+            prId: pr.id,
+            detail,
+            payload,
+            aiProvider: config?.aiProvider ?? "claude",
+            claudeModel: config?.claudeModel ?? null,
+            claudeEffort: config?.claudeEffort ?? null,
+            codexModel: config?.codexModel ?? null,
+            codexEffort: config?.codexEffort ?? null,
+          }),
+          skipAnalyzers: true,
+        });
         await updateJob("running", started.threadId);
 
         let finalState: AiReviewRunState | null = null;
@@ -421,9 +418,7 @@ export default function App() {
       reviewRun,
       draft,
     });
-    const published = await tauriCall<PublishedCommentIdentity>("publish_review_finding", {
-      request,
-    });
+    const published = await publishReviewFinding(request);
     return {
       id: published.commentId,
       createdOn: new Date().toISOString(),
