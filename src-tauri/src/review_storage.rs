@@ -229,16 +229,16 @@ fn review_key(workspace: &str, repo: &str, id: u32) -> String {
 }
 
 fn open() -> Result<Connection, String> {
-    let conn = Connection::open(db_path()?).map_err(|e| e.to_string())?;
+    let mut conn = Connection::open(db_path()?).map_err(|e| e.to_string())?;
     conn.pragma_update(None, "journal_mode", "WAL")
         .map_err(|e| e.to_string())?;
     conn.pragma_update(None, "foreign_keys", "ON")
         .map_err(|e| e.to_string())?;
-    migrate(&conn)?;
+    migrate(&mut conn)?;
     Ok(conn)
 }
 
-fn migrate(conn: &Connection) -> Result<(), String> {
+fn migrate(conn: &mut Connection) -> Result<(), String> {
     conn.execute_batch(
         r#"
         CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -327,29 +327,6 @@ fn migrate(conn: &Connection) -> Result<(), String> {
           PRIMARY KEY (tenant_id, provider, workspace, repo, pr_id)
         );
 
-        CREATE TABLE IF NOT EXISTS review_finding_feedback_events (
-          tenant_id TEXT NOT NULL,
-          event_id TEXT NOT NULL,
-          provider TEXT NOT NULL,
-          workspace TEXT NOT NULL,
-          repo TEXT NOT NULL,
-          pr_id INTEGER NOT NULL CHECK (pr_id > 0),
-          review_run_id TEXT NOT NULL,
-          finding_fingerprint TEXT NOT NULL,
-          action TEXT NOT NULL CHECK (
-            action IN ('accepted', 'dismissed', 'false_positive', 'fixed', 'reopened')
-          ),
-          occurred_at TEXT NOT NULL,
-          actor_id TEXT NOT NULL,
-          reason TEXT,
-          PRIMARY KEY (tenant_id, event_id)
-        );
-
-        CREATE INDEX IF NOT EXISTS idx_review_finding_feedback_target
-          ON review_finding_feedback_events(
-            tenant_id, provider, workspace, repo, pr_id,
-            review_run_id, finding_fingerprint, occurred_at, event_id
-          );
         "#,
     )
     .map_err(|e| e.to_string())?;
@@ -363,11 +340,45 @@ fn migrate(conn: &Connection) -> Result<(), String> {
         [],
     )
     .map_err(|e| e.to_string())?;
-    conn.execute(
-        "INSERT OR IGNORE INTO schema_migrations(version) VALUES (3)",
-        [],
-    )
-    .map_err(|e| e.to_string())?;
+    let migration = conn
+        .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+        .map_err(|error| error.to_string())?;
+    migration
+        .execute_batch(
+            r#"
+            CREATE TABLE IF NOT EXISTS review_finding_feedback_events (
+              tenant_id TEXT NOT NULL,
+              event_id TEXT NOT NULL,
+              provider TEXT NOT NULL,
+              workspace TEXT NOT NULL,
+              repo TEXT NOT NULL,
+              pr_id INTEGER NOT NULL CHECK (pr_id > 0),
+              review_run_id TEXT NOT NULL,
+              finding_fingerprint TEXT NOT NULL,
+              action TEXT NOT NULL CHECK (
+                action IN ('accepted', 'dismissed', 'false_positive', 'fixed', 'reopened')
+              ),
+              occurred_at TEXT NOT NULL,
+              actor_id TEXT NOT NULL,
+              reason TEXT,
+              PRIMARY KEY (tenant_id, event_id)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_review_finding_feedback_target
+              ON review_finding_feedback_events(
+                tenant_id, provider, workspace, repo, pr_id,
+                review_run_id, finding_fingerprint, occurred_at, event_id
+              );
+            "#,
+        )
+        .map_err(|error| error.to_string())?;
+    migration
+        .execute(
+            "INSERT OR IGNORE INTO schema_migrations(version) VALUES (3)",
+            [],
+        )
+        .map_err(|error| error.to_string())?;
+    migration.commit().map_err(|error| error.to_string())?;
     Ok(())
 }
 
@@ -1781,6 +1792,48 @@ mod tests {
                 .collect::<rusqlite::Result<_>>()
                 .expect("read migration versions");
             assert_eq!(versions, vec![1, 2, 3]);
+        });
+    }
+
+    #[test]
+    fn feedback_migration_repairs_a_missing_v3_table_atomically() {
+        with_test_data_dir("finding-feedback-v3-repair", |dir| {
+            fs::create_dir_all(dir).expect("create data directory");
+            let db = dir.join(DB_FILE);
+            let conn = Connection::open(&db).expect("open incomplete v3 database");
+            conn.execute_batch(
+                r#"
+                CREATE TABLE schema_migrations (
+                  version INTEGER PRIMARY KEY,
+                  applied_at TEXT NOT NULL DEFAULT (strftime('%s','now') || '000')
+                );
+                INSERT INTO schema_migrations(version) VALUES (1), (2), (3);
+                "#,
+            )
+            .expect("create incomplete v3 schema");
+            drop(conn);
+
+            let target =
+                feedback_event("event-1", ReviewFindingFeedbackAction::Accepted, "1000").target();
+            assert!(get_finding_feedback_state(&target)
+                .expect("repair and load feedback state")
+                .events
+                .is_empty());
+
+            let conn = Connection::open(db).expect("reopen repaired database");
+            let table_exists: bool = conn
+                .query_row(
+                    r#"
+                    SELECT EXISTS(
+                      SELECT 1 FROM sqlite_master
+                      WHERE type = 'table' AND name = 'review_finding_feedback_events'
+                    )
+                    "#,
+                    [],
+                    |row| row.get(0),
+                )
+                .expect("query repaired table");
+            assert!(table_exists);
         });
     }
 

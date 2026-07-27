@@ -194,6 +194,11 @@ fn validate_identifier(
     if value.trim().is_empty() {
         return Err(ReviewFindingFeedbackValidationError::MissingField(field));
     }
+    if value != value.trim() {
+        return Err(ReviewFindingFeedbackValidationError::SurroundingWhitespace(
+            field,
+        ));
+    }
     if value.len() > MAX_IDENTIFIER_BYTES {
         return Err(ReviewFindingFeedbackValidationError::FieldTooLong(field));
     }
@@ -220,6 +225,7 @@ fn timestamp_value(event: &ReviewFindingFeedbackEvent) -> i64 {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ReviewFindingFeedbackValidationError {
     MissingField(&'static str),
+    SurroundingWhitespace(&'static str),
     FieldTooLong(&'static str),
     InvalidPullRequestId,
     InvalidTimestamp,
@@ -231,6 +237,12 @@ impl fmt::Display for ReviewFindingFeedbackValidationError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::MissingField(field) => write!(formatter, "`{field}` must not be empty"),
+            Self::SurroundingWhitespace(field) => {
+                write!(
+                    formatter,
+                    "`{field}` must not contain surrounding whitespace"
+                )
+            }
             Self::FieldTooLong(field) => write!(formatter, "`{field}` exceeds the supported size"),
             Self::InvalidPullRequestId => formatter.write_str("`prId` must be a positive integer"),
             Self::InvalidTimestamp => formatter
@@ -335,6 +347,14 @@ mod tests {
         assert_eq!(
             invalid.validate(),
             Err(ReviewFindingFeedbackValidationError::EmptyReason)
+        );
+        invalid.reason = None;
+        invalid.review_run_id = " run-1".to_string();
+        assert_eq!(
+            invalid.validate(),
+            Err(ReviewFindingFeedbackValidationError::SurroundingWhitespace(
+                "reviewRunId"
+            ))
         );
     }
 }
