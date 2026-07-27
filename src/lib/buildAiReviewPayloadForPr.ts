@@ -21,6 +21,31 @@ export interface AiReviewPayloadForPr {
   reviewProfile: string | null;
 }
 
+function normalizedSha(value: string | null | undefined): string | null {
+  const normalized = value?.trim().toLowerCase();
+  return normalized || null;
+}
+
+export function assertStablePullRequestSnapshot(
+  before: PullRequestDetail,
+  after: PullRequestDetail,
+): void {
+  const beforeHead = normalizedSha(before.sourceCommitHash);
+  const afterHead = normalizedSha(after.sourceCommitHash);
+  const stable =
+    before.id === after.id &&
+    beforeHead != null &&
+    beforeHead === afterHead &&
+    normalizedSha(before.destinationCommitHash) === normalizedSha(after.destinationCommitHash) &&
+    before.sourceBranch === after.sourceBranch &&
+    before.destinationBranch === after.destinationBranch;
+  if (!stable) {
+    throw new Error(
+      "The pull request changed while its review snapshot was loading; rerun the review.",
+    );
+  }
+}
+
 async function fetchReviewContext(jiraKeys: string[], enabled: boolean): Promise<string | null> {
   if (!enabled || jiraKeys.length === 0) return null;
   const parts: string[] = [];
@@ -90,9 +115,16 @@ export async function buildAiReviewPayloadForPr({
   if (warnings.length > 0) {
     console.warn("Lachesi repo config warnings:", warnings);
   }
+  const verifiedPr = await tauriCall<PullRequestDetail>("get_pull_request", {
+    provider,
+    workspace,
+    repo,
+    id: prId,
+  });
+  assertStablePullRequestSnapshot(pr, verifiedPr);
   const payload = buildReviewPayload({
     prompt,
-    pr,
+    pr: verifiedPr,
     branchStatus,
     rawDiff,
     jiraKeys,
@@ -100,5 +132,12 @@ export async function buildAiReviewPayloadForPr({
     jiraContext,
     reviewReferences: loadReviewReferences(workspace, repo, prId),
   });
-  return { payload, pr, branchStatus, jiraKeys, rawDiff, reviewProfile: reviewProfile ?? null };
+  return {
+    payload,
+    pr: verifiedPr,
+    branchStatus,
+    jiraKeys,
+    rawDiff,
+    reviewProfile: reviewProfile ?? null,
+  };
 }

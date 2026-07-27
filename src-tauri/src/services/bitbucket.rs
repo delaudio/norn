@@ -19,7 +19,7 @@ use crate::review_storage::{self, ClosedPrMetric};
 
 const BASE: &str = "https://api.bitbucket.org/2.0";
 const BITBUCKET_PUBLICATION_COMMENT_FIELDS: &str = concat!(
-    "next,values.id,values.deleted,values.content.raw,values.inline.path,",
+    "next,values.id,values.deleted,values.user.account_id,values.content.raw,values.inline.path,",
     "values.inline.to,values.inline.from,values.inline.start_to,values.inline.start_from"
 );
 
@@ -564,6 +564,7 @@ struct BbCommentPage {
 struct BbPublicationComment {
     id: serde_json::Value,
     content: Option<BbContent>,
+    user: Option<BbAuthor>,
     #[serde(default)]
     deleted: bool,
     inline: Option<BbPublicationInline>,
@@ -705,6 +706,7 @@ struct GhPublicationComment {
     id: serde_json::Value,
     #[serde(default)]
     body: String,
+    user: Option<GhUser>,
     path: Option<String>,
     line: Option<u32>,
     start_line: Option<u32>,
@@ -2210,6 +2212,16 @@ fn find_published_finding_comment(
     match target.provider {
         PullRequestReviewEventProvider::Bitbucket => {
             let client = BitbucketClient::from_stored().map_err(map_publication_auth_error)?;
+            let user: BbUser = get_json(client.get(&format!("{BASE}/user")))
+                .map_err(map_publication_read_error)?;
+            let author_account_id = user
+                .account_id
+                .filter(|account_id| !account_id.trim().is_empty())
+                .ok_or_else(|| {
+                    ProviderPublicationApiError::unavailable(
+                        "Bitbucket did not return the authenticated account identifier.",
+                    )
+                })?;
             let comments_endpoint = format!(
                 "{}/pullrequests/{pr_id}/comments",
                 repo_base(&target.workspace, &target.repository)
@@ -2222,7 +2234,12 @@ fn find_published_finding_comment(
                 let page: BbPublicationCommentPage =
                     get_json(client.get(&url)).map_err(map_publication_read_error)?;
                 if let Some(comment) = page.values.into_iter().find(|comment| {
-                    bitbucket_publication_comment_matches(comment, marker, expected)
+                    bitbucket_publication_comment_matches(
+                        comment,
+                        marker,
+                        expected,
+                        &author_account_id,
+                    )
                 }) {
                     return Ok(Some(ProviderCommentIdentity {
                         comment_id: publication_comment_id(comment.id)?,
@@ -2239,6 +2256,14 @@ fn find_published_finding_comment(
         }
         PullRequestReviewEventProvider::Github => {
             let client = GithubClient::from_stored().map_err(map_publication_auth_error)?;
+            let user: GhUser = github_get_json(client.get("https://api.github.com/user"))
+                .map_err(map_publication_read_error)?;
+            let author_login = user.login.trim();
+            if author_login.is_empty() {
+                return Err(ProviderPublicationApiError::unavailable(
+                    "GitHub did not return the authenticated account login.",
+                ));
+            }
             let url = format!(
                 "{}/pulls/{pr_id}/comments?per_page=100&page=1",
                 github_repo_base(&target.workspace, &target.repository)
@@ -2248,7 +2273,9 @@ fn find_published_finding_comment(
                 github_paginated_get(&client, url).map_err(map_publication_read_error)?;
             comments
                 .into_iter()
-                .find(|comment| github_publication_comment_matches(comment, marker, expected))
+                .find(|comment| {
+                    github_publication_comment_matches(comment, marker, expected, author_login)
+                })
                 .map(|comment| {
                     Ok(ProviderCommentIdentity {
                         comment_id: publication_comment_id(comment.id)?,
@@ -2398,8 +2425,14 @@ fn bitbucket_publication_comment_matches(
     comment: &BbPublicationComment,
     marker: &str,
     expected: Option<&ProviderInlineCommentPayload>,
+    author_account_id: &str,
 ) -> bool {
     !comment.deleted
+        && comment
+            .user
+            .as_ref()
+            .and_then(|user| user.account_id.as_deref())
+            == Some(author_account_id)
         && expected
             .map(|expected| {
                 comment
@@ -2418,10 +2451,15 @@ fn github_publication_comment_matches(
     comment: &GhPublicationComment,
     marker: &str,
     expected: Option<&ProviderInlineCommentPayload>,
+    author_login: &str,
 ) -> bool {
-    expected
-        .map(|expected| github_anchor_matches(comment, expected))
-        .unwrap_or(true)
+    comment
+        .user
+        .as_ref()
+        .is_some_and(|user| user.login.eq_ignore_ascii_case(author_login))
+        && expected
+            .map(|expected| github_anchor_matches(comment, expected))
+            .unwrap_or(true)
         && comment_has_marker(&comment.body, marker)
 }
 
@@ -2466,7 +2504,11 @@ fn publication_permission_error(error: &str) -> bool {
 }
 
 fn publication_rate_limit_error(error: &str) -> bool {
-    error.contains("rate limit") || error.contains("429 Too Many Requests")
+    let lower = error.to_ascii_lowercase();
+    lower.contains("rate limit")
+        || lower.contains("429 too many requests")
+        || lower.contains("spam")
+        || lower.contains("abuse")
 }
 
 #[tauri::command]
@@ -2713,6 +2755,7 @@ mod tests {
     #[test]
     fn provider_publication_bodies_keep_inline_anchor_semantics() {
         for field in [
+            "values.user.account_id",
             "values.inline.path",
             "values.inline.to",
             "values.inline.from",
@@ -2745,6 +2788,7 @@ mod tests {
             "values": [{
                 "id": 99,
                 "deleted": false,
+                "user": { "account_id": "reviewer-1" },
                 "content": {
                     "raw": "finding\n\n<!-- lachesi:finding:abc -->"
                 },
@@ -2767,6 +2811,7 @@ mod tests {
         let orphan: BbPublicationComment = serde_json::from_value(json!({
             "id": 100,
             "deleted": false,
+            "user": { "account_id": "reviewer-1" },
             "content": {
                 "raw": "finding\n\n<!-- lachesi:finding:abc -->"
             }
@@ -2775,16 +2820,28 @@ mod tests {
         assert!(bitbucket_publication_comment_matches(
             &orphan,
             "<!-- lachesi:finding:abc -->",
-            None
+            None,
+            "reviewer-1"
         ));
         assert!(!bitbucket_publication_comment_matches(
             &orphan,
             "<!-- lachesi:finding:abc -->",
-            Some(&publication_payload(FindingAnchorSide::Old))
+            Some(&publication_payload(FindingAnchorSide::Old)),
+            "reviewer-1"
+        ));
+        assert!(!bitbucket_publication_comment_matches(
+            &orphan,
+            "<!-- lachesi:finding:abc -->",
+            None,
+            "another-reviewer"
         ));
         let github_response = GhPublicationComment {
             id: json!(99),
-            body: String::new(),
+            body: "finding\n\n<!-- lachesi:finding:abc -->".to_string(),
+            user: Some(GhUser {
+                login: "reviewer-1".to_string(),
+                name: None,
+            }),
             path: Some("src/lib.rs".to_string()),
             line: Some(14),
             start_line: Some(12),
@@ -2794,6 +2851,18 @@ mod tests {
         assert!(github_anchor_matches(
             &github_response,
             &publication_payload(FindingAnchorSide::New)
+        ));
+        assert!(github_publication_comment_matches(
+            &github_response,
+            "<!-- lachesi:finding:abc -->",
+            Some(&publication_payload(FindingAnchorSide::New)),
+            "REVIEWER-1"
+        ));
+        assert!(!github_publication_comment_matches(
+            &github_response,
+            "<!-- lachesi:finding:abc -->",
+            None,
+            "another-reviewer"
         ));
         let mut mismatched = publication_payload(FindingAnchorSide::New);
         mismatched.end_line = 15;
@@ -2871,6 +2940,23 @@ mod tests {
         assert_eq!(
             error.kind,
             crate::finding_publication::ProviderPublicationApiErrorKind::Unavailable
+        );
+        for message in [
+            "GitHub API error 422 Unprocessable Entity: the endpoint has been spammed",
+            "GitHub API error 422 Unprocessable Entity: abuse detection mechanism",
+            "GitHub API error 422 Unprocessable Entity: secondary rate limit",
+        ] {
+            assert_eq!(
+                map_publication_write_error(message.to_string()).kind,
+                crate::finding_publication::ProviderPublicationApiErrorKind::Unavailable
+            );
+        }
+        assert_eq!(
+            map_publication_write_error(
+                "GitHub API error 422 Unprocessable Entity: validation failed".to_string()
+            )
+            .kind,
+            crate::finding_publication::ProviderPublicationApiErrorKind::InvalidAnchor
         );
     }
 
