@@ -12,3 +12,4 @@ metadata.
 | 0005 | Publish an agentic code review policy pack prototype | Accepted | 2026-07-10 | default-agent | policy, examples, monetization |
 | 0006 | Support a terminal UI as a second local review interface | Accepted | 2026-07-23 | default-agent | tui, cli, rust, review-ui |
 | 0007 | Run reviews through a headless local CLI | Implemented | 2026-07-24 | default-agent | cli, headless, review, automation, codex |
+| 0008 | Run shared reviews as an opt-in tenant-isolated service | Accepted | 2026-07-27 | default-agent | service, trust, multi-tenant, open-core, review |
