@@ -435,7 +435,9 @@ fn resolve_repo_root_for_request(
     request: &HeadlessReviewRequest,
 ) -> Result<PathBuf, HeadlessReviewError> {
     if let Some(repo_path) = request.repo_path.as_deref() {
-        return resolve_repo_root(repo_path);
+        let repo_root = resolve_repo_root(repo_path)?;
+        validate_explicit_repo_identity(&repo_root, request)?;
+        return Ok(repo_root);
     }
 
     let cwd = std::env::current_dir().map_err(|error| {
@@ -465,6 +467,37 @@ fn resolve_repo_root_for_request(
             resolve_repo_root(&cwd)
         }
     }
+}
+
+fn validate_explicit_repo_identity(
+    repo_root: &Path,
+    request: &HeadlessReviewRequest,
+) -> Result<(), HeadlessReviewError> {
+    if request.provider.is_none() && request.workspace.is_none() && request.repo.is_none() {
+        return Ok(());
+    }
+    let identity = local_repo::resolve_current_repo_from_dir(repo_root).map_err(|error| {
+        HeadlessReviewError::target(format!(
+            "Cannot verify `--repo-path` against the requested repository: {error}"
+        ))
+    })?;
+    if request
+        .provider
+        .is_some_and(|provider| identity.provider != provider)
+        || request
+            .workspace
+            .as_deref()
+            .is_some_and(|workspace| identity.workspace != workspace)
+        || request
+            .repo
+            .as_deref()
+            .is_some_and(|repo| identity.repo != repo)
+    {
+        return Err(HeadlessReviewError::target(
+            "`--repo-path` does not match the requested provider, workspace, or repository.",
+        ));
+    }
+    Ok(())
 }
 
 fn requested_repo_identity(request: &HeadlessReviewRequest) -> Option<(&str, &str)> {
@@ -853,7 +886,8 @@ mod tests {
         build_review_payload, format_findings_markdown, map_native_review_error,
         map_provider_target_error, new_file_patch, public_provider_error,
         repo_identity_matches_target, requested_repo_identity, run,
-        strip_private_evidence_payloads, working_tree_diff, HeadlessReviewRequest, ReviewScope,
+        strip_private_evidence_payloads, validate_explicit_repo_identity, working_tree_diff,
+        HeadlessReviewRequest, ReviewScope,
     };
     use crate::config::{RepoRef, ReviewProvider};
     use crate::services::review::{
@@ -971,6 +1005,41 @@ mod tests {
     }
 
     #[test]
+    fn explicit_repo_path_must_match_requested_identity() {
+        let repo = temp_git_repo();
+        git(
+            &repo,
+            &[
+                "remote",
+                "add",
+                "origin",
+                "git@github.com:lachesi-hq/lachesi.git",
+            ],
+        );
+        let request = HeadlessReviewRequest {
+            repo_path: Some(repo.clone()),
+            scope: ReviewScope::Branch,
+            base: Some("HEAD".to_string()),
+            workspace: Some("different-workspace".to_string()),
+            repo: Some("lachesi".to_string()),
+            pr_id: None,
+            provider: Some(ReviewProvider::Github),
+            profile: None,
+            ai_provider: None,
+            model: None,
+            effort: None,
+            run_analyzers: false,
+        };
+
+        let error = validate_explicit_repo_identity(&repo, &request)
+            .expect_err("mismatched explicit identity must be rejected");
+
+        assert_eq!(error.exit_code, 4);
+        assert!(error.message.contains("does not match"));
+        let _ = fs::remove_dir_all(repo);
+    }
+
+    #[test]
     fn markdown_findings_are_grouped_and_anchored() {
         let finding = ReviewFinding {
             id: "finding-1".to_string(),
@@ -1068,7 +1137,7 @@ mod tests {
             workspace: None,
             repo: None,
             pr_id: None,
-            provider: Some(ReviewProvider::Github),
+            provider: None,
             profile: None,
             ai_provider: None,
             model: None,

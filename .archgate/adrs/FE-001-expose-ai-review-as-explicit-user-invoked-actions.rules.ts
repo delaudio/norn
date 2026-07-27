@@ -16,53 +16,36 @@ function extractInlineObjectArgument(source: string, start: number): string | nu
   let depth = 0;
   let quote: "'" | '"' | "`" | null = null;
   let escaped = false;
-
   for (let index = openingBrace; index < source.length; index += 1) {
     const character = source[index];
     if (quote) {
-      if (escaped) {
-        escaped = false;
-      } else if (character === "\\") {
-        escaped = true;
-      } else if (character === quote) {
-        quote = null;
-      }
+      if (escaped) escaped = false;
+      else if (character === "\\") escaped = true;
+      else if (character === quote) quote = null;
       continue;
     }
-    if (character === "'" || character === '"' || character === "`") {
-      quote = character;
-    } else if (character === "{") {
-      depth += 1;
-    } else if (character === "}") {
+    if (character === "'" || character === '"' || character === "`") quote = character;
+    else if (character === "{") depth += 1;
+    else if (character === "}") {
       depth -= 1;
       if (depth === 0) return source.slice(openingBrace, index + 1);
     }
   }
-
   return null;
 }
 
-function hasFinalTopLevelTrueProperty(objectSource: string, propertyName: string): boolean {
+function topLevelObjectSegments(objectSource: string): string[] {
+  const segments: string[] = [];
+  let start = 1;
   let depth = 0;
   let quote: "'" | '"' | "`" | null = null;
   let escaped = false;
   let lineComment = false;
   let blockComment = false;
-  let segmentStart = 1;
-  let finalSegment = "";
-
-  const matchesProperty = (segment: string) => {
-    const normalized = segment.trim();
-    const propertyPattern = new RegExp(
-      `^(?:${propertyName}|["']${propertyName}["'])\\s*:\\s*true\\s*$`,
-    );
-    return propertyPattern.test(normalized);
-  };
 
   for (let index = 1; index < objectSource.length - 1; index += 1) {
     const character = objectSource[index];
     const next = objectSource[index + 1];
-
     if (lineComment) {
       if (character === "\n") lineComment = false;
       continue;
@@ -75,13 +58,9 @@ function hasFinalTopLevelTrueProperty(objectSource: string, propertyName: string
       continue;
     }
     if (quote) {
-      if (escaped) {
-        escaped = false;
-      } else if (character === "\\") {
-        escaped = true;
-      } else if (character === quote) {
-        quote = null;
-      }
+      if (escaped) escaped = false;
+      else if (character === "\\") escaped = true;
+      else if (character === quote) quote = null;
       continue;
     }
     if (character === "/" && next === "/") {
@@ -97,15 +76,60 @@ function hasFinalTopLevelTrueProperty(objectSource: string, propertyName: string
     } else if (character === "}" || character === "]" || character === ")") {
       depth -= 1;
     } else if (character === "," && depth === 0) {
-      const segment = objectSource.slice(segmentStart, index);
-      if (segment.trim()) finalSegment = segment;
-      segmentStart = index + 1;
+      segments.push(objectSource.slice(start, index));
+      start = index + 1;
     }
   }
+  segments.push(objectSource.slice(start, -1));
+  return segments;
+}
 
-  const trailingSegment = objectSource.slice(segmentStart, -1);
-  if (trailingSegment.trim()) finalSegment = trailingSegment;
-  return matchesProperty(finalSegment);
+function hasEffectiveTrueProperty(objectSource: string, expectedName: string): boolean {
+  let effectiveValue: boolean | null = null;
+  const directName = `(?:${expectedName}|["']${expectedName}["'])`;
+  const computedName = `\\[\\s*["']${expectedName}["']\\s*\\]`;
+
+  for (const segment of topLevelObjectSegments(objectSource)) {
+    const property = segment
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .replace(/\/\/[^\n]*/g, "")
+      .trim();
+    if (!property) continue;
+    if (property.startsWith("...") || property.startsWith("[")) {
+      const computed = property.match(
+        new RegExp(`^${computedName}\\s*:\\s*(true|false)\\s*$`),
+      );
+      effectiveValue = computed ? computed[1] === "true" : null;
+      continue;
+    }
+    const literal = property.match(new RegExp(`^${directName}\\s*:\\s*(true|false)\\s*$`));
+    if (literal) {
+      effectiveValue = literal[1] === "true";
+      continue;
+    }
+    if (
+      new RegExp(`^${directName}\\s*:`).test(property) ||
+      new RegExp(`^(?:get|set)\\s+${directName}\\b`).test(property) ||
+      new RegExp(`^${expectedName}$`).test(property)
+    ) {
+      effectiveValue = null;
+    }
+  }
+  return effectiveValue === true;
+}
+
+function findStartInlineReviewCalls(source: string) {
+  const calls: Array<{ line: number; valid: boolean }> = [];
+  const callPattern = /tauriCall(?:<[^>]*>)?\s*\(\s*["']start_inline_review["']/g;
+  for (const match of source.matchAll(callPattern)) {
+    const callIndex = match.index ?? 0;
+    const argument = extractInlineObjectArgument(source, callIndex + match[0].length);
+    calls.push({
+      line: source.slice(0, callIndex).split("\n").length,
+      valid: !!argument && hasEffectiveTrueProperty(argument, "skipAnalyzers"),
+    });
+  }
+  return calls;
 }
 
 export default {
@@ -139,18 +163,14 @@ export default {
         await Promise.all(
           entryPoints.map(async (file) => {
             const source = await ctx.readFile(file);
-            const callPattern = /tauriCall(?:<[^>]*>)?\s*\(\s*["']start_inline_review["']/g;
-            const calls = [...source.matchAll(callPattern)];
+            const calls = findStartInlineReviewCalls(source);
 
             for (const call of calls) {
-              const callIndex = call.index ?? 0;
-              const argument = extractInlineObjectArgument(source, callIndex + call[0].length);
-              if (!argument || !hasFinalTopLevelTrueProperty(argument, "skipAnalyzers")) {
+              if (!call.valid) {
                 ctx.report.violation({
-                  message:
-                    "Every GUI start_inline_review call must end its argument object with skipAnalyzers: true.",
+                  message: "Every GUI start_inline_review call must send skipAnalyzers: true.",
                   file,
-                  line: source.slice(0, callIndex).split("\n").length,
+                  line: call.line,
                 });
               }
             }

@@ -49,4 +49,4 @@ despite lower-numbered historical queue items remaining open.
 - `../../adr/0007-headless-review-cli.md`
 - `../../adr/0006-terminal-ui.md`
 - `../../adr/0005-agentic-policy-pack-prototype.md`
-- `../../docs/specs/0006-cli-headless-review.md`
+- `../../../docs/specs/0006-cli-headless-review.md`
