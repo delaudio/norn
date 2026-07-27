@@ -748,27 +748,44 @@ fn resolve_default_base(repo_path: &Path) -> Result<String, HeadlessReviewError>
 
 fn working_tree_diff(repo_path: &Path) -> Result<(String, Vec<String>), HeadlessReviewError> {
     let mut warnings = Vec::new();
-    let mut diff = if git_output(repo_path, ["rev-parse", "--verify", "--quiet", "HEAD"]).is_ok() {
-        git_output(
-            repo_path,
-            ["diff", "--no-ext-diff", "--find-renames", "HEAD", "--"],
-        )?
-    } else {
+    let has_head = git_output(repo_path, ["rev-parse", "--verify", "--quiet", "HEAD"]).is_ok();
+    if !has_head {
         warnings.push(
             "Repository has no commits; staged and unstaged changes are shown separately."
                 .to_string(),
         );
-        let mut staged = git_output(
+    }
+    let staged = if has_head {
+        git_output(
+            repo_path,
+            [
+                "diff",
+                "--cached",
+                "--no-ext-diff",
+                "--find-renames",
+                "HEAD",
+                "--",
+            ],
+        )?
+    } else {
+        git_output(
             repo_path,
             ["diff", "--cached", "--no-ext-diff", "--find-renames", "--"],
-        )?;
-        let unstaged = git_output(repo_path, ["diff", "--no-ext-diff", "--find-renames", "--"])?;
-        if !staged.is_empty() && !staged.ends_with('\n') && !unstaged.is_empty() {
-            staged.push('\n');
-        }
-        staged.push_str(&unstaged);
-        staged
+        )?
     };
+    let unstaged = git_output(repo_path, ["diff", "--no-ext-diff", "--find-renames", "--"])?;
+    let mut diff = String::new();
+    let staged_label = if has_head {
+        "Staged changes (HEAD -> index)"
+    } else {
+        "Staged changes (empty tree -> index)"
+    };
+    append_diff_section(&mut diff, staged_label, &staged);
+    append_diff_section(
+        &mut diff,
+        "Unstaged changes (index -> working tree)",
+        &unstaged,
+    );
     let output = Command::new("git")
         .arg("-C")
         .arg(repo_path)
@@ -780,6 +797,7 @@ fn working_tree_diff(repo_path: &Path) -> Result<(String, Vec<String>), Headless
     }
 
     let mut included_bytes = 0_u64;
+    let mut has_untracked_section = false;
     for raw_path in output
         .stdout
         .split(|byte| *byte == 0)
@@ -823,13 +841,41 @@ fn working_tree_diff(repo_path: &Path) -> Result<(String, Vec<String>), Headless
                 continue;
             }
         };
-        if !diff.is_empty() && !diff.ends_with('\n') {
-            diff.push('\n');
+        if !has_untracked_section {
+            append_diff_section_header(&mut diff, "Untracked files (new files)");
+            has_untracked_section = true;
         }
-        diff.push_str(&new_file_patch(&relative, &text));
+        append_diff(&mut diff, &new_file_patch(&relative, &text));
         included_bytes = included_bytes.saturating_add(metadata.len());
     }
     Ok((diff, warnings))
+}
+
+fn append_diff_section(diff: &mut String, label: &str, patch: &str) {
+    if patch.is_empty() {
+        return;
+    }
+    append_diff_section_header(diff, label);
+    append_diff(diff, patch);
+}
+
+fn append_diff_section_header(diff: &mut String, label: &str) {
+    if !diff.is_empty() && !diff.ends_with('\n') {
+        diff.push('\n');
+    }
+    if !diff.is_empty() {
+        diff.push('\n');
+    }
+    diff.push_str("# Lachesi diff section: ");
+    diff.push_str(label);
+    diff.push('\n');
+}
+
+fn append_diff(diff: &mut String, patch: &str) {
+    if !diff.is_empty() && !diff.ends_with('\n') && !patch.is_empty() {
+        diff.push('\n');
+    }
+    diff.push_str(patch);
 }
 
 fn is_sensitive_untracked_path(relative: &str) -> bool {
@@ -1411,10 +1457,34 @@ mod tests {
         let (diff, warnings) = working_tree_diff(&repo).expect("collect working tree diff");
 
         assert!(warnings.is_empty());
+        assert!(diff.contains("# Lachesi diff section: Staged changes (HEAD -> index)"));
+        assert!(diff.contains("# Lachesi diff section: Unstaged changes (index -> working tree)"));
+        assert!(diff.contains("# Lachesi diff section: Untracked files (new files)"));
         assert!(diff.contains("+after staged"));
         assert!(diff.contains("+after unstaged"));
         assert!(diff.contains("diff --git a/untracked.txt b/untracked.txt"));
         assert!(diff.contains("+new untracked"));
+        let _ = fs::remove_dir_all(repo);
+    }
+
+    #[test]
+    fn working_tree_diff_keeps_staged_change_cancelled_by_worktree() {
+        let repo = temp_git_repo();
+        fs::write(repo.join("staged.txt"), "after staged\n").expect("update staged file");
+        git(&repo, &["add", "staged.txt"]);
+        fs::write(repo.join("staged.txt"), "before staged\n").expect("restore worktree content");
+
+        let (diff, warnings) = working_tree_diff(&repo).expect("collect working tree diff");
+
+        assert!(warnings.is_empty());
+        assert!(diff.contains("# Lachesi diff section: Staged changes (HEAD -> index)"));
+        assert!(diff.contains("# Lachesi diff section: Unstaged changes (index -> working tree)"));
+        assert_eq!(
+            diff.matches("diff --git a/staged.txt b/staged.txt").count(),
+            2
+        );
+        assert!(diff.contains("+after staged"));
+        assert!(diff.contains("-after staged"));
         let _ = fs::remove_dir_all(repo);
     }
 
