@@ -817,6 +817,7 @@ fn working_tree_diff(repo_path: &Path) -> Result<(String, Vec<String>), Headless
 
     let mut included_bytes = 0_u64;
     let mut has_untracked_section = false;
+    let mut warned_total_limit = false;
     for raw_path in output
         .stdout
         .split(|byte| *byte == 0)
@@ -884,6 +885,12 @@ fn working_tree_diff(repo_path: &Path) -> Result<(String, Vec<String>), Headless
         #[cfg(not(unix))]
         let _ = opened_metadata;
         if included_bytes >= MAX_UNTRACKED_TOTAL_BYTES {
+            if !warned_total_limit {
+                warnings.push(format!(
+                    "Skipped additional untracked files starting with `{display_relative}` because the total untracked-file byte limit was reached."
+                ));
+                warned_total_limit = true;
+            }
             continue;
         }
         let remaining_bytes = MAX_UNTRACKED_TOTAL_BYTES.saturating_sub(included_bytes);
@@ -897,9 +904,18 @@ fn working_tree_diff(repo_path: &Path) -> Result<(String, Vec<String>), Headless
                 ))
             })?;
         if contents.len() as u64 > allowed_bytes {
-            warnings.push(format!(
-                "Skipped large untracked file `{display_relative}`."
-            ));
+            if allowed_bytes < MAX_UNTRACKED_FILE_BYTES {
+                if !warned_total_limit {
+                    warnings.push(format!(
+                        "Skipped additional untracked files starting with `{display_relative}` because the total untracked-file byte limit was reached."
+                    ));
+                    warned_total_limit = true;
+                }
+            } else {
+                warnings.push(format!(
+                    "Skipped large untracked file `{display_relative}`."
+                ));
+            }
             continue;
         }
         if contents.contains(&0) {
@@ -1185,6 +1201,7 @@ mod tests {
         strip_private_evidence_payloads, untracked_relative_path, validate_explicit_repo_identity,
         validate_requested_identity_shape, working_tree_diff, HeadlessReviewExecution,
         HeadlessReviewRequest, HeadlessReviewTarget, ReviewScope, HEADLESS_REVIEW_BOUNDARY,
+        MAX_UNTRACKED_FILE_BYTES,
     };
     use crate::config::{RepoRef, ReviewProvider};
     use crate::services::review::{
@@ -1767,6 +1784,29 @@ mod tests {
         assert!(warnings
             .iter()
             .any(|warning| warning.contains("multiple hard links")));
+        let _ = fs::remove_dir_all(repo);
+    }
+
+    #[test]
+    fn working_tree_diff_warns_when_total_untracked_budget_is_reached() {
+        let repo = temp_git_repo();
+        let contents = vec![b'a'; MAX_UNTRACKED_FILE_BYTES as usize];
+        for index in 0..5 {
+            fs::write(repo.join(format!("large-{index}.txt")), &contents)
+                .expect("write large untracked fixture");
+        }
+
+        let (diff, warnings) = working_tree_diff(&repo).expect("collect working tree diff");
+
+        assert!(diff.contains("large-0.txt"));
+        assert!(!diff.contains("large-4.txt"));
+        assert_eq!(
+            warnings
+                .iter()
+                .filter(|warning| warning.contains("total untracked-file byte limit"))
+                .count(),
+            1
+        );
         let _ = fs::remove_dir_all(repo);
     }
 

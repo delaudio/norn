@@ -3144,12 +3144,7 @@ fn private_provider_temp_dir(prefix: &str) -> Result<tempfile::TempDir, String> 
 fn validate_isolated_provider_cli(ai_provider: AiProvider) -> Result<(), String> {
     let (label, program, args, required_help_text): (&str, &str, &[&str], &[&str]) =
         match ai_provider {
-            AiProvider::Claude => (
-                "Claude",
-                "claude",
-                &["--tools", "", "--help"],
-                &["--tools", "Use \"\" to disable all tools"],
-            ),
+            AiProvider::Claude => ("Claude", "claude", &["--tools", "", "--help"], &["--tools"]),
             AiProvider::Codex => (
                 "Codex",
                 "codex",
@@ -3183,7 +3178,10 @@ fn validate_isolated_provider_cli(ai_provider: AiProvider) -> Result<(), String>
     .split_whitespace()
     .collect::<Vec<_>>()
     .join(" ");
+    let claude_documents_empty_tools = ai_provider != AiProvider::Claude
+        || (help.contains("\"\"") && help.to_ascii_lowercase().contains("disable all"));
     if output.status.success()
+        && claude_documents_empty_tools
         && required_help_text
             .iter()
             .all(|required| help.contains(required))
