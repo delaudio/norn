@@ -3105,8 +3105,8 @@ fn build_claude_text_command(
     if repository_access {
         command.args(["--allowedTools", "Read,Glob,Grep"]);
     } else {
-        // Claude documents an empty --tools value as disabling all built-in tools.
-        command.args(["--tools", ""]);
+        // Empty tools disables built-ins; bare mode also skips hooks and user customizations.
+        command.args(["--tools", "", "--bare"]);
     }
     if let Some(model) = claude_model.and_then(normalize_claude_model) {
         command.args(["--model", &model]);
@@ -3144,7 +3144,12 @@ fn private_provider_temp_dir(prefix: &str) -> Result<tempfile::TempDir, String> 
 fn validate_isolated_provider_cli(ai_provider: AiProvider) -> Result<(), String> {
     let (label, program, args, required_help_text): (&str, &str, &[&str], &[&str]) =
         match ai_provider {
-            AiProvider::Claude => ("Claude", "claude", &["--tools", "", "--help"], &["--tools"]),
+            AiProvider::Claude => (
+                "Claude",
+                "claude",
+                &["--tools", "", "--bare", "--help"],
+                &["--tools", "--bare"],
+            ),
             AiProvider::Codex => (
                 "Codex",
                 "codex",
@@ -3166,8 +3171,11 @@ fn validate_isolated_provider_cli(ai_provider: AiProvider) -> Result<(), String>
         };
     // Exercise the exact isolation option combination. A CLI that rejects this
     // parser contract is unsupported even if each flag appears in its help.
+    let temp_dir = private_provider_temp_dir("lachesi-provider-check-")?;
     let output = user_installed_cli_command(program)
         .args(args)
+        .env("LACHESI_REVIEW_CHILD", "1")
+        .current_dir(temp_dir.path())
         .output()
         .map_err(|error| format!("Failed to validate the installed {label} CLI: {error}"))?;
     let help = format!(
@@ -5978,6 +5986,7 @@ mod tests {
             .windows(2)
             .any(|pair| pair == ["--permission-mode", "plan"]));
         assert!(args.windows(2).any(|pair| pair == ["--tools", ""]));
+        assert!(args.iter().any(|arg| arg == "--bare"));
         assert!(!args.iter().any(|arg| arg == "--allowedTools"));
         assert!(command.get_envs().any(|(key, value)| {
             key == "LACHESI_REVIEW_CHILD"

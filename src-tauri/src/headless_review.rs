@@ -1013,6 +1013,11 @@ fn is_sensitive_untracked_path(relative: &str) -> bool {
     let file_name = path.file_name().and_then(OsStr::to_str).unwrap_or_default();
     let extension = path.extension().and_then(OsStr::to_str).unwrap_or_default();
     let normalized_file_name = file_name.replace('-', "_");
+    let normalized_stem = file_name
+        .split('.')
+        .next()
+        .unwrap_or_default()
+        .replace('-', "_");
     if normalized.split('/').any(|component| {
         matches!(
             component,
@@ -1049,6 +1054,9 @@ fn is_sensitive_untracked_path(relative: &str) -> bool {
                 | "accesstokens.json"
                 | "access_tokens.json"
         )
+        || file_name.starts_with(".npmrc.")
+        || file_name.starts_with(".pypirc.")
+        || file_name.starts_with(".netrc.")
         || file_name == "terraform.tfvars"
         || file_name.ends_with(".auto.tfvars")
         || file_name.ends_with(".tfvars.json")
@@ -1059,6 +1067,43 @@ fn is_sensitive_untracked_path(relative: &str) -> bool {
         extension,
         "pem" | "key" | "p12" | "pfx" | "jks" | "keystore" | "der"
     ) {
+        return true;
+    }
+    let likely_secret_text = extension.is_empty()
+        || matches!(
+            extension,
+            "txt"
+                | "md"
+                | "json"
+                | "yaml"
+                | "yml"
+                | "toml"
+                | "ini"
+                | "conf"
+                | "config"
+                | "properties"
+                | "csv"
+                | "log"
+        );
+    if likely_secret_text
+        && (normalized_stem.split('_').any(|part| {
+            matches!(
+                part,
+                "secret" | "secrets" | "password" | "passwords" | "passwd"
+            )
+        }) || matches!(
+            normalized_stem.as_str(),
+            "token"
+                | "tokens"
+                | "credential"
+                | "credentials"
+                | "api_key"
+                | "private_key"
+                | "access_token"
+                | "auth_token"
+                | "refresh_token"
+        ))
+    {
         return true;
     }
     matches!(extension, "json" | "yaml" | "yml" | "toml")
@@ -1710,6 +1755,12 @@ mod tests {
         ));
         assert!(is_sensitive_untracked_path(".azure/accessTokens.json"));
         assert!(is_sensitive_untracked_path("cache/accessTokens.json"));
+        assert!(is_sensitive_untracked_path("secrets.txt"));
+        assert!(is_sensitive_untracked_path("passwords.md"));
+        assert!(is_sensitive_untracked_path("token.txt"));
+        assert!(is_sensitive_untracked_path("client-secrets.ini"));
+        assert!(is_sensitive_untracked_path(".npmrc.local"));
+        assert!(!is_sensitive_untracked_path("src/token.rs"));
         assert!(!is_sensitive_untracked_path("src/credentials.rs"));
         let _ = fs::remove_dir_all(repo);
     }
