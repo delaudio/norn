@@ -33,9 +33,9 @@ pub struct IncrementalChangedFile {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct IncrementalReviewScope {
-    /// Full Git commit object ID: 40 hex characters for SHA-1 or 64 for SHA-256.
+    /// Full Git commit object ID matching the repository storage format.
     pub previous_head_sha: String,
-    /// Full Git commit object ID: 40 hex characters for SHA-1 or 64 for SHA-256.
+    /// Full Git commit object ID matching the repository storage format.
     pub current_head_sha: String,
     pub files: Vec<IncrementalChangedFile>,
     pub patch: String,
@@ -51,6 +51,7 @@ pub enum IncrementalReviewSetupErrorCode {
     NonUtf8Path,
     PatchTooLarge,
     MetadataTooLarge,
+    UnsupportedObjectFormat,
     DiffFailed,
 }
 
@@ -101,15 +102,18 @@ pub fn build_incremental_review_scope(
 ) -> Result<IncrementalReviewScope, IncrementalReviewSetupError> {
     let repo_path = repo_path.as_ref();
     validate_repository(repo_path)?;
+    let object_id_hex_len = repository_object_id_hex_len(repo_path)?;
     validate_commit(
         repo_path,
         previous_head_sha,
         IncrementalCommitRole::PreviousHead,
+        object_id_hex_len,
     )?;
     validate_commit(
         repo_path,
         current_head_sha,
         IncrementalCommitRole::CurrentHead,
+        object_id_hex_len,
     )?;
 
     let name_status = git_diff(
@@ -206,14 +210,17 @@ fn validate_commit(
     repo_path: &Path,
     sha: &str,
     role: IncrementalCommitRole,
+    object_id_hex_len: usize,
 ) -> Result<(), IncrementalReviewSetupError> {
-    if !is_full_commit_object_id(sha) {
+    if sha.len() != object_id_hex_len || !sha.bytes().all(|byte| byte.is_ascii_hexdigit()) {
         return Err(setup_error(
             IncrementalReviewSetupErrorCode::InvalidCommitSha,
             Some(role),
             commit_error_message(
                 role,
-                "is not a full Git commit object ID (40-character SHA-1 or 64-character SHA-256)",
+                &format!(
+                    "is not a full {object_id_hex_len}-character Git commit object ID for this repository"
+                ),
             ),
         ));
     }
@@ -236,8 +243,54 @@ fn validate_commit(
     }
 }
 
-fn is_full_commit_object_id(value: &str) -> bool {
-    matches!(value.len(), 40 | 64) && value.bytes().all(|byte| byte.is_ascii_hexdigit())
+fn repository_object_id_hex_len(repo_path: &Path) -> Result<usize, IncrementalReviewSetupError> {
+    let output = git(repo_path, &["rev-parse", "--show-object-format"]).map_err(|_| {
+        setup_error(
+            IncrementalReviewSetupErrorCode::UnsupportedObjectFormat,
+            None,
+            "Cannot determine the repository object format.",
+        )
+    })?;
+    if output.status.success() {
+        return object_id_hex_len_from_format(&output.stdout);
+    }
+
+    // Older Git versions do not expose --show-object-format. SHA-256 repositories
+    // declare their format in the local config; an absent key is a SHA-1 repository.
+    let fallback = git(
+        repo_path,
+        &["config", "--local", "--get", "extensions.objectFormat"],
+    )
+    .map_err(|_| {
+        unsupported_object_format_error("Cannot determine the repository object format.")
+    })?;
+    if fallback.status.success() {
+        return object_id_hex_len_from_format(&fallback.stdout);
+    }
+    if fallback.status.code() == Some(1) && fallback.stdout.is_empty() {
+        return Ok(40);
+    }
+    Err(unsupported_object_format_error(
+        "Cannot determine the repository object format.",
+    ))
+}
+
+fn object_id_hex_len_from_format(format: &[u8]) -> Result<usize, IncrementalReviewSetupError> {
+    match String::from_utf8_lossy(format).trim() {
+        "sha1" => Ok(40),
+        "sha256" => Ok(64),
+        _ => Err(unsupported_object_format_error(
+            "Repository object format is unsupported.",
+        )),
+    }
+}
+
+fn unsupported_object_format_error(message: &'static str) -> IncrementalReviewSetupError {
+    setup_error(
+        IncrementalReviewSetupErrorCode::UnsupportedObjectFormat,
+        None,
+        message,
+    )
 }
 
 fn commit_error_message(role: IncrementalCommitRole, suffix: &str) -> String {
@@ -481,16 +534,37 @@ mod tests {
 
     impl RepoFixture {
         fn new() -> Self {
+            Self::with_init_args(&["init", "-q"])
+        }
+
+        fn new_sha256() -> Option<Self> {
+            Self::try_with_init_args(&["init", "-q", "--object-format=sha256"])
+        }
+
+        fn with_init_args(init_args: &[&str]) -> Self {
+            Self::try_with_init_args(init_args).expect("initialize fixture repository")
+        }
+
+        fn try_with_init_args(init_args: &[&str]) -> Option<Self> {
             let path = std::env::temp_dir().join(format!(
                 "lachesi-incremental-review-{}-{}",
                 std::process::id(),
                 NEXT_FIXTURE.fetch_add(1, Ordering::Relaxed)
             ));
             fs::create_dir_all(&path).expect("create fixture directory");
-            run_git(&path, &["init", "-q"]);
+            let output = Command::new("git")
+                .arg("-C")
+                .arg(&path)
+                .args(init_args)
+                .output()
+                .expect("run fixture git init");
+            if !output.status.success() {
+                let _ = fs::remove_dir_all(path);
+                return None;
+            }
             run_git(&path, &["config", "user.name", "Lachesi Test"]);
             run_git(&path, &["config", "user.email", "test@lachesi.local"]);
-            Self { path }
+            Some(Self { path })
         }
 
         fn write(&self, path: &str, contents: &[u8]) {
@@ -646,6 +720,17 @@ mod tests {
             Some(IncrementalCommitRole::PreviousHead)
         );
 
+        let wrong_format_error = build_incremental_review_scope(
+            &fixture.path,
+            "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+            &current,
+        )
+        .expect_err("wrong object format");
+        assert_eq!(
+            wrong_format_error.code,
+            IncrementalReviewSetupErrorCode::InvalidCommitSha
+        );
+
         let current_error = build_incremental_review_scope(&fixture.path, &previous, unavailable)
             .expect_err("unavailable current commit");
         assert_eq!(
@@ -655,6 +740,45 @@ mod tests {
         assert_eq!(
             current_error.commit_role,
             Some(IncrementalCommitRole::CurrentHead)
+        );
+    }
+
+    #[test]
+    fn sha256_repository_requires_and_accepts_canonical_object_ids() {
+        let Some(fixture) = RepoFixture::new_sha256() else {
+            return;
+        };
+        fixture.write("file.txt", b"base\n");
+        let previous = fixture.commit("base");
+        fixture.write("file.txt", b"base\ncurrent\n");
+        let current = fixture.commit("current");
+        assert_eq!(previous.len(), 64);
+        assert_eq!(current.len(), 64);
+
+        let scope =
+            build_incremental_review_scope(&fixture.path, &previous, &current).expect("scope");
+        assert!(scope.patch.contains("+current"));
+
+        let abbreviated = build_incremental_review_scope(&fixture.path, &previous[..40], &current)
+            .expect_err("sha256 abbreviation");
+        assert_eq!(
+            abbreviated.code,
+            IncrementalReviewSetupErrorCode::InvalidCommitSha
+        );
+    }
+
+    #[test]
+    fn object_format_parser_accepts_supported_formats() {
+        assert_eq!(object_id_hex_len_from_format(b"sha1\n").expect("sha1"), 40);
+        assert_eq!(
+            object_id_hex_len_from_format(b"sha256\n").expect("sha256"),
+            64
+        );
+        assert_eq!(
+            object_id_hex_len_from_format(b"future-hash\n")
+                .expect_err("unsupported future format")
+                .code,
+            IncrementalReviewSetupErrorCode::UnsupportedObjectFormat
         );
     }
 
