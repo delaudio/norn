@@ -42,6 +42,17 @@ describe("assertStablePullRequestSnapshot", () => {
       );
     }
   });
+
+  it("rejects snapshots that omit either provider commit id", () => {
+    for (const changed of [
+      { ...detail, sourceCommitHash: null },
+      { ...detail, destinationCommitHash: null },
+    ]) {
+      expect(() => assertStablePullRequestSnapshot(changed, changed)).toThrow(
+        "changed while its review snapshot was loading",
+      );
+    }
+  });
 });
 
 describe("resolveLineQuestionHunkFromReviewSnapshot", () => {

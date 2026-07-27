@@ -40,11 +40,14 @@ export function assertStablePullRequestSnapshot(
 ): void {
   const beforeHead = normalizedSha(before.sourceCommitHash);
   const afterHead = normalizedSha(after.sourceCommitHash);
+  const beforeBase = normalizedSha(before.destinationCommitHash);
+  const afterBase = normalizedSha(after.destinationCommitHash);
   const stable =
     before.id === after.id &&
     beforeHead != null &&
     beforeHead === afterHead &&
-    normalizedSha(before.destinationCommitHash) === normalizedSha(after.destinationCommitHash) &&
+    beforeBase != null &&
+    beforeBase === afterBase &&
     before.sourceBranch === after.sourceBranch &&
     before.destinationBranch === after.destinationBranch;
   if (!stable) {
