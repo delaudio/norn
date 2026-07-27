@@ -2354,6 +2354,8 @@ pub(crate) fn reserve_finding_publication(
     }
     let pr_id = shared_review_pr_id(request.pull_request_id)?;
     let canonical_head_sha = request.head_sha.to_ascii_lowercase();
+    let canonical_workspace = request.workspace.to_ascii_lowercase();
+    let canonical_repository = request.repository.to_ascii_lowercase();
     let now = now_ms_i64();
     let lease_expires_at = now.saturating_add(FINDING_PUBLICATION_LEASE_MS);
     let mut conn = open()?;
@@ -2402,8 +2404,8 @@ pub(crate) fn reserve_finding_publication(
     {
         if tenant_id != request.tenant_id
             || provider != request.provider.as_str()
-            || workspace != request.workspace
-            || repo != request.repository
+            || !workspace.eq_ignore_ascii_case(&request.workspace)
+            || !repo.eq_ignore_ascii_case(&request.repository)
             || stored_pr_id != pr_id
             || !head_sha.eq_ignore_ascii_case(&request.head_sha)
             || finding_fingerprint != request.finding_fingerprint
@@ -2457,8 +2459,8 @@ pub(crate) fn reserve_finding_publication(
                     marker,
                     request.tenant_id,
                     request.provider.as_str(),
-                    request.workspace,
-                    request.repository,
+                    canonical_workspace,
+                    canonical_repository,
                     pr_id,
                     canonical_head_sha,
                     request.finding_fingerprint,

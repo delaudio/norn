@@ -136,6 +136,7 @@ pub trait ProviderInlineCommentApi {
         &self,
         target: &ProviderPublicationTarget,
         marker: &str,
+        expected: &ProviderInlineCommentPayload,
     ) -> Result<Option<ProviderCommentIdentity>, ProviderPublicationApiError>;
 
     /// Creates an inline comment. Implementations must never fall back to a
@@ -145,6 +146,14 @@ pub trait ProviderInlineCommentApi {
         target: &ProviderPublicationTarget,
         payload: &ProviderInlineCommentPayload,
     ) -> Result<ProviderCommentIdentity, ProviderPublicationApiError>;
+
+    /// Removes a comment created by the current attempt when post-write
+    /// fencing proves that it must not be published.
+    fn delete_comment(
+        &self,
+        target: &ProviderPublicationTarget,
+        identity: &ProviderCommentIdentity,
+    ) -> Result<(), ProviderPublicationApiError>;
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -324,29 +333,44 @@ where
         marker: &str,
         lease: &FindingPublicationLease,
     ) -> Result<PublishedCommentIdentity, FindingPublicationError> {
+        let payload = request.provider_payload(marker);
+        let current_head = self
+            .api
+            .current_head_sha(target)
+            .map_err(publication_api_error)?;
+        if !current_head.eq_ignore_ascii_case(&request.head_sha) {
+            return Err(FindingPublicationError {
+                code: FindingPublicationErrorCode::OutdatedAnchor,
+                retryable: false,
+                message: "The pull request changed after this finding was produced; review the current diff before publishing.".to_string(),
+            });
+        }
         let published = if let Some(existing) = self
             .api
-            .find_inline_comment(target, marker)
+            .find_inline_comment(target, marker, &payload)
             .map_err(publication_api_error)?
         {
             existing
         } else {
+            let published = self
+                .api
+                .create_inline_comment(target, &payload)
+                .map_err(publication_api_error)?;
             let current_head = self
                 .api
                 .current_head_sha(target)
                 .map_err(publication_api_error)?;
             if !current_head.eq_ignore_ascii_case(&request.head_sha) {
+                self.api
+                    .delete_comment(target, &published)
+                    .map_err(publication_api_error)?;
                 return Err(FindingPublicationError {
                     code: FindingPublicationErrorCode::OutdatedAnchor,
                     retryable: false,
-                    message: "The pull request changed after this finding was produced; review the current diff before publishing.".to_string(),
+                    message: "The pull request changed while this finding was being published; the stale comment was removed.".to_string(),
                 });
             }
-
-            let payload = request.provider_payload(marker);
-            self.api
-                .create_inline_comment(target, &payload)
-                .map_err(publication_api_error)?
+            published
         };
         self.store
             .complete(lease, &published)
@@ -425,12 +449,14 @@ impl FindingPublicationRequest {
 pub fn finding_marker(request: &FindingPublicationRequest) -> String {
     let pull_request_id = request.pull_request_id.to_string();
     let head_sha = request.head_sha.to_ascii_lowercase();
+    let workspace = request.workspace.to_ascii_lowercase();
+    let repository = request.repository.to_ascii_lowercase();
     let mut hasher = Sha256::new();
     for part in [
         request.tenant_id.as_str(),
         request.provider.as_str(),
-        request.workspace.as_str(),
-        request.repository.as_str(),
+        workspace.as_str(),
+        repository.as_str(),
         pull_request_id.as_str(),
         head_sha.as_str(),
         request.finding_fingerprint.as_str(),
@@ -590,6 +616,8 @@ mod tests {
         comments: HashMap<String, ProviderCommentIdentity>,
         payloads: Vec<(PullRequestReviewEventProvider, ProviderInlineCommentPayload)>,
         fail_next_write: bool,
+        advance_head_on_write: bool,
+        deleted_comment_ids: Vec<String>,
     }
 
     impl Default for MockProviderState {
@@ -599,6 +627,8 @@ mod tests {
                 comments: HashMap::new(),
                 payloads: Vec::new(),
                 fail_next_write: false,
+                advance_head_on_write: false,
+                deleted_comment_ids: Vec::new(),
             }
         }
     }
@@ -615,6 +645,7 @@ mod tests {
             &self,
             _target: &ProviderPublicationTarget,
             marker: &str,
+            _expected: &ProviderInlineCommentPayload,
         ) -> Result<Option<ProviderCommentIdentity>, ProviderPublicationApiError> {
             Ok(self.state.lock().unwrap().comments.get(marker).cloned())
         }
@@ -642,7 +673,21 @@ mod tests {
             };
             state.payloads.push((target.provider, payload.clone()));
             state.comments.insert(marker, identity.clone());
+            if state.advance_head_on_write {
+                state.current_head_sha = "3333333333333333333333333333333333333333".to_string();
+            }
             Ok(identity)
+        }
+
+        fn delete_comment(
+            &self,
+            _target: &ProviderPublicationTarget,
+            identity: &ProviderCommentIdentity,
+        ) -> Result<(), ProviderPublicationApiError> {
+            let mut state = self.state.lock().unwrap();
+            state.comments.retain(|_, current| current != identity);
+            state.deleted_comment_ids.push(identity.comment_id.clone());
+            Ok(())
         }
     }
 
@@ -828,6 +873,23 @@ mod tests {
     }
 
     #[test]
+    fn head_advance_during_write_deletes_the_stale_comment() {
+        let publisher =
+            FindingPublisher::new(MockProviderApi::default(), MockPublicationStore::default());
+        publisher.api.state.lock().unwrap().advance_head_on_write = true;
+        let request = request(PullRequestReviewEventProvider::Github);
+
+        let error = publisher
+            .publish(&request)
+            .expect_err("post-write head change");
+
+        assert_eq!(error.code, FindingPublicationErrorCode::OutdatedAnchor);
+        let state = publisher.api.state.lock().unwrap();
+        assert_eq!(state.deleted_comment_ids, vec!["comment-1"]);
+        assert!(state.comments.is_empty());
+    }
+
+    #[test]
     fn provider_failure_is_retryable_and_does_not_mutate_the_request() {
         let publisher =
             FindingPublisher::new(MockProviderApi::default(), MockPublicationStore::default());
@@ -861,6 +923,9 @@ mod tests {
 
         request.tenant_id = "tenant-acme".to_string();
         request.head_sha = HEAD_SHA.to_ascii_uppercase();
+        assert_eq!(marker, finding_marker(&request));
+        request.workspace = "ACME".to_string();
+        request.repository = "PAYMENTS".to_string();
         assert_eq!(marker, finding_marker(&request));
     }
 

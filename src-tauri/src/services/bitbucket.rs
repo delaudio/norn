@@ -1975,8 +1975,9 @@ impl ProviderInlineCommentApi for StoredProviderInlineCommentApi {
         &self,
         target: &ProviderPublicationTarget,
         marker: &str,
+        expected: &ProviderInlineCommentPayload,
     ) -> Result<Option<ProviderCommentIdentity>, ProviderPublicationApiError> {
-        find_published_finding_comment(target, marker)
+        find_published_finding_comment(target, marker, expected)
     }
 
     fn create_inline_comment(
@@ -2022,12 +2023,48 @@ impl ProviderInlineCommentApi for StoredProviderInlineCommentApi {
                 (publication_comment_id(comment.id)?, inline)
             }
         };
+        let identity = ProviderCommentIdentity { comment_id };
         if !inline {
+            self.delete_comment(target, &identity)?;
             return Err(ProviderPublicationApiError::invalid_anchor(
-                "The provider did not create an inline comment.",
+                "The provider did not preserve the requested inline anchor; the comment was removed.",
             ));
         }
-        Ok(ProviderCommentIdentity { comment_id })
+        Ok(identity)
+    }
+
+    fn delete_comment(
+        &self,
+        target: &ProviderPublicationTarget,
+        identity: &ProviderCommentIdentity,
+    ) -> Result<(), ProviderPublicationApiError> {
+        let comment_id = encode_path_segment(&identity.comment_id);
+        let result = match target.provider {
+            PullRequestReviewEventProvider::Bitbucket => {
+                let client = BitbucketClient::from_stored().map_err(map_publication_auth_error)?;
+                let url = format!(
+                    "{}/pullrequests/{}/comments/{comment_id}",
+                    repo_base(&target.workspace, &target.repository)
+                        .map_err(ProviderPublicationApiError::unavailable)?,
+                    publication_pr_id(target.pull_request_id)?
+                );
+                send_checked(client.delete(&url)).map(|_| ())
+            }
+            PullRequestReviewEventProvider::Github => {
+                let client = GithubClient::from_stored().map_err(map_publication_auth_error)?;
+                let url = format!(
+                    "{}/pulls/comments/{comment_id}",
+                    github_repo_base(&target.workspace, &target.repository)
+                        .map_err(ProviderPublicationApiError::unavailable)?
+                );
+                github_send_checked(client.delete(&url)).map(|_| ())
+            }
+        };
+        match result {
+            Ok(()) => Ok(()),
+            Err(error) if error.contains("404 Not Found") => Ok(()),
+            Err(error) => Err(map_publication_read_error(error)),
+        }
     }
 }
 
@@ -2054,6 +2091,7 @@ pub fn publish_review_finding_native(
 fn find_published_finding_comment(
     target: &ProviderPublicationTarget,
     marker: &str,
+    expected: &ProviderInlineCommentPayload,
 ) -> Result<Option<ProviderCommentIdentity>, ProviderPublicationApiError> {
     let pr_id = publication_pr_id(target.pull_request_id)?;
     match target.provider {
@@ -2069,11 +2107,14 @@ fn find_published_finding_comment(
                     get_json(client.get(&url)).map_err(map_publication_read_error)?;
                 if let Some(comment) = page.values.into_iter().find(|comment| {
                     !comment.deleted
-                        && comment.inline.is_some()
+                        && comment
+                            .inline
+                            .as_ref()
+                            .is_some_and(|anchor| bitbucket_anchor_matches(anchor, expected))
                         && comment
                             .content
                             .as_ref()
-                            .is_some_and(|content| content.raw.contains(marker))
+                            .is_some_and(|content| comment_has_marker(&content.raw, marker))
                 }) {
                     return Ok(Some(ProviderCommentIdentity {
                         comment_id: publication_comment_id(comment.id)?,
@@ -2097,8 +2138,8 @@ fn find_published_finding_comment(
             comments
                 .into_iter()
                 .find(|comment| {
-                    comment.path.as_ref().is_some_and(|path| !path.is_empty())
-                        && comment.body.contains(marker)
+                    github_anchor_matches(comment, expected)
+                        && comment_has_marker(&comment.body, marker)
                 })
                 .map(|comment| {
                     Ok(ProviderCommentIdentity {
@@ -2220,6 +2261,10 @@ fn github_anchor_matches(
         } else {
             comment.start_line.is_none()
         }
+}
+
+fn comment_has_marker(body: &str, marker: &str) -> bool {
+    body.lines().next_back() == Some(marker)
 }
 
 fn map_publication_auth_error(error: String) -> ProviderPublicationApiError {
@@ -2538,6 +2583,17 @@ mod tests {
         assert!(github_anchor_matches(
             &github_response,
             &publication_payload(FindingAnchorSide::New)
+        ));
+        let mut mismatched = publication_payload(FindingAnchorSide::New);
+        mismatched.end_line = 15;
+        assert!(!github_anchor_matches(&github_response, &mismatched));
+        assert!(comment_has_marker(
+            "body\n\n<!-- lachesi:finding:abc -->",
+            "<!-- lachesi:finding:abc -->"
+        ));
+        assert!(!comment_has_marker(
+            "<!-- lachesi:finding:abc -->\nextra",
+            "<!-- lachesi:finding:abc -->"
         ));
     }
 
