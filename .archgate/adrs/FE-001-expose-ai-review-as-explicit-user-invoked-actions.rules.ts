@@ -42,6 +42,68 @@ function extractInlineObjectArgument(source: string, start: number): string | nu
   return null;
 }
 
+function hasTopLevelTrueProperty(objectSource: string, propertyName: string): boolean {
+  let depth = 0;
+  let quote: "'" | '"' | "`" | null = null;
+  let escaped = false;
+  let lineComment = false;
+  let blockComment = false;
+  let segmentStart = 1;
+
+  const matchesProperty = (segment: string) => {
+    const normalized = segment.trim();
+    const propertyPattern = new RegExp(
+      `^(?:${propertyName}|["']${propertyName}["'])\\s*:\\s*true\\s*$`,
+    );
+    return propertyPattern.test(normalized);
+  };
+
+  for (let index = 1; index < objectSource.length - 1; index += 1) {
+    const character = objectSource[index];
+    const next = objectSource[index + 1];
+
+    if (lineComment) {
+      if (character === "\n") lineComment = false;
+      continue;
+    }
+    if (blockComment) {
+      if (character === "*" && next === "/") {
+        blockComment = false;
+        index += 1;
+      }
+      continue;
+    }
+    if (quote) {
+      if (escaped) {
+        escaped = false;
+      } else if (character === "\\") {
+        escaped = true;
+      } else if (character === quote) {
+        quote = null;
+      }
+      continue;
+    }
+    if (character === "/" && next === "/") {
+      lineComment = true;
+      index += 1;
+    } else if (character === "/" && next === "*") {
+      blockComment = true;
+      index += 1;
+    } else if (character === "'" || character === '"' || character === "`") {
+      quote = character;
+    } else if (character === "{" || character === "[" || character === "(") {
+      depth += 1;
+    } else if (character === "}" || character === "]" || character === ")") {
+      depth -= 1;
+    } else if (character === "," && depth === 0) {
+      if (matchesProperty(objectSource.slice(segmentStart, index))) return true;
+      segmentStart = index + 1;
+    }
+  }
+
+  return matchesProperty(objectSource.slice(segmentStart, -1));
+}
+
 export default {
   rules: {
     "claude-launch-remains-explicit": {
@@ -79,7 +141,7 @@ export default {
             for (const call of calls) {
               const callIndex = call.index ?? 0;
               const argument = extractInlineObjectArgument(source, callIndex + call[0].length);
-              if (!argument || !/\bskipAnalyzers\s*:\s*true\b/.test(argument)) {
+              if (!argument || !hasTopLevelTrueProperty(argument, "skipAnalyzers")) {
                 ctx.report.violation({
                   message: "Every GUI start_inline_review call must send skipAnalyzers: true.",
                   file,

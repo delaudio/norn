@@ -119,26 +119,26 @@ Primary v0.1 command:
 lachesi review --workspace example-workspace --repo frontend-app --pr 1731
 ```
 
-Options:
+Options implemented in the first CLI cut:
 
 ```sh
 lachesi review \
-  --workspace <workspace> \
-  --repo <repo> \
-  --pr <id> \
   [--repo-path <path>] \
-  [--config <path>] \
-  [--local-config <path>] \
-  [--format markdown|json|jsonl] \
+  [--scope working-tree|branch|pr] \
+  [--base <ref>] \
+  [--workspace <workspace>] \
+  [--repo <repo>] \
+  [--pr <id>] \
+  [--provider github|bitbucket] \
+  [--format markdown|json] \
   [--profile <name>] \
+  [--ai-provider codex|claude] \
+  [--model <name>] \
+  [--effort <level>] \
   [--output <path>] \
-  [--evidence-only] \
   [--fail-on-findings] \
   [--min-severity info|low|medium|high|critical] \
-  [--run-analyzers] \
-  [--session-instruction <text>] \
-  [--no-jira] \
-  [--no-notion]
+  [--run-analyzers]
 ```
 
 Defaults:
@@ -157,6 +157,11 @@ Defaults:
   completion; setting `LACHESI_DATA_DIR` explicitly opts into a chosen
   persistent location
 
+Planned options such as custom config paths, JSONL streaming, evidence-only
+execution, per-run session instructions, and source-specific enrichment
+switches are not part of the first CLI cut. They must not be advertised by
+`lachesi review --help` until implemented.
+
 ### `lachesi config validate`
 
 Validates effective config without running review:
@@ -169,14 +174,15 @@ Exit behavior follows the config exit-code model below.
 
 ### `lachesi evidence`
 
-Optional v0.1 command if implemented early:
+Planned follow-up command:
 
 ```sh
 lachesi evidence --workspace example-workspace --repo frontend-app --pr 1731 --format json
 ```
 
-This runs configured analyzers and emits evidence without invoking the model.
-Equivalent behavior is also available through `lachesi review --evidence-only`.
+This will run configured analyzers and emit evidence without invoking the
+model. Neither this command nor `lachesi review --evidence-only` is implemented
+in the first CLI cut.
 
 ## Output Formats
 
@@ -232,6 +238,11 @@ The top-level headless envelope uses `lachesi.headless-review.v1`.
 `reviewRun` independently uses the same `v0.1` contract documented in the
 findings spec. Setup and runtime failures use the same top-level headless
 schema with `status: "failed"`, `exitCode`, and `error`.
+
+Headless output retains evidence identifiers, kinds, sources, titles, and
+summaries, but omits raw evidence payloads. Analyzer stdout and stderr can
+contain credentials or other sensitive process output and are never serialized
+to terminal or CI output.
 
 ### JSONL
 

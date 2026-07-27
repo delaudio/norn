@@ -216,7 +216,7 @@ pub fn run(request: HeadlessReviewRequest) -> Result<HeadlessReviewExecution, He
         &resolved.diff,
         request.scope,
     );
-    let review_run = run_headless_review_native(HeadlessNativeReviewRequest {
+    let mut review_run = run_headless_review_native(HeadlessNativeReviewRequest {
         repo_path: repo_path.clone(),
         review_provider: review_run_provider(resolved.provider),
         workspace: resolved.workspace,
@@ -235,6 +235,7 @@ pub fn run(request: HeadlessReviewRequest) -> Result<HeadlessReviewExecution, He
         run_analyzers: request.run_analyzers,
     })
     .map_err(map_native_review_error)?;
+    strip_private_evidence_payloads(&mut review_run);
 
     Ok(HeadlessReviewExecution {
         schema_version: "lachesi.headless-review.v1".to_string(),
@@ -246,6 +247,12 @@ pub fn run(request: HeadlessReviewRequest) -> Result<HeadlessReviewExecution, He
         target: resolved.target,
         review_run: Some(review_run),
     })
+}
+
+fn strip_private_evidence_payloads(review_run: &mut ReviewRun) {
+    for evidence in &mut review_run.evidence {
+        evidence.payload = None;
+    }
 }
 
 fn map_native_review_error(error: HeadlessNativeReviewError) -> HeadlessReviewError {
@@ -819,14 +826,16 @@ mod tests {
 
     use super::{
         build_review_payload, format_findings_markdown, map_native_review_error,
-        map_provider_target_error, new_file_patch, repo_identity_matches_target, working_tree_diff,
-        ReviewScope,
+        map_provider_target_error, new_file_patch, repo_identity_matches_target,
+        strip_private_evidence_payloads, working_tree_diff, ReviewScope,
     };
     use crate::config::{RepoRef, ReviewProvider};
     use crate::services::review::{
-        HeadlessNativeReviewError, ReviewAnchorSide, ReviewFinding, ReviewFindingAnchor,
-        ReviewFindingCategory, ReviewFindingConfidence, ReviewFindingSeverity, ReviewFindingSource,
-        ReviewFindingStatus,
+        AiReviewRunStatus, AiReviewTurnKind, HeadlessNativeReviewError, ReviewAnchorSide,
+        ReviewEvidenceArtifact, ReviewEvidenceKind, ReviewEvidenceSource, ReviewFinding,
+        ReviewFindingAnchor, ReviewFindingCategory, ReviewFindingConfidence,
+        ReviewFindingSeverity, ReviewFindingSource, ReviewFindingStatus,
+        ReviewProvider as ReviewRunProvider, ReviewRun,
     };
 
     static TEMP_REPO_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -937,6 +946,48 @@ mod tests {
         assert!(markdown.contains("### High"));
         assert!(markdown.contains("`src/review.rs:42-44`"));
         assert!(markdown.contains("Fix: Validate the remote identity."));
+    }
+
+    #[test]
+    fn headless_output_omits_raw_evidence_payloads() {
+        let mut run = ReviewRun {
+            id: "run-1".to_string(),
+            schema_version: "v0.1".to_string(),
+            provider: ReviewRunProvider::Github,
+            workspace: "lachesi-hq".to_string(),
+            repo: "lachesi".to_string(),
+            pr_id: 0,
+            source_branch: "feature".to_string(),
+            destination_branch: "main".to_string(),
+            status: AiReviewRunStatus::Succeeded,
+            turn_kind: AiReviewTurnKind::Initial,
+            review_profile: None,
+            created_at: "1".to_string(),
+            finished_at: Some("2".to_string()),
+            diff_fingerprint: "fingerprint".to_string(),
+            thread_id: None,
+            summary_markdown: Some("Review summary".to_string()),
+            evidence: vec![ReviewEvidenceArtifact {
+                id: "evidence-1".to_string(),
+                kind: ReviewEvidenceKind::Analyzer,
+                source: ReviewEvidenceSource::Tests,
+                title: "Analyzer output".to_string(),
+                summary: Some("Analyzer completed.".to_string()),
+                payload: Some("TOKEN=secret-value".to_string()),
+            }],
+            findings: Vec::new(),
+        };
+
+        strip_private_evidence_payloads(&mut run);
+
+        assert_eq!(run.evidence.len(), 1);
+        assert_eq!(
+            run.evidence[0].summary.as_deref(),
+            Some("Analyzer completed.")
+        );
+        assert_eq!(run.evidence[0].payload, None);
+        let json = serde_json::to_string(&run).expect("serialize sanitized review run");
+        assert!(!json.contains("secret-value"));
     }
 
     #[test]
