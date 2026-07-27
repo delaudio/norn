@@ -394,6 +394,7 @@ export interface ReviewRun {
   prId: number;
   sourceBranch: string;
   destinationBranch: string;
+  reviewedHeadSha?: string | null;
   status: AiReviewRunStatus;
   turnKind: AiReviewTurnKind;
   reviewProfile: string | null;

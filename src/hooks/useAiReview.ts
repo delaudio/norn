@@ -17,6 +17,7 @@ interface StartReviewArgs {
   title: string;
   sourceBranch: string;
   destinationBranch: string;
+  reviewedHeadSha: string | null;
   reviewKind?: "lineQuestion" | null;
   threadTitle?: string | null;
   aiProvider: AiProvider;
@@ -31,6 +32,7 @@ interface ReplyReviewArgs {
   title: string;
   sourceBranch: string;
   destinationBranch: string;
+  reviewedHeadSha: string | null;
   threadId: string;
   userMessage: string;
   basePayload: string;
@@ -169,6 +171,7 @@ export function useAiReview(
       title,
       sourceBranch,
       destinationBranch,
+      reviewedHeadSha,
       reviewKind,
       threadTitle,
       aiProvider,
@@ -193,6 +196,7 @@ export function useAiReview(
           displayMessage,
           sourceBranch,
           destinationBranch,
+          reviewedHeadSha,
           reviewKind,
           threadTitle,
           aiProvider,
@@ -225,6 +229,7 @@ export function useAiReview(
       title,
       sourceBranch,
       destinationBranch,
+      reviewedHeadSha,
       threadId,
       userMessage,
       basePayload,
@@ -247,6 +252,7 @@ export function useAiReview(
           title,
           sourceBranch,
           destinationBranch,
+          reviewedHeadSha,
           threadId,
           userMessage,
           basePayload,

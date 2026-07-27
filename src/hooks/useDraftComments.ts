@@ -70,7 +70,7 @@ interface UseDraftCommentsResult {
 
 export interface DraftCommentLifecycleOptions {
   publishFindingDraft?: (draft: DraftComment) => Promise<PublishedDraftComment>;
-  onDraftPublished?: (
+  onFindingDraftPublished?: (
     draft: DraftComment,
     comment: PublishedDraftComment,
   ) => void | Promise<void>;
@@ -148,7 +148,12 @@ export function useDraftComments(
   const [drafts, setDrafts] = useState<DraftComment[]>([]);
   const [publishing, setPublishing] = useState(false);
   const [publishingDraftId, setPublishingDraftId] = useState<string | null>(null);
-  const { publishFindingDraft, onDraftPublished, onDraftRemoved, onDraftsDiscarded } = options;
+  const {
+    publishFindingDraft,
+    onFindingDraftPublished,
+    onDraftRemoved,
+    onDraftsDiscarded,
+  } = options;
 
   const active = provider != null && workspace != null && repo != null && prId != null;
 
@@ -234,8 +239,8 @@ export function useDraftComments(
           draft,
           publishFindingDraft,
         );
-        if (onDraftPublished) {
-          await onDraftPublished(draft, comment);
+        if (draft.findingRef && onFindingDraftPublished) {
+          await onFindingDraftPublished(draft, comment);
         }
         setDrafts((prev) => prev.filter((candidate) => candidate.localId !== localId));
         return { draft, comment, error: null };
@@ -250,7 +255,16 @@ export function useDraftComments(
         setPublishing(false);
       }
     },
-    [active, provider, workspace, repo, prId, drafts, publishFindingDraft, onDraftPublished],
+    [
+      active,
+      provider,
+      workspace,
+      repo,
+      prId,
+      drafts,
+      publishFindingDraft,
+      onFindingDraftPublished,
+    ],
   );
 
   const publishAll = useCallback(async (): Promise<PublishResult> => {
@@ -269,8 +283,8 @@ export function useDraftComments(
           draft,
           publishFindingDraft,
         );
-        if (onDraftPublished) {
-          await onDraftPublished(draft, comment);
+        if (draft.findingRef && onFindingDraftPublished) {
+          await onFindingDraftPublished(draft, comment);
         }
         published += 1;
         setDrafts((prev) => prev.filter((d) => d.localId !== draft.localId));
@@ -281,7 +295,16 @@ export function useDraftComments(
     setPublishingDraftId(null);
     setPublishing(false);
     return { published, failed };
-  }, [active, provider, workspace, repo, prId, drafts, publishFindingDraft, onDraftPublished]);
+  }, [
+    active,
+    provider,
+    workspace,
+    repo,
+    prId,
+    drafts,
+    publishFindingDraft,
+    onFindingDraftPublished,
+  ]);
 
   return {
     drafts,

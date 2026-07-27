@@ -8,14 +8,14 @@ describe("useDraftComments structured finding publication", () => {
       id: "9223372036854775000",
       createdOn: "2026-07-27T20:00:00.000Z",
     });
-    const onDraftPublished = vi
+    const onFindingDraftPublished = vi
       .fn()
       .mockRejectedValueOnce(new Error("publication store unavailable"))
       .mockResolvedValueOnce(undefined);
     const { result } = renderHook(() =>
       useDraftComments("github", "publication-test", "retryable-payments", 42, {
         publishFindingDraft,
-        onDraftPublished,
+        onFindingDraftPublished,
       }),
     );
 
@@ -52,6 +52,40 @@ describe("useDraftComments structured finding publication", () => {
     });
     expect(result.current.drafts).toHaveLength(0);
     expect(publishFindingDraft).toHaveBeenCalledTimes(2);
-    expect(onDraftPublished).toHaveBeenCalledTimes(2);
+    expect(onFindingDraftPublished).toHaveBeenCalledTimes(2);
+  });
+
+  it("removes manual drafts immediately after their non-idempotent provider write", async () => {
+    const onFindingDraftPublished = vi
+      .fn()
+      .mockRejectedValue(new Error("must not run for manual comments"));
+    const { result } = renderHook(() =>
+      useDraftComments("github", "publication-test", "manual-payments", 42, {
+        onFindingDraftPublished,
+      }),
+    );
+
+    let localId = "";
+    act(() => {
+      localId =
+        result.current.addDraft({
+          path: "src/lib.ts",
+          to: 12,
+          from: null,
+          raw: "A manual review comment.",
+          parentId: null,
+          source: "manual",
+          findingRef: null,
+          publicationMode: null,
+          reviewHeadSha: null,
+        })?.localId ?? "";
+    });
+
+    await act(async () => {
+      const published = await result.current.publishDraft(localId);
+      expect(published.error).toBeNull();
+    });
+    expect(result.current.drafts).toHaveLength(0);
+    expect(onFindingDraftPublished).not.toHaveBeenCalled();
   });
 });

@@ -452,7 +452,7 @@ export default function App() {
     activeSel?.prId ?? null,
     {
       publishFindingDraft: publishStructuredFindingDraft,
-      onDraftPublished: recordPublishedFindingDraft,
+      onFindingDraftPublished: recordPublishedFindingDraft,
       onDraftRemoved: removeFindingDraft,
       onDraftsDiscarded: async (drafts) => {
         await removeFindingDrafts(drafts);
@@ -778,6 +778,7 @@ export default function App() {
           title: contextForReview.pr.title || `PR #${selectionForReview.prId}`,
           sourceBranch: contextForReview.pr.sourceBranch,
           destinationBranch: contextForReview.pr.destinationBranch,
+          reviewedHeadSha: contextForReview.pr.sourceCommitHash ?? null,
           aiProvider: config?.aiProvider ?? "claude",
           claudeModel: config?.claudeModel ?? null,
           claudeEffort: config?.claudeEffort ?? null,
@@ -831,6 +832,7 @@ export default function App() {
           title: aiReviewContext.pr.title || `PR #${activeSel.prId}`,
           sourceBranch: aiReviewContext.pr.sourceBranch,
           destinationBranch: aiReviewContext.pr.destinationBranch,
+          reviewedHeadSha: aiReviewContext.pr.sourceCommitHash ?? null,
           threadId: aiReview.activeThread.id,
           userMessage: request.displayMessage,
           basePayload: request.payload,
@@ -889,6 +891,7 @@ export default function App() {
         title: aiReviewContext.pr.title || `PR #${activeSel.prId}`,
         sourceBranch: aiReviewContext.pr.sourceBranch,
         destinationBranch: aiReviewContext.pr.destinationBranch,
+        reviewedHeadSha: aiReviewContext.pr.sourceCommitHash ?? null,
         threadId,
         userMessage,
         basePayload,
@@ -996,7 +999,7 @@ export default function App() {
         source: comment.findingRef ? "aiFinding" : "manual",
         findingRef: comment.findingRef,
         publicationMode: comment.publicationMode,
-        reviewHeadSha: comment.findingRef ? (aiReviewContext.pr.sourceCommitHash ?? null) : null,
+        reviewHeadSha: comment.findingRef ? (aiReview.activeRun?.reviewedHeadSha ?? null) : null,
       })),
     );
     await stageFindingDrafts(stagedDrafts);
