@@ -506,11 +506,32 @@ fn row_to_finding_feedback_event(
     let provider = match row.get::<_, String>(2)?.as_str() {
         "github" => PullRequestReviewEventProvider::Github,
         "bitbucket" => PullRequestReviewEventProvider::Bitbucket,
-        _ => return Err(rusqlite::Error::InvalidQuery),
+        _ => {
+            return Err(feedback_conversion_error(
+                2,
+                rusqlite::types::Type::Text,
+                "unsupported feedback provider",
+            ));
+        }
     };
-    let action = ReviewFindingFeedbackAction::from_str(&row.get::<_, String>(8)?)
-        .ok_or(rusqlite::Error::InvalidQuery)?;
-    let pr_id = u64::try_from(row.get::<_, i64>(5)?).map_err(|_| rusqlite::Error::InvalidQuery)?;
+    let action =
+        ReviewFindingFeedbackAction::from_str(&row.get::<_, String>(8)?).ok_or_else(|| {
+            feedback_conversion_error(
+                8,
+                rusqlite::types::Type::Text,
+                "unsupported feedback action",
+            )
+        })?;
+    let pr_id = u64::try_from(row.get::<_, i64>(5)?).map_err(|_| {
+        feedback_conversion_error(
+            5,
+            rusqlite::types::Type::Integer,
+            "invalid feedback pull-request id",
+        )
+    })?;
+    let reason = row
+        .get::<_, Option<String>>(11)?
+        .filter(|reason| !reason.trim().is_empty());
     Ok(ReviewFindingFeedbackEvent {
         event_id: row.get(0)?,
         identity: ReviewFindingFeedbackIdentity {
@@ -525,8 +546,23 @@ fn row_to_finding_feedback_event(
         action,
         occurred_at: row.get(9)?,
         actor_id: row.get(10)?,
-        reason: row.get(11)?,
+        reason,
     })
+}
+
+fn feedback_conversion_error(
+    column: usize,
+    data_type: rusqlite::types::Type,
+    message: &'static str,
+) -> rusqlite::Error {
+    rusqlite::Error::FromSqlConversionFailure(
+        column,
+        data_type,
+        Box::new(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            message,
+        )),
+    )
 }
 
 fn feedback_pr_id(identity: &ReviewFindingFeedbackIdentity) -> Result<i64, String> {
@@ -1603,13 +1639,31 @@ mod tests {
 
     #[test]
     fn duplicate_feedback_delivery_is_idempotent_and_conflicts_fail_closed() {
-        with_test_data_dir("finding-feedback-idempotency", |_| {
-            let event = feedback_event("delivery-1", ReviewFindingFeedbackAction::Accepted, "1000");
+        with_test_data_dir("finding-feedback-idempotency", |dir| {
+            let mut event =
+                feedback_event("delivery-1", ReviewFindingFeedbackAction::Accepted, "1000");
+            event.reason = None;
 
             let first = record_finding_feedback(&event).expect("first delivery");
             let duplicate = record_finding_feedback(&event).expect("duplicate delivery");
             assert_eq!(duplicate, first);
             assert_eq!(duplicate.events.len(), 1);
+
+            let conn =
+                Connection::open(dir.join(DB_FILE)).expect("open feedback database directly");
+            conn.execute(
+                r#"
+                UPDATE review_finding_feedback_events
+                SET reason = ''
+                WHERE tenant_id = 'tenant-acme' AND event_id = 'delivery-1'
+                "#,
+                [],
+            )
+            .expect("simulate a non-canonical imported reason");
+            drop(conn);
+            let normalized_duplicate =
+                record_finding_feedback(&event).expect("duplicate after reason normalization");
+            assert_eq!(normalized_duplicate, first);
 
             let mut conflicting = event;
             conflicting.action = ReviewFindingFeedbackAction::Fixed;

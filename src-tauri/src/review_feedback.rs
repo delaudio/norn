@@ -8,6 +8,8 @@ use crate::review_event::PullRequestReviewEventProvider;
 
 const MAX_IDENTIFIER_BYTES: usize = 512;
 const MAX_REASON_BYTES: usize = 4096;
+/// 2100-01-01T00:00:00Z. Feedback outside this operational epoch is rejected.
+const MAX_OCCURRED_AT_MILLIS: i64 = 4_102_444_800_000;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -212,6 +214,9 @@ fn parse_timestamp(value: &str) -> Result<i64, ReviewFindingFeedbackValidationEr
     if timestamp < 0 {
         return Err(ReviewFindingFeedbackValidationError::InvalidTimestamp);
     }
+    if timestamp > MAX_OCCURRED_AT_MILLIS {
+        return Err(ReviewFindingFeedbackValidationError::TimestampOutOfRange);
+    }
     Ok(timestamp)
 }
 
@@ -229,6 +234,7 @@ pub enum ReviewFindingFeedbackValidationError {
     FieldTooLong(&'static str),
     InvalidPullRequestId,
     InvalidTimestamp,
+    TimestampOutOfRange,
     EmptyReason,
     MixedFindingTargets,
 }
@@ -247,6 +253,9 @@ impl fmt::Display for ReviewFindingFeedbackValidationError {
             Self::InvalidPullRequestId => formatter.write_str("`prId` must be a positive integer"),
             Self::InvalidTimestamp => formatter
                 .write_str("`occurredAt` must be a non-negative Unix timestamp in milliseconds"),
+            Self::TimestampOutOfRange => {
+                formatter.write_str("`occurredAt` exceeds the supported epoch range")
+            }
             Self::EmptyReason => formatter.write_str("`reason` must not be empty when provided"),
             Self::MixedFindingTargets => {
                 formatter.write_str("feedback events must target the same finding")
@@ -355,6 +364,12 @@ mod tests {
             Err(ReviewFindingFeedbackValidationError::SurroundingWhitespace(
                 "reviewRunId"
             ))
+        );
+        invalid.review_run_id = "run-1".to_string();
+        invalid.occurred_at = i64::MAX.to_string();
+        assert_eq!(
+            invalid.validate(),
+            Err(ReviewFindingFeedbackValidationError::TimestampOutOfRange)
         );
     }
 }
