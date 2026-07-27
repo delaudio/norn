@@ -201,7 +201,7 @@ describe("linkAiReviewDraftCommentsToFindings", () => {
     const linked = linkAiReviewDraftCommentsToFindings(reviewRun, [
       {
         path: "src/app/views/utils/buildRecordsUrlFromSavedView.ts",
-        to: 16,
+        to: 17,
         from: null,
         raw: "Guard the `filterId` path here or add a regression test for the empty-results case.",
       },
@@ -219,6 +219,28 @@ describe("linkAiReviewDraftCommentsToFindings", () => {
           findingFingerprint: "fingerprint-1",
         },
         publicationMode: "inline",
+      },
+    ]);
+  });
+
+  it("does not link or move a comment adjacent to a structured finding", () => {
+    const linked = linkAiReviewDraftCommentsToFindings(reviewRun, [
+      {
+        path: "src/app/views/utils/buildRecordsUrlFromSavedView.ts",
+        to: 16,
+        from: null,
+        raw: "This nearby comment may describe a different defect.",
+      },
+    ]);
+
+    expect(linked).toEqual([
+      {
+        path: "src/app/views/utils/buildRecordsUrlFromSavedView.ts",
+        to: 16,
+        from: null,
+        raw: "This nearby comment may describe a different defect.",
+        findingRef: null,
+        publicationMode: null,
       },
     ]);
   });

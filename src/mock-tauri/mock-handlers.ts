@@ -675,6 +675,22 @@ function validatePublicationText(value: string, field: string, maximum: number):
   }
 }
 
+function mockPublicationMarkdown(request: FindingPublicationRequest): string {
+  const severity = `${request.severity.charAt(0).toUpperCase()}${request.severity.slice(1)}`;
+  let markdown = `**${request.title}**\n\n${request.body}\n\nSeverity: **${severity}**`;
+  if (request.suggestedFix != null) {
+    const longestBacktickRun = Math.max(
+      0,
+      ...request.suggestedFix.split(/[^`]+/).map((run) => run.length),
+    );
+    const fence = "`".repeat(Math.max(3, longestBacktickRun + 1));
+    markdown += `\n\nSuggested fix:\n\n${fence}suggestion\n${request.suggestedFix}`;
+    if (!request.suggestedFix.endsWith("\n")) markdown += "\n";
+    markdown += fence;
+  }
+  return `${markdown}\n\n<!-- lachesi:finding:${"0".repeat(64)} -->`;
+}
+
 function findingPublicationKey(request: FindingPublicationRequest): string {
   return JSON.stringify([
     request.tenantId,
@@ -698,6 +714,9 @@ export function publishMockReviewFinding(
   validatePublicationText(request.body, "body", 64 * 1024);
   if (request.suggestedFix != null) {
     validatePublicationText(request.suggestedFix, "suggestedFix", 64 * 1024);
+  }
+  if (publicationByteLength(mockPublicationMarkdown(request)) > 32 * 1024) {
+    throw new Error("Structured finding publication markdown is too long.");
   }
 
   const headSha = request.headSha.toLowerCase();

@@ -19,6 +19,7 @@ const MAX_PATH_BYTES: usize = 4096;
 const MAX_TITLE_BYTES: usize = 1024;
 const MAX_BODY_BYTES: usize = 64 * 1024;
 const MAX_SUGGESTED_FIX_BYTES: usize = 64 * 1024;
+const MAX_PROVIDER_MARKDOWN_BYTES: usize = 32 * 1024;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum FindingPublicationSchemaVersion {
@@ -430,6 +431,10 @@ impl FindingPublicationRequest {
         validate_text("body", &self.body, MAX_BODY_BYTES)?;
         if let Some(suggested_fix) = &self.suggested_fix {
             validate_text("suggestedFix", suggested_fix, MAX_SUGGESTED_FIX_BYTES)?;
+        }
+        let rendered = render_finding_markdown(self, &finding_marker(self));
+        if rendered.len() > MAX_PROVIDER_MARKDOWN_BYTES {
+            return Err("rendered finding markdown is too long for provider comments".to_string());
         }
         Ok(())
     }
@@ -959,6 +964,23 @@ mod tests {
             FindingPublicationErrorCode::OutdatedAnchor
         );
         assert!(!outdated_error.retryable);
+        assert!(publisher.api.state.lock().unwrap().payloads.is_empty());
+    }
+
+    #[test]
+    fn oversized_rendered_markdown_is_rejected_before_publication_state_changes() {
+        let publisher =
+            FindingPublisher::new(MockProviderApi::default(), MockPublicationStore::default());
+        let mut oversized = request(PullRequestReviewEventProvider::Github);
+        oversized.body = "x".repeat(MAX_PROVIDER_MARKDOWN_BYTES);
+        oversized.suggested_fix = None;
+
+        let error = publisher
+            .publish(&oversized)
+            .expect_err("oversized rendered markdown");
+
+        assert_eq!(error.code, FindingPublicationErrorCode::InvalidRequest);
+        assert!(error.message.contains("markdown is too long"));
         assert!(publisher.api.state.lock().unwrap().payloads.is_empty());
     }
 

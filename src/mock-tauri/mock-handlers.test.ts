@@ -51,4 +51,14 @@ describe("publishMockReviewFinding", () => {
       ),
     ).toThrow("head changed");
   });
+
+  it("rejects oversized rendered markdown before creating a mock comment", () => {
+    expect(() =>
+      publishMockReviewFinding(
+        publicationRequest({
+          body: "x".repeat(32 * 1024),
+        }),
+      ),
+    ).toThrow("markdown is too long");
+  });
 });

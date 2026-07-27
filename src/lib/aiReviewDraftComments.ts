@@ -162,13 +162,10 @@ export function linkAiReviewDraftCommentsToFindings(
       .filter((finding) => !usedFindingIds.has(finding.id))
       .map((finding) => {
         const distance = anchorDistance(finding, comment);
-        if (distance == null || distance > 3) {
+        if (distance !== 0) {
           return null;
         }
-        const score =
-          100 -
-          distance * 10 +
-          keywordOverlapScore(comment.raw, `${finding.title} ${finding.summary}`);
+        const score = 100 + keywordOverlapScore(comment.raw, `${finding.title} ${finding.summary}`);
         return { finding, score };
       })
       .filter(
