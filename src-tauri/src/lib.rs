@@ -13,6 +13,7 @@ pub mod review_feedback;
 mod review_storage;
 mod services;
 pub mod tui;
+pub mod webhook_ingress;
 
 pub use review_storage::{
     append_administrative_audit_event, get_finding_feedback_state, get_review_cursor,
