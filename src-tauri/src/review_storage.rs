@@ -6,6 +6,10 @@ use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 use serde::{Deserialize, Serialize};
 
 use crate::review_event::PullRequestReviewEventProvider;
+use crate::review_feedback::{
+    derive_finding_feedback_state, ReviewFindingFeedbackAction, ReviewFindingFeedbackEvent,
+    ReviewFindingFeedbackIdentity, ReviewFindingFeedbackState, ReviewFindingFeedbackTarget,
+};
 
 const APP_DIR: &str = "lachesi";
 const DB_FILE: &str = "lachesi.sqlite3";
@@ -322,6 +326,30 @@ fn migrate(conn: &Connection) -> Result<(), String> {
           completed_at TEXT NOT NULL,
           PRIMARY KEY (tenant_id, provider, workspace, repo, pr_id)
         );
+
+        CREATE TABLE IF NOT EXISTS review_finding_feedback_events (
+          tenant_id TEXT NOT NULL,
+          event_id TEXT NOT NULL,
+          provider TEXT NOT NULL,
+          workspace TEXT NOT NULL,
+          repo TEXT NOT NULL,
+          pr_id INTEGER NOT NULL CHECK (pr_id > 0),
+          review_run_id TEXT NOT NULL,
+          finding_fingerprint TEXT NOT NULL,
+          action TEXT NOT NULL CHECK (
+            action IN ('accepted', 'dismissed', 'false_positive', 'fixed', 'reopened')
+          ),
+          occurred_at TEXT NOT NULL,
+          actor_id TEXT NOT NULL,
+          reason TEXT,
+          PRIMARY KEY (tenant_id, event_id)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_review_finding_feedback_target
+          ON review_finding_feedback_events(
+            tenant_id, provider, workspace, repo, pr_id,
+            review_run_id, finding_fingerprint, occurred_at, event_id
+          );
         "#,
     )
     .map_err(|e| e.to_string())?;
@@ -335,6 +363,11 @@ fn migrate(conn: &Connection) -> Result<(), String> {
         [],
     )
     .map_err(|e| e.to_string())?;
+    conn.execute(
+        "INSERT OR IGNORE INTO schema_migrations(version) VALUES (3)",
+        [],
+    )
+    .map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -343,6 +376,153 @@ fn now_ms() -> String {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis().to_string())
         .unwrap_or_else(|_| "0".to_string())
+}
+
+pub fn record_finding_feedback(
+    event: &ReviewFindingFeedbackEvent,
+) -> Result<ReviewFindingFeedbackState, String> {
+    event.validate().map_err(|error| error.to_string())?;
+    let target = event.target();
+    let pr_id = feedback_pr_id(&event.identity)?;
+    let mut conn = open()?;
+    let transaction = conn
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .map_err(|error| error.to_string())?;
+    let existing = transaction
+        .query_row(
+            r#"
+            SELECT event_id, tenant_id, provider, workspace, repo, pr_id,
+              review_run_id, finding_fingerprint, action, occurred_at, actor_id, reason
+            FROM review_finding_feedback_events
+            WHERE tenant_id = ?1 AND event_id = ?2
+            "#,
+            params![event.identity.tenant_id, event.event_id],
+            row_to_finding_feedback_event,
+        )
+        .optional()
+        .map_err(|error| error.to_string())?;
+    if let Some(existing) = existing {
+        if existing != *event {
+            return Err(
+                "`eventId` is already associated with different reviewer feedback".to_string(),
+            );
+        }
+    } else {
+        transaction
+            .execute(
+                r#"
+                INSERT INTO review_finding_feedback_events (
+                  tenant_id, event_id, provider, workspace, repo, pr_id,
+                  review_run_id, finding_fingerprint, action, occurred_at, actor_id, reason
+                )
+                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+                "#,
+                params![
+                    event.identity.tenant_id,
+                    event.event_id,
+                    event.identity.provider.as_str(),
+                    event.identity.workspace,
+                    event.identity.repo,
+                    pr_id,
+                    event.review_run_id,
+                    event.finding_fingerprint,
+                    event.action.as_str(),
+                    event.occurred_at,
+                    event.actor_id,
+                    event.reason
+                ],
+            )
+            .map_err(|error| error.to_string())?;
+    }
+    let state = get_finding_feedback_state_from(&transaction, &target)?;
+    transaction.commit().map_err(|error| error.to_string())?;
+    Ok(state)
+}
+
+pub fn get_finding_feedback_state(
+    target: &ReviewFindingFeedbackTarget,
+) -> Result<ReviewFindingFeedbackState, String> {
+    target.validate().map_err(|error| error.to_string())?;
+    let conn = open()?;
+    get_finding_feedback_state_from(&conn, target)
+}
+
+fn get_finding_feedback_state_from(
+    conn: &Connection,
+    target: &ReviewFindingFeedbackTarget,
+) -> Result<ReviewFindingFeedbackState, String> {
+    let mut statement = conn
+        .prepare(
+            r#"
+            SELECT event_id, tenant_id, provider, workspace, repo, pr_id,
+              review_run_id, finding_fingerprint, action, occurred_at, actor_id, reason
+            FROM review_finding_feedback_events
+            WHERE tenant_id = ?1
+              AND provider = ?2
+              AND workspace = ?3
+              AND repo = ?4
+              AND pr_id = ?5
+              AND review_run_id = ?6
+              AND finding_fingerprint = ?7
+            ORDER BY CAST(occurred_at AS INTEGER) ASC, event_id ASC
+            "#,
+        )
+        .map_err(|error| error.to_string())?;
+    let rows = statement
+        .query_map(
+            params![
+                target.identity.tenant_id,
+                target.identity.provider.as_str(),
+                target.identity.workspace,
+                target.identity.repo,
+                feedback_pr_id(&target.identity)?,
+                target.review_run_id,
+                target.finding_fingerprint
+            ],
+            row_to_finding_feedback_event,
+        )
+        .map_err(|error| error.to_string())?;
+    let mut events = Vec::new();
+    for row in rows {
+        events.push(row.map_err(|error| error.to_string())?);
+    }
+    derive_finding_feedback_state(events).map_err(|error| error.to_string())
+}
+
+fn row_to_finding_feedback_event(
+    row: &rusqlite::Row<'_>,
+) -> rusqlite::Result<ReviewFindingFeedbackEvent> {
+    let provider = match row.get::<_, String>(2)?.as_str() {
+        "github" => PullRequestReviewEventProvider::Github,
+        "bitbucket" => PullRequestReviewEventProvider::Bitbucket,
+        _ => return Err(rusqlite::Error::InvalidQuery),
+    };
+    let action = ReviewFindingFeedbackAction::from_str(&row.get::<_, String>(8)?)
+        .ok_or(rusqlite::Error::InvalidQuery)?;
+    let pr_id = u64::try_from(row.get::<_, i64>(5)?).map_err(|_| rusqlite::Error::InvalidQuery)?;
+    Ok(ReviewFindingFeedbackEvent {
+        event_id: row.get(0)?,
+        identity: ReviewFindingFeedbackIdentity {
+            tenant_id: row.get(1)?,
+            provider,
+            workspace: row.get(3)?,
+            repo: row.get(4)?,
+            pr_id,
+        },
+        review_run_id: row.get(6)?,
+        finding_fingerprint: row.get(7)?,
+        action,
+        occurred_at: row.get(9)?,
+        actor_id: row.get(10)?,
+        reason: row.get(11)?,
+    })
+}
+
+fn feedback_pr_id(identity: &ReviewFindingFeedbackIdentity) -> Result<i64, String> {
+    if identity.pr_id == 0 {
+        return Err("`prId` must be a positive integer".to_string());
+    }
+    i64::try_from(identity.pr_id).map_err(|_| "`prId` exceeds the supported range".to_string())
 }
 
 pub fn get_review_cursor(identity: &ReviewCursorIdentity) -> Result<ReviewCursorState, String> {
@@ -1195,6 +1375,29 @@ mod tests {
         }
     }
 
+    fn feedback_event(
+        event_id: &str,
+        action: ReviewFindingFeedbackAction,
+        occurred_at: &str,
+    ) -> ReviewFindingFeedbackEvent {
+        ReviewFindingFeedbackEvent {
+            event_id: event_id.to_string(),
+            identity: ReviewFindingFeedbackIdentity {
+                tenant_id: "tenant-acme".to_string(),
+                provider: PullRequestReviewEventProvider::Github,
+                workspace: "acme".to_string(),
+                repo: "payments".to_string(),
+                pr_id: 42,
+            },
+            review_run_id: "run-1".to_string(),
+            finding_fingerprint: "finding-abc".to_string(),
+            action,
+            occurred_at: occurred_at.to_string(),
+            actor_id: "reviewer-1".to_string(),
+            reason: Some(format!("reason for {}", action.as_str())),
+        }
+    }
+
     #[test]
     fn dedicated_review_data_dir_is_created() {
         let _guard = ENV_LOCK.lock().expect("test env lock");
@@ -1357,6 +1560,140 @@ mod tests {
     }
 
     #[test]
+    fn records_every_feedback_action_without_mutating_the_original_finding() {
+        const REVIEW_JSON: &str = r#"{"reviewRuns":[{"id":"run-1","findings":[{"fingerprint":"finding-abc","status":"new"}]}]}"#;
+        with_test_data_dir("finding-feedback-actions", |_| {
+            save_review_json("acme", "payments", 42, REVIEW_JSON).expect("save original finding");
+
+            let mut latest = None;
+            for (index, action) in ReviewFindingFeedbackAction::ALL.into_iter().enumerate() {
+                latest = Some(
+                    record_finding_feedback(&feedback_event(
+                        &format!("event-{index}"),
+                        action,
+                        &format!("{}", 1000 + index),
+                    ))
+                    .expect("record feedback"),
+                );
+            }
+
+            let latest = latest.expect("feedback state");
+            assert_eq!(latest.events.len(), ReviewFindingFeedbackAction::ALL.len());
+            assert_eq!(
+                latest.disposition,
+                crate::review_feedback::ReviewFindingDisposition::Open
+            );
+            assert_eq!(
+                load_review_json("acme", "payments", 42).expect("reload original finding"),
+                Some(REVIEW_JSON.to_string())
+            );
+        });
+    }
+
+    #[test]
+    fn duplicate_feedback_delivery_is_idempotent_and_conflicts_fail_closed() {
+        with_test_data_dir("finding-feedback-idempotency", |_| {
+            let event = feedback_event("delivery-1", ReviewFindingFeedbackAction::Accepted, "1000");
+
+            let first = record_finding_feedback(&event).expect("first delivery");
+            let duplicate = record_finding_feedback(&event).expect("duplicate delivery");
+            assert_eq!(duplicate, first);
+            assert_eq!(duplicate.events.len(), 1);
+
+            let mut conflicting = event;
+            conflicting.action = ReviewFindingFeedbackAction::Fixed;
+            assert_eq!(
+                record_finding_feedback(&conflicting).expect_err("conflicting delivery"),
+                "`eventId` is already associated with different reviewer feedback"
+            );
+            assert_eq!(
+                get_finding_feedback_state(&conflicting.target())
+                    .expect("state after conflict")
+                    .events
+                    .len(),
+                1
+            );
+        });
+    }
+
+    #[test]
+    fn feedback_state_is_deterministic_for_out_of_order_and_equal_timestamps() {
+        with_test_data_dir("finding-feedback-ordering", |_| {
+            let reopened = feedback_event(
+                "event-middle",
+                ReviewFindingFeedbackAction::Reopened,
+                "3000",
+            );
+            let target = reopened.target();
+            record_finding_feedback(&reopened).expect("newest first");
+            record_finding_feedback(&feedback_event(
+                "event-old",
+                ReviewFindingFeedbackAction::Fixed,
+                "2000",
+            ))
+            .expect("older second");
+            record_finding_feedback(&feedback_event(
+                "event-z",
+                ReviewFindingFeedbackAction::Fixed,
+                "4000",
+            ))
+            .expect("equal timestamp lexically later");
+            let state = record_finding_feedback(&feedback_event(
+                "event-a",
+                ReviewFindingFeedbackAction::Accepted,
+                "4000",
+            ))
+            .expect("equal timestamp lexically earlier");
+
+            assert_eq!(
+                state.disposition,
+                crate::review_feedback::ReviewFindingDisposition::Fixed
+            );
+            assert_eq!(
+                state
+                    .latest_event
+                    .as_ref()
+                    .map(|event| event.event_id.as_str()),
+                Some("event-z")
+            );
+            assert_eq!(
+                get_finding_feedback_state(&target).expect("reload state"),
+                state
+            );
+        });
+    }
+
+    #[test]
+    fn feedback_storage_is_tenant_scoped() {
+        with_test_data_dir("finding-feedback-tenant-isolation", |_| {
+            let tenant_acme = feedback_event(
+                "shared-delivery",
+                ReviewFindingFeedbackAction::Accepted,
+                "1000",
+            );
+            let mut tenant_other = tenant_acme.clone();
+            tenant_other.identity.tenant_id = "tenant-other".to_string();
+            tenant_other.action = ReviewFindingFeedbackAction::Dismissed;
+
+            record_finding_feedback(&tenant_acme).expect("acme feedback");
+            record_finding_feedback(&tenant_other).expect("other tenant feedback");
+
+            assert_eq!(
+                get_finding_feedback_state(&tenant_acme.target())
+                    .expect("acme state")
+                    .disposition,
+                crate::review_feedback::ReviewFindingDisposition::Accepted
+            );
+            assert_eq!(
+                get_finding_feedback_state(&tenant_other.target())
+                    .expect("other state")
+                    .disposition,
+                crate::review_feedback::ReviewFindingDisposition::Dismissed
+            );
+        });
+    }
+
+    #[test]
     fn v1_database_migrates_without_losing_review_jobs_or_findings() {
         with_test_data_dir("review-cursor-v1-migration", |dir| {
             fs::create_dir_all(dir).expect("create v1 data directory");
@@ -1443,7 +1780,7 @@ mod tests {
                 .expect("query migrations")
                 .collect::<rusqlite::Result<_>>()
                 .expect("read migration versions");
-            assert_eq!(versions, vec![1, 2]);
+            assert_eq!(versions, vec![1, 2, 3]);
         });
     }
 

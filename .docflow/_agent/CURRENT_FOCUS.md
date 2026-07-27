@@ -8,15 +8,15 @@ If status files and git disagree, git is authoritative; correct this file.
 
 ## Active state
 
-- **Branch:** `agent/incremental-review-scope`
-- **Active item:** GitHub issue #92 and `.docflow/plan/todo/0004-shared-review-service-program.md`
+- **Branch:** `agent/reviewer-feedback-events`
+- **Active item:** GitHub issue #93 and `.docflow/plan/todo/0004-shared-review-service-program.md`
 - **Blockers:** none; use the available SSH key for signed commits.
-- **Uncommitted work:** read-only incremental review scope between explicit commit SHAs.
+- **Uncommitted work:** append-only reviewer feedback events and derived finding dispositions.
 
 ## Last shipped
 
-`a28aca8` - persist last-reviewed-head cursors through PR #119.
+`786a457` - build incremental review scope through PR #120.
 
 ## Next item
 
-Implement GitHub issue #93 after the incremental-scope PR merges.
+Implement GitHub issue #94 after the reviewer-feedback PR merges.
