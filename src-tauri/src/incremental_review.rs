@@ -8,6 +8,7 @@ use std::process::{Command, Output, Stdio};
 use serde::{Deserialize, Serialize};
 
 const MAX_INCREMENTAL_PATCH_BYTES: usize = 2 * 1024 * 1024;
+const MAX_INCREMENTAL_METADATA_BYTES: usize = 2 * 1024 * 1024;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -49,6 +50,7 @@ pub enum IncrementalReviewSetupErrorCode {
     NonUtf8Patch,
     NonUtf8Path,
     PatchTooLarge,
+    MetadataTooLarge,
     DiffFailed,
 }
 
@@ -116,14 +118,14 @@ pub fn build_incremental_review_scope(
         current_head_sha,
         &["--name-status", "-z"],
     )?;
-    let changed_files = parse_name_status(&name_status.stdout)?;
+    let changed_files = parse_name_status(&name_status)?;
     let numstat = git_diff(
         repo_path,
         previous_head_sha,
         current_head_sha,
         &["--numstat", "-z"],
     )?;
-    let stats = parse_numstat(&numstat.stdout)?;
+    let stats = parse_numstat(&numstat)?;
     let patch = git_diff_patch(repo_path, previous_head_sha, current_head_sha)?;
 
     let files = materialize_changed_files(changed_files, stats)?;
@@ -251,16 +253,17 @@ fn git_diff(
     previous_head_sha: &str,
     current_head_sha: &str,
     options: &[&str],
-) -> Result<Output, IncrementalReviewSetupError> {
+) -> Result<Vec<u8>, IncrementalReviewSetupError> {
     let mut args = vec!["diff", "--no-ext-diff", "--no-textconv", "--find-renames"];
     args.extend_from_slice(options);
     args.extend([previous_head_sha, current_head_sha, "--"]);
-    let output = git(repo_path, &args).map_err(|_| diff_error())?;
-    if output.status.success() {
-        Ok(output)
-    } else {
-        Err(diff_error())
-    }
+    git_bounded_stdout(
+        repo_path,
+        &args,
+        MAX_INCREMENTAL_METADATA_BYTES,
+        IncrementalReviewSetupErrorCode::MetadataTooLarge,
+        "Incremental diff metadata exceeds the supported size limit.",
+    )
 }
 
 fn git_diff_patch(
@@ -268,8 +271,9 @@ fn git_diff_patch(
     previous_head_sha: &str,
     current_head_sha: &str,
 ) -> Result<Vec<u8>, IncrementalReviewSetupError> {
-    let mut child = git_command(repo_path)
-        .args([
+    git_bounded_stdout(
+        repo_path,
+        &[
             "diff",
             "--no-ext-diff",
             "--no-textconv",
@@ -279,7 +283,22 @@ fn git_diff_patch(
             previous_head_sha,
             current_head_sha,
             "--",
-        ])
+        ],
+        MAX_INCREMENTAL_PATCH_BYTES,
+        IncrementalReviewSetupErrorCode::PatchTooLarge,
+        "Incremental patch exceeds the supported size limit.",
+    )
+}
+
+fn git_bounded_stdout(
+    repo_path: &Path,
+    args: &[&str],
+    max_bytes: usize,
+    size_error_code: IncrementalReviewSetupErrorCode,
+    size_error_message: &'static str,
+) -> Result<Vec<u8>, IncrementalReviewSetupError> {
+    let mut child = git_command(repo_path)
+        .args(args)
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .spawn()
@@ -289,17 +308,13 @@ fn git_diff_patch(
         .stdout
         .take()
         .ok_or_else(diff_error)?
-        .take((MAX_INCREMENTAL_PATCH_BYTES + 1) as u64)
+        .take((max_bytes + 1) as u64)
         .read_to_end(&mut patch)
         .map_err(|_| diff_error())?;
-    if patch.len() > MAX_INCREMENTAL_PATCH_BYTES {
+    if patch.len() > max_bytes {
         let _ = child.kill();
         let _ = child.wait();
-        return Err(setup_error(
-            IncrementalReviewSetupErrorCode::PatchTooLarge,
-            None,
-            "Incremental patch exceeds the supported size limit.",
-        ));
+        return Err(setup_error(size_error_code, None, size_error_message));
     }
     let status = child.wait().map_err(|_| diff_error())?;
     if !status.success() {
@@ -319,6 +334,10 @@ fn git_command(repo_path: &Path) -> Command {
         .arg("core.quotePath=true")
         .arg("-c")
         .arg("diff.renames=true")
+        .arg("-c")
+        .arg("color.ui=false")
+        .arg("-c")
+        .arg("color.diff=false")
         .arg("-C")
         .arg(repo_path);
     command
@@ -707,15 +726,37 @@ mod tests {
     }
 
     #[test]
+    fn bounded_git_reader_reports_oversized_metadata() {
+        let (fixture, previous, current) = fixture_with_incremental_changes();
+        let error = git_bounded_stdout(
+            &fixture.path,
+            &["diff", "--name-status", "-z", &previous, &current, "--"],
+            1,
+            IncrementalReviewSetupErrorCode::MetadataTooLarge,
+            "metadata too large",
+        )
+        .expect_err("bounded metadata");
+
+        assert_eq!(
+            error.code,
+            IncrementalReviewSetupErrorCode::MetadataTooLarge
+        );
+    }
+
+    #[test]
     fn scope_construction_does_not_modify_repository_state() {
         let (fixture, previous, current) = fixture_with_incremental_changes();
         run_git(&fixture.path, &["config", "diff.renames", "copies"]);
+        run_git(&fixture.path, &["config", "color.ui", "always"]);
+        run_git(&fixture.path, &["config", "color.diff", "always"]);
         fixture.write("working-tree.txt", b"leave me alone\n");
         let before_head = git_stdout(&fixture.path, &["rev-parse", "HEAD"]);
         let before_status = git_stdout(&fixture.path, &["status", "--porcelain=v1"]);
 
-        build_incremental_review_scope(&fixture.path, &previous, &current).expect("scope");
+        let scope =
+            build_incremental_review_scope(&fixture.path, &previous, &current).expect("scope");
 
+        assert!(!scope.patch.contains('\u{1b}'));
         assert_eq!(
             git_stdout(&fixture.path, &["rev-parse", "HEAD"]),
             before_head
