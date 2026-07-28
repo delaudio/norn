@@ -206,6 +206,13 @@ struct StoredReviewStore {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
+struct StoredReviewMetricsEnvelope {
+    #[serde(default)]
+    review_runs: Vec<serde_json::Value>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct StoredReviewThread {
     id: String,
     title: String,
@@ -304,15 +311,16 @@ fn migrate(conn: &mut Connection) -> Result<(), String> {
         );
 
         CREATE TABLE IF NOT EXISTS ai_review_stores (
-          review_key TEXT PRIMARY KEY,
           tenant_id TEXT NOT NULL DEFAULT 'local',
+          review_key TEXT NOT NULL,
           workspace TEXT NOT NULL,
           repo TEXT NOT NULL,
           pr_id INTEGER NOT NULL,
           store_json TEXT NOT NULL,
           migrated_from_json INTEGER NOT NULL DEFAULT 0,
           created_at TEXT NOT NULL,
-          updated_at TEXT NOT NULL
+          updated_at TEXT NOT NULL,
+          PRIMARY KEY (tenant_id, review_key)
         );
 
         CREATE INDEX IF NOT EXISTS idx_ai_review_stores_repo
@@ -717,9 +725,57 @@ fn migrate(conn: &mut Connection) -> Result<(), String> {
             )
             .map_err(|error| error.to_string())?;
     }
+    let has_tenant_scoped_key = migration
+        .prepare("PRAGMA table_info(ai_review_stores)")
+        .and_then(|mut statement| {
+            let columns = statement
+                .query_map([], |row| {
+                    Ok((row.get::<_, String>(1)?, row.get::<_, i64>(5)?))
+                })?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            Ok(columns
+                .iter()
+                .any(|(name, position)| name == "tenant_id" && *position == 1)
+                && columns
+                    .iter()
+                    .any(|(name, position)| name == "review_key" && *position == 2))
+        })
+        .map_err(|error| error.to_string())?;
+    if !has_tenant_scoped_key {
+        migration
+            .execute_batch(
+                r#"
+                CREATE TABLE ai_review_stores_v8 (
+                  tenant_id TEXT NOT NULL,
+                  review_key TEXT NOT NULL,
+                  workspace TEXT NOT NULL,
+                  repo TEXT NOT NULL,
+                  pr_id INTEGER NOT NULL,
+                  store_json TEXT NOT NULL,
+                  migrated_from_json INTEGER NOT NULL DEFAULT 0,
+                  created_at TEXT NOT NULL,
+                  updated_at TEXT NOT NULL,
+                  PRIMARY KEY (tenant_id, review_key)
+                );
+                INSERT INTO ai_review_stores_v8 (
+                  tenant_id, review_key, workspace, repo, pr_id, store_json,
+                  migrated_from_json, created_at, updated_at
+                )
+                SELECT
+                  tenant_id, review_key, workspace, repo, pr_id, store_json,
+                  migrated_from_json, created_at, updated_at
+                FROM ai_review_stores;
+                DROP TABLE ai_review_stores;
+                ALTER TABLE ai_review_stores_v8 RENAME TO ai_review_stores;
+                "#,
+            )
+            .map_err(|error| error.to_string())?;
+    }
     migration
         .execute_batch(
             r#"
+            CREATE INDEX IF NOT EXISTS idx_ai_review_stores_repo
+              ON ai_review_stores(workspace, repo, pr_id);
             CREATE INDEX IF NOT EXISTS idx_ai_review_stores_tenant_repo
               ON ai_review_stores(tenant_id, workspace, repo, pr_id);
             "#,
@@ -1208,15 +1264,26 @@ pub fn review_effectiveness_metrics(
     for row in store_rows {
         let (tenant_id, workspace, repo, pr_id, store_json) =
             row.map_err(|error| error.to_string())?;
-        let store = serde_json::from_str::<StoredReviewStore>(&store_json).map_err(|error| {
-            format!("Could not parse stored review data for {workspace}/{repo}: {error}")
-        })?;
+        let store =
+            serde_json::from_str::<StoredReviewMetricsEnvelope>(&store_json).map_err(|error| {
+                format!("Could not parse stored review data for {workspace}/{repo}: {error}")
+            })?;
         let pr_id = u64::try_from(pr_id)
             .map_err(|_| format!("Stored pull-request id for {workspace}/{repo} is invalid."))?;
-        for run in store.review_runs {
-            if run.id.is_empty() {
-                continue;
+        for run_value in store.review_runs {
+            match run_value.get("id") {
+                None | Some(serde_json::Value::Null) => continue,
+                Some(serde_json::Value::String(id)) if id.is_empty() => continue,
+                Some(serde_json::Value::String(_)) => {}
+                Some(_) => {
+                    return Err(format!(
+                        "Stored review run for {workspace}/{repo} has a non-string id."
+                    ))
+                }
             }
+            let run = serde_json::from_value::<StoredReviewRun>(run_value).map_err(|error| {
+                format!("Could not parse structured review run for {workspace}/{repo}: {error}")
+            })?;
             runs.push(stored_review_run_to_metrics(
                 tenant_id.clone(),
                 workspace.clone(),
@@ -2949,7 +3016,7 @@ pub fn load_review_json(workspace: &str, repo: &str, id: u32) -> Result<Option<S
     let key = review_key(workspace, repo, id);
     let db_json = conn
         .query_row(
-            "SELECT store_json FROM ai_review_stores WHERE review_key = ?1",
+            "SELECT store_json FROM ai_review_stores WHERE tenant_id = 'local' AND review_key = ?1",
             params![key],
             |row| row.get::<_, String>(0),
         )
@@ -2993,20 +3060,6 @@ fn save_review_json_for_tenant(
     validate_audit_identifier("tenantId", tenant_id).map_err(|error| error.to_string())?;
     let conn = open()?;
     let key = review_key(workspace, repo, id);
-    let existing_tenant = conn
-        .query_row(
-            "SELECT tenant_id FROM ai_review_stores WHERE review_key = ?1",
-            params![&key],
-            |row| row.get::<_, String>(0),
-        )
-        .optional()
-        .map_err(|error| error.to_string())?;
-    if existing_tenant
-        .as_deref()
-        .is_some_and(|existing| existing != tenant_id)
-    {
-        return Err("Review storage identity is already assigned to another tenant.".to_string());
-    }
     let now = now_ms();
     conn.execute(
         r#"
@@ -3015,7 +3068,7 @@ fn save_review_json_for_tenant(
           migrated_from_json, created_at, updated_at
         )
         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?8)
-        ON CONFLICT(review_key) DO UPDATE SET
+        ON CONFLICT(tenant_id, review_key) DO UPDATE SET
           store_json = excluded.store_json,
           migrated_from_json = ai_review_stores.migrated_from_json OR excluded.migrated_from_json,
           updated_at = excluded.updated_at
@@ -3039,7 +3092,7 @@ pub fn delete_review(workspace: &str, repo: &str, id: u32) -> Result<(), String>
     let conn = open()?;
     let key = review_key(workspace, repo, id);
     conn.execute(
-        "DELETE FROM ai_review_stores WHERE review_key = ?1",
+        "DELETE FROM ai_review_stores WHERE tenant_id = 'local' AND review_key = ?1",
         params![key],
     )
     .map_err(|e| e.to_string())?;
@@ -3052,11 +3105,11 @@ pub fn delete_review(workspace: &str, repo: &str, id: u32) -> Result<(), String>
 pub fn cleanup_stale_reviews(keep_keys: &[String]) -> Result<(), String> {
     let conn = open()?;
     if keep_keys.is_empty() {
-        conn.execute("DELETE FROM ai_review_stores", [])
+        conn.execute("DELETE FROM ai_review_stores WHERE tenant_id = 'local'", [])
             .map_err(|e| e.to_string())?;
     } else {
         let mut stmt = conn
-            .prepare("SELECT review_key FROM ai_review_stores")
+            .prepare("SELECT review_key FROM ai_review_stores WHERE tenant_id = 'local'")
             .map_err(|e| e.to_string())?;
         let rows = stmt
             .query_map([], |row| row.get::<_, String>(0))
@@ -3065,7 +3118,7 @@ pub fn cleanup_stale_reviews(keep_keys: &[String]) -> Result<(), String> {
             let key = row.map_err(|e| e.to_string())?;
             if !keep_keys.contains(&key) {
                 conn.execute(
-                    "DELETE FROM ai_review_stores WHERE review_key = ?1",
+                    "DELETE FROM ai_review_stores WHERE tenant_id = 'local' AND review_key = ?1",
                     params![key],
                 )
                 .map_err(|e| e.to_string())?;
@@ -3215,6 +3268,7 @@ pub fn list_recent_review_jobs(limit: u32) -> Result<Vec<ReviewJob>, String> {
             r#"
             SELECT review_key, workspace, repo, pr_id, store_json, created_at, updated_at
             FROM ai_review_stores
+            WHERE tenant_id = 'local'
             ORDER BY CAST(updated_at AS INTEGER) DESC
             LIMIT ?1
             "#,
@@ -4417,7 +4471,7 @@ mod tests {
                 false,
             )
             .expect("save payments run");
-            let cross_tenant_overwrite = save_review_json_for_tenant(
+            save_review_json_for_tenant(
                 "tenant-other",
                 "acme",
                 "payments",
@@ -4425,8 +4479,18 @@ mod tests {
                 &store_json("run-cross-tenant", 1_100, 1_600),
                 false,
             )
-            .expect_err("review identity must remain tenant scoped");
-            assert!(cross_tenant_overwrite.contains("another tenant"));
+            .expect("same repository identity is isolated by tenant");
+            save_review_json(
+                "acme",
+                "payments",
+                42,
+                &store_json("run-local", 1_200, 1_700),
+            )
+            .expect("save matching local review identity");
+            delete_review("acme", "payments", 42).expect("delete local review only");
+            assert!(load_review_json("acme", "payments", 42)
+                .expect("load deleted local review")
+                .is_none());
             save_review_json_for_tenant(
                 "tenant-acme",
                 "acme",
@@ -4474,8 +4538,8 @@ mod tests {
                 ..ReviewEffectivenessFilter::default()
             })
             .expect("aggregate other tenant");
-            assert_eq!(other.summary.review_count, 1);
-            assert_eq!(other.summary.finding_count, 1);
+            assert_eq!(other.summary.review_count, 2);
+            assert_eq!(other.summary.finding_count, 2);
             assert_eq!(other.summary.feedback.findings_with_feedback, 0);
         });
     }
@@ -4551,6 +4615,10 @@ mod tests {
                 load_review_json("acme", "payments", 42).expect("load preserved findings"),
                 Some(r#"{"reviewRuns":[{"findings":[{"title":"preserved"}]}]}"#.to_string())
             );
+            let legacy_metrics = review_effectiveness_metrics(ReviewEffectivenessFilter::default())
+                .expect("id-less legacy runs are ignored");
+            assert_eq!(legacy_metrics.summary.review_count, 0);
+            assert_eq!(legacy_metrics.summary.finding_count, 0);
             assert_eq!(
                 get_review_job("job-existing")
                     .expect("load preserved job")

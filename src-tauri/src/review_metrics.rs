@@ -1,6 +1,6 @@
 //! Deterministic review-effectiveness aggregation over stored review runs and feedback.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fmt;
 
 use serde::{Deserialize, Serialize};
@@ -260,12 +260,14 @@ pub fn aggregate_review_effectiveness(
     filter: ReviewEffectivenessFilter,
 ) -> Result<ReviewEffectivenessReport, ReviewEffectivenessError> {
     validate_filter(&filter)?;
-    for run in runs.iter().filter(|run| run.tenant_id == filter.tenant_id) {
+    for run in runs.iter().filter(|run| {
+        run.tenant_id == filter.tenant_id && run_matches_repository_filter(run, &filter)
+    }) {
         validate_run(run)?;
     }
     for event in feedback_events
         .iter()
-        .filter(|event| event.identity.tenant_id == filter.tenant_id)
+        .filter(|event| feedback_matches_filter(event, &filter))
     {
         event
             .validate()
@@ -274,7 +276,9 @@ pub fn aggregate_review_effectiveness(
 
     let tenant_runs = runs
         .iter()
-        .filter(|run| run.tenant_id == filter.tenant_id)
+        .filter(|run| {
+            run.tenant_id == filter.tenant_id && run_matches_repository_filter(run, &filter)
+        })
         .collect::<Vec<_>>();
     let latest_feedback = latest_feedback_by_finding(feedback_events, &filter)?;
     let summary = aggregate_summary(&tenant_runs, &latest_feedback, &filter, None);
@@ -433,14 +437,21 @@ fn validate_run(run: &ReviewEffectivenessRun) -> Result<(), ReviewEffectivenessE
             "timestamps must be non-negative and finish at or after creation".to_string(),
         ));
     }
-    if run
-        .findings
-        .iter()
-        .any(|finding| finding.fingerprint.trim().is_empty())
-    {
-        return Err(ReviewEffectivenessError::InvalidRun(
-            "finding fingerprints must not be empty".to_string(),
-        ));
+    let mut fingerprints = HashSet::new();
+    for finding in &run.findings {
+        if finding.fingerprint.trim().is_empty()
+            || finding.fingerprint != finding.fingerprint.trim()
+        {
+            return Err(ReviewEffectivenessError::InvalidRun(
+                "finding fingerprints must be non-empty without surrounding whitespace".to_string(),
+            ));
+        }
+        if !fingerprints.insert(finding.fingerprint.as_str()) {
+            return Err(ReviewEffectivenessError::InvalidRun(format!(
+                "finding fingerprint `{}` occurs more than once in run `{}`",
+                finding.fingerprint, run.run_id
+            )));
+        }
     }
     Ok(())
 }
@@ -452,7 +463,7 @@ fn latest_feedback_by_finding(
     let mut latest = HashMap::<FindingKey, (&ReviewFindingFeedbackEvent, i64)>::new();
     for event in events
         .iter()
-        .filter(|event| event.identity.tenant_id == filter.tenant_id)
+        .filter(|event| feedback_matches_filter(event, filter))
     {
         let occurred_at = event.occurred_at.parse::<i64>().map_err(|_| {
             ReviewEffectivenessError::InvalidFeedback(
@@ -479,6 +490,24 @@ fn latest_feedback_by_finding(
         .into_iter()
         .map(|(key, (event, _))| (key, event.action))
         .collect())
+}
+
+fn feedback_matches_filter(
+    event: &ReviewFindingFeedbackEvent,
+    filter: &ReviewEffectivenessFilter,
+) -> bool {
+    event.identity.tenant_id == filter.tenant_id
+        && filter
+            .provider
+            .is_none_or(|provider| event.identity.provider == provider)
+        && filter
+            .workspace
+            .as_deref()
+            .is_none_or(|workspace| event.identity.workspace == workspace)
+        && filter
+            .repo
+            .as_deref()
+            .is_none_or(|repo| event.identity.repo == repo)
 }
 
 fn run_matches_repository_filter(
@@ -877,7 +906,7 @@ mod tests {
     }
 
     #[test]
-    fn malformed_other_tenant_data_cannot_affect_the_selected_tenant() {
+    fn malformed_out_of_scope_data_cannot_affect_the_selected_report() {
         let mut other_run = run(
             "tenant-other",
             "payments",
@@ -898,12 +927,34 @@ mod tests {
             1_600,
         );
         other_feedback.actor_id.clear();
+        let mut other_repo_run = run(
+            "tenant-acme",
+            "catalog",
+            7,
+            "run-catalog",
+            1_000,
+            1_500,
+            vec![],
+        );
+        other_repo_run.run_id = " invalid ".to_string();
+        let mut other_repo_feedback = feedback(
+            "tenant-acme",
+            "catalog",
+            7,
+            "run-catalog",
+            "finding-catalog",
+            ReviewFindingFeedbackAction::Accepted,
+            1_600,
+        );
+        other_repo_feedback.actor_id.clear();
 
         let report = aggregate_review_effectiveness(
-            &[other_run],
-            &[other_feedback],
+            &[other_run, other_repo_run],
+            &[other_feedback, other_repo_feedback],
             ReviewEffectivenessFilter {
                 tenant_id: "tenant-acme".to_string(),
+                workspace: Some("acme".to_string()),
+                repo: Some("payments".to_string()),
                 ..ReviewEffectivenessFilter::default()
             },
         )
@@ -911,5 +962,41 @@ mod tests {
 
         assert_eq!(report.summary.review_count, 0);
         assert!(report.repositories.is_empty());
+    }
+
+    #[test]
+    fn duplicate_fingerprints_in_one_run_are_rejected() {
+        let duplicate = run(
+            "tenant-acme",
+            "payments",
+            42,
+            "run-duplicate",
+            1_000,
+            1_500,
+            vec![
+                (
+                    "finding-duplicate",
+                    ReviewMetricSeverity::High,
+                    ReviewMetricCategory::Bug,
+                ),
+                (
+                    "finding-duplicate",
+                    ReviewMetricSeverity::Low,
+                    ReviewMetricCategory::Docs,
+                ),
+            ],
+        );
+
+        let error = aggregate_review_effectiveness(
+            &[duplicate],
+            &[],
+            ReviewEffectivenessFilter {
+                tenant_id: "tenant-acme".to_string(),
+                ..ReviewEffectivenessFilter::default()
+            },
+        )
+        .expect_err("duplicate fingerprints are ambiguous");
+
+        assert!(error.to_string().contains("occurs more than once"));
     }
 }

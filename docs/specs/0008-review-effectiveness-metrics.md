@@ -35,8 +35,9 @@ timestamps in milliseconds. The time range selects successful review runs by
 completion time.
 
 Tenant scope is mandatory at the storage boundary. A report never reads runs or
-feedback from another tenant. Repository rows are ordered by provider,
-workspace, and repository; count rows are ordered by their stable key.
+feedback from another tenant, and identical repository/pull-request keys may
+coexist in separate tenants. Repository rows are ordered by provider, workspace,
+and repository; count rows are ordered by their stable key.
 
 ## Review and finding counts
 
@@ -108,8 +109,10 @@ infer acceptance or rejection.
 
 Legacy stores without structured review-run ids do not become synthetic metric
 runs. Malformed structured runs, unsupported providers, invalid timestamps,
-unknown severity/category values, and malformed feedback fail the report
-instead of silently changing its totals.
+unknown severity/category values, duplicate fingerprints within one run, and
+malformed feedback fail the report instead of silently changing its totals.
+Malformed data outside the selected tenant/provider/repository scope cannot
+affect the requested report.
 
 ## JSON shape
 
