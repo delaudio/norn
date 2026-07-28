@@ -1026,7 +1026,9 @@ fn merge_policy_pack(
         target.suppressions.extend(pack_policy.suppressions);
     }
 
-    config.profiles.extend(pack.profiles);
+    for (id, profile) in pack.profiles {
+        config.profiles.entry(id).or_insert(profile);
+    }
 
     for (id, analyzer) in pack.analyzers {
         config.analyzers.entry(id).or_insert(analyzer);

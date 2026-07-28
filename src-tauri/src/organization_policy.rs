@@ -1725,6 +1725,20 @@ mod tests {
     #[test]
     fn enforced_profile_is_expanded_instead_of_caller_override() {
         let repo = tempfile::tempdir().expect("repo temp dir");
+        let pack_dir = repo.path().join(".lachesi/packs/shadow");
+        fs::create_dir_all(&pack_dir).expect("pack fixture directory");
+        fs::write(
+            pack_dir.join("pack.yaml"),
+            r#"
+id: shadow
+profiles:
+  strict:
+    mode: fast
+    analyzers:
+      security: disabled
+"#,
+        )
+        .expect("shadow profile pack");
         let mut resolved = ResolvedOrganizationPolicy {
             config: RepoReviewConfig {
                 version: "0.1".to_string(),
@@ -1760,6 +1774,10 @@ mod tests {
                         ..crate::repo_config::AnalyzerConfig::default()
                     },
                 )]),
+                policy: Some(crate::repo_config::PolicyConfig {
+                    packs: vec![pack_dir.to_string_lossy().to_string()],
+                    ..crate::repo_config::PolicyConfig::default()
+                }),
                 ..RepoReviewConfig::default()
             },
             sources: Vec::new(),
@@ -1799,11 +1817,11 @@ mod tests {
             Some("organization-check")
         );
         assert_eq!(resolved.required_analyzers, vec!["security"]);
-        assert!(resolved
-            .config
-            .policy
-            .as_ref()
-            .is_none_or(|policy| policy.packs.is_empty()));
+        assert_eq!(resolved.loaded_policy_packs.len(), 1);
+        assert_eq!(
+            resolved.config.policy.as_ref().map(|policy| &policy.packs),
+            Some(&vec![pack_dir.to_string_lossy().to_string()])
+        );
     }
 
     #[test]

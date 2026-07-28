@@ -11,7 +11,7 @@ use crate::config::{self, AiProvider, ReviewProvider};
 use crate::local_repo;
 use crate::organization_policy::{
     resolve_configured_organization_policy, AdministrativePolicyAuditContext,
-    SqliteOrganizationPolicyAuditSink,
+    OrganizationPolicyAuditSink, SqliteOrganizationPolicyAuditSink,
 };
 use crate::repo_config::{self, ReviewSeverity};
 use crate::review_event::PullRequestReviewEventProvider;
@@ -163,7 +163,6 @@ pub fn run(request: HeadlessReviewRequest) -> Result<HeadlessReviewExecution, He
         repo_config::load_from_repo_path_with_profile(&repo_path, request.profile.as_deref())
             .map_err(HeadlessReviewError::config)?;
     ensure_config_valid(&config_result)?;
-    let mut resolved = resolve_target(&request, &repo_path)?;
     let mut policy_sources = Vec::new();
     let mut required_policy_analyzers = Vec::new();
     let mut resolved_policy_config = None;
@@ -171,24 +170,10 @@ pub fn run(request: HeadlessReviewRequest) -> Result<HeadlessReviewExecution, He
         .duration_since(std::time::UNIX_EPOCH)
         .map(|duration| duration.as_millis() as u64)
         .unwrap_or_default();
-    let audit = SqliteOrganizationPolicyAuditSink {
-        context: AdministrativePolicyAuditContext {
-            provider: match resolved.provider {
-                ReviewProvider::Github => PullRequestReviewEventProvider::Github,
-                ReviewProvider::Bitbucket => PullRequestReviewEventProvider::Bitbucket,
-            },
-            workspace: resolved.workspace.clone(),
-            repository: resolved.repo.clone(),
-            pull_request_id: (resolved.pr_id > 0).then_some(u64::from(resolved.pr_id)),
-            actor_kind: AdministrativeAuditActorKind::System,
-            actor_id: "system:headless-review".to_string(),
-            correlation_id: format!("correlation:headless-{}-{resolved_at_ms}", resolved.pr_id),
-        },
-    };
     if let Some(organization_policy) = resolve_configured_organization_policy(
         &repo_path,
         request.profile.as_deref(),
-        Some(&audit),
+        None,
         resolved_at_ms,
     )
     .map_err(|error| HeadlessReviewError::config(error.to_string()))?
@@ -203,6 +188,28 @@ pub fn run(request: HeadlessReviewRequest) -> Result<HeadlessReviewExecution, He
         policy_sources = organization_policy.sources;
     }
     ensure_config_valid(&config_result)?;
+    let mut resolved = resolve_target(&request, &repo_path)?;
+    if !policy_sources.is_empty() {
+        let audit = SqliteOrganizationPolicyAuditSink {
+            context: AdministrativePolicyAuditContext {
+                provider: match resolved.provider {
+                    ReviewProvider::Github => PullRequestReviewEventProvider::Github,
+                    ReviewProvider::Bitbucket => PullRequestReviewEventProvider::Bitbucket,
+                },
+                workspace: resolved.workspace.clone(),
+                repository: resolved.repo.clone(),
+                pull_request_id: (resolved.pr_id > 0).then_some(u64::from(resolved.pr_id)),
+                actor_kind: AdministrativeAuditActorKind::System,
+                actor_id: "system:headless-review".to_string(),
+                correlation_id: format!("correlation:headless-{}-{resolved_at_ms}", resolved.pr_id),
+            },
+        };
+        for source in &policy_sources {
+            audit
+                .record(source, resolved_at_ms)
+                .map_err(HeadlessReviewError::config)?;
+        }
+    }
     resolved.warnings.extend(
         config_result
             .warnings

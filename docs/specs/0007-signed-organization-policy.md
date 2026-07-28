@@ -69,7 +69,8 @@ expansion instead of any caller-supplied profile override. The selected profile
 must be defined in the signed `enforced.profiles` map, and enforced profile and
 analyzer definitions replace merged repository definitions rather than
 inheriting fields from them. Resolution fails closed if that signed profile
-does not exist.
+does not exist. Repository policy packs may add missing profiles but cannot
+replace an existing signed enforced profile.
 
 This ordering lets a repository specialize organization defaults, lets a
 developer apply local non-secret configuration, and guarantees that mandatory
@@ -144,8 +145,9 @@ the selected profile and source versions on the review run.
 An explicit repository `.lachesi.yaml` must first pass its standalone,
 versioned configuration contract before it participates as a merge layer;
 organization defaults cannot supply a missing or invalid repository version.
-Headless review returns those local configuration errors before resolving a
-remote pull-request target.
+Headless review returns local configuration or organization-policy resolution
+errors before resolving a remote pull-request target. Administrative audit
+recording is deferred until target identity is available.
 Normal desktop and TUI review continues to skip analyzer execution because
 evidence is expected upstream. An explicitly enabled and `required` analyzer
 in resolved organization policy is the exception and must run successfully;
