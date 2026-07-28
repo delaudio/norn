@@ -20,6 +20,7 @@ import type {
   RepositoryFileContent,
   RepositoryFileDiff,
   RepositoryFileEntry,
+  ReviewEffectivenessFilter,
   ReviewFinding,
   ReviewFindingPublication,
   ReviewFindingPublicationEvent,
@@ -30,12 +31,17 @@ import {
   mockComments,
   mockConfig,
   mockDiffstat,
+  mockEmptyReviewEffectivenessSummary,
   mockPullRequestDetail,
   mockPullRequests,
   mockRawDiff,
+  mockReviewEffectivenessLast7DaysReport,
+  mockReviewEffectivenessReport,
 } from "./fixtures";
 
 type Handler = (args?: Record<string, unknown>) => unknown;
+
+const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
 
 interface SavedReview {
   content: string;
@@ -1194,6 +1200,32 @@ export const mockHandlers: Record<string, Handler> = {
   },
 
   list_closed_pr_metrics: () => ({ metrics: mockClosedPrMetrics, syncedCount: 0 }),
+  get_review_effectiveness_metrics: (args) => {
+    const filter = (args?.filter ??
+      mockReviewEffectivenessReport.filter) as ReviewEffectivenessFilter;
+    const rangeMs =
+      filter.fromMs == null || filter.toMs == null ? null : filter.toMs - filter.fromMs;
+    const fixture =
+      rangeMs != null && rangeMs <= SEVEN_DAYS_MS
+        ? mockReviewEffectivenessLast7DaysReport
+        : mockReviewEffectivenessReport;
+    const repositories = fixture.repositories.filter(
+      (repository) =>
+        (filter.provider == null || repository.provider === filter.provider) &&
+        (filter.workspace == null || repository.workspace === filter.workspace) &&
+        (filter.repo == null || repository.repo === filter.repo),
+    );
+    const summary =
+      repositories.length === fixture.repositories.length
+        ? fixture.summary
+        : (repositories[0]?.summary ?? mockEmptyReviewEffectivenessSummary);
+    return {
+      ...fixture,
+      filter,
+      summary,
+      repositories,
+    };
+  },
   sync_closed_pr_metrics: (args) => {
     const updatedAfter = String(
       (args?.options as { updatedAfter?: string } | undefined)?.updatedAfter ?? "",

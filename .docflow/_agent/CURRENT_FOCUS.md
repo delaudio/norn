@@ -8,15 +8,15 @@ If status files and git disagree, git is authoritative; correct this file.
 
 ## Active state
 
-- **Branch:** `agent/tui-image-diff`
-- **Active item:** GitHub issue #127 and `.docflow/plan/todo/0005-terminal-image-diffs.md`
+- **Branch:** `agent/review-effectiveness-dashboard`
+- **Active item:** GitHub issue #101 and `.docflow/plan/todo/0004-shared-review-service-program.md`
 - **Blockers:** none; use the available SSH key for signed commits.
-- **Uncommitted work:** verify and review bounded terminal image diff rendering.
+- **Uncommitted work:** publish and merge the reviewed dashboard branch.
 
 ## Last shipped
 
-`dfca54e` - resolve signed organization policy through PR #128.
+`7feaa40` - ship review effectiveness metrics through PR #131.
 
 ## Next item
 
-Complete GitHub issue #127, then resume GitHub issue #100.
+Complete GitHub issue #101, then continue the shared review service program.

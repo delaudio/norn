@@ -3,6 +3,7 @@ import type {
   AiReviewStore,
   FindingPublicationRequest,
   FindingReconciliationSummary,
+  ReviewEffectivenessReport,
 } from "@/types";
 import { mockHandlers, publishMockReviewFinding } from "./mock-handlers";
 
@@ -160,5 +161,81 @@ describe("mock structured review runs", () => {
     });
 
     mockHandlers.delete_saved_review(target);
+  });
+});
+
+describe("mock review effectiveness metrics", () => {
+  it("echoes the filter and returns the selected repository summary", () => {
+    const toMs = 2_000_000_000;
+    const report = mockHandlers.get_review_effectiveness_metrics({
+      filter: {
+        tenantId: "local",
+        provider: "bitbucket",
+        workspace: "example-workspace",
+        repo: "backend-api",
+        fromMs: toMs - 30 * 24 * 60 * 60 * 1000,
+        toMs,
+      },
+    }) as ReviewEffectivenessReport;
+
+    expect(report.filter).toEqual({
+      tenantId: "local",
+      provider: "bitbucket",
+      workspace: "example-workspace",
+      repo: "backend-api",
+      fromMs: toMs - 30 * 24 * 60 * 60 * 1000,
+      toMs,
+    });
+    expect(report.repositories).toHaveLength(1);
+    expect(report.repositories[0]).toMatchObject({
+      workspace: "example-workspace",
+      repo: "backend-api",
+    });
+    expect(report.summary).toEqual(report.repositories[0]?.summary);
+  });
+
+  it("returns an empty scoped report when no fixture repository matches", () => {
+    const report = mockHandlers.get_review_effectiveness_metrics({
+      filter: {
+        tenantId: "local",
+        provider: "bitbucket",
+        workspace: "example-workspace",
+        repo: "missing-repository",
+      },
+    }) as ReviewEffectivenessReport;
+
+    expect(report.filter.repo).toBe("missing-repository");
+    expect(report.repositories).toEqual([]);
+    expect(report.summary).toMatchObject({
+      reviewCount: 0,
+      findingCount: 0,
+    });
+    expect(report.summary.feedback.acceptanceRate.basisPoints).toBeNull();
+    expect(report.summary.timeToFirstReview.medianMs).toBeNull();
+  });
+
+  it("uses a distinct precomputed report for the seven-day range", () => {
+    const toMs = 2_000_000_000;
+    const sevenDays = mockHandlers.get_review_effectiveness_metrics({
+      filter: {
+        tenantId: "local",
+        provider: "bitbucket",
+        fromMs: toMs - 7 * 24 * 60 * 60 * 1000,
+        toMs,
+      },
+    }) as ReviewEffectivenessReport;
+    const thirtyDays = mockHandlers.get_review_effectiveness_metrics({
+      filter: {
+        tenantId: "local",
+        provider: "bitbucket",
+        fromMs: toMs - 30 * 24 * 60 * 60 * 1000,
+        toMs,
+      },
+    }) as ReviewEffectivenessReport;
+
+    expect(sevenDays.summary.reviewCount).toBe(31);
+    expect(thirtyDays.summary.reviewCount).toBe(48);
+    expect(sevenDays.repositories).toHaveLength(1);
+    expect(thirtyDays.repositories).toHaveLength(2);
   });
 });
