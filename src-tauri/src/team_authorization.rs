@@ -234,15 +234,41 @@ impl TeamActor {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct TeamRepositoryScope {
-    pub organization_id: String,
-    pub team_id: String,
+pub struct TeamRepositoryTarget {
     pub provider: PullRequestReviewEventProvider,
     pub workspace: String,
     pub repo: String,
 }
 
+/// Repository ownership resolved from a trusted enrollment or installation store.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TeamRepositoryScope {
+    organization_id: String,
+    team_id: String,
+    provider: PullRequestReviewEventProvider,
+    workspace: String,
+    repo: String,
+}
+
 impl TeamRepositoryScope {
+    pub fn from_enrollment(
+        organization_id: String,
+        team_id: String,
+        provider: PullRequestReviewEventProvider,
+        workspace: String,
+        repo: String,
+    ) -> Result<Self, TeamAuthorizationError> {
+        let scope = Self {
+            organization_id,
+            team_id,
+            provider,
+            workspace,
+            repo,
+        };
+        validate_repository_scope(&scope)?;
+        Ok(scope)
+    }
+
     pub fn local(provider: PullRequestReviewEventProvider, workspace: &str, repo: &str) -> Self {
         Self {
             organization_id: "local".to_string(),
@@ -286,7 +312,7 @@ pub struct TeamAuthorizationRequest {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub team: Option<TeamIdentity>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub repository: Option<TeamRepositoryScope>,
+    pub repository: Option<TeamRepositoryTarget>,
     pub operation: TeamOperation,
 }
 
@@ -300,6 +326,7 @@ pub enum TeamAuthorizationDeniedReason {
     TeamMismatch,
     TeamMembershipRequired,
     RepositoryScopeRequired,
+    RepositoryMismatch,
 }
 
 impl TeamAuthorizationDeniedReason {
@@ -312,6 +339,7 @@ impl TeamAuthorizationDeniedReason {
             Self::TeamMismatch => "team-mismatch",
             Self::TeamMembershipRequired => "team-membership-required",
             Self::RepositoryScopeRequired => "repository-scope-required",
+            Self::RepositoryMismatch => "repository-mismatch",
         }
     }
 }
@@ -370,12 +398,23 @@ impl std::error::Error for TeamAuthorizationError {}
 pub fn authorize_team_operation(
     authenticated_actor: &TeamActor,
     audit_context: &TeamAuthorizationAuditContext,
+    enrolled_repository: Option<&TeamRepositoryScope>,
     request: &TeamAuthorizationRequest,
     audit_sink: &dyn TeamAuthorizationAuditSink,
 ) -> Result<TeamAuthorizationDecision, TeamAuthorizationError> {
-    validate_request(authenticated_actor, audit_context, request)?;
+    validate_request(
+        authenticated_actor,
+        audit_context,
+        enrolled_repository,
+        request,
+    )?;
     let permission = request.operation.required_permission();
-    let denial = denied_reason(authenticated_actor, request, permission);
+    let denial = denied_reason(
+        authenticated_actor,
+        enrolled_repository,
+        request,
+        permission,
+    );
     let Some(reason) = denial else {
         return Ok(TeamAuthorizationDecision::Allowed { permission });
     };
@@ -383,6 +422,7 @@ pub fn authorize_team_operation(
     let event = authorization_denied_audit_event(
         authenticated_actor,
         audit_context,
+        enrolled_repository,
         request,
         permission,
         reason,
@@ -398,16 +438,20 @@ pub fn authorize_team_operation(
 fn validate_request(
     authenticated_actor: &TeamActor,
     audit_context: &TeamAuthorizationAuditContext,
+    enrolled_repository: Option<&TeamRepositoryScope>,
     request: &TeamAuthorizationRequest,
 ) -> Result<(), TeamAuthorizationError> {
     validate_actor(authenticated_actor)?;
     validate_audit_context(audit_context)?;
+    if let Some(repository) = enrolled_repository {
+        validate_repository_scope(repository)?;
+    }
     for (field, value) in [("organization.id", request.organization.id.as_str())] {
         validate_identifier(field, value)
             .map_err(|_| TeamAuthorizationError::InvalidRequest(field))?;
     }
     if !request.operation.supports_repository_scope()
-        && (request.team.is_some() || request.repository.is_some())
+        && (request.team.is_some() || request.repository.is_some() || enrolled_repository.is_some())
     {
         return Err(TeamAuthorizationError::InvalidRequest("scope"));
     }
@@ -432,17 +476,30 @@ fn validate_request(
     }
     if let Some(repository) = &request.repository {
         for (field, value) in [
-            (
-                "repository.organizationId",
-                repository.organization_id.as_str(),
-            ),
-            ("repository.teamId", repository.team_id.as_str()),
             ("repository.workspace", repository.workspace.as_str()),
             ("repository.repo", repository.repo.as_str()),
         ] {
             validate_identifier(field, value)
                 .map_err(|_| TeamAuthorizationError::InvalidRequest(field))?;
         }
+    }
+    Ok(())
+}
+
+fn validate_repository_scope(
+    repository: &TeamRepositoryScope,
+) -> Result<(), TeamAuthorizationError> {
+    for (field, value) in [
+        (
+            "repositoryScope.organizationId",
+            repository.organization_id.as_str(),
+        ),
+        ("repositoryScope.teamId", repository.team_id.as_str()),
+        ("repositoryScope.workspace", repository.workspace.as_str()),
+        ("repositoryScope.repo", repository.repo.as_str()),
+    ] {
+        validate_identifier(field, value)
+            .map_err(|_| TeamAuthorizationError::InvalidRequest(field))?;
     }
     Ok(())
 }
@@ -494,6 +551,7 @@ fn validate_actor(actor: &TeamActor) -> Result<(), TeamAuthorizationError> {
 
 fn denied_reason(
     authenticated_actor: &TeamActor,
+    enrolled_repository: Option<&TeamRepositoryScope>,
     request: &TeamAuthorizationRequest,
     permission: TeamPermission,
 ) -> Option<TeamAuthorizationDeniedReason> {
@@ -501,7 +559,7 @@ fn denied_reason(
         return Some(TeamAuthorizationDeniedReason::OrganizationMismatch);
     }
     if request.operation.requires_repository()
-        && (request.team.is_none() || request.repository.is_none())
+        && (request.team.is_none() || request.repository.is_none() || enrolled_repository.is_none())
     {
         return Some(TeamAuthorizationDeniedReason::RepositoryScopeRequired);
     }
@@ -515,7 +573,7 @@ fn denied_reason(
             return Some(TeamAuthorizationDeniedReason::TeamMembershipRequired);
         }
     }
-    if let Some(repository) = &request.repository {
+    if let Some(repository) = enrolled_repository {
         if repository.organization_id != request.organization.id {
             return Some(TeamAuthorizationDeniedReason::OrganizationMismatch);
         }
@@ -525,6 +583,17 @@ fn denied_reason(
         if repository.team_id != team.id {
             return Some(TeamAuthorizationDeniedReason::TeamMismatch);
         }
+        let Some(target) = &request.repository else {
+            return Some(TeamAuthorizationDeniedReason::RepositoryScopeRequired);
+        };
+        if repository.provider != target.provider
+            || repository.workspace != target.workspace
+            || repository.repo != target.repo
+        {
+            return Some(TeamAuthorizationDeniedReason::RepositoryMismatch);
+        }
+    } else if request.repository.is_some() {
+        return Some(TeamAuthorizationDeniedReason::RepositoryScopeRequired);
     }
     if authenticated_actor.role == TeamRole::Unknown {
         return Some(TeamAuthorizationDeniedReason::UnknownRole);
@@ -539,6 +608,7 @@ fn denied_reason(
 fn authorization_denied_audit_event(
     authenticated_actor: &TeamActor,
     audit_context: &TeamAuthorizationAuditContext,
+    enrolled_repository: Option<&TeamRepositoryScope>,
     request: &TeamAuthorizationRequest,
     permission: TeamPermission,
     reason: TeamAuthorizationDeniedReason,
@@ -556,7 +626,7 @@ fn authorization_denied_audit_event(
             },
             id: authenticated_actor.id.clone(),
         },
-        repository: audited_repository(authenticated_actor, request),
+        repository: audited_repository(authenticated_actor, enrolled_repository, request),
         action: AdministrativeAuditAction::AuthorizationDenied,
         target: AdministrativeAuditTarget {
             kind: AdministrativeAuditTargetKind::AuthorizationRequest,
@@ -574,15 +644,20 @@ fn authorization_denied_audit_event(
 
 fn audited_repository(
     authenticated_actor: &TeamActor,
+    enrolled_repository: Option<&TeamRepositoryScope>,
     request: &TeamAuthorizationRequest,
 ) -> Option<AdministrativeAuditRepositoryScope> {
-    let repository = request.repository.as_ref()?;
+    let repository = enrolled_repository?;
+    let target = request.repository.as_ref()?;
     let team = request.team.as_ref()?;
     (request.operation.supports_repository_scope()
         && request.organization.id == authenticated_actor.organization_id
         && repository.organization_id == authenticated_actor.organization_id
         && team.organization_id == authenticated_actor.organization_id
-        && repository.team_id == team.id)
+        && repository.team_id == team.id
+        && repository.provider == target.provider
+        && repository.workspace == target.workspace
+        && repository.repo == target.repo)
         .then(|| AdministrativeAuditRepositoryScope {
             provider: repository.provider,
             workspace: repository.workspace.clone(),
@@ -651,6 +726,7 @@ mod tests {
     struct AuthorizationCase {
         actor: TeamActor,
         audit: TeamAuthorizationAuditContext,
+        repository_scope: Option<TeamRepositoryScope>,
         request: TeamAuthorizationRequest,
     }
 
@@ -672,7 +748,13 @@ mod tests {
         case: &AuthorizationCase,
         sink: &dyn TeamAuthorizationAuditSink,
     ) -> Result<TeamAuthorizationDecision, TeamAuthorizationError> {
-        authorize_team_operation(&case.actor, &case.audit, &case.request, sink)
+        authorize_team_operation(
+            &case.actor,
+            &case.audit,
+            case.repository_scope.as_ref(),
+            &case.request,
+            sink,
+        )
     }
 
     fn request(role: TeamRole, operation: TeamOperation) -> AuthorizationCase {
@@ -685,6 +767,13 @@ mod tests {
                 occurred_at_ms: 1_000,
                 correlation_id: "correlation:1".to_string(),
             },
+            repository_scope: repository_required.then(|| TeamRepositoryScope {
+                organization_id: "tenant-acme".to_string(),
+                team_id: "team-payments".to_string(),
+                provider: PullRequestReviewEventProvider::Github,
+                workspace: "acme".to_string(),
+                repo: "payments".to_string(),
+            }),
             request: TeamAuthorizationRequest {
                 schema_version: TeamAuthorizationSchemaVersion::V1,
                 organization: TeamOrganization {
@@ -694,9 +783,7 @@ mod tests {
                     id: "team-payments".to_string(),
                     organization_id: "tenant-acme".to_string(),
                 }),
-                repository: repository_required.then(|| TeamRepositoryScope {
-                    organization_id: "tenant-acme".to_string(),
-                    team_id: "team-payments".to_string(),
+                repository: repository_required.then(|| TeamRepositoryTarget {
                     provider: PullRequestReviewEventProvider::Github,
                     workspace: "acme".to_string(),
                     repo: "payments".to_string(),
@@ -837,7 +924,7 @@ mod tests {
                 {
                     let mut value = request(TeamRole::Member, TeamOperation::TriggerReview);
                     value
-                        .repository
+                        .repository_scope
                         .as_mut()
                         .expect("repository")
                         .organization_id = "tenant-other".to_string();
@@ -848,7 +935,7 @@ mod tests {
             (
                 {
                     let mut value = request(TeamRole::Member, TeamOperation::TriggerReview);
-                    value.repository.as_mut().expect("repository").team_id =
+                    value.repository_scope.as_mut().expect("repository").team_id =
                         "team-other".to_string();
                     value
                 },
@@ -879,7 +966,7 @@ mod tests {
     fn scope_mismatches_precede_unknown_role_and_operation_denials() {
         let mut unknown_role = request(TeamRole::Unknown, TeamOperation::TriggerReview);
         unknown_role
-            .repository
+            .repository_scope
             .as_mut()
             .expect("repository")
             .organization_id = "tenant-other".to_string();
@@ -887,7 +974,7 @@ mod tests {
         let mut unknown_operation = request(TeamRole::Admin, TeamOperation::TriggerReview);
         unknown_operation.operation = TeamOperation::Unknown;
         unknown_operation
-            .repository
+            .repository_scope
             .as_mut()
             .expect("repository")
             .team_id = "team-other".to_string();
@@ -950,11 +1037,42 @@ mod tests {
     }
 
     #[test]
+    fn repository_target_never_proves_enrollment_or_ownership() {
+        let mut unenrolled = request(TeamRole::Member, TeamOperation::TriggerReview);
+        unenrolled.repository_scope = None;
+        let unenrolled_sink = MemoryAuditSink::default();
+        assert!(matches!(
+            authorize_case(&unenrolled, &unenrolled_sink).expect("unenrolled decision"),
+            TeamAuthorizationDecision::Denied {
+                reason: TeamAuthorizationDeniedReason::RepositoryScopeRequired,
+                ..
+            }
+        ));
+        assert!(unenrolled_sink.events.borrow()[0].repository.is_none());
+
+        let mut spoofed_target = request(TeamRole::Member, TeamOperation::TriggerReview);
+        spoofed_target
+            .repository
+            .as_mut()
+            .expect("target")
+            .workspace = "unowned-workspace".to_string();
+        let spoofed_sink = MemoryAuditSink::default();
+        assert!(matches!(
+            authorize_case(&spoofed_target, &spoofed_sink).expect("spoofed target decision"),
+            TeamAuthorizationDecision::Denied {
+                reason: TeamAuthorizationDeniedReason::RepositoryMismatch,
+                ..
+            }
+        ));
+        assert!(spoofed_sink.events.borrow()[0].repository.is_none());
+    }
+
+    #[test]
     fn organization_mismatch_is_audited_only_in_the_authenticated_tenant() {
         let mut request = request(TeamRole::Member, TeamOperation::TriggerReview);
         request.organization.id = "tenant-other".to_string();
         request.team.as_mut().expect("team").organization_id = "tenant-other".to_string();
-        let repository = request.repository.as_mut().expect("repository");
+        let repository = request.repository_scope.as_mut().expect("repository");
         repository.organization_id = "tenant-other".to_string();
         let sink = MemoryAuditSink::default();
 
@@ -979,7 +1097,12 @@ mod tests {
             id: "team-payments".to_string(),
             organization_id: "tenant-acme".to_string(),
         });
-        invalid.repository = Some(TeamRepositoryScope {
+        invalid.repository = Some(TeamRepositoryTarget {
+            provider: PullRequestReviewEventProvider::Github,
+            workspace: "acme".to_string(),
+            repo: "payments".to_string(),
+        });
+        invalid.repository_scope = Some(TeamRepositoryScope {
             organization_id: "tenant-acme".to_string(),
             team_id: "team-payments".to_string(),
             provider: PullRequestReviewEventProvider::Github,
@@ -1019,6 +1142,7 @@ mod tests {
         let mut request = request(TeamRole::Viewer, TeamOperation::ReadMetrics);
         request.team = None;
         request.repository = None;
+        request.repository_scope = None;
         let sink = MemoryAuditSink::default();
 
         assert!(matches!(
@@ -1126,6 +1250,30 @@ mod tests {
     }
 
     #[test]
+    fn enrollment_constructor_validates_trusted_repository_scope() {
+        assert!(TeamRepositoryScope::from_enrollment(
+            "tenant-acme".to_string(),
+            "team-payments".to_string(),
+            PullRequestReviewEventProvider::Github,
+            "acme".to_string(),
+            "payments".to_string(),
+        )
+        .is_ok());
+        assert_eq!(
+            TeamRepositoryScope::from_enrollment(
+                "tenant-acme".to_string(),
+                "team-payments".to_string(),
+                PullRequestReviewEventProvider::Github,
+                "../other".to_string(),
+                "payments".to_string(),
+            ),
+            Err(TeamAuthorizationError::InvalidRequest(
+                "repositoryScope.workspace"
+            ))
+        );
+    }
+
+    #[test]
     fn trusted_audit_context_constructor_enforces_bounds() {
         assert!(TeamAuthorizationAuditContext::from_trusted_ingress(
             "attempt-1".to_string(),
@@ -1156,22 +1304,34 @@ mod tests {
                 occurred_at_ms: 1_000,
                 correlation_id: "correlation:local".to_string(),
             };
+            let repository_scope = repository_required.then(|| {
+                TeamRepositoryScope::local(
+                    PullRequestReviewEventProvider::Github,
+                    "local",
+                    "repository",
+                )
+            });
             let request = TeamAuthorizationRequest {
                 schema_version: TeamAuthorizationSchemaVersion::V1,
                 organization: TeamOrganization::local(),
                 team: repository_required.then(TeamIdentity::local),
-                repository: repository_required.then(|| {
-                    TeamRepositoryScope::local(
-                        PullRequestReviewEventProvider::Github,
-                        "local",
-                        "repository",
-                    )
+                repository: repository_required.then(|| TeamRepositoryTarget {
+                    provider: PullRequestReviewEventProvider::Github,
+                    workspace: "local".to_string(),
+                    repo: "repository".to_string(),
                 }),
                 operation,
             };
             let sink = MemoryAuditSink::default();
             assert!(matches!(
-                authorize_team_operation(&actor, &audit, &request, &sink).expect("local decision"),
+                authorize_team_operation(
+                    &actor,
+                    &audit,
+                    repository_scope.as_ref(),
+                    &request,
+                    &sink
+                )
+                .expect("local decision"),
                 TeamAuthorizationDecision::Allowed { .. }
             ));
             assert!(sink.events.borrow().is_empty());
@@ -1189,6 +1349,8 @@ mod tests {
         assert!(value.get("audit").is_none());
         assert_eq!(value["operation"], "trigger_review");
         assert_eq!(value["repository"]["provider"], "github");
+        assert!(value["repository"].get("organizationId").is_none());
+        assert!(value["repository"].get("teamId").is_none());
         assert!(value.get("issuer").is_none());
         assert!(value.get("accessToken").is_none());
 

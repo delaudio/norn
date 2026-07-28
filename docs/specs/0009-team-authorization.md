@@ -27,6 +27,12 @@ The same trusted adapter supplies a separate
 tenant-unique attempt id, bounded timestamp, and bounded correlation id. A
 caller cannot select an audit delivery key through the operation request.
 
+Repository requests carry only a provider, workspace, and repository target.
+They never assert ownership. A separate non-deserializable
+`TeamRepositoryScope` must be resolved from the trusted enrollment or provider
+installation store and passed to authorization. Its tenant, team, and exact
+provider target must match before a repository operation can be allowed.
+
 ## Roles and permissions
 
 Every operation maps to one explicit permission:
@@ -63,6 +69,8 @@ repository-scoped.
 
 Scope checks run before the role matrix. Matching repository names in another
 organization or team never grant access.
+Caller-supplied organization or team labels cannot enroll a provider target;
+missing trusted enrollment and target/enrollment mismatch both fail closed.
 Organization-only operations reject repository or team fields instead of
 silently changing scope. Metrics accept exactly organization scope or a paired
 team and repository scope; team-only scope is invalid. Audit timestamps and
