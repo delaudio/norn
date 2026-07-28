@@ -160,8 +160,7 @@ pub fn run(request: HeadlessReviewRequest) -> Result<HeadlessReviewExecution, He
     validate_requested_identity_shape(&request)?;
     let repo_path = resolve_repo_root_for_request(&request)?;
     let mut config_result =
-        repo_config::load_from_repo_path_with_profile(&repo_path, request.profile.as_deref())
-            .map_err(HeadlessReviewError::config)?;
+        repo_config::load_from_repo_path(&repo_path).map_err(HeadlessReviewError::config)?;
     ensure_config_valid(&config_result)?;
     let mut policy_sources = Vec::new();
     let mut required_policy_analyzers = Vec::new();
@@ -186,6 +185,10 @@ pub fn run(request: HeadlessReviewRequest) -> Result<HeadlessReviewExecution, He
         required_policy_analyzers = organization_policy.required_analyzers;
         resolved_policy_config = Some(organization_policy.config);
         policy_sources = organization_policy.sources;
+    } else if request.profile.is_some() {
+        config_result =
+            repo_config::load_from_repo_path_with_profile(&repo_path, request.profile.as_deref())
+                .map_err(HeadlessReviewError::config)?;
     }
     ensure_config_valid(&config_result)?;
     let mut resolved = resolve_target(&request, &repo_path)?;

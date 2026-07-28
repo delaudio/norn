@@ -4561,6 +4561,31 @@ fn validate_organization_policy_repo_path(
     Ok(repo_path)
 }
 
+fn append_execution_policy_to_payloads(
+    config: Option<&repo_config::RepoReviewConfig>,
+    payload: &mut String,
+    snapshot_payload: &mut String,
+    fallback_payload: &mut Option<String>,
+) {
+    let Some(config) = config else {
+        return;
+    };
+    if let Some(appendix) = execution_policy_prompt_appendix(config, payload) {
+        payload.push_str("\n\n");
+        payload.push_str(&appendix);
+    }
+    if let Some(appendix) = execution_policy_prompt_appendix(config, snapshot_payload) {
+        snapshot_payload.push_str("\n\n");
+        snapshot_payload.push_str(&appendix);
+    }
+    if let Some(fallback) = fallback_payload.as_mut() {
+        if let Some(appendix) = execution_policy_prompt_appendix(config, fallback) {
+            fallback.push_str("\n\n");
+            fallback.push_str(&appendix);
+        }
+    }
+}
+
 fn run_inline_review_pipeline(
     store: AiReviewRunStore,
     key: String,
@@ -4660,22 +4685,6 @@ fn run_inline_review_pipeline(
         effective_snapshot_payload = format!("{effective_snapshot_payload}\n\n{appendix}");
         if let Some(fallback) = effective_fallback_payload.as_deref() {
             effective_fallback_payload = Some(format!("{fallback}\n\n{appendix}"));
-        }
-    }
-    if let Some(config) = resolved_policy_config.as_ref() {
-        if let Some(appendix) = execution_policy_prompt_appendix(config, &effective_payload) {
-            effective_payload = format!("{effective_payload}\n\n{appendix}");
-        }
-        if let Some(appendix) =
-            execution_policy_prompt_appendix(config, &effective_snapshot_payload)
-        {
-            effective_snapshot_payload = format!("{effective_snapshot_payload}\n\n{appendix}");
-        }
-        if let Some(fallback) = effective_fallback_payload.as_mut() {
-            if let Some(appendix) = execution_policy_prompt_appendix(config, fallback) {
-                fallback.push_str("\n\n");
-                fallback.push_str(&appendix);
-            }
         }
     }
     let run_required_policy_analyzers = skip_analyzers && !required_policy_analyzers.is_empty();
@@ -4800,6 +4809,13 @@ fn run_inline_review_pipeline(
             "Skipping local evidence analyzers for this review.",
         );
     }
+
+    append_execution_policy_to_payloads(
+        resolved_policy_config.as_ref(),
+        &mut effective_payload,
+        &mut effective_snapshot_payload,
+        &mut effective_fallback_payload,
+    );
 
     append_inline_review_log(
         &store,
@@ -6089,14 +6105,15 @@ pub fn reset_ai_review_fix_state(
 #[cfg(test)]
 mod tests {
     use super::{
-        analyzer_specs_from_config, apply_review_finding_publication_event,
-        begin_inline_review_run, build_claude_text_command, build_codex_text_command,
-        extract_review_findings, format_claude_stream_log_line, get_ai_review_run_state_native,
-        human_duration, materialize_review_run, normalize_codex_effort, normalize_codex_model,
-        parse_claude_fix_result, parse_claude_structured_json, parse_claude_text_result,
-        parse_review_resources, resolve_gui_skip_analyzers, review_analyzer_specs,
-        review_findings_from_output, review_profile_for_thread, should_execute_analyzers,
-        trim_evidence_output, user_installed_cli_command, validate_isolated_provider_cli,
+        analyzer_specs_from_config, append_execution_policy_to_payloads,
+        apply_review_finding_publication_event, begin_inline_review_run, build_claude_text_command,
+        build_codex_text_command, extract_review_findings, format_claude_stream_log_line,
+        get_ai_review_run_state_native, human_duration, materialize_review_run,
+        normalize_codex_effort, normalize_codex_model, parse_claude_fix_result,
+        parse_claude_structured_json, parse_claude_text_result, parse_review_resources,
+        resolve_gui_skip_analyzers, review_analyzer_specs, review_findings_from_output,
+        review_profile_for_thread, should_execute_analyzers, trim_evidence_output,
+        user_installed_cli_command, validate_isolated_provider_cli,
         validate_organization_policy_repo_path, AiReviewDraftCommentResult, AiReviewRunStatus,
         AiReviewRunStore, AiReviewStoreData, AiReviewTurnKind, ProviderExecutionContext,
         ReviewEvidenceArtifact, ReviewEvidenceKind, ReviewEvidenceSource, ReviewFindingCategory,
@@ -6105,6 +6122,42 @@ mod tests {
         ReviewPublicationMode, STRUCTURED_REVIEW_SCHEMA_VERSION,
     };
     use serde_json::json;
+
+    #[test]
+    fn authoritative_policy_follows_repository_controlled_evidence() {
+        let config: crate::repo_config::RepoReviewConfig = serde_json::from_value(json!({
+            "version": "0.1",
+            "review": {
+                "prompt": {
+                    "replace": "Enforce the signed organization review rules."
+                }
+            }
+        }))
+        .expect("policy config");
+        let mut payload =
+            "review input\n\n## Local analyzer evidence\n\nrepository output".to_string();
+        let mut snapshot_payload = payload.clone();
+        let mut fallback_payload = Some(payload.clone());
+
+        append_execution_policy_to_payloads(
+            Some(&config),
+            &mut payload,
+            &mut snapshot_payload,
+            &mut fallback_payload,
+        );
+
+        for rendered in [
+            payload.as_str(),
+            snapshot_payload.as_str(),
+            fallback_payload.as_deref().expect("fallback"),
+        ] {
+            assert!(
+                rendered.find("repository output")
+                    < rendered.find("## Authoritative resolved review instructions")
+            );
+            assert!(rendered.ends_with("Enforce the signed organization review rules."));
+        }
+    }
 
     #[test]
     fn configured_organization_policy_requires_a_local_repo() {
