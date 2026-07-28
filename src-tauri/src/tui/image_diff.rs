@@ -358,9 +358,9 @@ pub fn image_candidate_from_patch(patch: &str) -> Option<ImageDiffCandidate> {
     }
     if old_path.is_none() && new_path.is_none() {
         let header = patch.lines().find(|line| line.starts_with("diff --git "))?;
-        let mut parts = header.split_whitespace().skip(2);
-        old_path = parts.next().and_then(normalize_path);
-        new_path = parts.next().and_then(normalize_path);
+        let (old_header_path, new_header_path) = parse_diff_header_paths(header)?;
+        old_path = normalize_path(&old_header_path);
+        new_path = normalize_path(&new_header_path);
     }
     if added {
         old_path = None;
@@ -368,11 +368,8 @@ pub fn image_candidate_from_patch(patch: &str) -> Option<ImageDiffCandidate> {
     if deleted {
         new_path = None;
     }
-    if !old_path.as_deref().is_some_and(is_supported_image_path)
-        && !new_path.as_deref().is_some_and(is_supported_image_path)
-    {
-        return None;
-    }
+    old_path = old_path.filter(|path| is_supported_image_path(path));
+    new_path = new_path.filter(|path| is_supported_image_path(path));
     let kind = match (old_path.is_some(), new_path.is_some()) {
         (false, true) => ImageChangeKind::Added,
         (true, false) => ImageChangeKind::Deleted,
@@ -387,16 +384,82 @@ pub fn image_candidate_from_patch(patch: &str) -> Option<ImageDiffCandidate> {
 }
 
 fn normalize_path(path: &str) -> Option<String> {
-    let path = path.trim();
+    let path = decode_git_path(path.trim())?;
     if path == "/dev/null" {
         return None;
     }
     Some(
         path.strip_prefix("a/")
             .or_else(|| path.strip_prefix("b/"))
-            .unwrap_or(path)
+            .unwrap_or(&path)
             .to_string(),
     )
+}
+
+fn parse_diff_header_paths(header: &str) -> Option<(String, String)> {
+    let input = header.strip_prefix("diff --git ")?;
+    let (old_path, rest) = parse_git_path_token(input)?;
+    let (new_path, rest) = parse_git_path_token(rest)?;
+    rest.trim().is_empty().then_some((old_path, new_path))
+}
+
+fn decode_git_path(input: &str) -> Option<String> {
+    if !input.starts_with('"') {
+        return Some(input.to_string());
+    }
+    let (path, rest) = parse_git_path_token(input)?;
+    rest.trim().is_empty().then_some(path)
+}
+
+fn parse_git_path_token(input: &str) -> Option<(String, &str)> {
+    let input = input.trim_start();
+    if !input.starts_with('"') {
+        let end = input.find(char::is_whitespace).unwrap_or(input.len());
+        return (end > 0).then(|| (input[..end].to_string(), &input[end..]));
+    }
+
+    let bytes = input.as_bytes();
+    let mut decoded = Vec::new();
+    let mut index = 1;
+    while index < bytes.len() {
+        match bytes[index] {
+            b'"' => {
+                let path = String::from_utf8(decoded).ok()?;
+                return Some((path, &input[index + 1..]));
+            }
+            b'\\' => {
+                index += 1;
+                let escaped = *bytes.get(index)?;
+                if (b'0'..=b'7').contains(&escaped) {
+                    let mut value = 0_u16;
+                    let mut count = 0;
+                    while count < 3 && index < bytes.len() && (b'0'..=b'7').contains(&bytes[index])
+                    {
+                        value = value * 8 + u16::from(bytes[index] - b'0');
+                        index += 1;
+                        count += 1;
+                    }
+                    decoded.push(u8::try_from(value).ok()?);
+                    continue;
+                }
+                decoded.push(match escaped {
+                    b'a' => 0x07,
+                    b'b' => 0x08,
+                    b't' => b'\t',
+                    b'n' => b'\n',
+                    b'v' => 0x0b,
+                    b'f' => 0x0c,
+                    b'r' => b'\r',
+                    b'\\' => b'\\',
+                    b'"' => b'"',
+                    _ => return None,
+                });
+            }
+            byte => decoded.push(byte),
+        }
+        index += 1;
+    }
+    None
 }
 
 fn is_supported_image_path(path: &str) -> bool {
@@ -468,6 +531,32 @@ mod tests {
         .expect("added image from mode");
         assert_eq!(added_without_markers.kind, ImageChangeKind::Added);
         assert_eq!(added_without_markers.old_path, None);
+    }
+
+    #[test]
+    fn parses_quoted_image_paths_and_cross_type_renames() {
+        let spaced = image_candidate_from_patch(
+            "diff --git \"a/assets/foo bar.png\" \"b/assets/foo bar.png\"\nBinary files \"a/assets/foo bar.png\" and \"b/assets/foo bar.png\" differ\n",
+        )
+        .expect("quoted image path");
+        assert_eq!(spaced.kind, ImageChangeKind::Modified);
+        assert_eq!(spaced.new_path.as_deref(), Some("assets/foo bar.png"));
+
+        let image_to_text = image_candidate_from_patch(
+            "diff --git a/logo.png b/logo.txt\nsimilarity index 100%\nrename from logo.png\nrename to logo.txt\n",
+        )
+        .expect("image renamed to text");
+        assert_eq!(image_to_text.kind, ImageChangeKind::Deleted);
+        assert_eq!(image_to_text.old_path.as_deref(), Some("logo.png"));
+        assert_eq!(image_to_text.new_path, None);
+
+        let text_to_image = image_candidate_from_patch(
+            "diff --git a/logo.txt b/logo.png\nsimilarity index 100%\nrename from logo.txt\nrename to logo.png\n",
+        )
+        .expect("text renamed to image");
+        assert_eq!(text_to_image.kind, ImageChangeKind::Added);
+        assert_eq!(text_to_image.old_path, None);
+        assert_eq!(text_to_image.new_path.as_deref(), Some("logo.png"));
     }
 
     #[test]
