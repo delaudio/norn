@@ -38,6 +38,10 @@ also rejected before caching, using the same rule as repository configuration.
 Versions are capped at `9007199254740991`, preserving exact JSON/TypeScript
 integer representation in review metadata.
 
+Signed layers cannot use `policy.packs` or `policy.sources`, because those
+paths resolve inside the reviewed repository. Organization rules must be
+embedded directly in the signed `defaults` or `enforced` layer.
+
 ## Deterministic precedence
 
 The resolver applies layers from lowest to highest precedence:

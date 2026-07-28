@@ -924,6 +924,17 @@ fn analyzer_specs_with_profile(
     }
 }
 
+fn review_analyzer_specs(
+    repo_path: &Path,
+    resolved_policy_config: Option<&repo_config::RepoReviewConfig>,
+    review_profile: Option<&str>,
+) -> Result<Vec<AnalyzerSpec>, String> {
+    match resolved_policy_config {
+        Some(config) => Ok(analyzer_specs_from_config(config)),
+        None => analyzer_specs_with_profile(repo_path, review_profile),
+    }
+}
+
 fn run_analyzer_command(
     repo_path: &Path,
     spec: &AnalyzerSpec,
@@ -4660,20 +4671,11 @@ fn run_inline_review_pipeline(
     if turn_kind == AiReviewTurnKind::Initial && !skip_analyzers {
         if let Some(repo_path) = repo_path.as_deref() {
             append_inline_review_log(&store, &key, run_id, "Running local evidence analyzers.");
-            let analyzer_specs = resolved_policy_config
-                .as_ref()
-                .map(|config| {
-                    let configured = analyzer_specs_from_config(config);
-                    if configured.is_empty() {
-                        default_analyzer_specs(repo_path)
-                    } else {
-                        configured
-                    }
-                })
-                .map(Ok)
-                .unwrap_or_else(|| {
-                    analyzer_specs_with_profile(repo_path, review_profile.as_deref())
-                });
+            let analyzer_specs = review_analyzer_specs(
+                repo_path,
+                resolved_policy_config.as_ref(),
+                review_profile.as_deref(),
+            );
             let results = match analyzer_specs {
                 Ok(specs) if specs.is_empty() => {
                     append_inline_review_log(
@@ -6072,15 +6074,15 @@ mod tests {
         extract_review_findings, format_claude_stream_log_line, get_ai_review_run_state_native,
         human_duration, materialize_review_run, normalize_codex_effort, normalize_codex_model,
         parse_claude_fix_result, parse_claude_structured_json, parse_claude_text_result,
-        parse_review_resources, resolve_gui_skip_analyzers, review_findings_from_output,
-        review_profile_for_thread, trim_evidence_output, user_installed_cli_command,
-        validate_isolated_provider_cli, validate_organization_policy_repo_path,
-        AiReviewDraftCommentResult, AiReviewRunStatus, AiReviewRunStore, AiReviewStoreData,
-        AiReviewTurnKind, ProviderExecutionContext, ReviewEvidenceArtifact, ReviewEvidenceKind,
-        ReviewEvidenceSource, ReviewFindingCategory, ReviewFindingConfidence,
-        ReviewFindingPublication, ReviewFindingPublicationEvent, ReviewFindingPublicationEventKind,
-        ReviewFindingSeverity, ReviewProvider, ReviewPublicationMode,
-        STRUCTURED_REVIEW_SCHEMA_VERSION,
+        parse_review_resources, resolve_gui_skip_analyzers, review_analyzer_specs,
+        review_findings_from_output, review_profile_for_thread, trim_evidence_output,
+        user_installed_cli_command, validate_isolated_provider_cli,
+        validate_organization_policy_repo_path, AiReviewDraftCommentResult, AiReviewRunStatus,
+        AiReviewRunStore, AiReviewStoreData, AiReviewTurnKind, ProviderExecutionContext,
+        ReviewEvidenceArtifact, ReviewEvidenceKind, ReviewEvidenceSource, ReviewFindingCategory,
+        ReviewFindingConfidence, ReviewFindingPublication, ReviewFindingPublicationEvent,
+        ReviewFindingPublicationEventKind, ReviewFindingSeverity, ReviewProvider,
+        ReviewPublicationMode, STRUCTURED_REVIEW_SCHEMA_VERSION,
     };
     use serde_json::json;
 
@@ -6114,6 +6116,27 @@ mod tests {
         assert_eq!(specs.len(), 1);
         assert_eq!(specs[0].command, "security-check");
         assert!(specs[0].required);
+    }
+
+    #[test]
+    fn resolved_policy_with_no_enabled_analyzers_stays_empty() {
+        let repo = tempfile::tempdir().expect("repo temp dir");
+        let config = crate::repo_config::RepoReviewConfig {
+            version: "0.1".to_string(),
+            analyzers: std::collections::BTreeMap::from([(
+                "organization-security".to_string(),
+                crate::repo_config::AnalyzerConfig {
+                    enabled: false,
+                    command: Some("security-check".to_string()),
+                    ..crate::repo_config::AnalyzerConfig::default()
+                },
+            )]),
+            ..crate::repo_config::RepoReviewConfig::default()
+        };
+
+        let specs = review_analyzer_specs(repo.path(), Some(&config), None)
+            .expect("resolved analyzer selection");
+        assert!(specs.is_empty());
     }
 
     #[test]

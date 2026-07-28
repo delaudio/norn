@@ -930,6 +930,8 @@ fn verify_bundle(
     validate_layer("organization enforcement", Some(&envelope.bundle.enforced))?;
     reject_organization_version_override(&envelope.bundle.defaults)?;
     reject_organization_version_override(&envelope.bundle.enforced)?;
+    reject_repository_policy_indirection(&envelope.bundle.defaults)?;
+    reject_repository_policy_indirection(&envelope.bundle.enforced)?;
     validate_organization_layer_schema(&envelope.bundle.defaults, "defaults")?;
     validate_organization_layer_schema(&envelope.bundle.enforced, "enforced")?;
     let digest = hex::encode(Sha256::digest(&canonical));
@@ -970,6 +972,29 @@ fn reject_organization_version_override(
         ));
     }
     Ok(())
+}
+
+fn reject_repository_policy_indirection(
+    layer: &Value,
+) -> Result<(), OrganizationPolicyResolutionError> {
+    let Some(policy) = layer
+        .as_object()
+        .and_then(|object| object.get("policy"))
+        .and_then(Value::as_object)
+    else {
+        return Ok(());
+    };
+    let forbidden = ["packs", "sources"]
+        .into_iter()
+        .filter(|field| policy.contains_key(*field))
+        .collect::<Vec<_>>();
+    if forbidden.is_empty() {
+        return Ok(());
+    }
+    Err(OrganizationPolicyResolutionError::InvalidBundle(format!(
+        "Signed organization policy cannot reference repository-controlled policy {}. Embed rules directly in the signed bundle.",
+        forbidden.join(" or ")
+    )))
 }
 
 fn validate_organization_layer_schema(
@@ -1675,6 +1700,32 @@ mod tests {
             OrganizationPolicyResolutionError::InvalidBundle(message)
                 if message.contains("$.review.strictnes")
         ));
+    }
+
+    #[test]
+    fn signed_layers_cannot_delegate_to_repository_policy_files() {
+        for policy in [
+            json!({"packs": [".lachesi/packs/security"]}),
+            json!({"sources": [{"type": "adr", "path": "docs/adr"}]}),
+        ] {
+            let error = resolve_organization_policy(
+                &config(
+                    OrganizationPolicyRequirement::Mandatory,
+                    OrganizationPolicyUnavailableBehavior::FailClosed,
+                ),
+                &StaticSource(Ok(signed_bundle(2, json!({"policy": policy}), json!({})))),
+                &MemoryCache::default(),
+                None,
+                input(),
+            )
+            .expect_err("repository indirection");
+
+            assert!(matches!(
+                error,
+                OrganizationPolicyResolutionError::InvalidBundle(message)
+                    if message.contains("repository-controlled")
+            ));
+        }
     }
 
     #[test]
