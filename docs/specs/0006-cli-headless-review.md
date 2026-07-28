@@ -183,6 +183,19 @@ lachesi config validate --repo-path .
 
 Exit behavior follows the config exit-code model below.
 
+### `lachesi metrics`
+
+Aggregates persisted structured review runs and append-only finding feedback:
+
+```sh
+lachesi metrics --tenant local --workspace example-workspace --repo frontend-app
+```
+
+The command supports human and `lachesi.review-effectiveness.v1` JSON output,
+tenant/provider/repository filters, and an inclusive-start/exclusive-end
+completion-time window. Metric definitions and missing-feedback behavior are
+specified in [Review effectiveness metrics](0008-review-effectiveness-metrics.md).
+
 ### `lachesi evidence`
 
 Planned follow-up command:

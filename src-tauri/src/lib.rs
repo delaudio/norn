@@ -14,6 +14,7 @@ pub mod repo_config;
 pub mod review_event;
 pub mod review_feedback;
 pub mod review_job;
+pub mod review_metrics;
 mod review_storage;
 mod services;
 pub mod tui;
@@ -22,7 +23,7 @@ pub mod webhook_ingress;
 pub use review_storage::{
     append_administrative_audit_event, get_finding_feedback_state, get_review_cursor,
     purge_administrative_audit_events_before, record_finding_feedback, record_review_completion,
-    set_team_audit_collection_enabled, team_audit_collection_enabled,
+    review_effectiveness_metrics, set_team_audit_collection_enabled, team_audit_collection_enabled,
     write_administrative_audit_jsonl, ReviewCursor, ReviewCursorIdentity, ReviewCursorState,
     ReviewRunCompletion, ReviewRunOutcome,
 };
