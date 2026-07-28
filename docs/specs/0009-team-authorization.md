@@ -79,6 +79,9 @@ organization scope only for `authorization_denied` events while preserving the
 required repository field and stable wire shape of existing `v1` events. A
 mismatched repository or team is also omitted from the denial audit rather
 than crossing the tenant boundary.
+The audit event serializer and deserializer both enforce these version rules:
+`v1` cannot omit repository scope or carry an authorization denial, and
+repository-less `v2` is valid only for a denied authorization request.
 
 Only bounded identifiers, operation, permission, denial reason, and correlation
 metadata are eligible for storage. The existing audit redaction boundary runs

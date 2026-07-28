@@ -2,6 +2,7 @@
 
 use std::fmt;
 
+use serde::ser::SerializeStruct;
 use serde::{Deserialize, Deserializer, Serialize};
 
 use crate::review_event::PullRequestReviewEventProvider;
@@ -96,8 +97,7 @@ pub struct AdministrativeAuditTarget {
     pub id: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AdministrativeAuditEvent {
     pub schema_version: AdministrativeAuditSchemaVersion,
     /// Tenant-unique delivery key used for idempotency.
@@ -106,12 +106,38 @@ pub struct AdministrativeAuditEvent {
     /// Milliseconds since Unix epoch, represented as a decimal string.
     pub occurred_at: String,
     pub actor: AdministrativeAuditActor,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub repository: Option<AdministrativeAuditRepositoryScope>,
     pub action: AdministrativeAuditAction,
     pub target: AdministrativeAuditTarget,
     pub outcome: AdministrativeAuditOutcome,
     pub correlation_id: String,
+}
+
+impl Serialize for AdministrativeAuditEvent {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        self.validate_wire_shape()
+            .map_err(serde::ser::Error::custom)?;
+        let mut state = serializer.serialize_struct(
+            "AdministrativeAuditEvent",
+            if self.repository.is_some() { 10 } else { 9 },
+        )?;
+        state.serialize_field("schemaVersion", &self.schema_version)?;
+        state.serialize_field("deliveryId", &self.delivery_id)?;
+        state.serialize_field("tenantId", &self.tenant_id)?;
+        state.serialize_field("occurredAt", &self.occurred_at)?;
+        state.serialize_field("actor", &self.actor)?;
+        if let Some(repository) = &self.repository {
+            state.serialize_field("repository", repository)?;
+        }
+        state.serialize_field("action", &self.action)?;
+        state.serialize_field("target", &self.target)?;
+        state.serialize_field("outcome", &self.outcome)?;
+        state.serialize_field("correlationId", &self.correlation_id)?;
+        state.end()
+    }
 }
 
 #[derive(Deserialize)]
@@ -135,11 +161,7 @@ impl<'de> Deserialize<'de> for AdministrativeAuditEvent {
         D: Deserializer<'de>,
     {
         let wire = AdministrativeAuditEventWire::deserialize(deserializer)?;
-        if wire.schema_version == AdministrativeAuditSchemaVersion::V1 && wire.repository.is_none()
-        {
-            return Err(serde::de::Error::missing_field("repository"));
-        }
-        Ok(Self {
+        let event = Self {
             schema_version: wire.schema_version,
             delivery_id: wire.delivery_id,
             tenant_id: wire.tenant_id,
@@ -150,7 +172,11 @@ impl<'de> Deserialize<'de> for AdministrativeAuditEvent {
             target: wire.target,
             outcome: wire.outcome,
             correlation_id: wire.correlation_id,
-        })
+        };
+        event
+            .validate_wire_shape()
+            .map_err(serde::de::Error::custom)?;
+        Ok(event)
     }
 }
 
@@ -163,6 +189,26 @@ pub enum AdministrativeAuditAppendResult {
 }
 
 impl AdministrativeAuditEvent {
+    fn validate_wire_shape(&self) -> Result<(), AdministrativeAuditValidationError> {
+        if self.action == AdministrativeAuditAction::AuthorizationDenied
+            && (self.schema_version != AdministrativeAuditSchemaVersion::V2
+                || self.target.kind != AdministrativeAuditTargetKind::AuthorizationRequest
+                || self.outcome != AdministrativeAuditOutcome::Denied)
+        {
+            return Err(AdministrativeAuditValidationError::InvalidAuthorizationDenial);
+        }
+        let allows_organization_scope = self.schema_version == AdministrativeAuditSchemaVersion::V2
+            && self.action == AdministrativeAuditAction::AuthorizationDenied
+            && self.target.kind == AdministrativeAuditTargetKind::AuthorizationRequest
+            && self.outcome == AdministrativeAuditOutcome::Denied;
+        if self.repository.is_none() && !allows_organization_scope {
+            return Err(AdministrativeAuditValidationError::MissingField(
+                "repository",
+            ));
+        }
+        Ok(())
+    }
+
     pub fn prepare_for_storage(
         &self,
     ) -> Result<AdministrativeAuditEvent, AdministrativeAuditValidationError> {
@@ -230,24 +276,10 @@ impl AdministrativeAuditEvent {
     }
 
     fn validate_structural_fields(&self) -> Result<(), AdministrativeAuditValidationError> {
+        self.validate_wire_shape()?;
         validate_identifier("deliveryId", &self.delivery_id)?;
         validate_identifier("tenantId", &self.tenant_id)?;
         validate_timestamp(&self.occurred_at)?;
-        if self.action == AdministrativeAuditAction::AuthorizationDenied
-            && (self.target.kind != AdministrativeAuditTargetKind::AuthorizationRequest
-                || self.outcome != AdministrativeAuditOutcome::Denied)
-        {
-            return Err(AdministrativeAuditValidationError::InvalidAuthorizationDenial);
-        }
-        let allows_organization_scope = self.schema_version == AdministrativeAuditSchemaVersion::V2
-            && self.action == AdministrativeAuditAction::AuthorizationDenied
-            && self.target.kind == AdministrativeAuditTargetKind::AuthorizationRequest
-            && self.outcome == AdministrativeAuditOutcome::Denied;
-        if self.repository.is_none() && !allows_organization_scope {
-            return Err(AdministrativeAuditValidationError::MissingField(
-                "repository",
-            ));
-        }
         if let Some(repository) = &self.repository {
             validate_identifier("workspace", &repository.workspace)?;
             validate_identifier("repo", &repository.repo)?;
@@ -511,10 +543,20 @@ mod tests {
                 "repository"
             ))
         );
-        assert!(serde_json::from_value::<AdministrativeAuditEvent>(
-            serde_json::to_value(&v1).expect("serialize invalid v1")
-        )
-        .is_err());
+        assert!(serde_json::to_value(&v1).is_err());
+
+        let mut v1_authorization = audit_event();
+        v1_authorization.action = AdministrativeAuditAction::AuthorizationDenied;
+        v1_authorization.target = AdministrativeAuditTarget {
+            kind: AdministrativeAuditTargetKind::AuthorizationRequest,
+            id: "authorization:read-metrics:read-metrics:permission-denied".to_string(),
+        };
+        v1_authorization.outcome = AdministrativeAuditOutcome::Denied;
+        assert_eq!(
+            v1_authorization.prepare_for_storage(),
+            Err(AdministrativeAuditValidationError::InvalidAuthorizationDenial)
+        );
+        assert!(serde_json::to_value(&v1_authorization).is_err());
 
         let mut v2 = v1;
         v2.schema_version = AdministrativeAuditSchemaVersion::V2;
@@ -635,6 +677,14 @@ mod tests {
         for action in AdministrativeAuditAction::ALL {
             let mut event = audit_event();
             event.action = action;
+            if action == AdministrativeAuditAction::AuthorizationDenied {
+                event.schema_version = AdministrativeAuditSchemaVersion::V2;
+                event.target = AdministrativeAuditTarget {
+                    kind: AdministrativeAuditTargetKind::AuthorizationRequest,
+                    id: "authorization:read-metrics:read-metrics:permission-denied".to_string(),
+                };
+                event.outcome = AdministrativeAuditOutcome::Denied;
+            }
             let json = serde_json::to_string(&event).expect("serialize");
             assert!(!json.contains("aiProvider"));
             assert_eq!(
