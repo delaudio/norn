@@ -2,7 +2,7 @@
 
 use std::fmt;
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 
 use crate::review_event::PullRequestReviewEventProvider;
 
@@ -96,7 +96,7 @@ pub struct AdministrativeAuditTarget {
     pub id: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct AdministrativeAuditEvent {
     pub schema_version: AdministrativeAuditSchemaVersion,
@@ -112,6 +112,46 @@ pub struct AdministrativeAuditEvent {
     pub target: AdministrativeAuditTarget,
     pub outcome: AdministrativeAuditOutcome,
     pub correlation_id: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct AdministrativeAuditEventWire {
+    schema_version: AdministrativeAuditSchemaVersion,
+    delivery_id: String,
+    tenant_id: String,
+    occurred_at: String,
+    actor: AdministrativeAuditActor,
+    repository: Option<AdministrativeAuditRepositoryScope>,
+    action: AdministrativeAuditAction,
+    target: AdministrativeAuditTarget,
+    outcome: AdministrativeAuditOutcome,
+    correlation_id: String,
+}
+
+impl<'de> Deserialize<'de> for AdministrativeAuditEvent {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let wire = AdministrativeAuditEventWire::deserialize(deserializer)?;
+        if wire.schema_version == AdministrativeAuditSchemaVersion::V1 && wire.repository.is_none()
+        {
+            return Err(serde::de::Error::missing_field("repository"));
+        }
+        Ok(Self {
+            schema_version: wire.schema_version,
+            delivery_id: wire.delivery_id,
+            tenant_id: wire.tenant_id,
+            occurred_at: wire.occurred_at,
+            actor: wire.actor,
+            repository: wire.repository,
+            action: wire.action,
+            target: wire.target,
+            outcome: wire.outcome,
+            correlation_id: wire.correlation_id,
+        })
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -248,7 +288,7 @@ fn validate_redactable_input(
     Ok(())
 }
 
-fn validate_redactable_stored(
+pub(crate) fn validate_bounded_audit_value(
     field: &'static str,
     value: &str,
 ) -> Result<(), AdministrativeAuditValidationError> {
@@ -257,6 +297,13 @@ fn validate_redactable_stored(
         return Err(AdministrativeAuditValidationError::FieldTooLong(field));
     }
     Ok(())
+}
+
+fn validate_redactable_stored(
+    field: &'static str,
+    value: &str,
+) -> Result<(), AdministrativeAuditValidationError> {
+    validate_bounded_audit_value(field, value)
 }
 
 pub(crate) fn validate_timestamp(value: &str) -> Result<(), AdministrativeAuditValidationError> {
@@ -464,6 +511,10 @@ mod tests {
                 "repository"
             ))
         );
+        assert!(serde_json::from_value::<AdministrativeAuditEvent>(
+            serde_json::to_value(&v1).expect("serialize invalid v1")
+        )
+        .is_err());
 
         let mut v2 = v1;
         v2.schema_version = AdministrativeAuditSchemaVersion::V2;

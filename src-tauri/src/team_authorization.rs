@@ -5,10 +5,10 @@ use std::fmt;
 use serde::{Deserialize, Serialize};
 
 use crate::administrative_audit::{
-    validate_identifier, validate_timestamp, AdministrativeAuditAction, AdministrativeAuditActor,
-    AdministrativeAuditActorKind, AdministrativeAuditEvent, AdministrativeAuditOutcome,
-    AdministrativeAuditRepositoryScope, AdministrativeAuditSchemaVersion,
-    AdministrativeAuditTarget, AdministrativeAuditTargetKind,
+    validate_bounded_audit_value, validate_identifier, validate_timestamp,
+    AdministrativeAuditAction, AdministrativeAuditActor, AdministrativeAuditActorKind,
+    AdministrativeAuditEvent, AdministrativeAuditOutcome, AdministrativeAuditRepositoryScope,
+    AdministrativeAuditSchemaVersion, AdministrativeAuditTarget, AdministrativeAuditTargetKind,
 };
 use crate::review_event::PullRequestReviewEventProvider;
 use crate::review_storage;
@@ -254,12 +254,28 @@ impl TeamRepositoryScope {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+/// Metadata created by the trusted ingress adapter for denial audit idempotency.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TeamAuthorizationAuditContext {
-    pub attempt_id: String,
-    pub occurred_at_ms: u64,
-    pub correlation_id: String,
+    attempt_id: String,
+    occurred_at_ms: u64,
+    correlation_id: String,
+}
+
+impl TeamAuthorizationAuditContext {
+    pub fn from_trusted_ingress(
+        attempt_id: String,
+        occurred_at_ms: u64,
+        correlation_id: String,
+    ) -> Result<Self, TeamAuthorizationError> {
+        let context = Self {
+            attempt_id,
+            occurred_at_ms,
+            correlation_id,
+        };
+        validate_audit_context(&context)?;
+        Ok(context)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -272,7 +288,6 @@ pub struct TeamAuthorizationRequest {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub repository: Option<TeamRepositoryScope>,
     pub operation: TeamOperation,
-    pub audit: TeamAuthorizationAuditContext,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -354,19 +369,26 @@ impl std::error::Error for TeamAuthorizationError {}
 /// Authorizes untrusted operation input against a separately authenticated principal.
 pub fn authorize_team_operation(
     authenticated_actor: &TeamActor,
+    audit_context: &TeamAuthorizationAuditContext,
     request: &TeamAuthorizationRequest,
     audit_sink: &dyn TeamAuthorizationAuditSink,
 ) -> Result<TeamAuthorizationDecision, TeamAuthorizationError> {
-    validate_request(authenticated_actor, request)?;
+    validate_request(authenticated_actor, audit_context, request)?;
     let permission = request.operation.required_permission();
     let denial = denied_reason(authenticated_actor, request, permission);
     let Some(reason) = denial else {
         return Ok(TeamAuthorizationDecision::Allowed { permission });
     };
 
-    let event = authorization_denied_audit_event(authenticated_actor, request, permission, reason)
-        .prepare_for_storage()
-        .map_err(|_| TeamAuthorizationError::AuditFailed)?;
+    let event = authorization_denied_audit_event(
+        authenticated_actor,
+        audit_context,
+        request,
+        permission,
+        reason,
+    )
+    .prepare_for_storage()
+    .map_err(|_| TeamAuthorizationError::AuditFailed)?;
     audit_sink
         .record_denied(&event)
         .map_err(|_| TeamAuthorizationError::AuditFailed)?;
@@ -375,28 +397,15 @@ pub fn authorize_team_operation(
 
 fn validate_request(
     authenticated_actor: &TeamActor,
+    audit_context: &TeamAuthorizationAuditContext,
     request: &TeamAuthorizationRequest,
 ) -> Result<(), TeamAuthorizationError> {
     validate_actor(authenticated_actor)?;
-    for (field, value) in [
-        ("organization.id", request.organization.id.as_str()),
-        ("audit.attemptId", request.audit.attempt_id.as_str()),
-    ] {
+    validate_audit_context(audit_context)?;
+    for (field, value) in [("organization.id", request.organization.id.as_str())] {
         validate_identifier(field, value)
             .map_err(|_| TeamAuthorizationError::InvalidRequest(field))?;
     }
-    if request.audit.correlation_id.trim().is_empty() {
-        return Err(TeamAuthorizationError::InvalidRequest(
-            "audit.correlationId",
-        ));
-    }
-    validate_timestamp(&request.audit.occurred_at_ms.to_string())
-        .map_err(|_| TeamAuthorizationError::InvalidRequest("audit.occurredAtMs"))?;
-    validate_identifier(
-        "audit.attemptId",
-        &format!("authorization-denied:{}", request.audit.attempt_id),
-    )
-    .map_err(|_| TeamAuthorizationError::InvalidRequest("audit.attemptId"))?;
     if !request.operation.supports_repository_scope()
         && (request.team.is_some() || request.repository.is_some())
     {
@@ -436,6 +445,22 @@ fn validate_request(
         }
     }
     Ok(())
+}
+
+fn validate_audit_context(
+    audit_context: &TeamAuthorizationAuditContext,
+) -> Result<(), TeamAuthorizationError> {
+    validate_identifier("audit.attemptId", &audit_context.attempt_id)
+        .map_err(|_| TeamAuthorizationError::InvalidRequest("audit.attemptId"))?;
+    validate_identifier(
+        "audit.attemptId",
+        &format!("authorization-denied:{}", audit_context.attempt_id),
+    )
+    .map_err(|_| TeamAuthorizationError::InvalidRequest("audit.attemptId"))?;
+    validate_timestamp(&audit_context.occurred_at_ms.to_string())
+        .map_err(|_| TeamAuthorizationError::InvalidRequest("audit.occurredAtMs"))?;
+    validate_bounded_audit_value("audit.correlationId", &audit_context.correlation_id)
+        .map_err(|_| TeamAuthorizationError::InvalidRequest("audit.correlationId"))
 }
 
 fn validate_actor(actor: &TeamActor) -> Result<(), TeamAuthorizationError> {
@@ -513,15 +538,16 @@ fn denied_reason(
 
 fn authorization_denied_audit_event(
     authenticated_actor: &TeamActor,
+    audit_context: &TeamAuthorizationAuditContext,
     request: &TeamAuthorizationRequest,
     permission: TeamPermission,
     reason: TeamAuthorizationDeniedReason,
 ) -> AdministrativeAuditEvent {
     AdministrativeAuditEvent {
         schema_version: AdministrativeAuditSchemaVersion::V2,
-        delivery_id: format!("authorization-denied:{}", request.audit.attempt_id),
+        delivery_id: format!("authorization-denied:{}", audit_context.attempt_id),
         tenant_id: authenticated_actor.organization_id.clone(),
-        occurred_at: request.audit.occurred_at_ms.to_string(),
+        occurred_at: audit_context.occurred_at_ms.to_string(),
         actor: AdministrativeAuditActor {
             kind: match authenticated_actor.kind {
                 TeamActorKind::User => AdministrativeAuditActorKind::User,
@@ -542,7 +568,7 @@ fn authorization_denied_audit_event(
             ),
         },
         outcome: AdministrativeAuditOutcome::Denied,
-        correlation_id: request.audit.correlation_id.clone(),
+        correlation_id: audit_context.correlation_id.clone(),
     }
 }
 
@@ -624,6 +650,7 @@ mod tests {
 
     struct AuthorizationCase {
         actor: TeamActor,
+        audit: TeamAuthorizationAuditContext,
         request: TeamAuthorizationRequest,
     }
 
@@ -645,7 +672,7 @@ mod tests {
         case: &AuthorizationCase,
         sink: &dyn TeamAuthorizationAuditSink,
     ) -> Result<TeamAuthorizationDecision, TeamAuthorizationError> {
-        authorize_team_operation(&case.actor, &case.request, sink)
+        authorize_team_operation(&case.actor, &case.audit, &case.request, sink)
     }
 
     fn request(role: TeamRole, operation: TeamOperation) -> AuthorizationCase {
@@ -653,6 +680,11 @@ mod tests {
             operation.requires_repository() || operation == TeamOperation::ReadMetrics;
         AuthorizationCase {
             actor: actor(role),
+            audit: TeamAuthorizationAuditContext {
+                attempt_id: "attempt-1".to_string(),
+                occurred_at_ms: 1_000,
+                correlation_id: "correlation:1".to_string(),
+            },
             request: TeamAuthorizationRequest {
                 schema_version: TeamAuthorizationSchemaVersion::V1,
                 organization: TeamOrganization {
@@ -670,11 +702,6 @@ mod tests {
                     repo: "payments".to_string(),
                 }),
                 operation,
-                audit: TeamAuthorizationAuditContext {
-                    attempt_id: "attempt-1".to_string(),
-                    occurred_at_ms: 1_000,
-                    correlation_id: "correlation:1".to_string(),
-                },
             },
         }
     }
@@ -1099,11 +1126,36 @@ mod tests {
     }
 
     #[test]
+    fn trusted_audit_context_constructor_enforces_bounds() {
+        assert!(TeamAuthorizationAuditContext::from_trusted_ingress(
+            "attempt-1".to_string(),
+            1_000,
+            "correlation:1".to_string(),
+        )
+        .is_ok());
+        assert_eq!(
+            TeamAuthorizationAuditContext::from_trusted_ingress(
+                "attempt-1".to_string(),
+                1_000,
+                "x".repeat(4_097),
+            ),
+            Err(TeamAuthorizationError::InvalidRequest(
+                "audit.correlationId"
+            ))
+        );
+    }
+
+    #[test]
     fn local_single_user_mode_needs_no_identity_provider() {
         for operation in TeamOperation::ALL {
             let repository_required =
                 operation.requires_repository() || operation == TeamOperation::ReadMetrics;
             let actor = TeamActor::local_single_user();
+            let audit = TeamAuthorizationAuditContext {
+                attempt_id: format!("local-{operation:?}").to_ascii_lowercase(),
+                occurred_at_ms: 1_000,
+                correlation_id: "correlation:local".to_string(),
+            };
             let request = TeamAuthorizationRequest {
                 schema_version: TeamAuthorizationSchemaVersion::V1,
                 organization: TeamOrganization::local(),
@@ -1116,15 +1168,10 @@ mod tests {
                     )
                 }),
                 operation,
-                audit: TeamAuthorizationAuditContext {
-                    attempt_id: format!("local-{operation:?}").to_ascii_lowercase(),
-                    occurred_at_ms: 1_000,
-                    correlation_id: "correlation:local".to_string(),
-                },
             };
             let sink = MemoryAuditSink::default();
             assert!(matches!(
-                authorize_team_operation(&actor, &request, &sink).expect("local decision"),
+                authorize_team_operation(&actor, &audit, &request, &sink).expect("local decision"),
                 TeamAuthorizationDecision::Allowed { .. }
             ));
             assert!(sink.events.borrow().is_empty());
@@ -1139,6 +1186,7 @@ mod tests {
         assert!(value.get("actor").is_none());
         assert!(value.get("role").is_none());
         assert!(value.get("teamIds").is_none());
+        assert!(value.get("audit").is_none());
         assert_eq!(value["operation"], "trigger_review");
         assert_eq!(value["repository"]["provider"], "github");
         assert!(value.get("issuer").is_none());

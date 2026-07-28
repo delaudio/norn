@@ -11,9 +11,9 @@ optional team-service operations. Local desktop, terminal, and headless review
 remain independent from any identity provider.
 
 The versioned request schema is `v1`. It identifies an organization, optional
-team, optional repository, requested operation, and bounded audit context. It
-never carries actor roles or memberships, login tokens, provider credentials,
-prompts, diffs, or finding text.
+team, optional repository, and requested operation. It never carries actor
+roles or memberships, audit idempotency data, login tokens, provider
+credentials, prompts, diffs, or finding text.
 
 The authorization function receives a separate `TeamActor` principal produced
 by a trusted server-side authentication adapter. `TeamActor` is not
@@ -21,6 +21,11 @@ deserializable from the request contract, its fields are private, and its
 constructor validates authenticated claim shape. API and IPC adapters must
 resolve this principal before calling authorization; they must never construct
 it from role or membership values supplied in an operation request.
+
+The same trusted adapter supplies a separate
+`TeamAuthorizationAuditContext`. Its non-deserializable, private fields carry a
+tenant-unique attempt id, bounded timestamp, and bounded correlation id. A
+caller cannot select an audit delivery key through the operation request.
 
 ## Roles and permissions
 
