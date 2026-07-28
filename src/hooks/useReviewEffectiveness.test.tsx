@@ -3,23 +3,23 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { mockReviewEffectivenessReport } from "@/mock-tauri/fixtures";
 import { useReviewEffectiveness } from "./useReviewEffectiveness";
 
-const { tauriCallMock } = vi.hoisted(() => ({
-  tauriCallMock: vi.fn(),
+const { getReviewEffectivenessMetricsMock } = vi.hoisted(() => ({
+  getReviewEffectivenessMetricsMock: vi.fn(),
 }));
 
-vi.mock("@/lib/tauri", () => ({
-  tauriCall: tauriCallMock,
+vi.mock("@/lib/reviewMetricsService", () => ({
+  getReviewEffectivenessMetrics: getReviewEffectivenessMetricsMock,
 }));
 
 describe("useReviewEffectiveness", () => {
   afterEach(() => {
     vi.restoreAllMocks();
-    tauriCallMock.mockReset();
+    getReviewEffectivenessMetricsMock.mockReset();
   });
 
   it("sends the selected repository and refreshes the rolling time range", async () => {
     const now = vi.spyOn(Date, "now").mockReturnValue(2_000_000_000);
-    tauriCallMock.mockResolvedValue(mockReviewEffectivenessReport);
+    getReviewEffectivenessMetricsMock.mockResolvedValue(mockReviewEffectivenessReport);
 
     const { result } = renderHook(() =>
       useReviewEffectiveness({
@@ -35,15 +35,13 @@ describe("useReviewEffectiveness", () => {
     );
 
     await waitFor(() => expect(result.current.loading).toBe(false));
-    expect(tauriCallMock).toHaveBeenLastCalledWith("get_review_effectiveness_metrics", {
-      filter: {
-        tenantId: "local",
-        provider: "bitbucket",
-        workspace: "example-workspace",
-        repo: "frontend-app",
-        fromMs: 2_000_000_000 - 7 * 24 * 60 * 60 * 1000,
-        toMs: 2_000_000_000,
-      },
+    expect(getReviewEffectivenessMetricsMock).toHaveBeenLastCalledWith({
+      tenantId: "local",
+      provider: "bitbucket",
+      workspace: "example-workspace",
+      repo: "frontend-app",
+      fromMs: 2_000_000_000 - 7 * 24 * 60 * 60 * 1000,
+      toMs: 2_000_000_000,
     });
 
     now.mockReturnValue(2_100_000_000);
@@ -51,11 +49,41 @@ describe("useReviewEffectiveness", () => {
       await result.current.refresh();
     });
 
-    expect(tauriCallMock).toHaveBeenLastCalledWith("get_review_effectiveness_metrics", {
-      filter: expect.objectContaining({
-        fromMs: 2_100_000_000 - 7 * 24 * 60 * 60 * 1000,
-        toMs: 2_100_000_000,
-      }),
+    expect(getReviewEffectivenessMetricsMock).toHaveBeenLastCalledWith({
+      fromMs: 2_100_000_000 - 7 * 24 * 60 * 60 * 1000,
+      toMs: 2_100_000_000,
+      tenantId: "local",
+      provider: "bitbucket",
+      workspace: "example-workspace",
+      repo: "frontend-app",
     });
+  });
+
+  it("clears an in-flight state when disabled", async () => {
+    let resolveRequest: (value: typeof mockReviewEffectivenessReport) => void = () => {};
+    getReviewEffectivenessMetricsMock.mockReturnValue(
+      new Promise((resolve) => {
+        resolveRequest = resolve;
+      }),
+    );
+
+    const { result, rerender } = renderHook(
+      ({ enabled }: { enabled: boolean }) =>
+        useReviewEffectiveness({
+          enabled,
+          provider: "bitbucket",
+          repository: null,
+          days: 30,
+        }),
+      { initialProps: { enabled: true } },
+    );
+
+    await waitFor(() => expect(result.current.loading).toBe(true));
+    rerender({ enabled: false });
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.report).toBeNull();
+    expect(result.current.error).toBeNull();
+
+    resolveRequest(mockReviewEffectivenessReport);
   });
 });

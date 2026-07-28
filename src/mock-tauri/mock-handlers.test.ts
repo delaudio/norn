@@ -166,14 +166,15 @@ describe("mock structured review runs", () => {
 
 describe("mock review effectiveness metrics", () => {
   it("echoes the filter and returns the selected repository summary", () => {
+    const toMs = 2_000_000_000;
     const report = mockHandlers.get_review_effectiveness_metrics({
       filter: {
         tenantId: "local",
         provider: "bitbucket",
         workspace: "example-workspace",
         repo: "backend-api",
-        fromMs: 1_000,
-        toMs: 2_000,
+        fromMs: toMs - 30 * 24 * 60 * 60 * 1000,
+        toMs,
       },
     }) as ReviewEffectivenessReport;
 
@@ -182,8 +183,8 @@ describe("mock review effectiveness metrics", () => {
       provider: "bitbucket",
       workspace: "example-workspace",
       repo: "backend-api",
-      fromMs: 1_000,
-      toMs: 2_000,
+      fromMs: toMs - 30 * 24 * 60 * 60 * 1000,
+      toMs,
     });
     expect(report.repositories).toHaveLength(1);
     expect(report.repositories[0]).toMatchObject({
@@ -211,5 +212,30 @@ describe("mock review effectiveness metrics", () => {
     });
     expect(report.summary.feedback.acceptanceRate.basisPoints).toBeNull();
     expect(report.summary.timeToFirstReview.medianMs).toBeNull();
+  });
+
+  it("uses a distinct precomputed report for the seven-day range", () => {
+    const toMs = 2_000_000_000;
+    const sevenDays = mockHandlers.get_review_effectiveness_metrics({
+      filter: {
+        tenantId: "local",
+        provider: "bitbucket",
+        fromMs: toMs - 7 * 24 * 60 * 60 * 1000,
+        toMs,
+      },
+    }) as ReviewEffectivenessReport;
+    const thirtyDays = mockHandlers.get_review_effectiveness_metrics({
+      filter: {
+        tenantId: "local",
+        provider: "bitbucket",
+        fromMs: toMs - 30 * 24 * 60 * 60 * 1000,
+        toMs,
+      },
+    }) as ReviewEffectivenessReport;
+
+    expect(sevenDays.summary.reviewCount).toBe(31);
+    expect(thirtyDays.summary.reviewCount).toBe(48);
+    expect(sevenDays.repositories).toHaveLength(1);
+    expect(thirtyDays.repositories).toHaveLength(2);
   });
 });

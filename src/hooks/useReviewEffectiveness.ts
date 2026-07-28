@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { tauriCall } from "@/lib/tauri";
+import { getReviewEffectivenessMetrics } from "@/lib/reviewMetricsService";
 import type {
   RepoRef,
   ReviewEffectivenessFilter,
@@ -54,9 +54,7 @@ export function useReviewEffectiveness({
     setError(null);
     setReport(null);
     try {
-      const next = await tauriCall<ReviewEffectivenessReport>("get_review_effectiveness_metrics", {
-        filter: buildFilter(),
-      });
+      const next = await getReviewEffectivenessMetrics(buildFilter());
       if (requestId.current === currentRequest) setReport(next);
     } catch (nextError) {
       if (requestId.current !== currentRequest) return;
@@ -69,6 +67,9 @@ export function useReviewEffectiveness({
   useEffect(() => {
     if (!enabled) {
       requestId.current += 1;
+      setLoading(false);
+      setError(null);
+      setReport(null);
       return;
     }
     void refresh();

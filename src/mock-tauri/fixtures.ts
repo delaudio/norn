@@ -444,6 +444,12 @@ export const mockReviewEffectivenessReport: ReviewEffectivenessReport = {
   ],
 };
 
+export const mockReviewEffectivenessLast7DaysReport: ReviewEffectivenessReport = {
+  ...mockReviewEffectivenessReport,
+  summary: mockReviewEffectivenessReport.repositories[0]!.summary,
+  repositories: [mockReviewEffectivenessReport.repositories[0]!],
+};
+
 /** A small, real-shaped unified diff used for diff-viewer stories/tests. */
 export const mockRawDiff = `diff --git a/src/app/views/utils/buildRecordsUrlFromSavedView.ts b/src/app/views/utils/buildRecordsUrlFromSavedView.ts
 index 5fdfc9cb3..154929261 100644
