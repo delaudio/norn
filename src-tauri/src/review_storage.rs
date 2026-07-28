@@ -12,8 +12,8 @@ use crate::administrative_audit::{
     AdministrativeAuditEvent,
 };
 use crate::finding_publication::{
-    FindingPublicationLease, FindingPublicationRequest, FindingPublicationReservation,
-    ProviderCommentIdentity,
+    legacy_finding_marker, FindingPublicationLease, FindingPublicationRequest,
+    FindingPublicationReservation, ProviderCommentIdentity,
 };
 use crate::review_event::PullRequestReviewEventProvider;
 use crate::review_feedback::{
@@ -2382,6 +2382,52 @@ fn now_ms_i64() -> i64 {
     now_ms().parse().unwrap_or(0)
 }
 
+type StoredFindingPublicationRow = (
+    String,
+    String,
+    String,
+    String,
+    i64,
+    String,
+    String,
+    String,
+    String,
+    Option<i64>,
+    Option<String>,
+);
+
+fn load_finding_publication_row(
+    conn: &Connection,
+    marker: &str,
+) -> Result<Option<StoredFindingPublicationRow>, String> {
+    conn.query_row(
+        r#"
+        SELECT tenant_id, provider, workspace, repo, pr_id, base_sha, head_sha,
+               finding_fingerprint, status, lease_expires_at_ms, comment_id
+        FROM shared_finding_publications
+        WHERE marker = ?1
+        "#,
+        params![marker],
+        |row| {
+            Ok((
+                row.get(0)?,
+                row.get(1)?,
+                row.get(2)?,
+                row.get(3)?,
+                row.get(4)?,
+                row.get(5)?,
+                row.get(6)?,
+                row.get(7)?,
+                row.get(8)?,
+                row.get(9)?,
+                row.get(10)?,
+            ))
+        },
+    )
+    .optional()
+    .map_err(|error| error.to_string())
+}
+
 pub(crate) fn reserve_finding_publication(
     request: &FindingPublicationRequest,
     marker: &str,
@@ -2402,33 +2448,21 @@ pub(crate) fn reserve_finding_publication(
     let transaction = conn
         .transaction_with_behavior(TransactionBehavior::Immediate)
         .map_err(|error| error.to_string())?;
-    let existing = transaction
-        .query_row(
-            r#"
-            SELECT tenant_id, provider, workspace, repo, pr_id, base_sha, head_sha,
-                   finding_fingerprint, status, lease_expires_at_ms, comment_id
-            FROM shared_finding_publications
-            WHERE marker = ?1
-            "#,
-            params![marker],
-            |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, String>(2)?,
-                    row.get::<_, String>(3)?,
-                    row.get::<_, i64>(4)?,
-                    row.get::<_, String>(5)?,
-                    row.get::<_, String>(6)?,
-                    row.get::<_, String>(7)?,
-                    row.get::<_, String>(8)?,
-                    row.get::<_, Option<i64>>(9)?,
-                    row.get::<_, Option<String>>(10)?,
-                ))
-            },
-        )
-        .optional()
-        .map_err(|error| error.to_string())?;
+    let mut reserved_marker = marker.to_string();
+    let mut existing = load_finding_publication_row(&transaction, marker)?;
+    if existing.is_none() {
+        // v6 markers had no base SHA. Keep that marker for remote-comment
+        // recovery while treating its empty base as an explicit legacy identity.
+        let legacy_marker = legacy_finding_marker(request);
+        if legacy_marker != marker {
+            let legacy = load_finding_publication_row(&transaction, &legacy_marker)?;
+            if legacy.as_ref().is_some_and(|row| row.5.is_empty()) {
+                reserved_marker = legacy_marker;
+                existing = legacy;
+            }
+        }
+    }
+    let legacy_reservation = reserved_marker != marker;
 
     if let Some((
         tenant_id,
@@ -2444,12 +2478,17 @@ pub(crate) fn reserve_finding_publication(
         comment_id,
     )) = existing
     {
+        let base_matches = if legacy_reservation {
+            base_sha.is_empty()
+        } else {
+            base_sha.eq_ignore_ascii_case(&request.base_sha)
+        };
         if tenant_id != request.tenant_id
             || provider != request.provider.as_str()
             || !workspace.eq_ignore_ascii_case(&request.workspace)
             || !repo.eq_ignore_ascii_case(&request.repository)
             || stored_pr_id != pr_id
-            || !base_sha.eq_ignore_ascii_case(&request.base_sha)
+            || !base_matches
             || !head_sha.eq_ignore_ascii_case(&request.head_sha)
             || finding_fingerprint != request.finding_fingerprint
         {
@@ -2462,9 +2501,10 @@ pub(crate) fn reserve_finding_publication(
                     "Published finding is missing its provider comment id.".to_string()
                 })?;
             transaction.commit().map_err(|error| error.to_string())?;
-            return Ok(FindingPublicationReservation::Published(
-                ProviderCommentIdentity { comment_id },
-            ));
+            return Ok(FindingPublicationReservation::Published {
+                identity: ProviderCommentIdentity { comment_id },
+                marker: reserved_marker,
+            });
         }
         if stored_lease_expires_at.is_some_and(|expires_at| expires_at > now) {
             transaction.commit().map_err(|error| error.to_string())?;
@@ -2478,7 +2518,7 @@ pub(crate) fn reserve_finding_publication(
                 WHERE marker = ?1 AND status = 'publishing'
                   AND lease_expires_at_ms <= ?4
                 "#,
-                params![marker, lease_token, lease_expires_at, now],
+                params![reserved_marker, lease_token, lease_expires_at, now],
             )
             .map_err(|error| error.to_string())?;
         if updated != 1 {
@@ -2518,7 +2558,7 @@ pub(crate) fn reserve_finding_publication(
     transaction.commit().map_err(|error| error.to_string())?;
     Ok(FindingPublicationReservation::Acquired(
         FindingPublicationLease {
-            marker: marker.to_string(),
+            marker: reserved_marker,
             token: lease_token.to_string(),
         },
     ))
@@ -3335,15 +3375,21 @@ mod tests {
             assert_eq!(
                 reserve_finding_publication(&request, &marker, "lease-3")
                     .expect("idempotent published reservation"),
-                FindingPublicationReservation::Published(identity)
+                FindingPublicationReservation::Published {
+                    identity,
+                    marker: marker.clone(),
+                }
             );
             release_finding_publication(&first_lease).expect("stale release is harmless");
             assert_eq!(
                 reserve_finding_publication(&request, &marker, "lease-4")
                     .expect("published state survives stale release"),
-                FindingPublicationReservation::Published(ProviderCommentIdentity {
-                    comment_id: "9223372036854775000".to_string()
-                })
+                FindingPublicationReservation::Published {
+                    identity: ProviderCommentIdentity {
+                        comment_id: "9223372036854775000".to_string()
+                    },
+                    marker,
+                }
             );
         });
     }
@@ -4067,6 +4113,9 @@ mod tests {
     #[test]
     fn v6_publication_database_adds_base_sha_without_losing_rows() {
         with_test_data_dir("finding-publication-v6-migration", |dir| {
+            let request = finding_publication_request();
+            let legacy_marker = crate::finding_publication::legacy_finding_marker(&request);
+            let current_marker = crate::finding_publication::finding_marker(&request);
             fs::create_dir_all(dir).expect("create v6 data directory");
             let db = dir.join(DB_FILE);
             let conn = Connection::open(&db).expect("open v6 database");
@@ -4099,18 +4148,32 @@ mod tests {
                   ON shared_finding_publications(
                     tenant_id, provider, workspace, repo, pr_id, head_sha
                   );
+                "#,
+            )
+            .expect("create v6 publication schema");
+            conn.execute(
+                r#"
                 INSERT INTO shared_finding_publications (
                   marker, tenant_id, provider, workspace, repo, pr_id, head_sha,
                   finding_fingerprint, status, lease_token, lease_expires_at_ms,
                   comment_id, created_at_ms, updated_at_ms
                 ) VALUES (
-                  'legacy-marker', 'tenant-acme', 'github', 'acme', 'payments',
-                  42, '2222222222222222222222222222222222222222',
-                  'legacy-finding', 'published', NULL, NULL, 'comment-1', 1000, 1000
-                );
+                  ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'published',
+                  NULL, NULL, 'comment-1', 1000, 1000
+                )
                 "#,
+                params![
+                    legacy_marker,
+                    request.tenant_id,
+                    request.provider.as_str(),
+                    request.workspace,
+                    request.repository,
+                    request.pull_request_id,
+                    request.head_sha,
+                    request.finding_fingerprint,
+                ],
             )
-            .expect("create v6 publication schema");
+            .expect("insert v6 publication");
             drop(conn);
 
             let migrated = open().expect("migrate v6 publication schema");
@@ -4119,9 +4182,9 @@ mod tests {
                     r#"
                     SELECT base_sha, comment_id
                     FROM shared_finding_publications
-                    WHERE marker = 'legacy-marker'
+                    WHERE marker = ?1
                     "#,
-                    [],
+                    params![legacy_marker],
                     |row| Ok((row.get(0)?, row.get(1)?)),
                 )
                 .expect("load migrated publication");
@@ -4145,6 +4208,18 @@ mod tests {
                 })
                 .expect("load latest migration");
             assert_eq!(version, 7);
+            drop(migrated);
+
+            assert_eq!(
+                reserve_finding_publication(&request, &current_marker, "lease-after-migration")
+                    .expect("reserve migrated publication"),
+                FindingPublicationReservation::Published {
+                    identity: ProviderCommentIdentity {
+                        comment_id: "comment-1".to_string(),
+                    },
+                    marker: legacy_marker,
+                }
+            );
         });
     }
 

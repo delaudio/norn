@@ -220,7 +220,10 @@ pub struct FindingPublicationLease {
 pub enum FindingPublicationReservation {
     Acquired(FindingPublicationLease),
     InProgress,
-    Published(ProviderCommentIdentity),
+    Published {
+        identity: ProviderCommentIdentity,
+        marker: String,
+    },
 }
 
 pub trait FindingPublicationStore {
@@ -324,8 +327,11 @@ where
             .reserve(request, &marker)
             .map_err(publication_state_error)?
         {
-            FindingPublicationReservation::Published(existing) => {
-                return Ok(request.published_identity(existing.comment_id, marker));
+            FindingPublicationReservation::Published {
+                identity,
+                marker: published_marker,
+            } => {
+                return Ok(request.published_identity(identity.comment_id, published_marker));
             }
             FindingPublicationReservation::InProgress => {
                 return Err(FindingPublicationError {
@@ -337,7 +343,7 @@ where
             FindingPublicationReservation::Acquired(lease) => lease,
         };
 
-        let result = self.publish_reserved(request, &target, &marker, &lease);
+        let result = self.publish_reserved(request, &target, &lease.marker, &lease);
         if result.is_err() {
             let _ = self.store.release(&lease);
         }
@@ -426,8 +432,8 @@ impl FindingPublicationRequest {
         if self.pull_request_id == 0 {
             return Err("`pullRequestId` must be a positive integer".to_string());
         }
-        validate_sha(&self.head_sha)?;
-        validate_sha(&self.base_sha)?;
+        validate_sha("headSha", &self.head_sha)?;
+        validate_sha("baseSha", &self.base_sha)?;
         validate_identifier("findingFingerprint", &self.finding_fingerprint)?;
         validate_path(&self.anchor.path)?;
         if self.anchor.start_line == 0 || self.anchor.end_line == 0 {
@@ -496,22 +502,39 @@ impl FindingPublicationRequest {
 }
 
 pub fn finding_marker(request: &FindingPublicationRequest) -> String {
+    finding_marker_with_revision(request, true)
+}
+
+pub(crate) fn legacy_finding_marker(request: &FindingPublicationRequest) -> String {
+    finding_marker_with_revision(request, false)
+}
+
+fn finding_marker_with_revision(
+    request: &FindingPublicationRequest,
+    include_base_sha: bool,
+) -> String {
     let pull_request_id = request.pull_request_id.to_string();
     let head_sha = request.head_sha.to_ascii_lowercase();
     let base_sha = request.base_sha.to_ascii_lowercase();
     let workspace = request.workspace.to_ascii_lowercase();
     let repository = request.repository.to_ascii_lowercase();
     let mut hasher = Sha256::new();
-    for part in [
+    let common_parts = [
         request.tenant_id.as_str(),
         request.provider.as_str(),
         workspace.as_str(),
         repository.as_str(),
         pull_request_id.as_str(),
-        base_sha.as_str(),
-        head_sha.as_str(),
-        request.finding_fingerprint.as_str(),
-    ] {
+    ];
+    for part in common_parts {
+        hasher.update((part.len() as u64).to_be_bytes());
+        hasher.update(part.as_bytes());
+    }
+    if include_base_sha {
+        hasher.update((base_sha.len() as u64).to_be_bytes());
+        hasher.update(base_sha.as_bytes());
+    }
+    for part in [head_sha.as_str(), request.finding_fingerprint.as_str()] {
         hasher.update((part.len() as u64).to_be_bytes());
         hasher.update(part.as_bytes());
     }
@@ -571,11 +594,11 @@ fn validate_identifier(field: &str, value: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn validate_sha(value: &str) -> Result<(), String> {
+fn validate_sha(field: &str, value: &str) -> Result<(), String> {
     if matches!(value.len(), 40 | 64) && value.bytes().all(|byte| byte.is_ascii_hexdigit()) {
         Ok(())
     } else {
-        Err("`headSha` must be a full hexadecimal commit SHA".to_string())
+        Err(format!("`{field}` must be a full hexadecimal commit SHA"))
     }
 }
 
@@ -815,7 +838,10 @@ mod tests {
                     Ok(FindingPublicationReservation::InProgress)
                 }
                 Some(MockPublicationState::Published(identity)) => {
-                    Ok(FindingPublicationReservation::Published(identity.clone()))
+                    Ok(FindingPublicationReservation::Published {
+                        identity: identity.clone(),
+                        marker: marker.to_string(),
+                    })
                 }
                 None => {
                     let lease = FindingPublicationLease {
@@ -886,6 +912,31 @@ mod tests {
         }
     }
 
+    #[derive(Debug, Default)]
+    struct LegacyPublicationStore(MockPublicationStore);
+
+    impl FindingPublicationStore for LegacyPublicationStore {
+        fn reserve(
+            &self,
+            request: &FindingPublicationRequest,
+            _marker: &str,
+        ) -> Result<FindingPublicationReservation, String> {
+            self.0.reserve(request, &legacy_finding_marker(request))
+        }
+
+        fn complete(
+            &self,
+            lease: &FindingPublicationLease,
+            identity: &ProviderCommentIdentity,
+        ) -> Result<(), String> {
+            self.0.complete(lease, identity)
+        }
+
+        fn release(&self, lease: &FindingPublicationLease) -> Result<(), String> {
+            self.0.release(lease)
+        }
+    }
+
     fn request(provider: PullRequestReviewEventProvider) -> FindingPublicationRequest {
         FindingPublicationRequest {
             schema_version: FindingPublicationSchemaVersion::V1,
@@ -947,6 +998,30 @@ mod tests {
 
         assert_eq!(repeated, first);
         assert_eq!(publisher.api.state.lock().unwrap().payloads.len(), 1);
+    }
+
+    #[test]
+    fn migrated_legacy_reservation_recovers_its_existing_provider_comment() {
+        let publisher = FindingPublisher::new(
+            MockProviderApi::default(),
+            LegacyPublicationStore::default(),
+        );
+        let request = request(PullRequestReviewEventProvider::Github);
+        let legacy_marker = legacy_finding_marker(&request);
+        publisher.api.state.lock().unwrap().comments.insert(
+            legacy_marker.clone(),
+            ProviderCommentIdentity {
+                comment_id: "comment-existing".to_string(),
+            },
+        );
+
+        let published = publisher
+            .publish(&request)
+            .expect("recover legacy publication");
+
+        assert_eq!(published.comment_id, "comment-existing");
+        assert_eq!(published.finding_marker, legacy_marker);
+        assert!(publisher.api.state.lock().unwrap().payloads.is_empty());
     }
 
     #[test]
@@ -1214,6 +1289,23 @@ mod tests {
         assert!(value.get("token").is_none());
         assert!(value.get("credentials").is_none());
         assert_eq!(value["schemaVersion"], "v1");
+    }
+
+    #[test]
+    fn invalid_revision_errors_name_the_rejected_field() {
+        let mut request = request(PullRequestReviewEventProvider::Github);
+        request.base_sha = "invalid".to_string();
+        assert_eq!(
+            request.validate().expect_err("invalid base SHA"),
+            "`baseSha` must be a full hexadecimal commit SHA"
+        );
+
+        request.base_sha = BASE_SHA.to_string();
+        request.head_sha = "invalid".to_string();
+        assert_eq!(
+            request.validate().expect_err("invalid head SHA"),
+            "`headSha` must be a full hexadecimal commit SHA"
+        );
     }
 
     #[test]
