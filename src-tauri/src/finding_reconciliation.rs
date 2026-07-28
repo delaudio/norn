@@ -311,6 +311,66 @@ where
                 ));
                 continue;
             }
+            if !has_lineage_marker {
+                let owns_legacy_comment = match self.store.owns_published_comment(
+                    &exact_marker,
+                    &provider_comment.identity,
+                    &target,
+                    &fingerprint,
+                ) {
+                    Ok(owned) => owned,
+                    Err(_) => {
+                        actions.push(failed_action(
+                            fingerprint,
+                            Some(previous_identity.comment_id),
+                            None,
+                            false,
+                            FindingPublicationError {
+                                code: FindingPublicationErrorCode::ProviderUnavailable,
+                                retryable: true,
+                                message:
+                                    "The local publication state is unavailable for reconciliation."
+                                        .to_string(),
+                            },
+                        ));
+                        continue;
+                    }
+                };
+                if !owns_legacy_comment {
+                    actions.push(if let Some(current_finding) = current_finding {
+                        match publisher.publish(current_finding) {
+                            Ok(published) => successful_action(
+                                fingerprint,
+                                FindingReconciliationActionKind::Created,
+                                Some(previous_identity.comment_id),
+                                Some(published.comment_id),
+                                true,
+                            ),
+                            Err(error) => failed_action(
+                                fingerprint,
+                                Some(previous_identity.comment_id),
+                                None,
+                                false,
+                                error,
+                            ),
+                        }
+                    } else {
+                        failed_action(
+                            fingerprint,
+                            Some(previous_identity.comment_id),
+                            None,
+                            false,
+                            FindingPublicationError {
+                                code: FindingPublicationErrorCode::PermissionDenied,
+                                retryable: false,
+                                message: "The legacy tracked comment is not backed by trusted local publication state."
+                                    .to_string(),
+                            },
+                        )
+                    });
+                    continue;
+                }
+            }
 
             match current_finding {
                 Some(current_finding) => actions.push(self.reconcile_current_finding(
@@ -405,17 +465,12 @@ where
             );
         }
 
-        let published = match publisher.publish(current) {
-            Ok(published) => published,
-            Err(error) => {
-                return failed_action(fingerprint, Some(previous_id), None, false, error);
-            }
-        };
         let resolved = resolved_markdown(
             &provider_comment.markdown,
             &request.lineage_marker(&fingerprint),
             &previous_exact_marker,
         );
+        let mut resolved_previous = false;
         if !was_resolved && provider_comment.markdown != resolved {
             if let Err(failure) = self.update_fenced(
                 request,
@@ -427,12 +482,25 @@ where
                 return failed_action(
                     fingerprint,
                     Some(previous_id),
-                    Some(published.comment_id),
-                    true,
+                    None,
+                    failure.provider_mutated,
                     failure.error,
                 );
             }
+            resolved_previous = true;
         }
+        let published = match publisher.publish(current) {
+            Ok(published) => published,
+            Err(error) => {
+                return failed_action(
+                    fingerprint,
+                    Some(previous_id),
+                    None,
+                    resolved_previous,
+                    error,
+                );
+            }
+        };
         successful_action(
             fingerprint,
             if was_resolved {
@@ -1124,18 +1192,38 @@ mod tests {
         }
     }
 
+    #[derive(Debug, Clone)]
+    struct MockStoredPublication {
+        identity: ProviderCommentIdentity,
+        target: ProviderPublicationTarget,
+        finding_fingerprint: String,
+    }
+
     #[derive(Debug, Default)]
-    struct MockStore(Mutex<HashMap<String, ProviderCommentIdentity>>);
+    struct MockStoreState {
+        published: HashMap<String, MockStoredPublication>,
+        pending: HashMap<String, (ProviderPublicationTarget, String)>,
+    }
+
+    #[derive(Debug, Default)]
+    struct MockStore(Mutex<MockStoreState>);
 
     impl FindingPublicationStore for MockStore {
         fn reserve(
             &self,
-            _request: &FindingPublicationRequest,
+            request: &FindingPublicationRequest,
             marker: &str,
         ) -> Result<FindingPublicationReservation, String> {
-            if let Some(identity) = self.0.lock().unwrap().get(marker).cloned() {
-                return Ok(FindingPublicationReservation::Published(identity));
+            let mut state = self.0.lock().unwrap();
+            if let Some(publication) = state.published.get(marker) {
+                return Ok(FindingPublicationReservation::Published(
+                    publication.identity.clone(),
+                ));
             }
+            state.pending.insert(
+                marker.to_string(),
+                (request.target(), request.finding_fingerprint.clone()),
+            );
             Ok(FindingPublicationReservation::Acquired(
                 FindingPublicationLease {
                     marker: marker.to_string(),
@@ -1149,15 +1237,45 @@ mod tests {
             lease: &FindingPublicationLease,
             identity: &ProviderCommentIdentity,
         ) -> Result<(), String> {
-            self.0
-                .lock()
-                .unwrap()
-                .insert(lease.marker.clone(), identity.clone());
+            let mut state = self.0.lock().unwrap();
+            let (target, finding_fingerprint) = state
+                .pending
+                .remove(&lease.marker)
+                .ok_or_else(|| "publication reservation is missing".to_string())?;
+            state.published.insert(
+                lease.marker.clone(),
+                MockStoredPublication {
+                    identity: identity.clone(),
+                    target,
+                    finding_fingerprint,
+                },
+            );
             Ok(())
         }
 
-        fn release(&self, _lease: &FindingPublicationLease) -> Result<(), String> {
+        fn release(&self, lease: &FindingPublicationLease) -> Result<(), String> {
+            self.0.lock().unwrap().pending.remove(&lease.marker);
             Ok(())
+        }
+
+        fn owns_published_comment(
+            &self,
+            marker: &str,
+            identity: &ProviderCommentIdentity,
+            target: &ProviderPublicationTarget,
+            finding_fingerprint: &str,
+        ) -> Result<bool, String> {
+            Ok(self
+                .0
+                .lock()
+                .unwrap()
+                .published
+                .get(marker)
+                .is_some_and(|publication| {
+                    publication.identity == *identity
+                        && publication.target == *target
+                        && publication.finding_fingerprint == finding_fingerprint
+                }))
         }
     }
 
@@ -1321,6 +1439,31 @@ mod tests {
         ] {
             assert_eq!(state.comments[id].replies, vec![reply]);
         }
+    }
+
+    #[test]
+    fn moved_finding_does_not_publish_replacement_before_old_comment_cleanup() {
+        let api = MockApi::default();
+        let store = MockStore::default();
+        let previous = finding("moved", HEAD_SHA);
+        let tracked = api.insert(&previous, "comment-moved", false, &[]);
+        let mut current = previous.clone();
+        current.anchor.start_line = 30;
+        current.anchor.end_line = 30;
+        api.set_fail_next_update();
+
+        let summary = FindingReconciler::new(&api, &store)
+            .reconcile(&request(vec![tracked], vec![current]))
+            .expect("partial moved finding");
+
+        assert_eq!(summary.status, FindingReconciliationStatus::Partial);
+        assert_eq!(summary.counts.failed, 1);
+        assert_eq!(summary.actions[0].comment_id, None);
+        let state = api.0.lock().unwrap();
+        assert_eq!(state.create_count, 0);
+        assert!(!comment_is_resolved(
+            &state.comments["comment-moved"].comment.markdown
+        ));
     }
 
     #[test]
@@ -1532,6 +1675,20 @@ mod tests {
         let previous = finding("legacy", OLD_HEAD_SHA);
         let previous_marker = finding_marker(&previous);
         let tracked = api.insert(&previous, "comment-legacy", false, &[]);
+        let FindingPublicationReservation::Acquired(lease) = store
+            .reserve(&previous, &previous_marker)
+            .expect("legacy publication reservation")
+        else {
+            panic!("legacy marker should be reservable");
+        };
+        store
+            .complete(
+                &lease,
+                &ProviderCommentIdentity {
+                    comment_id: "comment-legacy".to_string(),
+                },
+            )
+            .expect("legacy publication completion");
         {
             let mut state = api.0.lock().unwrap();
             let body = active_markdown(&state.comments["comment-legacy"].comment.markdown);
@@ -1550,6 +1707,41 @@ mod tests {
         assert_eq!(summary.status, FindingReconciliationStatus::Succeeded);
         assert_eq!(summary.counts.unchanged, 1);
         assert!(summary.actions[0].provider_mutated);
+    }
+
+    #[test]
+    fn untrusted_legacy_mapping_never_mutates_the_tracked_comment() {
+        let api = MockApi::default();
+        let store = MockStore::default();
+        let previous = finding("other", OLD_HEAD_SHA);
+        let previous_marker = finding_marker(&previous);
+        let mut tracked = api.insert(&previous, "comment-other", false, &[]);
+        tracked.finding_fingerprint = "victim".to_string();
+        {
+            let mut state = api.0.lock().unwrap();
+            let body = active_markdown(&state.comments["comment-other"].comment.markdown);
+            state
+                .comments
+                .get_mut("comment-other")
+                .unwrap()
+                .comment
+                .markdown = format!("{body}\n\n{previous_marker}");
+        }
+
+        let summary = FindingReconciler::new(&api, &store)
+            .reconcile(&request(vec![tracked], vec![finding("victim", HEAD_SHA)]))
+            .expect("safe legacy reconciliation");
+
+        assert_eq!(summary.counts.created, 1);
+        assert_ne!(
+            summary.actions[0].comment_id.as_deref(),
+            Some("comment-other")
+        );
+        let state = api.0.lock().unwrap();
+        assert_eq!(state.update_count, 0);
+        assert!(!comment_is_resolved(
+            &state.comments["comment-other"].comment.markdown
+        ));
     }
 
     #[test]

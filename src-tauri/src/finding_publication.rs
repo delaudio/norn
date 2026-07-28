@@ -286,6 +286,19 @@ pub trait FindingPublicationStore {
 
     /// Releases a failed attempt only when the caller still owns the lease.
     fn release(&self, lease: &FindingPublicationLease) -> Result<(), String>;
+
+    /// Confirms that an exact marker and provider comment were durably
+    /// published for the requested target and finding lineage.
+    fn owns_published_comment(
+        &self,
+        marker: &str,
+        identity: &ProviderCommentIdentity,
+        target: &ProviderPublicationTarget,
+        finding_fingerprint: &str,
+    ) -> Result<bool, String> {
+        let _ = (marker, identity, target, finding_fingerprint);
+        Ok(false)
+    }
 }
 
 impl<T> FindingPublicationStore for &T
@@ -311,6 +324,16 @@ where
     fn release(&self, lease: &FindingPublicationLease) -> Result<(), String> {
         (**self).release(lease)
     }
+
+    fn owns_published_comment(
+        &self,
+        marker: &str,
+        identity: &ProviderCommentIdentity,
+        target: &ProviderPublicationTarget,
+        finding_fingerprint: &str,
+    ) -> Result<bool, String> {
+        (**self).owns_published_comment(marker, identity, target, finding_fingerprint)
+    }
 }
 
 #[derive(Debug, Default, Clone, Copy)]
@@ -335,6 +358,21 @@ impl FindingPublicationStore for SqliteFindingPublicationStore {
 
     fn release(&self, lease: &FindingPublicationLease) -> Result<(), String> {
         review_storage::release_finding_publication(lease)
+    }
+
+    fn owns_published_comment(
+        &self,
+        marker: &str,
+        identity: &ProviderCommentIdentity,
+        target: &ProviderPublicationTarget,
+        finding_fingerprint: &str,
+    ) -> Result<bool, String> {
+        review_storage::finding_publication_owns_comment(
+            marker,
+            identity,
+            target,
+            finding_fingerprint,
+        )
     }
 }
 

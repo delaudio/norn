@@ -285,6 +285,7 @@ export function latestTrackedFindingComments(
   for (const run of store?.reviewRuns ?? []) {
     for (const finding of run.findings) {
       const publication = finding.publication;
+      if (publication?.mode !== "inline") continue;
       const remoteCommentIds = publication?.remoteCommentIds ?? [];
       const commentId = remoteCommentIds[remoteCommentIds.length - 1];
       if (!commentId) continue;

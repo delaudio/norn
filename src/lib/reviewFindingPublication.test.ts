@@ -7,6 +7,7 @@ import {
   filterStageableAiReviewDraftComments,
   latestReviewFindingFingerprintsForRevision,
   latestTrackedFindingCommentId,
+  latestTrackedFindingComments,
   selectTrackedFindingCommentsForBatch,
   summarizeActiveReviewFindings,
 } from "./reviewFindingPublication";
@@ -379,6 +380,33 @@ describe("summarizeActiveReviewFindings", () => {
       { findingFingerprint: "staged", commentId: "comment-1" },
       { findingFingerprint: "absent", commentId: "comment-3" },
     ]);
+  });
+
+  it("tracks only inline provider comments for reconciliation", () => {
+    const generalRun: ReviewRun = {
+      ...previousRun,
+      id: "run-general",
+      findings: [
+        {
+          ...previousRun.findings[0]!,
+          fingerprint: "general-finding",
+          publication: {
+            mode: "general",
+            draftIds: [],
+            remoteCommentIds: ["general-comment"],
+            publishedAt: "2026-06-22T20:11:00.000Z",
+          },
+        },
+      ],
+    };
+
+    expect(
+      latestTrackedFindingComments({
+        activeThreadId: null,
+        threads: [],
+        reviewRuns: [previousRun, generalRun],
+      }),
+    ).toEqual([{ findingFingerprint: "fingerprint-1", commentId: "101" }]);
   });
 });
 
