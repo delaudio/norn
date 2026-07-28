@@ -2,6 +2,7 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::json;
 use std::path::Path;
+use std::sync::OnceLock;
 
 use crate::config::{self, AppConfig, RepoRef, ReviewProvider};
 use crate::config::{AiProvider, ReviewTerminal};
@@ -2141,8 +2142,66 @@ pub async fn get_pr_file_preview(
 // Commands — comments
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Default, Clone, Copy)]
-pub struct StoredProviderInlineCommentApi;
+#[derive(Default)]
+pub struct StoredProviderInlineCommentApi {
+    bitbucket_client: OnceLock<Result<BitbucketClient, String>>,
+    github_client: OnceLock<Result<GithubClient, String>>,
+    bitbucket_author_account_id: OnceLock<Result<String, ProviderPublicationApiError>>,
+    github_author_login: OnceLock<Result<String, ProviderPublicationApiError>>,
+}
+
+impl StoredProviderInlineCommentApi {
+    fn bitbucket_client(&self) -> Result<&BitbucketClient, ProviderPublicationApiError> {
+        self.bitbucket_client
+            .get_or_init(BitbucketClient::from_stored)
+            .as_ref()
+            .map_err(|error| map_publication_auth_error(error.clone()))
+    }
+
+    fn github_client(&self) -> Result<&GithubClient, ProviderPublicationApiError> {
+        self.github_client
+            .get_or_init(GithubClient::from_stored)
+            .as_ref()
+            .map_err(|error| map_publication_auth_error(error.clone()))
+    }
+
+    fn bitbucket_author_account_id(&self) -> Result<&str, ProviderPublicationApiError> {
+        self.bitbucket_author_account_id
+            .get_or_init(|| {
+                let user: BbUser = get_json(self.bitbucket_client()?.get(&format!("{BASE}/user")))
+                    .map_err(map_publication_read_error)?;
+                user.account_id
+                    .filter(|account_id| !account_id.trim().is_empty())
+                    .ok_or_else(|| {
+                        ProviderPublicationApiError::unavailable(
+                            "Bitbucket did not return the authenticated account identifier.",
+                        )
+                    })
+            })
+            .as_ref()
+            .map(String::as_str)
+            .map_err(Clone::clone)
+    }
+
+    fn github_author_login(&self) -> Result<&str, ProviderPublicationApiError> {
+        self.github_author_login
+            .get_or_init(|| {
+                let user: GhUser =
+                    github_get_json(self.github_client()?.get("https://api.github.com/user"))
+                        .map_err(map_publication_read_error)?;
+                let login = user.login.trim();
+                if login.is_empty() {
+                    return Err(ProviderPublicationApiError::unavailable(
+                        "GitHub did not return the authenticated account login.",
+                    ));
+                }
+                Ok(login.to_string())
+            })
+            .as_ref()
+            .map(String::as_str)
+            .map_err(Clone::clone)
+    }
+}
 
 impl ProviderInlineCommentApi for StoredProviderInlineCommentApi {
     fn current_revision(
@@ -2151,9 +2210,9 @@ impl ProviderInlineCommentApi for StoredProviderInlineCommentApi {
     ) -> Result<ProviderPullRequestRevision, ProviderPublicationApiError> {
         let detail = match target.provider {
             PullRequestReviewEventProvider::Bitbucket => {
-                let client = BitbucketClient::from_stored().map_err(map_publication_auth_error)?;
+                let client = self.bitbucket_client()?;
                 fetch_pull_request_detail(
-                    &client,
+                    client,
                     &target.workspace,
                     &target.repository,
                     publication_pr_id(target.pull_request_id)?,
@@ -2161,9 +2220,9 @@ impl ProviderInlineCommentApi for StoredProviderInlineCommentApi {
                 .map_err(map_publication_read_error)?
             }
             PullRequestReviewEventProvider::Github => {
-                let client = GithubClient::from_stored().map_err(map_publication_auth_error)?;
+                let client = self.github_client()?;
                 fetch_github_pull_request_detail(
-                    &client,
+                    client,
                     &target.workspace,
                     &target.repository,
                     publication_pr_id(target.pull_request_id)?,
@@ -2190,7 +2249,7 @@ impl ProviderInlineCommentApi for StoredProviderInlineCommentApi {
         marker: &str,
         expected: &ProviderInlineCommentPayload,
     ) -> Result<Option<ProviderCommentIdentity>, ProviderPublicationApiError> {
-        find_published_finding_comment(target, marker, Some(expected))
+        find_published_finding_comment(self, target, marker, Some(expected))
     }
 
     fn find_comment_by_marker(
@@ -2198,7 +2257,7 @@ impl ProviderInlineCommentApi for StoredProviderInlineCommentApi {
         target: &ProviderPublicationTarget,
         marker: &str,
     ) -> Result<Option<ProviderCommentIdentity>, ProviderPublicationApiError> {
-        find_published_finding_comment(target, marker, None)
+        find_published_finding_comment(self, target, marker, None)
     }
 
     fn create_inline_comment(
@@ -2209,7 +2268,7 @@ impl ProviderInlineCommentApi for StoredProviderInlineCommentApi {
         let pr_id = publication_pr_id(target.pull_request_id)?;
         let (comment_id, inline) = match target.provider {
             PullRequestReviewEventProvider::Bitbucket => {
-                let client = BitbucketClient::from_stored().map_err(map_publication_auth_error)?;
+                let client = self.bitbucket_client()?;
                 let url = format!(
                     "{}/pullrequests/{pr_id}/comments",
                     repo_base(&target.workspace, &target.repository)
@@ -2230,7 +2289,7 @@ impl ProviderInlineCommentApi for StoredProviderInlineCommentApi {
                 )
             }
             PullRequestReviewEventProvider::Github => {
-                let client = GithubClient::from_stored().map_err(map_publication_auth_error)?;
+                let client = self.github_client()?;
                 let base = github_repo_base(&target.workspace, &target.repository)
                     .map_err(ProviderPublicationApiError::unavailable)?;
                 let body = github_publication_body(payload);
@@ -2262,7 +2321,7 @@ impl ProviderInlineCommentApi for StoredProviderInlineCommentApi {
         let comment_id = encode_path_segment(&identity.comment_id);
         let result = match target.provider {
             PullRequestReviewEventProvider::Bitbucket => {
-                let client = BitbucketClient::from_stored().map_err(map_publication_auth_error)?;
+                let client = self.bitbucket_client()?;
                 let url = format!(
                     "{}/pullrequests/{}/comments/{comment_id}",
                     repo_base(&target.workspace, &target.repository)
@@ -2272,7 +2331,7 @@ impl ProviderInlineCommentApi for StoredProviderInlineCommentApi {
                 send_checked(client.delete(&url)).map(|_| ())
             }
             PullRequestReviewEventProvider::Github => {
-                let client = GithubClient::from_stored().map_err(map_publication_auth_error)?;
+                let client = self.github_client()?;
                 let url = format!(
                     "{}/pulls/comments/{comment_id}",
                     github_repo_base(&target.workspace, &target.repository)
@@ -2299,17 +2358,8 @@ impl ProviderFindingReconciliationApi for StoredProviderInlineCommentApi {
         let comment_id = encode_path_segment(&identity.comment_id);
         match target.provider {
             PullRequestReviewEventProvider::Bitbucket => {
-                let client = BitbucketClient::from_stored().map_err(map_publication_auth_error)?;
-                let user: BbUser = get_json(client.get(&format!("{BASE}/user")))
-                    .map_err(map_publication_read_error)?;
-                let author_account_id = user
-                    .account_id
-                    .filter(|account_id| !account_id.trim().is_empty())
-                    .ok_or_else(|| {
-                        ProviderPublicationApiError::unavailable(
-                            "Bitbucket did not return the authenticated account identifier.",
-                        )
-                    })?;
+                let client = self.bitbucket_client()?;
+                let author_account_id = self.bitbucket_author_account_id()?;
                 let url = format!(
                     "{}/pullrequests/{pr_id}/comments/{comment_id}",
                     repo_base(&target.workspace, &target.repository)
@@ -2325,22 +2375,15 @@ impl ProviderFindingReconciliationApi for StoredProviderInlineCommentApi {
                         .user
                         .as_ref()
                         .and_then(|user| user.account_id.as_deref())
-                        != Some(author_account_id.as_str())
+                        != Some(author_account_id)
                 {
                     return Ok(None);
                 }
                 provider_finding_comment_from_bitbucket(comment).map(Some)
             }
             PullRequestReviewEventProvider::Github => {
-                let client = GithubClient::from_stored().map_err(map_publication_auth_error)?;
-                let user: GhUser = github_get_json(client.get("https://api.github.com/user"))
-                    .map_err(map_publication_read_error)?;
-                let author_login = user.login.trim();
-                if author_login.is_empty() {
-                    return Err(ProviderPublicationApiError::unavailable(
-                        "GitHub did not return the authenticated account login.",
-                    ));
-                }
+                let client = self.github_client()?;
+                let author_login = self.github_author_login()?;
                 let repository_base = github_repo_base(&target.workspace, &target.repository)
                     .map_err(ProviderPublicationApiError::unavailable)?;
                 let url = format!("{repository_base}/pulls/comments/{comment_id}");
@@ -2370,22 +2413,11 @@ impl ProviderFindingReconciliationApi for StoredProviderInlineCommentApi {
         identity: &ProviderCommentIdentity,
         markdown: &str,
     ) -> Result<(), ProviderPublicationApiError> {
-        let existing = self.get_finding_comment(target, identity)?.ok_or_else(|| {
-            ProviderPublicationApiError::permission_denied(
-                "The tracked finding comment is missing or belongs to another author.",
-            )
-        })?;
-        if !comment_has_lachesi_finding_marker(&existing.markdown) {
-            return Err(ProviderPublicationApiError::permission_denied(
-                "The tracked provider comment is not a Lachesi finding.",
-            ));
-        }
-
         let pr_id = publication_pr_id(target.pull_request_id)?;
         let comment_id = encode_path_segment(&identity.comment_id);
         let (updated_id, updated_markdown) = match target.provider {
             PullRequestReviewEventProvider::Bitbucket => {
-                let client = BitbucketClient::from_stored().map_err(map_publication_auth_error)?;
+                let client = self.bitbucket_client()?;
                 let url = format!(
                     "{}/pullrequests/{pr_id}/comments/{comment_id}",
                     repo_base(&target.workspace, &target.repository)
@@ -2409,7 +2441,7 @@ impl ProviderFindingReconciliationApi for StoredProviderInlineCommentApi {
                 )
             }
             PullRequestReviewEventProvider::Github => {
-                let client = GithubClient::from_stored().map_err(map_publication_auth_error)?;
+                let client = self.github_client()?;
                 let url = format!(
                     "{}/pulls/comments/{comment_id}",
                     github_repo_base(&target.workspace, &target.repository)
@@ -2537,22 +2569,6 @@ fn github_finding_anchor(comment: &GhPublicationComment) -> Option<FindingLineRa
     })
 }
 
-fn comment_has_lachesi_finding_marker(markdown: &str) -> bool {
-    let controls = markdown
-        .lines()
-        .rev()
-        .skip_while(|line| line.is_empty())
-        .take_while(|line| line.starts_with("<!-- lachesi:") && line.ends_with(" -->"))
-        .collect::<Vec<_>>();
-    controls.iter().any(|line| {
-        line.strip_prefix("<!-- lachesi:finding:")
-            .and_then(|value| value.strip_suffix(" -->"))
-            .is_some_and(|digest| {
-                digest.len() == 64 && digest.bytes().all(|byte| byte.is_ascii_hexdigit())
-            })
-    })
-}
-
 fn bitbucket_reconciliation_update_body(markdown: &str) -> serde_json::Value {
     json!({ "content": { "raw": markdown } })
 }
@@ -2573,7 +2589,7 @@ pub fn reconcile_review_findings_native(
         return dry_run_reconciliation_summary(request);
     }
     FindingReconciler::new(
-        StoredProviderInlineCommentApi,
+        StoredProviderInlineCommentApi::default(),
         SqliteFindingPublicationStore,
     )
     .reconcile(request)
@@ -2609,7 +2625,7 @@ pub fn publish_review_finding_native(
         return dry_run_publication_identity(request);
     }
     FindingPublisher::new(
-        StoredProviderInlineCommentApi,
+        StoredProviderInlineCommentApi::default(),
         SqliteFindingPublicationStore,
     )
     .publish(request)
@@ -2636,6 +2652,7 @@ fn publication_ipc_error(error: FindingPublicationError) -> String {
 }
 
 fn find_published_finding_comment(
+    api: &StoredProviderInlineCommentApi,
     target: &ProviderPublicationTarget,
     marker: &str,
     expected: Option<&ProviderInlineCommentPayload>,
@@ -2643,17 +2660,8 @@ fn find_published_finding_comment(
     let pr_id = publication_pr_id(target.pull_request_id)?;
     match target.provider {
         PullRequestReviewEventProvider::Bitbucket => {
-            let client = BitbucketClient::from_stored().map_err(map_publication_auth_error)?;
-            let user: BbUser = get_json(client.get(&format!("{BASE}/user")))
-                .map_err(map_publication_read_error)?;
-            let author_account_id = user
-                .account_id
-                .filter(|account_id| !account_id.trim().is_empty())
-                .ok_or_else(|| {
-                    ProviderPublicationApiError::unavailable(
-                        "Bitbucket did not return the authenticated account identifier.",
-                    )
-                })?;
+            let client = api.bitbucket_client()?;
+            let author_account_id = api.bitbucket_author_account_id()?;
             let comments_endpoint = format!(
                 "{}/pullrequests/{pr_id}/comments",
                 repo_base(&target.workspace, &target.repository)
@@ -2670,7 +2678,7 @@ fn find_published_finding_comment(
                         comment,
                         marker,
                         expected,
-                        &author_account_id,
+                        author_account_id,
                     )
                 }) {
                     return Ok(Some(ProviderCommentIdentity {
@@ -2687,22 +2695,15 @@ fn find_published_finding_comment(
             }
         }
         PullRequestReviewEventProvider::Github => {
-            let client = GithubClient::from_stored().map_err(map_publication_auth_error)?;
-            let user: GhUser = github_get_json(client.get("https://api.github.com/user"))
-                .map_err(map_publication_read_error)?;
-            let author_login = user.login.trim();
-            if author_login.is_empty() {
-                return Err(ProviderPublicationApiError::unavailable(
-                    "GitHub did not return the authenticated account login.",
-                ));
-            }
+            let client = api.github_client()?;
+            let author_login = api.github_author_login()?;
             let url = format!(
                 "{}/pulls/{pr_id}/comments?per_page=100&page=1",
                 github_repo_base(&target.workspace, &target.repository)
                     .map_err(ProviderPublicationApiError::unavailable)?
             );
             let comments: Vec<GhPublicationComment> =
-                github_paginated_get(&client, url).map_err(map_publication_read_error)?;
+                github_paginated_get(client, url).map_err(map_publication_read_error)?;
             comments
                 .into_iter()
                 .find(|comment| {
@@ -3452,25 +3453,12 @@ mod tests {
     }
 
     #[test]
-    fn reconciliation_updates_only_marker_owned_comment_bodies() {
+    fn reconciliation_update_bodies_preserve_markdown() {
         let lineage = "a".repeat(64);
         let exact = "b".repeat(64);
         let markdown = format!(
             "finding\n\n<!-- lachesi:finding-lineage:{lineage} -->\n<!-- lachesi:finding:{exact} -->"
         );
-        assert!(comment_has_lachesi_finding_marker(&markdown));
-        assert!(!comment_has_lachesi_finding_marker(
-            "<!-- lachesi:finding-state:resolved -->"
-        ));
-        assert!(!comment_has_lachesi_finding_marker(
-            "<!-- lachesi:finding-lineage:abc -->"
-        ));
-        assert!(comment_has_lachesi_finding_marker(&format!(
-            "legacy finding\n\n<!-- lachesi:finding:{exact} -->"
-        )));
-        assert!(!comment_has_lachesi_finding_marker(&format!(
-            "<!-- lachesi:finding:{exact} -->\ncontent"
-        )));
         assert_eq!(
             bitbucket_reconciliation_update_body(&markdown),
             json!({ "content": { "raw": markdown } })

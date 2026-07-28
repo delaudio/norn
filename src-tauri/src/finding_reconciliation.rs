@@ -132,8 +132,8 @@ pub trait ProviderFindingReconciliationApi: ProviderInlineCommentApi {
         identity: &ProviderCommentIdentity,
     ) -> Result<Option<ProviderFindingComment>, ProviderPublicationApiError>;
 
-    /// Edits the original comment body in place so provider replies and thread
-    /// identity remain intact.
+    /// Edits a comment already returned by `get_finding_comment` in place so
+    /// provider replies and thread identity remain intact.
     fn update_finding_comment(
         &self,
         target: &ProviderPublicationTarget,
@@ -526,8 +526,14 @@ where
                     error,
                     provider_mutated: false,
                 }),
-                Err(rollback_error) => Err(FencedUpdateFailure {
-                    error: publication_api_error(rollback_error),
+                Err(_) => Err(FencedUpdateFailure {
+                    error: FindingPublicationError {
+                        message: format!(
+                            "{} The provider comment rollback also failed, so its state may have changed.",
+                            error.message
+                        ),
+                        ..error
+                    },
                     provider_mutated: true,
                 }),
             };
@@ -1429,6 +1435,10 @@ mod tests {
         assert_eq!(summary.status, FindingReconciliationStatus::Partial);
         assert_eq!(summary.counts.failed, 1);
         assert!(summary.actions[0].provider_mutated);
+        let error = summary.actions[0].error.as_ref().expect("action error");
+        assert_eq!(error.code, FindingPublicationErrorCode::OutdatedAnchor);
+        assert!(!error.retryable);
+        assert!(error.message.contains("rollback also failed"));
     }
 
     #[test]
