@@ -17,6 +17,7 @@ pub mod review_job;
 pub mod review_metrics;
 mod review_storage;
 mod services;
+pub mod team_authorization;
 pub mod tui;
 pub mod webhook_ingress;
 
