@@ -26,16 +26,18 @@ pub enum AdministrativeAuditAction {
     ReviewCancelled,
     ReviewPublished,
     CredentialReferenceChanged,
+    AuthorizationDenied,
 }
 
 impl AdministrativeAuditAction {
-    pub const ALL: [Self; 6] = [
+    pub const ALL: [Self; 7] = [
         Self::ConfigurationChanged,
         Self::PolicyResolved,
         Self::AutomatedReviewTriggered,
         Self::ReviewCancelled,
         Self::ReviewPublished,
         Self::CredentialReferenceChanged,
+        Self::AuthorizationDenied,
     ];
 }
 
@@ -55,6 +57,7 @@ pub enum AdministrativeAuditTargetKind {
     ReviewRun,
     Publication,
     CredentialReference,
+    AuthorizationRequest,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -101,7 +104,8 @@ pub struct AdministrativeAuditEvent {
     /// Milliseconds since Unix epoch, represented as a decimal string.
     pub occurred_at: String,
     pub actor: AdministrativeAuditActor,
-    pub repository: AdministrativeAuditRepositoryScope,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub repository: Option<AdministrativeAuditRepositoryScope>,
     pub action: AdministrativeAuditAction,
     pub target: AdministrativeAuditTarget,
     pub outcome: AdministrativeAuditOutcome,
@@ -187,10 +191,12 @@ impl AdministrativeAuditEvent {
         validate_identifier("deliveryId", &self.delivery_id)?;
         validate_identifier("tenantId", &self.tenant_id)?;
         validate_timestamp(&self.occurred_at)?;
-        validate_identifier("workspace", &self.repository.workspace)?;
-        validate_identifier("repo", &self.repository.repo)?;
-        if self.repository.pr_id == Some(0) {
-            return Err(AdministrativeAuditValidationError::InvalidPullRequestId);
+        if let Some(repository) = &self.repository {
+            validate_identifier("workspace", &repository.workspace)?;
+            validate_identifier("repo", &repository.repo)?;
+            if repository.pr_id == Some(0) {
+                return Err(AdministrativeAuditValidationError::InvalidPullRequestId);
+            }
         }
         Ok(())
     }
@@ -273,6 +279,7 @@ fn target_id_is_safe_v1(kind: AdministrativeAuditTargetKind, value: &str) -> boo
         AdministrativeAuditTargetKind::ReviewRun => "run:",
         AdministrativeAuditTargetKind::Publication => "publication:",
         AdministrativeAuditTargetKind::CredentialReference => "credential-ref:",
+        AdministrativeAuditTargetKind::AuthorizationRequest => "authorization:",
     };
     audit_value_has_prefix_v1(value, prefix)
 }
@@ -382,12 +389,12 @@ mod tests {
                 kind: AdministrativeAuditActorKind::User,
                 id: "user:reviewer-1".to_string(),
             },
-            repository: AdministrativeAuditRepositoryScope {
+            repository: Some(AdministrativeAuditRepositoryScope {
                 provider: PullRequestReviewEventProvider::Github,
                 workspace: "acme".to_string(),
                 repo: "payments".to_string(),
                 pr_id: Some(42),
-            },
+            }),
             action: AdministrativeAuditAction::ConfigurationChanged,
             target: AdministrativeAuditTarget {
                 kind: AdministrativeAuditTargetKind::Configuration,

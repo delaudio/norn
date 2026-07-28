@@ -335,12 +335,12 @@ fn policy_resolution_audit_event(
             kind: context.actor_kind,
             id: context.actor_id.clone(),
         },
-        repository: AdministrativeAuditRepositoryScope {
+        repository: Some(AdministrativeAuditRepositoryScope {
             provider: context.provider,
             workspace: context.workspace.clone(),
             repo: context.repository.clone(),
             pr_id: context.pull_request_id,
-        },
+        }),
         action: AdministrativeAuditAction::PolicyResolved,
         target: AdministrativeAuditTarget {
             kind: AdministrativeAuditTargetKind::Policy,

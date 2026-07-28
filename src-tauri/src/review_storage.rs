@@ -3959,12 +3959,12 @@ mod tests {
                 kind: AdministrativeAuditActorKind::User,
                 id: "user:reviewer-1".to_string(),
             },
-            repository: AdministrativeAuditRepositoryScope {
+            repository: Some(AdministrativeAuditRepositoryScope {
                 provider: PullRequestReviewEventProvider::Github,
                 workspace: "acme".to_string(),
                 repo: "payments".to_string(),
                 pr_id: Some(42),
-            },
+            }),
             action: AdministrativeAuditAction::AutomatedReviewTriggered,
             target: AdministrativeAuditTarget {
                 kind: AdministrativeAuditTargetKind::ReviewRun,
