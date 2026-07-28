@@ -1,6 +1,6 @@
-import { describe, expect, it } from "vitest";
-import type { FindingPublicationRequest } from "@/types";
-import { publishMockReviewFinding } from "./mock-handlers";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import type { AiReviewStore, FindingPublicationRequest } from "@/types";
+import { mockHandlers, publishMockReviewFinding } from "./mock-handlers";
 
 function publicationRequest(
   overrides: Partial<FindingPublicationRequest> = {},
@@ -72,5 +72,59 @@ describe("publishMockReviewFinding", () => {
         }),
       ),
     ).toThrow("markdown is too long");
+  });
+});
+
+describe("mock structured review runs", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("preserves reviewed base and head revisions for initial and reply runs", async () => {
+    vi.useFakeTimers();
+    const target = {
+      workspace: "mock-revision-test",
+      repo: "frontend",
+      id: 91,
+    };
+    const reviewArgs = {
+      ...target,
+      title: "Revision-aware review",
+      sourceBranch: "feature/revision-aware",
+      destinationBranch: "main",
+      reviewedBaseSha: "1111111111111111111111111111111111111111",
+      reviewedHeadSha: "2222222222222222222222222222222222222222",
+      displayMessage: "Review this pull request.",
+    };
+
+    mockHandlers.start_inline_review(reviewArgs);
+    await vi.advanceTimersByTimeAsync(1_300);
+    let store = mockHandlers.load_ai_review_store(target) as AiReviewStore;
+    const initialRuns = store.reviewRuns ?? [];
+    const initialRun = initialRuns[initialRuns.length - 1];
+    expect(initialRun).toMatchObject({
+      reviewedBaseSha: reviewArgs.reviewedBaseSha,
+      reviewedHeadSha: reviewArgs.reviewedHeadSha,
+      sourceBranch: reviewArgs.sourceBranch,
+      destinationBranch: reviewArgs.destinationBranch,
+      turnKind: "initial",
+    });
+    expect(initialRun?.findings).toHaveLength(1);
+
+    mockHandlers.reply_inline_review({
+      ...reviewArgs,
+      threadId: store.activeThreadId,
+      userMessage: "Check the filter path again.",
+    });
+    await vi.advanceTimersByTimeAsync(1_300);
+    store = mockHandlers.load_ai_review_store(target) as AiReviewStore;
+    const replyRuns = store.reviewRuns ?? [];
+    expect(replyRuns[replyRuns.length - 1]).toMatchObject({
+      reviewedBaseSha: reviewArgs.reviewedBaseSha,
+      reviewedHeadSha: reviewArgs.reviewedHeadSha,
+      turnKind: "reply",
+    });
+
+    mockHandlers.delete_saved_review(target);
   });
 });

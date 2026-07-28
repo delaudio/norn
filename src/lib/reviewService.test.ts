@@ -127,11 +127,13 @@ describe("publishReviewFinding", () => {
   });
 
   it("normalizes serialized Tauri publication failures", async () => {
-    vi.mocked(tauriCall).mockRejectedValue({
-      code: "outdated_anchor",
-      retryable: false,
-      message: "The pull request head changed.",
-    });
+    vi.mocked(tauriCall).mockRejectedValue(
+      JSON.stringify({
+        code: "outdated_anchor",
+        retryable: false,
+        message: "The pull request head changed.",
+      }),
+    );
 
     const error = await publishReviewFinding(request).catch((caught: unknown) => caught);
 

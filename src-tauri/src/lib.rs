@@ -298,7 +298,12 @@ mod tauri_ipc_smoke {
         )
         .expect_err("invalid publication request should use the command error channel");
 
-        assert_eq!(error["code"], "invalid_request");
-        assert_eq!(error["retryable"], false);
+        let serialized = error
+            .as_str()
+            .expect("publication command errors should cross IPC as strings");
+        let publication_error: serde_json::Value =
+            serde_json::from_str(serialized).expect("publication error should contain JSON");
+        assert_eq!(publication_error["code"], "invalid_request");
+        assert_eq!(publication_error["retryable"], false);
     }
 }

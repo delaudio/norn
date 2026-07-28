@@ -2257,14 +2257,21 @@ pub fn publish_review_finding_native(
 #[tauri::command]
 pub async fn publish_review_finding(
     request: FindingPublicationRequest,
-) -> Result<PublishedCommentIdentity, FindingPublicationError> {
+) -> Result<PublishedCommentIdentity, String> {
     tauri::async_runtime::spawn_blocking(move || publish_review_finding_native(&request))
         .await
-        .map_err(|_| FindingPublicationError {
-            code: FindingPublicationErrorCode::ProviderUnavailable,
-            retryable: true,
-            message: "The finding publication worker stopped unexpectedly.".to_string(),
+        .map_err(|_| {
+            publication_ipc_error(FindingPublicationError {
+                code: FindingPublicationErrorCode::ProviderUnavailable,
+                retryable: true,
+                message: "The finding publication worker stopped unexpectedly.".to_string(),
+            })
         })?
+        .map_err(publication_ipc_error)
+}
+
+fn publication_ipc_error(error: FindingPublicationError) -> String {
+    serde_json::to_string(&error).unwrap_or(error.message)
 }
 
 fn find_published_finding_comment(

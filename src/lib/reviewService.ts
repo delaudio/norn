@@ -45,9 +45,17 @@ export class ReviewFindingPublicationError extends Error {
 }
 
 function normalizePublicationError(error: unknown): Error {
-  if (error instanceof Error) return error;
-  if (typeof error === "object" && error != null) {
-    const record = error as Record<string, unknown>;
+  const serialized = error instanceof Error ? error.message : error;
+  let parsed: unknown = serialized;
+  if (typeof serialized === "string") {
+    try {
+      parsed = JSON.parse(serialized);
+    } catch {
+      if (error instanceof Error) return error;
+    }
+  }
+  if (typeof parsed === "object" && parsed != null) {
+    const record = parsed as Record<string, unknown>;
     if (typeof record.message === "string" && record.message.trim()) {
       return new ReviewFindingPublicationError(
         record.message,
@@ -57,7 +65,9 @@ function normalizePublicationError(error: unknown): Error {
     }
   }
   return new ReviewFindingPublicationError(
-    typeof error === "string" && error.trim() ? error : "Structured finding publication failed.",
+    typeof serialized === "string" && serialized.trim()
+      ? serialized
+      : "Structured finding publication failed.",
     null,
     null,
   );

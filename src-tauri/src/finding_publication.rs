@@ -372,12 +372,12 @@ where
                 message: "The pull request changed after this finding was produced; review the current diff before publishing.".to_string(),
             });
         }
-        let (published, created_here) = if let Some(existing) = self
+        let published = if let Some(existing) = self
             .api
             .find_inline_comment(target, marker, &payload)
             .map_err(publication_api_error)?
         {
-            (existing, false)
+            existing
         } else {
             if let Some(orphan) = self
                 .api
@@ -388,11 +388,9 @@ where
                     .delete_comment(target, &orphan)
                     .map_err(publication_api_error)?;
             }
-            let published = self
-                .api
+            self.api
                 .create_inline_comment(target, &payload)
-                .map_err(publication_api_error)?;
-            (published, true)
+                .map_err(publication_api_error)?
         };
         let current_revision = self
             .api
@@ -408,12 +406,9 @@ where
                 message: "The pull request changed while this finding was being published; the stale comment was removed.".to_string(),
             });
         }
-        if let Err(error) = self.store.complete(lease, &published) {
-            if created_here {
-                let _ = self.api.delete_comment(target, &published);
-            }
-            return Err(publication_state_error(error));
-        }
+        self.store
+            .complete(lease, &published)
+            .map_err(publication_state_error)?;
         Ok(request.published_identity(published.comment_id, marker.to_string()))
     }
 }
@@ -861,28 +856,46 @@ mod tests {
         }
     }
 
-    #[derive(Debug, Default)]
-    struct FailingCompletionStore(MockPublicationStore);
+    #[derive(Debug)]
+    struct RetryingCompletionStore {
+        store: MockPublicationStore,
+        fail_next_completion: Mutex<bool>,
+    }
 
-    impl FindingPublicationStore for FailingCompletionStore {
+    impl Default for RetryingCompletionStore {
+        fn default() -> Self {
+            Self {
+                store: MockPublicationStore::default(),
+                fail_next_completion: Mutex::new(true),
+            }
+        }
+    }
+
+    impl FindingPublicationStore for RetryingCompletionStore {
         fn reserve(
             &self,
             request: &FindingPublicationRequest,
             marker: &str,
         ) -> Result<FindingPublicationReservation, String> {
-            self.0.reserve(request, marker)
+            self.store.reserve(request, marker)
         }
 
         fn complete(
             &self,
-            _lease: &FindingPublicationLease,
-            _identity: &ProviderCommentIdentity,
+            lease: &FindingPublicationLease,
+            identity: &ProviderCommentIdentity,
         ) -> Result<(), String> {
-            Err("publication database unavailable".to_string())
+            let mut fail_next = self.fail_next_completion.lock().unwrap();
+            if *fail_next {
+                *fail_next = false;
+                return Err("publication database unavailable".to_string());
+            }
+            drop(fail_next);
+            self.store.complete(lease, identity)
         }
 
         fn release(&self, lease: &FindingPublicationLease) -> Result<(), String> {
-            self.0.release(lease)
+            self.store.release(lease)
         }
     }
 
@@ -1134,10 +1147,10 @@ mod tests {
     }
 
     #[test]
-    fn completion_failure_deletes_the_comment_created_by_this_attempt() {
+    fn completion_failure_leaves_the_marked_comment_for_idempotent_retry() {
         let publisher = FindingPublisher::new(
             MockProviderApi::default(),
-            FailingCompletionStore::default(),
+            RetryingCompletionStore::default(),
         );
         let request = request(PullRequestReviewEventProvider::Github);
 
@@ -1146,9 +1159,19 @@ mod tests {
             .expect_err("durable completion fails");
 
         assert_eq!(error.code, FindingPublicationErrorCode::ProviderUnavailable);
+        assert!(publisher
+            .api
+            .state
+            .lock()
+            .unwrap()
+            .deleted_comment_ids
+            .is_empty());
+
+        let published = publisher.publish(&request).expect("recover marked comment");
+        assert_eq!(published.comment_id, "comment-1");
         let state = publisher.api.state.lock().unwrap();
-        assert_eq!(state.deleted_comment_ids, vec!["comment-1"]);
-        assert!(state.comments.is_empty());
+        assert_eq!(state.payloads.len(), 1);
+        assert_eq!(state.comments.len(), 1);
     }
 
     #[test]
