@@ -1,6 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value as JsonValue;
@@ -620,6 +621,7 @@ pub(crate) fn load_local_policy_layer(repo_path: &Path) -> Result<Option<JsonVal
     if !path.is_file() {
         return Ok(None);
     }
+    validate_local_policy_override_state(repo_path)?;
     let contents = fs::read_to_string(&path)
         .map_err(|error| format!("Failed to read {}: {error}", path.display()))?;
     let yaml = serde_yaml::from_str::<Value>(&contents)
@@ -636,6 +638,47 @@ pub(crate) fn load_local_policy_layer(repo_path: &Path) -> Result<Option<JsonVal
     serde_json::to_value(yaml)
         .map(Some)
         .map_err(|error| format!("Failed to normalize {}: {error}", path.display()))
+}
+
+fn validate_local_policy_override_state(repo_path: &Path) -> Result<(), String> {
+    let tracked = Command::new("git")
+        .arg("-C")
+        .arg(repo_path)
+        .args(["ls-files", "--error-unmatch", "--", ".lachesi.local.yaml"])
+        .output()
+        .map_err(|error| format!("Failed to inspect local policy tracking state: {error}"))?;
+    if tracked.status.success() {
+        return Err(
+            ".lachesi.local.yaml is tracked by Git and cannot be used as a local policy override."
+                .to_string(),
+        );
+    }
+    if tracked.status.code() != Some(1) {
+        return Err(format!(
+            "Could not determine whether .lachesi.local.yaml is tracked: {}",
+            String::from_utf8_lossy(&tracked.stderr).trim()
+        ));
+    }
+
+    let ignored = Command::new("git")
+        .arg("-C")
+        .arg(repo_path)
+        .args(["check-ignore", "--quiet", "--", ".lachesi.local.yaml"])
+        .output()
+        .map_err(|error| format!("Failed to inspect local policy ignore state: {error}"))?;
+    if ignored.status.success() {
+        return Ok(());
+    }
+    if ignored.status.code() == Some(1) {
+        return Err(
+            ".lachesi.local.yaml must be untracked and covered by a Git ignore rule before it can be used."
+                .to_string(),
+        );
+    }
+    Err(format!(
+        "Could not determine whether .lachesi.local.yaml is ignored: {}",
+        String::from_utf8_lossy(&ignored.stderr).trim()
+    ))
 }
 
 pub(crate) fn finalize_resolved_config(
@@ -1245,7 +1288,7 @@ fn collect_forbidden_fields(
 #[cfg(test)]
 mod tests {
     use super::{
-        load_from_repo_path, load_from_str, load_repository_policy_layer,
+        load_from_repo_path, load_from_str, load_local_policy_layer, load_repository_policy_layer,
         validate_external_config_layer, RepoReviewConfigLoadResult,
     };
     use std::fs;
@@ -1403,6 +1446,73 @@ review:
         assert_eq!(warnings.len(), 1);
         assert!(warnings[0].message.contains("$.review.surprise"));
         let _ = fs::remove_dir_all(repo);
+    }
+
+    #[test]
+    fn local_policy_layer_must_be_untracked_and_ignored() {
+        let ignored_repo = temp_repo();
+        assert!(std::process::Command::new("git")
+            .arg("init")
+            .arg("-q")
+            .arg(&ignored_repo)
+            .status()
+            .expect("git init")
+            .success());
+        fs::write(ignored_repo.join(".gitignore"), ".lachesi.local.yaml\n")
+            .expect("ignore fixture");
+        fs::write(
+            ignored_repo.join(".lachesi.local.yaml"),
+            "review:\n  mode: strict\n",
+        )
+        .expect("local policy fixture");
+        assert!(load_local_policy_layer(&ignored_repo)
+            .expect("ignored local policy")
+            .is_some());
+
+        let unignored_repo = temp_repo();
+        assert!(std::process::Command::new("git")
+            .arg("init")
+            .arg("-q")
+            .arg(&unignored_repo)
+            .status()
+            .expect("git init")
+            .success());
+        fs::write(
+            unignored_repo.join(".lachesi.local.yaml"),
+            "review:\n  mode: strict\n",
+        )
+        .expect("local policy fixture");
+        assert!(load_local_policy_layer(&unignored_repo)
+            .expect_err("unignored local policy")
+            .contains("covered by a Git ignore rule"));
+
+        let tracked_repo = temp_repo();
+        assert!(std::process::Command::new("git")
+            .arg("init")
+            .arg("-q")
+            .arg(&tracked_repo)
+            .status()
+            .expect("git init")
+            .success());
+        fs::write(
+            tracked_repo.join(".lachesi.local.yaml"),
+            "review:\n  mode: strict\n",
+        )
+        .expect("local policy fixture");
+        assert!(std::process::Command::new("git")
+            .arg("-C")
+            .arg(&tracked_repo)
+            .args(["add", ".lachesi.local.yaml"])
+            .status()
+            .expect("git add")
+            .success());
+        assert!(load_local_policy_layer(&tracked_repo)
+            .expect_err("tracked local policy")
+            .contains("tracked by Git"));
+
+        let _ = fs::remove_dir_all(ignored_repo);
+        let _ = fs::remove_dir_all(unignored_repo);
+        let _ = fs::remove_dir_all(tracked_repo);
     }
 
     #[test]

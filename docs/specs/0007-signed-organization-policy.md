@@ -142,8 +142,10 @@ if the resolved prompt text is absent, a separate authoritative instruction
 section supplies it without duplicating text already present.
 
 `.lachesi.local.yaml` is a non-committed override for configured organization
-resolution. When no organization source is configured, Lachesi retains the
-pre-existing repository loader unchanged and does not load that file.
+resolution. It is accepted only when Git reports it as untracked and covered
+by an ignore rule; tracked or merely unignored files fail closed. When no
+organization source is configured, Lachesi retains the pre-existing
+repository loader unchanged and does not load that file.
 
 Desktop and TUI review fail closed when organization policy is configured but
 the selected repository has no local clone, because repository and local
