@@ -2447,15 +2447,7 @@ fn provider_finding_comment_from_bitbucket(
             "The tracked Bitbucket finding has no comment body.",
         )
     })?;
-    let anchor = comment
-        .inline
-        .as_ref()
-        .and_then(bitbucket_finding_anchor)
-        .ok_or_else(|| {
-            ProviderPublicationApiError::invalid_anchor(
-                "The tracked Bitbucket finding no longer has a valid inline anchor.",
-            )
-        })?;
+    let anchor = comment.inline.as_ref().and_then(bitbucket_finding_anchor);
     Ok(ProviderFindingComment {
         identity,
         markdown,
@@ -2466,11 +2458,7 @@ fn provider_finding_comment_from_bitbucket(
 fn provider_finding_comment_from_github(
     comment: GhPublicationComment,
 ) -> Result<ProviderFindingComment, ProviderPublicationApiError> {
-    let anchor = github_finding_anchor(&comment).ok_or_else(|| {
-        ProviderPublicationApiError::invalid_anchor(
-            "The tracked GitHub finding no longer has a valid inline anchor.",
-        )
-    })?;
+    let anchor = github_finding_anchor(&comment);
     let identity = ProviderCommentIdentity {
         comment_id: publication_comment_id(comment.id)?,
     };
@@ -3383,12 +3371,12 @@ mod tests {
         assert_eq!(bitbucket.identity.comment_id, "9223372036854775000");
         assert_eq!(
             bitbucket.anchor,
-            FindingLineRange {
+            Some(FindingLineRange {
                 path: "src/lib.rs".to_string(),
                 start_line: 12,
                 end_line: 14,
                 side: FindingAnchorSide::New,
-            }
+            })
         );
         assert_eq!(bitbucket.markdown, markdown);
 
@@ -3405,14 +3393,43 @@ mod tests {
         assert_eq!(github.identity.comment_id, "opaque-comment");
         assert_eq!(
             github.anchor,
-            FindingLineRange {
+            Some(FindingLineRange {
                 path: "src/lib.rs".to_string(),
                 start_line: 20,
                 end_line: 22,
                 side: FindingAnchorSide::Old,
-            }
+            })
         );
         assert_eq!(github.markdown, markdown);
+    }
+
+    #[test]
+    fn reconciliation_comment_mappers_allow_missing_provider_anchors() {
+        let markdown =
+            "finding\n\n<!-- lachesi:finding-lineage:abc -->\n<!-- lachesi:finding:def -->";
+        let bitbucket: BbPublicationComment = serde_json::from_value(json!({
+            "id": 42,
+            "content": { "raw": markdown }
+        }))
+        .expect("Bitbucket anchorless comment");
+        let github: GhPublicationComment = serde_json::from_value(json!({
+            "id": 43,
+            "body": markdown
+        }))
+        .expect("GitHub anchorless comment");
+
+        assert_eq!(
+            provider_finding_comment_from_bitbucket(bitbucket)
+                .expect("Bitbucket mapping")
+                .anchor,
+            None
+        );
+        assert_eq!(
+            provider_finding_comment_from_github(github)
+                .expect("GitHub mapping")
+                .anchor,
+            None
+        );
     }
 
     #[test]

@@ -5,6 +5,7 @@ import {
   assertPullRequestMatchesReviewRun,
   buildFindingPublicationRequest,
   filterStageableAiReviewDraftComments,
+  latestReviewFindingFingerprintsForRevision,
   latestTrackedFindingCommentId,
   selectTrackedFindingCommentsForBatch,
   summarizeActiveReviewFindings,
@@ -310,6 +311,33 @@ describe("assertPullRequestMatchesReviewRun", () => {
         destinationCommitHash: "4444444444444444444444444444444444444444",
       }),
     ).toThrow("changed after this review");
+  });
+});
+
+describe("latestReviewFindingFingerprintsForRevision", () => {
+  it("uses the newest successful run for a reviewed revision", () => {
+    const latestRun: ReviewRun = {
+      ...activeRun,
+      id: "run-latest",
+      findings: [
+        {
+          ...activeRun.findings[0]!,
+          fingerprint: "latest-finding",
+        },
+      ],
+    };
+
+    expect(
+      latestReviewFindingFingerprintsForRevision(
+        {
+          activeThreadId: null,
+          threads: [],
+          reviewRuns: [activeRun, latestRun],
+        },
+        activeRun.reviewedBaseSha ?? "",
+        activeRun.reviewedHeadSha ?? "",
+      ),
+    ).toEqual(new Set(["latest-finding"]));
   });
 });
 

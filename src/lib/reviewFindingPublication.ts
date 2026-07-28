@@ -308,6 +308,27 @@ export function latestTrackedFindingComments(
     }));
 }
 
+export function latestReviewFindingFingerprintsForRevision(
+  store: AiReviewStore | null | undefined,
+  baseSha: string,
+  headSha: string,
+): Set<string> {
+  const normalizedBase = baseSha.trim().toLowerCase();
+  const normalizedHead = headSha.trim().toLowerCase();
+  const runs = store?.reviewRuns ?? [];
+  for (let index = runs.length - 1; index >= 0; index -= 1) {
+    const run = runs[index];
+    if (
+      run?.status === "succeeded" &&
+      run.reviewedBaseSha?.trim().toLowerCase() === normalizedBase &&
+      run.reviewedHeadSha?.trim().toLowerCase() === normalizedHead
+    ) {
+      return new Set(run.findings.map((finding) => finding.fingerprint));
+    }
+  }
+  return new Set();
+}
+
 export function selectTrackedFindingCommentsForBatch(
   trackedComments: TrackedFindingComment[],
   currentFindingFingerprints: ReadonlySet<string>,

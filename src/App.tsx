@@ -47,6 +47,7 @@ import {
   assertPullRequestMatchesReviewRun,
   buildFindingPublicationRequest,
   filterStageableAiReviewDraftComments,
+  latestReviewFindingFingerprintsForRevision,
   latestTrackedFindingCommentId,
   latestTrackedFindingComments,
   selectTrackedFindingCommentsForBatch,
@@ -63,6 +64,7 @@ import type {
   AiReviewRunState,
   AppSelection,
   DraftComment,
+  FindingReconciliationSummary,
   PrListFilter,
   PullRequestDetail,
   PullRequestSummary,
@@ -503,90 +505,111 @@ export default function App() {
       provider: activeRepo?.provider ?? reviewProvider,
       prId: activeSel.prId,
     });
-    const requests = drafts.map((draft) => {
-      const reviewRun =
-        aiReview.store?.reviewRuns?.find(
-          (candidate) => candidate.id === draft.findingRef?.reviewRunId,
-        ) ?? null;
-      if (!reviewRun) {
-        throw new Error("A review run linked to the staged findings is no longer available.");
-      }
-      assertPullRequestMatchesReviewRun(reviewRun, snapshot.pr);
-      return {
-        draft,
-        reviewRun,
-        request: buildFindingPublicationRequest({
-          provider: activeRepo?.provider ?? reviewProvider,
-          workspace: activeSel.workspace,
-          repo: activeSel.repo,
-          pr: snapshot.pr,
-          reviewRun,
-          draft,
-        }),
-      };
-    });
-    const first = requests[0];
-    if (!first) {
-      throw new Error("Structured finding reconciliation requires at least one finding.");
-    }
-    if (
-      requests.some(
-        ({ request, reviewRun }) =>
-          reviewRun.id !== first.reviewRun.id ||
-          request.baseSha.toLowerCase() !== first.request.baseSha.toLowerCase() ||
-          request.headSha.toLowerCase() !== first.request.headSha.toLowerCase(),
-      )
-    ) {
-      throw new Error("Publish staged findings from one reviewed pull request revision at a time.");
-    }
-    const stagedFingerprints = new Set(requests.map(({ request }) => request.findingFingerprint));
-    const currentFingerprints = new Set(
-      first.reviewRun.findings.map((finding) => finding.fingerprint),
-    );
-    const trackedComments = selectTrackedFindingCommentsForBatch(
-      latestTrackedFindingComments(aiReview.store),
-      currentFingerprints,
-      stagedFingerprints,
-    );
-    const reconciliation = await reconcileReviewFindings({
-      schemaVersion: "v1",
-      tenantId: first.request.tenantId,
-      provider: first.request.provider,
-      workspace: first.request.workspace,
-      repository: first.request.repository,
-      pullRequestId: first.request.pullRequestId,
-      baseSha: first.request.baseSha,
-      headSha: first.request.headSha,
-      trackedComments,
-      currentFindings: requests.map(({ request }) => request),
-    });
     const comments = new Map<string, PublishedDraftComment>();
     const failures = new Map<string, string>();
-    for (const { draft, request } of requests) {
-      const action = reconciliation.actions.find(
-        (candidate) => candidate.findingFingerprint === request.findingFingerprint,
+    const errors: string[] = [];
+    const requests: Array<{
+      draft: DraftComment;
+      request: ReturnType<typeof buildFindingPublicationRequest>;
+    }> = [];
+    for (const draft of drafts) {
+      try {
+        const reviewRun =
+          aiReview.store?.reviewRuns?.find(
+            (candidate) => candidate.id === draft.findingRef?.reviewRunId,
+          ) ?? null;
+        if (!reviewRun) {
+          throw new Error("A review run linked to the staged finding is no longer available.");
+        }
+        assertPullRequestMatchesReviewRun(reviewRun, snapshot.pr);
+        requests.push({
+          draft,
+          request: buildFindingPublicationRequest({
+            provider: activeRepo?.provider ?? reviewProvider,
+            workspace: activeSel.workspace,
+            repo: activeSel.repo,
+            pr: snapshot.pr,
+            reviewRun,
+            draft,
+          }),
+        });
+      } catch (error) {
+        failures.set(draft.localId, error instanceof Error ? error.message : String(error));
+      }
+    }
+
+    const batches = new Map<string, typeof requests>();
+    for (const entry of requests) {
+      const key = `${entry.request.baseSha.toLowerCase()}:${entry.request.headSha.toLowerCase()}`;
+      const batch = batches.get(key);
+      if (batch) batch.push(entry);
+      else batches.set(key, [entry]);
+    }
+
+    for (const batch of batches.values()) {
+      const first = batch[0];
+      if (!first) continue;
+      const stagedFingerprints = new Set(batch.map(({ request }) => request.findingFingerprint));
+      const currentFingerprints = latestReviewFindingFingerprintsForRevision(
+        aiReview.store,
+        first.request.baseSha,
+        first.request.headSha,
       );
-      if (!action || action.kind === "failed" || !action.commentId) {
-        failures.set(
-          draft.localId,
-          action?.error?.message ?? "A structured finding was not reconciled with the provider.",
-        );
+      for (const fingerprint of stagedFingerprints) currentFingerprints.add(fingerprint);
+      const trackedComments = selectTrackedFindingCommentsForBatch(
+        latestTrackedFindingComments(aiReview.store),
+        currentFingerprints,
+        stagedFingerprints,
+      );
+      let reconciliation: FindingReconciliationSummary;
+      try {
+        reconciliation = await reconcileReviewFindings({
+          schemaVersion: "v1",
+          tenantId: first.request.tenantId,
+          provider: first.request.provider,
+          workspace: first.request.workspace,
+          repository: first.request.repository,
+          pullRequestId: first.request.pullRequestId,
+          baseSha: first.request.baseSha,
+          headSha: first.request.headSha,
+          trackedComments,
+          currentFindings: batch.map(({ request }) => request),
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        for (const { draft } of batch) failures.set(draft.localId, message);
         continue;
       }
-      comments.set(draft.localId, {
-        id: action.commentId,
-        createdOn: new Date().toISOString(),
-      });
-    }
-    const errors = reconciliation.actions
-      .filter(
-        (action) => action.kind === "failed" && !stagedFingerprints.has(action.findingFingerprint),
-      )
-      .map(
-        (action) =>
-          action.error?.message ??
-          `Finding ${action.findingFingerprint} could not be reconciled with the provider.`,
+
+      for (const { draft, request } of batch) {
+        const action = reconciliation.actions.find(
+          (candidate) => candidate.findingFingerprint === request.findingFingerprint,
+        );
+        if (!action || action.kind === "failed" || !action.commentId) {
+          failures.set(
+            draft.localId,
+            action?.error?.message ?? "A structured finding was not reconciled with the provider.",
+          );
+          continue;
+        }
+        comments.set(draft.localId, {
+          id: action.commentId,
+          createdOn: new Date().toISOString(),
+        });
+      }
+      errors.push(
+        ...reconciliation.actions
+          .filter(
+            (action) =>
+              action.kind === "failed" && !stagedFingerprints.has(action.findingFingerprint),
+          )
+          .map(
+            (action) =>
+              action.error?.message ??
+              `Finding ${action.findingFingerprint} could not be reconciled with the provider.`,
+          ),
       );
+    }
     return { comments, failures, errors };
   };
 

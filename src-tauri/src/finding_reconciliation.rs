@@ -18,7 +18,7 @@ use crate::finding_publication::{
 };
 use crate::review_event::PullRequestReviewEventProvider;
 
-const MAX_RECONCILIATION_FINDINGS: usize = 10_000;
+const MAX_RECONCILIATION_FINDINGS: usize = 250;
 const RESOLVED_NOTICE: &str = "> This finding is no longer present in the latest Lachesi review.";
 const RESOLVED_MARKER: &str = "<!-- lachesi:finding-state:resolved -->";
 
@@ -120,7 +120,7 @@ pub struct FindingReconciliationSummary {
 pub struct ProviderFindingComment {
     pub identity: ProviderCommentIdentity,
     pub markdown: String,
-    pub anchor: FindingLineRange,
+    pub anchor: Option<FindingLineRange>,
 }
 
 pub trait ProviderFindingReconciliationApi: ProviderInlineCommentApi {
@@ -366,7 +366,7 @@ where
         let exact_marker = finding_marker(current);
         let desired = render_finding_markdown(current, &exact_marker);
         let was_resolved = comment_is_resolved(&provider_comment.markdown);
-        let same_anchor = provider_comment.anchor == current.anchor;
+        let same_anchor = provider_comment.anchor.as_ref() == Some(&current.anchor);
         let semantic_match =
             active_markdown(&provider_comment.markdown) == active_markdown(&desired);
 
@@ -610,8 +610,11 @@ impl FindingReconciliationRequest {
         }
         validate_sha("baseSha", &self.base_sha)?;
         validate_sha("headSha", &self.head_sha)?;
-        if self.tracked_comments.len() > MAX_RECONCILIATION_FINDINGS
-            || self.current_findings.len() > MAX_RECONCILIATION_FINDINGS
+        if self
+            .tracked_comments
+            .len()
+            .saturating_add(self.current_findings.len())
+            > MAX_RECONCILIATION_FINDINGS
         {
             return Err(invalid_request("reconciliation contains too many findings"));
         }
@@ -944,7 +947,7 @@ mod tests {
                             comment_id: comment_id.to_string(),
                         },
                         markdown,
-                        anchor: request.anchor.clone(),
+                        anchor: Some(request.anchor.clone()),
                     },
                     replies: replies.iter().map(|reply| (*reply).to_string()).collect(),
                 },
@@ -957,6 +960,17 @@ mod tests {
 
         fn set_fail_next_update(&self) {
             self.0.lock().unwrap().fail_next_update = true;
+        }
+
+        fn clear_anchor(&self, comment_id: &str) {
+            self.0
+                .lock()
+                .unwrap()
+                .comments
+                .get_mut(comment_id)
+                .expect("mock comment")
+                .comment
+                .anchor = None;
         }
 
         fn set_drift_after_next_update(&self) {
@@ -991,11 +1005,12 @@ mod tests {
                 .comments
                 .values()
                 .find(|comment| {
-                    comment.comment.anchor.path == expected.path
-                        && comment.comment.anchor.start_line == expected.start_line
-                        && comment.comment.anchor.end_line == expected.end_line
-                        && comment.comment.anchor.side == expected.side
-                        && comment_has_marker(&comment.comment.markdown, marker)
+                    comment.comment.anchor.as_ref().is_some_and(|anchor| {
+                        anchor.path == expected.path
+                            && anchor.start_line == expected.start_line
+                            && anchor.end_line == expected.end_line
+                            && anchor.side == expected.side
+                    }) && comment_has_marker(&comment.comment.markdown, marker)
                 })
                 .map(|comment| comment.comment.identity.clone()))
         }
@@ -1033,12 +1048,12 @@ mod tests {
                     comment: ProviderFindingComment {
                         identity: identity.clone(),
                         markdown: payload.markdown.clone(),
-                        anchor: FindingLineRange {
+                        anchor: Some(FindingLineRange {
                             path: payload.path.clone(),
                             start_line: payload.start_line,
                             end_line: payload.end_line,
                             side: payload.side,
-                        },
+                        }),
                     },
                     replies: Vec::new(),
                 },
@@ -1303,6 +1318,26 @@ mod tests {
     }
 
     #[test]
+    fn resolves_an_absent_finding_when_provider_anchor_metadata_is_gone() {
+        let api = MockApi::default();
+        let store = MockStore::default();
+        let previous = finding("fixed", OLD_HEAD_SHA);
+        let tracked = api.insert(&previous, "comment-fixed", false, &["keep reply"]);
+        api.clear_anchor("comment-fixed");
+
+        let summary = FindingReconciler::new(&api, &store)
+            .reconcile(&request(vec![tracked], Vec::new()))
+            .expect("resolve anchorless finding");
+
+        assert_eq!(summary.counts.resolved, 1);
+        let state = api.0.lock().unwrap();
+        assert!(comment_is_resolved(
+            &state.comments["comment-fixed"].comment.markdown
+        ));
+        assert_eq!(state.comments["comment-fixed"].replies, vec!["keep reply"]);
+    }
+
+    #[test]
     fn partial_failure_retries_without_duplicate_new_comments() {
         let api = MockApi::default();
         let store = MockStore::default();
@@ -1408,6 +1443,20 @@ mod tests {
             .expect_err("invalid tracked comment");
 
         assert_eq!(error.code, FindingPublicationErrorCode::InvalidRequest);
+    }
+
+    #[test]
+    fn rejects_reconciliation_batches_over_the_provider_call_budget() {
+        let current_findings = (0..=MAX_RECONCILIATION_FINDINGS)
+            .map(|index| finding(&format!("finding-{index}"), HEAD_SHA))
+            .collect();
+
+        let error = request(Vec::new(), current_findings)
+            .validate()
+            .expect_err("oversized reconciliation");
+
+        assert_eq!(error.code, FindingPublicationErrorCode::InvalidRequest);
+        assert_eq!(error.message, "reconciliation contains too many findings");
     }
 
     #[test]
