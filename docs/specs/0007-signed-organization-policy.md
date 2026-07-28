@@ -144,6 +144,8 @@ the selected profile and source versions on the review run.
 An explicit repository `.lachesi.yaml` must first pass its standalone,
 versioned configuration contract before it participates as a merge layer;
 organization defaults cannot supply a missing or invalid repository version.
+Headless review returns those local configuration errors before resolving a
+remote pull-request target.
 Normal desktop and TUI review continues to skip analyzer execution because
 evidence is expected upstream. An explicitly enabled and `required` analyzer
 in resolved organization policy is the exception and must run successfully;

@@ -162,6 +162,7 @@ pub fn run(request: HeadlessReviewRequest) -> Result<HeadlessReviewExecution, He
     let mut config_result =
         repo_config::load_from_repo_path_with_profile(&repo_path, request.profile.as_deref())
             .map_err(HeadlessReviewError::config)?;
+    ensure_config_valid(&config_result)?;
     let mut resolved = resolve_target(&request, &repo_path)?;
     let mut policy_sources = Vec::new();
     let mut required_policy_analyzers = Vec::new();
@@ -201,16 +202,7 @@ pub fn run(request: HeadlessReviewRequest) -> Result<HeadlessReviewExecution, He
         resolved_policy_config = Some(organization_policy.config);
         policy_sources = organization_policy.sources;
     }
-    if !config_result.errors.is_empty() {
-        return Err(HeadlessReviewError::config(
-            config_result
-                .errors
-                .iter()
-                .map(|error| format!("{}: {}", error.path, error.message))
-                .collect::<Vec<_>>()
-                .join("\n"),
-        ));
-    }
+    ensure_config_valid(&config_result)?;
     resolved.warnings.extend(
         config_result
             .warnings
@@ -304,6 +296,22 @@ pub fn run(request: HeadlessReviewRequest) -> Result<HeadlessReviewExecution, He
         target: resolved.target,
         review_run: Some(review_run),
     })
+}
+
+fn ensure_config_valid(
+    config_result: &repo_config::RepoReviewConfigLoadResult,
+) -> Result<(), HeadlessReviewError> {
+    if config_result.errors.is_empty() {
+        return Ok(());
+    }
+    Err(HeadlessReviewError::config(
+        config_result
+            .errors
+            .iter()
+            .map(|error| format!("{}: {}", error.path, error.message))
+            .collect::<Vec<_>>()
+            .join("\n"),
+    ))
 }
 
 fn validate_empty_diff_analyzers(
@@ -1323,7 +1331,7 @@ mod tests {
     use std::sync::atomic::{AtomicU64, Ordering};
 
     use super::{
-        branch_scope_warnings, build_review_payload, effective_analyzers_ran,
+        branch_scope_warnings, build_review_payload, effective_analyzers_ran, ensure_config_valid,
         format_findings_markdown, format_markdown, is_safe_synthetic_diff_path,
         is_sensitive_untracked_path, map_native_review_error, map_provider_target_error,
         markdown_fence, new_file_patch, public_provider_error, repo_identity_matches_target,
@@ -1996,6 +2004,27 @@ mod tests {
             .expect_err("required analyzer must not be skipped");
         assert_eq!(error.exit_code, 5);
         assert!(error.message.contains("organization-check"));
+    }
+
+    #[test]
+    fn config_errors_fail_before_target_resolution() {
+        let result = crate::repo_config::RepoReviewConfigLoadResult {
+            repo_path: "/tmp/repo".to_string(),
+            config_path: "/tmp/repo/.lachesi.yaml".to_string(),
+            exists: true,
+            config: None,
+            selected_profile: None,
+            loaded_policy_packs: Vec::new(),
+            warnings: Vec::new(),
+            errors: vec![crate::repo_config::RepoConfigValidationMessage {
+                path: "/tmp/repo/.lachesi.yaml".to_string(),
+                message: "version is required".to_string(),
+            }],
+        };
+
+        let error = ensure_config_valid(&result).expect_err("invalid config");
+        assert_eq!(error.exit_code, 2);
+        assert!(error.message.contains("version is required"));
     }
 
     #[test]
