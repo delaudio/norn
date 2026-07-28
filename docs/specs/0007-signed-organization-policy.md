@@ -36,6 +36,8 @@ Unsigned, expired, oversized, identity-mismatched, or incorrectly signed
 bundles are rejected before any layer is applied. Signed layers also apply a
 recursive check before caching that rejects credential-like extension keys
 containing token, password, secret, credential, or username markers.
+The free-form `analyzers.<id>.config` object is opaque to unknown-field schema
+checks, but remains subject to that credential scan.
 Versions are capped at `9007199254740991`, preserving exact JSON/TypeScript
 integer representation in review metadata.
 
@@ -134,7 +136,8 @@ model prompt, selects requested analyzers from the resolved config, and stores
 the selected profile and source versions on the review run.
 Normal desktop and TUI review continues to skip analyzer execution because
 evidence is expected upstream. An explicitly enabled and `required` analyzer
-in resolved organization policy is the exception and must run successfully.
+in resolved organization policy is the exception and must run successfully;
+that exception does not execute optional repository analyzer commands.
 The resolved-policy appendix contains runtime constraints but omits
 `review.prompt`, whose replacement or extension text is already materialized
 in the review prompt. Execution-time resolution checks the submitted payload;

@@ -928,12 +928,17 @@ fn review_analyzer_specs(
     repo_path: &Path,
     resolved_policy_config: Option<&repo_config::RepoReviewConfig>,
     review_profile: Option<&str>,
+    required_only: bool,
 ) -> Result<Vec<AnalyzerSpec>, String> {
-    match resolved_policy_config {
+    let mut specs = match resolved_policy_config {
         Some(config) if config.analyzers.is_empty() => Ok(default_analyzer_specs(repo_path)),
         Some(config) => Ok(analyzer_specs_from_config(config)),
         None => analyzer_specs_with_profile(repo_path, review_profile),
+    }?;
+    if required_only {
+        specs.retain(|spec| spec.required);
     }
+    Ok(specs)
 }
 
 fn resolved_policy_requires_analyzers(config: Option<&repo_config::RepoReviewConfig>) -> bool {
@@ -4671,16 +4676,18 @@ fn run_inline_review_pipeline(
             }
         }
     }
-    let skip_analyzers =
-        skip_analyzers && !resolved_policy_requires_analyzers(resolved_policy_config.as_ref());
+    let run_required_policy_analyzers =
+        skip_analyzers && resolved_policy_requires_analyzers(resolved_policy_config.as_ref());
+    let run_analyzers = !skip_analyzers || run_required_policy_analyzers;
 
-    if turn_kind == AiReviewTurnKind::Initial && !skip_analyzers {
+    if turn_kind == AiReviewTurnKind::Initial && run_analyzers {
         if let Some(repo_path) = repo_path.as_deref() {
             append_inline_review_log(&store, &key, run_id, "Running local evidence analyzers.");
             let analyzer_specs = review_analyzer_specs(
                 repo_path,
                 resolved_policy_config.as_ref(),
                 review_profile.as_deref(),
+                run_required_policy_analyzers,
             );
             let results = match analyzer_specs {
                 Ok(specs) if specs.is_empty() => {
@@ -4782,7 +4789,7 @@ fn run_inline_review_pipeline(
                 "No local clone configured; skipping local evidence analyzers.",
             );
         }
-    } else if skip_analyzers {
+    } else if !run_analyzers {
         append_inline_review_log(
             &store,
             &key,
@@ -6140,7 +6147,7 @@ mod tests {
             ..crate::repo_config::RepoReviewConfig::default()
         };
 
-        let specs = review_analyzer_specs(repo.path(), Some(&config), None)
+        let specs = review_analyzer_specs(repo.path(), Some(&config), None, false)
             .expect("resolved analyzer selection");
         assert!(specs.is_empty());
     }
@@ -6158,7 +6165,7 @@ mod tests {
             ..crate::repo_config::RepoReviewConfig::default()
         };
 
-        let specs = review_analyzer_specs(repo.path(), Some(&config), None)
+        let specs = review_analyzer_specs(repo.path(), Some(&config), None, false)
             .expect("resolved analyzer selection");
         assert_eq!(
             specs
@@ -6167,6 +6174,31 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec!["typecheck", "test"]
         );
+    }
+
+    #[test]
+    fn policy_forced_analyzer_selection_excludes_optional_commands() {
+        let repo = tempfile::tempdir().expect("repo temp dir");
+        let analyzer = |required| crate::repo_config::AnalyzerConfig {
+            enabled: true,
+            command: Some("check".to_string()),
+            required,
+            ..crate::repo_config::AnalyzerConfig::default()
+        };
+        let config = crate::repo_config::RepoReviewConfig {
+            version: "0.1".to_string(),
+            analyzers: std::collections::BTreeMap::from([
+                ("organization-required".to_string(), analyzer(true)),
+                ("repository-optional".to_string(), analyzer(false)),
+            ]),
+            ..crate::repo_config::RepoReviewConfig::default()
+        };
+
+        let specs = review_analyzer_specs(repo.path(), Some(&config), None, true)
+            .expect("required analyzer selection");
+        assert_eq!(specs.len(), 1);
+        assert_eq!(specs[0].id, "organization-required");
+        assert!(specs[0].required);
     }
 
     #[test]

@@ -1067,6 +1067,9 @@ fn collect_unknown_fields(
     context: Option<&str>,
     warnings: &mut Vec<RepoConfigValidationMessage>,
 ) {
+    if context == Some("opaque") {
+        return;
+    }
     let mapping = match value {
         Value::Mapping(mapping) => mapping,
         Value::Sequence(items) => {
@@ -1235,6 +1238,7 @@ fn next_context(context: Option<&str>, key: &str) -> Option<&'static str> {
         (Some("review"), "findings") => Some("findings"),
         (Some("profile"), "prompt") => Some("prompt"),
         (Some("profile"), "analyzers") => Some("profileAnalyzerMap"),
+        (Some("analyzer"), "config") => Some("opaque"),
         (Some("policy"), "sources") => Some("policySource"),
         (Some("policy"), "rules") => Some("rule"),
         (Some("policy"), "pathRules") => Some("pathRule"),
@@ -1579,6 +1583,25 @@ policy:
         let error = validate_external_config_layer(&layer)
             .expect_err("unknown signed rule field must be rejected");
         assert!(error.contains("$.policy.rules[0].enforcemnt"));
+    }
+
+    #[test]
+    fn external_policy_layer_accepts_free_form_analyzer_config() {
+        let layer = serde_yaml::from_str(
+            r#"
+analyzers:
+  custom:
+    enabled: true
+    command: custom-check
+    config:
+      threshold: 10
+      nested:
+        mode: strict
+"#,
+        )
+        .expect("external layer fixture");
+
+        validate_external_config_layer(&layer).expect("free-form analyzer config");
     }
 
     #[test]
