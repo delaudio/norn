@@ -255,14 +255,41 @@ export function summarizeActiveReviewFindings(
       currentPublishedCount,
       historicalDraftCount,
       historicalPublishedCount,
-      alreadyStaged: currentDraftCount + historicalDraftCount > 0,
-      alreadyPublished: currentPublishedCount + historicalPublishedCount > 0,
+      alreadyStaged: currentDraftCount > 0,
+      alreadyPublished: currentPublishedCount > 0,
       staleAnchor,
       latestPublishedAt,
     });
   }
 
   return summary;
+}
+
+export function latestTrackedFindingCommentId(
+  store: AiReviewStore | null | undefined,
+  findingFingerprint: string,
+): string | null {
+  let latest: { commentId: string; publishedAt: number; order: number } | null = null;
+  let order = 0;
+  for (const run of store?.reviewRuns ?? []) {
+    for (const finding of run.findings) {
+      if (finding.fingerprint !== findingFingerprint) continue;
+      const publication = finding.publication;
+      const remoteCommentIds = publication?.remoteCommentIds ?? [];
+      const commentId = remoteCommentIds[remoteCommentIds.length - 1];
+      if (!commentId) continue;
+      const publishedAt = parseTimestamp(publication?.publishedAt);
+      if (
+        latest == null ||
+        publishedAt > latest.publishedAt ||
+        (publishedAt === latest.publishedAt && order > latest.order)
+      ) {
+        latest = { commentId, publishedAt, order };
+      }
+      order += 1;
+    }
+  }
+  return latest?.commentId ?? null;
 }
 
 export function filterStageableAiReviewDraftComments(

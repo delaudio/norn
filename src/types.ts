@@ -339,6 +339,67 @@ export interface PublishedCommentIdentity {
   side: ReviewAnchorSide;
 }
 
+export interface TrackedFindingComment {
+  findingFingerprint: string;
+  commentId: string;
+}
+
+export interface FindingReconciliationRequest {
+  schemaVersion: "v1";
+  tenantId: string;
+  provider: ReviewProvider;
+  workspace: string;
+  repository: string;
+  pullRequestId: number;
+  baseSha: string;
+  headSha: string;
+  trackedComments: TrackedFindingComment[];
+  currentFindings: FindingPublicationRequest[];
+}
+
+export type FindingReconciliationStatus = "succeeded" | "partial";
+export type FindingReconciliationActionKind =
+  | "unchanged"
+  | "created"
+  | "updated"
+  | "resolved"
+  | "reopened"
+  | "failed";
+
+export interface FindingReconciliationAction {
+  findingFingerprint: string;
+  kind: FindingReconciliationActionKind;
+  previousCommentId: string | null;
+  commentId: string | null;
+  providerMutated: boolean;
+  error: {
+    code: string;
+    retryable: boolean;
+    message: string;
+  } | null;
+}
+
+export interface FindingReconciliationSummary {
+  schemaVersion: "v1";
+  status: FindingReconciliationStatus;
+  tenantId: string;
+  provider: ReviewProvider;
+  workspace: string;
+  repository: string;
+  pullRequestId: number;
+  baseSha: string;
+  headSha: string;
+  counts: {
+    unchanged: number;
+    created: number;
+    updated: number;
+    resolved: number;
+    reopened: number;
+    failed: number;
+  };
+  actions: FindingReconciliationAction[];
+}
+
 export interface ReviewFindingPublication {
   mode: ReviewPublicationMode;
   draftIds: string[];

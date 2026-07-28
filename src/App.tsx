@@ -43,9 +43,13 @@ import {
   assertPullRequestMatchesReviewRun,
   buildFindingPublicationRequest,
   filterStageableAiReviewDraftComments,
+  latestTrackedFindingCommentId,
   summarizeActiveReviewFindings,
 } from "@/lib/reviewFindingPublication";
-import { publishReviewFinding, recordReviewFindingPublicationEvents } from "@/lib/reviewService";
+import {
+  reconcileReviewFindings,
+  recordReviewFindingPublicationEvents,
+} from "@/lib/reviewService";
 import { tauriCall } from "@/lib/tauri";
 import type {
   AiLineQuestionContext,
@@ -429,9 +433,39 @@ export default function App() {
       reviewRun,
       draft,
     });
-    const published = await publishReviewFinding(request);
+    const trackedCommentId = latestTrackedFindingCommentId(
+      aiReview.store,
+      request.findingFingerprint,
+    );
+    const reconciliation = await reconcileReviewFindings({
+      schemaVersion: "v1",
+      tenantId: request.tenantId,
+      provider: request.provider,
+      workspace: request.workspace,
+      repository: request.repository,
+      pullRequestId: request.pullRequestId,
+      baseSha: request.baseSha,
+      headSha: request.headSha,
+      trackedComments: trackedCommentId
+        ? [
+            {
+              findingFingerprint: request.findingFingerprint,
+              commentId: trackedCommentId,
+            },
+          ]
+        : [],
+      currentFindings: [request],
+    });
+    const action = reconciliation.actions.find(
+      (candidate) => candidate.findingFingerprint === request.findingFingerprint,
+    );
+    if (!action || action.kind === "failed" || !action.commentId) {
+      throw new Error(
+        action?.error?.message ?? "The structured finding was not reconciled with the provider.",
+      );
+    }
     return {
-      id: published.commentId,
+      id: action.commentId,
       createdOn: new Date().toISOString(),
     };
   };

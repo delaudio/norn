@@ -3,11 +3,14 @@ import { tauriCall } from "@/lib/tauri";
 import type {
   AiReviewStore,
   FindingPublicationRequest,
+  FindingReconciliationRequest,
+  FindingReconciliationSummary,
   PublishedCommentIdentity,
   ReviewFindingPublicationEvent,
 } from "@/types";
 import {
   publishReviewFinding,
+  reconcileReviewFindings,
   ReviewFindingPublicationError,
   recordReviewFindingPublicationEvents,
 } from "./reviewService";
@@ -142,6 +145,62 @@ describe("publishReviewFinding", () => {
       message: "The pull request head changed.",
       code: "outdated_anchor",
       retryable: false,
+    });
+  });
+});
+
+describe("reconcileReviewFindings", () => {
+  beforeEach(() => {
+    vi.mocked(tauriCall).mockReset();
+  });
+
+  it("owns the typed reconciliation IPC command and request envelope", async () => {
+    const reconciliationRequest: FindingReconciliationRequest = {
+      schemaVersion: "v1",
+      tenantId: request.tenantId,
+      provider: request.provider,
+      workspace: request.workspace,
+      repository: request.repository,
+      pullRequestId: request.pullRequestId,
+      baseSha: request.baseSha,
+      headSha: request.headSha,
+      trackedComments: [],
+      currentFindings: [request],
+    };
+    const summary: FindingReconciliationSummary = {
+      schemaVersion: "v1",
+      status: "succeeded",
+      tenantId: request.tenantId,
+      provider: request.provider,
+      workspace: request.workspace,
+      repository: request.repository,
+      pullRequestId: request.pullRequestId,
+      baseSha: request.baseSha,
+      headSha: request.headSha,
+      counts: {
+        unchanged: 0,
+        created: 1,
+        updated: 0,
+        resolved: 0,
+        reopened: 0,
+        failed: 0,
+      },
+      actions: [
+        {
+          findingFingerprint: request.findingFingerprint,
+          kind: "created",
+          previousCommentId: null,
+          commentId: "comment-1",
+          providerMutated: true,
+          error: null,
+        },
+      ],
+    };
+    vi.mocked(tauriCall).mockResolvedValue(summary);
+
+    await expect(reconcileReviewFindings(reconciliationRequest)).resolves.toEqual(summary);
+    expect(tauriCall).toHaveBeenCalledWith("reconcile_review_findings", {
+      request: reconciliationRequest,
     });
   });
 });

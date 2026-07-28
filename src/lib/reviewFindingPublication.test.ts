@@ -5,6 +5,7 @@ import {
   assertPullRequestMatchesReviewRun,
   buildFindingPublicationRequest,
   filterStageableAiReviewDraftComments,
+  latestTrackedFindingCommentId,
   summarizeActiveReviewFindings,
 } from "./reviewFindingPublication";
 
@@ -316,7 +317,7 @@ describe("summarizeActiveReviewFindings", () => {
     const summary = summarizeActiveReviewFindings(store, activeRun);
 
     expect(summary.get("run-1-finding-1")).toMatchObject({
-      alreadyPublished: true,
+      alreadyPublished: false,
       historicalPublishedCount: 1,
       currentPublishedCount: 0,
       currentDraftCount: 0,
@@ -324,6 +325,7 @@ describe("summarizeActiveReviewFindings", () => {
       publicationMode: "inline",
       latestPublishedAt: "2026-06-22T20:10:00.000Z",
     });
+    expect(latestTrackedFindingCommentId(store, "fingerprint-1")).toBe("101");
     expect(summary.get("run-1-finding-2")).toMatchObject({
       alreadyStaged: true,
       currentDraftCount: 1,
@@ -335,7 +337,7 @@ describe("summarizeActiveReviewFindings", () => {
 });
 
 describe("filterStageableAiReviewDraftComments", () => {
-  it("skips comments already represented by staged drafts, published findings, or local duplicates", () => {
+  it("allows historical findings to reconcile while skipping current drafts and local duplicates", () => {
     const publicationSummary = summarizeActiveReviewFindings(store, activeRun);
     const existingDrafts: Pick<DraftComment, "path" | "to" | "from" | "raw">[] = [
       {
@@ -391,10 +393,10 @@ describe("filterStageableAiReviewDraftComments", () => {
     expect(
       filterStageableAiReviewDraftComments(comments, existingDrafts, publicationSummary),
     ).toEqual({
-      stageable: [comments[3]],
-      skipped: 3,
+      stageable: [comments[0], comments[3]],
+      skipped: 2,
       skippedAlreadyStaged: 1,
-      skippedAlreadyPublished: 1,
+      skippedAlreadyPublished: 0,
       skippedExistingDrafts: 1,
     });
   });

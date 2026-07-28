@@ -760,6 +760,8 @@ struct GhPublicationComment {
     #[serde(default)]
     body: String,
     user: Option<GhUser>,
+    #[serde(default)]
+    pull_request_url: Option<String>,
     path: Option<String>,
     line: Option<u32>,
     original_line: Option<u32>,
@@ -2339,20 +2341,21 @@ impl ProviderFindingReconciliationApi for StoredProviderInlineCommentApi {
                         "GitHub did not return the authenticated account login.",
                     ));
                 }
-                let url = format!(
-                    "{}/pulls/comments/{comment_id}",
-                    github_repo_base(&target.workspace, &target.repository)
-                        .map_err(ProviderPublicationApiError::unavailable)?
-                );
+                let repository_base = github_repo_base(&target.workspace, &target.repository)
+                    .map_err(ProviderPublicationApiError::unavailable)?;
+                let url = format!("{repository_base}/pulls/comments/{comment_id}");
                 let comment: GhPublicationComment = match github_get_json(client.get(&url)) {
                     Ok(comment) => comment,
                     Err(error) if error.contains("404 Not Found") => return Ok(None),
                     Err(error) => return Err(map_publication_read_error(error)),
                 };
-                if !comment
-                    .user
-                    .as_ref()
-                    .is_some_and(|user| user.login.eq_ignore_ascii_case(author_login))
+                let expected_pull_request_url =
+                    format!("{repository_base}/pulls/{}", target.pull_request_id);
+                if !github_comment_matches_pull_request(&comment, &expected_pull_request_url)
+                    || !comment
+                        .user
+                        .as_ref()
+                        .is_some_and(|user| user.login.eq_ignore_ascii_case(author_login))
                 {
                     return Ok(None);
                 }
@@ -2478,6 +2481,16 @@ fn provider_finding_comment_from_github(
     })
 }
 
+fn github_comment_matches_pull_request(
+    comment: &GhPublicationComment,
+    expected_pull_request_url: &str,
+) -> bool {
+    comment
+        .pull_request_url
+        .as_deref()
+        .is_some_and(|url| url.eq_ignore_ascii_case(expected_pull_request_url))
+}
+
 fn bitbucket_finding_anchor(anchor: &BbPublicationInline) -> Option<FindingLineRange> {
     if let Some(end_line) = anchor.to {
         let start_line = anchor.start_to.unwrap_or(end_line);
@@ -2568,6 +2581,22 @@ pub fn reconcile_review_findings_native(
         SqliteFindingPublicationStore,
     )
     .reconcile(request)
+}
+
+#[tauri::command]
+pub async fn reconcile_review_findings(
+    request: FindingReconciliationRequest,
+) -> Result<FindingReconciliationSummary, String> {
+    tauri::async_runtime::spawn_blocking(move || reconcile_review_findings_native(&request))
+        .await
+        .map_err(|_| {
+            publication_ipc_error(FindingPublicationError {
+                code: FindingPublicationErrorCode::ProviderUnavailable,
+                retryable: true,
+                message: "The finding reconciliation worker stopped unexpectedly.".to_string(),
+            })
+        })?
+        .map_err(publication_ipc_error)
 }
 
 pub fn publish_review_finding_native(
@@ -3254,6 +3283,9 @@ mod tests {
                 login: "reviewer-1".to_string(),
                 name: None,
             }),
+            pull_request_url: Some(
+                "https://api.github.com/repos/acme/payments/pulls/42".to_string(),
+            ),
             path: Some("src/lib.rs".to_string()),
             line: Some(14),
             original_line: None,
@@ -3279,6 +3311,9 @@ mod tests {
                 login: "reviewer-1".to_string(),
                 name: None,
             }),
+            pull_request_url: Some(
+                "https://api.github.com/repos/acme/payments/pulls/42".to_string(),
+            ),
             path: Some("src/lib.rs".to_string()),
             line: None,
             original_line: Some(14),
@@ -3370,6 +3405,25 @@ mod tests {
             }
         );
         assert_eq!(github.markdown, markdown);
+    }
+
+    #[test]
+    fn github_reconciliation_comment_must_belong_to_the_target_pull_request() {
+        let comment: GhPublicationComment = serde_json::from_value(json!({
+            "id": 99,
+            "body": "finding",
+            "pull_request_url": "https://api.github.com/repos/acme/payments/pulls/42"
+        }))
+        .expect("GitHub review comment");
+
+        assert!(github_comment_matches_pull_request(
+            &comment,
+            "https://api.github.com/repos/ACME/PAYMENTS/pulls/42"
+        ));
+        assert!(!github_comment_matches_pull_request(
+            &comment,
+            "https://api.github.com/repos/acme/payments/pulls/43"
+        ));
     }
 
     #[test]

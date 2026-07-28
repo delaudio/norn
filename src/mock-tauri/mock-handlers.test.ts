@@ -1,5 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { AiReviewStore, FindingPublicationRequest } from "@/types";
+import type {
+  AiReviewStore,
+  FindingPublicationRequest,
+  FindingReconciliationSummary,
+} from "@/types";
 import { mockHandlers, publishMockReviewFinding } from "./mock-handlers";
 
 function publicationRequest(
@@ -72,6 +76,36 @@ describe("publishMockReviewFinding", () => {
         }),
       ),
     ).toThrow("markdown is too long");
+  });
+
+  it("reconciles a tracked finding through the mock IPC surface", () => {
+    const request = publicationRequest();
+    const summary = mockHandlers.reconcile_review_findings({
+      request: {
+        schemaVersion: "v1",
+        tenantId: request.tenantId,
+        provider: request.provider,
+        workspace: request.workspace,
+        repository: request.repository,
+        pullRequestId: request.pullRequestId,
+        baseSha: request.baseSha,
+        headSha: request.headSha,
+        trackedComments: [
+          {
+            findingFingerprint: request.findingFingerprint,
+            commentId: "comment-existing",
+          },
+        ],
+        currentFindings: [request],
+      },
+    }) as FindingReconciliationSummary;
+
+    expect(summary.counts.updated).toBe(1);
+    expect(summary.actions[0]).toMatchObject({
+      findingFingerprint: request.findingFingerprint,
+      previousCommentId: "comment-existing",
+      commentId: "comment-existing",
+    });
   });
 });
 

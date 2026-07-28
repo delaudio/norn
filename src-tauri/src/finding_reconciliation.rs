@@ -14,7 +14,7 @@ use crate::finding_publication::{
     FindingPublicationError, FindingPublicationErrorCode, FindingPublicationRequest,
     FindingPublicationStore, FindingPublisher, ProviderCommentIdentity, ProviderInlineCommentApi,
     ProviderPublicationApiError, ProviderPublicationApiErrorKind, ProviderPublicationTarget,
-    ProviderPullRequestRevision, PublishedCommentIdentity,
+    ProviderPullRequestRevision,
 };
 use crate::review_event::PullRequestReviewEventProvider;
 
@@ -32,7 +32,7 @@ pub enum FindingReconciliationSchemaVersion {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct TrackedFindingComment {
     pub finding_fingerprint: String,
-    pub publication: PublishedCommentIdentity,
+    pub comment_id: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -202,7 +202,7 @@ where
         for (fingerprint, tracked) in tracked {
             let current_finding = current.remove(&fingerprint);
             let previous_identity = ProviderCommentIdentity {
-                comment_id: tracked.publication.comment_id.clone(),
+                comment_id: tracked.comment_id.clone(),
             };
             if let Err(error) = self.ensure_current_revision(request, &target) {
                 actions.push(failed_action(
@@ -244,30 +244,48 @@ where
                         ),
                     });
                 } else {
-                    actions.push(successful_action(
+                    actions.push(failed_action(
                         fingerprint,
-                        FindingReconciliationActionKind::Resolved,
                         Some(previous_identity.comment_id.clone()),
-                        Some(previous_identity.comment_id),
-                        false,
+                        None,
+                        FindingPublicationError {
+                            code: FindingPublicationErrorCode::AnchorRejected,
+                            retryable: false,
+                            message:
+                                "The tracked finding comment is missing or no longer editable."
+                                    .to_string(),
+                        },
                     ));
                 }
                 continue;
             };
 
             let lineage_marker = request.lineage_marker(&fingerprint);
-            let exact_marker_matches = comment_has_marker(
-                &provider_comment.markdown,
-                &tracked.publication.finding_marker,
-            ) || current_finding
-                .map(finding_marker)
-                .is_some_and(|marker| comment_has_marker(&provider_comment.markdown, &marker));
+            let exact_marker = trailing_control_lines(&provider_comment.markdown)
+                .into_iter()
+                .find(|line| is_exact_finding_marker(line))
+                .map(str::to_string);
             let has_lineage_marker = trailing_control_lines(&provider_comment.markdown)
                 .iter()
                 .any(|line| line.starts_with("<!-- lachesi:finding-lineage:"));
             let lineage_marker_matches =
                 comment_has_marker(&provider_comment.markdown, &lineage_marker);
-            if !exact_marker_matches || (has_lineage_marker && !lineage_marker_matches) {
+            let Some(exact_marker) = exact_marker else {
+                actions.push(failed_action(
+                    fingerprint,
+                    Some(previous_identity.comment_id),
+                    None,
+                    FindingPublicationError {
+                        code: FindingPublicationErrorCode::PermissionDenied,
+                        retryable: false,
+                        message:
+                            "The tracked provider comment is not owned by this Lachesi finding."
+                                .to_string(),
+                    },
+                ));
+                continue;
+            };
+            if has_lineage_marker && !lineage_marker_matches {
                 actions.push(failed_action(
                     fingerprint,
                     Some(previous_identity.comment_id),
@@ -288,8 +306,8 @@ where
                     request,
                     &publisher,
                     fingerprint,
-                    tracked,
                     provider_comment,
+                    exact_marker,
                     current_finding,
                 )),
                 None => actions.push(self.resolve_absent_finding(
@@ -298,6 +316,7 @@ where
                     fingerprint,
                     tracked,
                     provider_comment,
+                    exact_marker,
                 )),
             }
         }
@@ -327,8 +346,8 @@ where
         request: &FindingReconciliationRequest,
         publisher: &FindingPublisher<&A, &S>,
         fingerprint: String,
-        tracked: &TrackedFindingComment,
         provider_comment: ProviderFindingComment,
+        previous_exact_marker: String,
         current: &FindingPublicationRequest,
     ) -> FindingReconciliationAction {
         let target = request.target();
@@ -382,8 +401,8 @@ where
         };
         let resolved = resolved_markdown(
             &provider_comment.markdown,
-            &request.lineage_marker(&tracked.finding_fingerprint),
-            &tracked.publication.finding_marker,
+            &request.lineage_marker(&fingerprint),
+            &previous_exact_marker,
         );
         if !was_resolved && provider_comment.markdown != resolved {
             if let Err(error) = self.update_fenced(
@@ -421,6 +440,7 @@ where
         fingerprint: String,
         tracked: &TrackedFindingComment,
         provider_comment: ProviderFindingComment,
+        previous_exact_marker: String,
     ) -> FindingReconciliationAction {
         let comment_id = provider_comment.identity.comment_id.clone();
         if comment_is_resolved(&provider_comment.markdown) {
@@ -435,7 +455,7 @@ where
         let resolved = resolved_markdown(
             &provider_comment.markdown,
             &request.lineage_marker(&tracked.finding_fingerprint),
-            &tracked.publication.finding_marker,
+            &previous_exact_marker,
         );
         match self.update_fenced(
             request,
@@ -523,7 +543,7 @@ impl FindingReconciliationRequest {
         let mut tracked = BTreeMap::new();
         for comment in &self.tracked_comments {
             validate_identifier("findingFingerprint", &comment.finding_fingerprint)?;
-            self.validate_publication_identity(&comment.publication)?;
+            validate_identifier("commentId", &comment.comment_id)?;
             if tracked
                 .insert(comment.finding_fingerprint.as_str(), ())
                 .is_some()
@@ -552,28 +572,6 @@ impl FindingReconciliationRequest {
             }
         }
         Ok(())
-    }
-
-    fn validate_publication_identity(
-        &self,
-        publication: &PublishedCommentIdentity,
-    ) -> Result<(), FindingPublicationError> {
-        let matches = publication.tenant_id == self.tenant_id
-            && publication.provider == self.provider
-            && publication.workspace.eq_ignore_ascii_case(&self.workspace)
-            && publication
-                .repository
-                .eq_ignore_ascii_case(&self.repository)
-            && publication.pull_request_id == self.pull_request_id
-            && !publication.comment_id.trim().is_empty()
-            && is_exact_finding_marker(&publication.finding_marker);
-        if matches {
-            Ok(())
-        } else {
-            Err(invalid_request(
-                "tracked publications must belong to the reconciliation target",
-            ))
-        }
     }
 
     fn matches_finding_target(&self, finding: &FindingPublicationRequest) -> bool {
@@ -878,7 +876,7 @@ mod tests {
             );
             TrackedFindingComment {
                 finding_fingerprint: request.finding_fingerprint.clone(),
-                publication: published_identity(request, comment_id),
+                comment_id: comment_id.to_string(),
             }
         }
 
@@ -1081,25 +1079,6 @@ mod tests {
         }
     }
 
-    fn published_identity(
-        request: &FindingPublicationRequest,
-        comment_id: &str,
-    ) -> PublishedCommentIdentity {
-        PublishedCommentIdentity {
-            tenant_id: request.tenant_id.clone(),
-            provider: request.provider,
-            workspace: request.workspace.clone(),
-            repository: request.repository.clone(),
-            pull_request_id: request.pull_request_id,
-            comment_id: comment_id.to_string(),
-            finding_marker: finding_marker(request),
-            path: request.anchor.path.clone(),
-            start_line: request.anchor.start_line,
-            end_line: request.anchor.end_line,
-            side: request.anchor.side,
-        }
-    }
-
     fn request(
         tracked_comments: Vec<TrackedFindingComment>,
         current_findings: Vec<FindingPublicationRequest>,
@@ -1266,6 +1245,26 @@ mod tests {
     }
 
     #[test]
+    fn missing_absent_tracked_comment_is_reported_as_stale_state() {
+        let tracked = TrackedFindingComment {
+            finding_fingerprint: "missing".to_string(),
+            comment_id: "comment-missing".to_string(),
+        };
+
+        let summary = FindingReconciler::new(&MockApi::default(), &MockStore::default())
+            .reconcile(&request(vec![tracked], Vec::new()))
+            .expect("auditable stale state");
+
+        assert_eq!(summary.status, FindingReconciliationStatus::Partial);
+        assert_eq!(summary.counts.failed, 1);
+        assert_eq!(
+            summary.actions[0].error.as_ref().map(|error| error.code),
+            Some(FindingPublicationErrorCode::AnchorRejected)
+        );
+        assert!(!summary.actions[0].provider_mutated);
+    }
+
+    #[test]
     fn revision_drift_rolls_back_an_in_place_update() {
         let api = MockApi::default();
         let store = MockStore::default();
@@ -1294,17 +1293,15 @@ mod tests {
     }
 
     #[test]
-    fn rejects_cross_tenant_tracked_publications() {
-        let previous = finding("tracked", OLD_HEAD_SHA);
-        let mut tracked = TrackedFindingComment {
-            finding_fingerprint: previous.finding_fingerprint.clone(),
-            publication: published_identity(&previous, "comment-1"),
+    fn rejects_invalid_tracked_comment_ids() {
+        let tracked = TrackedFindingComment {
+            finding_fingerprint: "tracked".to_string(),
+            comment_id: " invalid ".to_string(),
         };
-        tracked.publication.tenant_id = "tenant-other".to_string();
 
         let error = FindingReconciler::new(&MockApi::default(), &MockStore::default())
             .reconcile(&request(vec![tracked], Vec::new()))
-            .expect_err("cross-tenant publication");
+            .expect_err("invalid tracked comment");
 
         assert_eq!(error.code, FindingPublicationErrorCode::InvalidRequest);
     }
@@ -1370,6 +1367,7 @@ mod tests {
         let api = MockApi::default();
         let store = MockStore::default();
         let previous = finding("legacy", OLD_HEAD_SHA);
+        let previous_marker = finding_marker(&previous);
         let tracked = api.insert(&previous, "comment-legacy", false, &[]);
         {
             let mut state = api.0.lock().unwrap();
@@ -1379,7 +1377,7 @@ mod tests {
                 .get_mut("comment-legacy")
                 .unwrap()
                 .comment
-                .markdown = format!("{body}\n\n{}", tracked.publication.finding_marker);
+                .markdown = format!("{body}\n\n{previous_marker}");
         }
 
         let summary = FindingReconciler::new(&api, &store)

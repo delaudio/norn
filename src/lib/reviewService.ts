@@ -4,6 +4,8 @@ import type {
   AiReviewJobStatus,
   AiReviewStore,
   FindingPublicationRequest,
+  FindingReconciliationRequest,
+  FindingReconciliationSummary,
   PublishedCommentIdentity,
   ReviewFindingPublicationEvent,
 } from "@/types";
@@ -125,6 +127,16 @@ export function publishReviewFinding(
   request: FindingPublicationRequest,
 ): Promise<PublishedCommentIdentity> {
   return tauriCall<PublishedCommentIdentity>("publish_review_finding", { request }).catch(
+    (error: unknown) => {
+      throw normalizePublicationError(error);
+    },
+  );
+}
+
+export function reconcileReviewFindings(
+  request: FindingReconciliationRequest,
+): Promise<FindingReconciliationSummary> {
+  return tauriCall<FindingReconciliationSummary>("reconcile_review_findings", { request }).catch(
     (error: unknown) => {
       throw normalizePublicationError(error);
     },
