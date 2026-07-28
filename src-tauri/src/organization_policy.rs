@@ -370,6 +370,7 @@ pub struct ResolvedOrganizationPolicy {
     pub loaded_policy_packs: Vec<crate::repo_config::LoadedPolicyPack>,
     pub warnings: Vec<crate::repo_config::RepoConfigValidationMessage>,
     enforced_layer: Option<Value>,
+    pending_cache_bundle: Option<CachedOrganizationPolicyBundle>,
 }
 
 pub fn organization_policy_is_configured() -> bool {
@@ -434,6 +435,7 @@ pub fn resolve_configured_organization_policy(
     )?;
     resolved.warnings = repository_warnings;
     finalize_resolved_organization_policy(repo_path, &mut resolved, profile_override)?;
+    store_pending_cache_bundle(&mut resolved, &SqliteOrganizationPolicyCache)?;
     if let Some(audit) = audit {
         for source in &resolved.sources {
             audit
@@ -597,6 +599,18 @@ fn finalize_resolved_organization_policy(
     resolved.config = reapply_enforced_layer(finalized_config, resolved.enforced_layer.as_ref())?;
     resolved.required_analyzers =
         enforced_required_analyzer_ids(&resolved.config, resolved.enforced_layer.as_ref());
+    Ok(())
+}
+
+fn store_pending_cache_bundle(
+    resolved: &mut ResolvedOrganizationPolicy,
+    cache: &dyn OrganizationPolicyCache,
+) -> Result<(), OrganizationPolicyResolutionError> {
+    if let Some(bundle) = resolved.pending_cache_bundle.take() {
+        cache
+            .store(&bundle)
+            .map_err(OrganizationPolicyResolutionError::Cache)?;
+    }
     Ok(())
 }
 
@@ -906,11 +920,6 @@ pub fn resolve_organization_policy(
     })?;
     crate::repo_config::validate_resolved_config(&config)
         .map_err(OrganizationPolicyResolutionError::InvalidLayer)?;
-    if let Some(verified) = resolved_bundle.as_ref().filter(|_| !from_cache) {
-        cache
-            .store(verified)
-            .map_err(OrganizationPolicyResolutionError::Cache)?;
-    }
     if let Some(audit) = audit {
         for source in &sources {
             audit
@@ -927,6 +936,7 @@ pub fn resolve_organization_policy(
         loaded_policy_packs: Vec::new(),
         warnings: Vec::new(),
         enforced_layer,
+        pending_cache_bundle: resolved_bundle.filter(|_| !from_cache),
     })
 }
 
@@ -1782,6 +1792,7 @@ mod tests {
                     }
                 }
             })),
+            pending_cache_bundle: None,
         };
 
         finalize_resolved_organization_policy(repo.path(), &mut resolved, Some("fast"))
@@ -1822,6 +1833,7 @@ mod tests {
             loaded_policy_packs: Vec::new(),
             warnings: Vec::new(),
             enforced_layer: Some(json!({"review": {"profile": "missing"}})),
+            pending_cache_bundle: None,
         };
 
         let error = finalize_resolved_organization_policy(repo.path(), &mut resolved, None)
@@ -2153,7 +2165,7 @@ mod tests {
             verified_at_ms: NOW - 100,
         })));
 
-        let resolved = resolve_organization_policy(
+        let mut resolved = resolve_organization_policy(
             &config(
                 OrganizationPolicyRequirement::Mandatory,
                 OrganizationPolicyUnavailableBehavior::FailClosed,
@@ -2166,6 +2178,10 @@ mod tests {
         .expect("valid live bundle repairs cache");
 
         assert_eq!(resolved.sources[0].version, 9);
+        let repo = tempfile::tempdir().expect("repo temp dir");
+        finalize_resolved_organization_policy(repo.path(), &mut resolved, None)
+            .expect("finalize live bundle");
+        store_pending_cache_bundle(&mut resolved, &cache).expect("store finalized bundle");
         assert_eq!(
             cache
                 .0
@@ -2174,6 +2190,31 @@ mod tests {
                 .map(|cached| cached.envelope.bundle.version),
             Some(9)
         );
+    }
+
+    #[test]
+    fn live_bundle_is_not_cached_before_finalization_succeeds() {
+        let cache = MemoryCache::default();
+        let mut resolved = resolve_organization_policy(
+            &config(
+                OrganizationPolicyRequirement::Mandatory,
+                OrganizationPolicyUnavailableBehavior::FailClosed,
+            ),
+            &StaticSource(Ok(signed_bundle(
+                9,
+                json!({}),
+                json!({"review": {"profile": "missing"}}),
+            ))),
+            &cache,
+            None,
+            input(),
+        )
+        .expect("verified live bundle");
+
+        let repo = tempfile::tempdir().expect("repo temp dir");
+        finalize_resolved_organization_policy(repo.path(), &mut resolved, None)
+            .expect_err("missing signed enforced profile");
+        assert!(cache.0.borrow().is_none());
     }
 
     #[test]

@@ -94,7 +94,8 @@ offline use. A live bundle is fetched and verified before cached content is
 parsed, so a damaged cache cannot block recovery from an available source.
 Unverifiable cached rows are removed before a verified live bundle is stored;
 only a signature- and digest-valid cached version participates in rollback
-protection.
+protection. A verified live bundle is committed to cache only after profile,
+pack, and final resolved-config validation succeeds.
 
 ## Local runtime configuration
 
