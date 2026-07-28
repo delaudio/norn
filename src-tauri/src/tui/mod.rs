@@ -583,7 +583,6 @@ impl TuiApp {
                 self.refresh_ai_review_output();
                 self.detail_view = target_view;
                 self.reset_detail_scrolls();
-                self.refresh_selected_image_diff();
                 self.status = format!("Loaded PR #{pr_id}");
             }
             Err(error) => {
