@@ -11,7 +11,7 @@ If status files and git disagree, git is authoritative; correct this file.
 - **Branch:** `agent/provider-inline-publication`
 - **Active item:** GitHub issue #97 and `.docflow/plan/todo/0004-shared-review-service-program.md`
 - **Blockers:** none; use the available SSH key for signed commits.
-- **Uncommitted work:** issue #97 coordination closeout through GitHub old-side anchor commit `3ec085b`; final pre-push review and PR integration remain.
+- **Uncommitted work:** issue #97 coordination closeout through recoverable publication commit `93133a8`; final pre-push review and PR integration remain.
 
 ## Last shipped
 
