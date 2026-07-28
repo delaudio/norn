@@ -11,7 +11,7 @@ If status files and git disagree, git is authoritative; correct this file.
 - **Branch:** `agent/review-effectiveness-dashboard`
 - **Active item:** GitHub issue #101 and `.docflow/plan/todo/0004-shared-review-service-program.md`
 - **Blockers:** none; use the available SSH key for signed commits.
-- **Uncommitted work:** run the bounded Lachesi review, then publish and merge the dashboard.
+- **Uncommitted work:** publish and merge the reviewed dashboard branch.
 
 ## Last shipped
 
