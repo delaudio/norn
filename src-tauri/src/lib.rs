@@ -4,6 +4,7 @@ mod commands;
 mod config;
 mod credentials;
 pub mod finding_publication;
+pub mod finding_reconciliation;
 mod headless_review;
 pub mod incremental_review;
 mod launch;
@@ -24,7 +25,7 @@ pub use review_storage::{
     write_administrative_audit_jsonl, ReviewCursor, ReviewCursorIdentity, ReviewCursorState,
     ReviewRunCompletion, ReviewRunOutcome,
 };
-pub use services::bitbucket::publish_review_finding_native;
+pub use services::bitbucket::{publish_review_finding_native, reconcile_review_findings_native};
 
 use commands::{bitbucket, context, repositories, review};
 use tauri::{

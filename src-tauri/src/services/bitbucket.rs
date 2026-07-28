@@ -7,11 +7,15 @@ use crate::config::{self, AppConfig, RepoRef, ReviewProvider};
 use crate::config::{AiProvider, ReviewTerminal};
 use crate::credentials::{self, Credentials};
 use crate::finding_publication::{
-    dry_run_publication_identity, FindingAnchorSide, FindingPublicationError,
+    dry_run_publication_identity, FindingAnchorSide, FindingLineRange, FindingPublicationError,
     FindingPublicationErrorCode, FindingPublicationRequest, FindingPublisher,
     ProviderCommentIdentity, ProviderInlineCommentApi, ProviderInlineCommentPayload,
     ProviderPublicationApiError, ProviderPublicationTarget, ProviderPullRequestRevision,
     PublishedCommentIdentity, SqliteFindingPublicationStore,
+};
+use crate::finding_reconciliation::{
+    FindingReconciler, FindingReconciliationRequest, FindingReconciliationSummary,
+    ProviderFindingComment, ProviderFindingReconciliationApi,
 };
 use crate::repo_config::{self, RepoReviewConfigLoadResult};
 use crate::review_event::PullRequestReviewEventProvider;
@@ -80,6 +84,12 @@ impl BitbucketClient {
             .basic_auth(&self.username, Some(&self.token))
     }
 
+    fn put(&self, url: &str) -> reqwest::blocking::RequestBuilder {
+        self.http
+            .put(url)
+            .basic_auth(&self.username, Some(&self.token))
+    }
+
     fn delete(&self, url: &str) -> reqwest::blocking::RequestBuilder {
         self.http
             .delete(url)
@@ -121,6 +131,13 @@ impl GithubClient {
     fn post(&self, url: &str) -> reqwest::blocking::RequestBuilder {
         self.http
             .post(url)
+            .bearer_auth(&self.token)
+            .header(reqwest::header::ACCEPT, "application/vnd.github+json")
+    }
+
+    fn patch(&self, url: &str) -> reqwest::blocking::RequestBuilder {
+        self.http
+            .patch(url)
             .bearer_auth(&self.token)
             .header(reqwest::header::ACCEPT, "application/vnd.github+json")
     }
@@ -2270,6 +2287,289 @@ impl ProviderInlineCommentApi for StoredProviderInlineCommentApi {
     }
 }
 
+impl ProviderFindingReconciliationApi for StoredProviderInlineCommentApi {
+    fn get_finding_comment(
+        &self,
+        target: &ProviderPublicationTarget,
+        identity: &ProviderCommentIdentity,
+    ) -> Result<Option<ProviderFindingComment>, ProviderPublicationApiError> {
+        let pr_id = publication_pr_id(target.pull_request_id)?;
+        let comment_id = encode_path_segment(&identity.comment_id);
+        match target.provider {
+            PullRequestReviewEventProvider::Bitbucket => {
+                let client = BitbucketClient::from_stored().map_err(map_publication_auth_error)?;
+                let user: BbUser = get_json(client.get(&format!("{BASE}/user")))
+                    .map_err(map_publication_read_error)?;
+                let author_account_id = user
+                    .account_id
+                    .filter(|account_id| !account_id.trim().is_empty())
+                    .ok_or_else(|| {
+                        ProviderPublicationApiError::unavailable(
+                            "Bitbucket did not return the authenticated account identifier.",
+                        )
+                    })?;
+                let url = format!(
+                    "{}/pullrequests/{pr_id}/comments/{comment_id}",
+                    repo_base(&target.workspace, &target.repository)
+                        .map_err(ProviderPublicationApiError::unavailable)?
+                );
+                let comment: BbPublicationComment = match get_json(client.get(&url)) {
+                    Ok(comment) => comment,
+                    Err(error) if error.contains("404 Not Found") => return Ok(None),
+                    Err(error) => return Err(map_publication_read_error(error)),
+                };
+                if comment.deleted
+                    || comment
+                        .user
+                        .as_ref()
+                        .and_then(|user| user.account_id.as_deref())
+                        != Some(author_account_id.as_str())
+                {
+                    return Ok(None);
+                }
+                provider_finding_comment_from_bitbucket(comment).map(Some)
+            }
+            PullRequestReviewEventProvider::Github => {
+                let client = GithubClient::from_stored().map_err(map_publication_auth_error)?;
+                let user: GhUser = github_get_json(client.get("https://api.github.com/user"))
+                    .map_err(map_publication_read_error)?;
+                let author_login = user.login.trim();
+                if author_login.is_empty() {
+                    return Err(ProviderPublicationApiError::unavailable(
+                        "GitHub did not return the authenticated account login.",
+                    ));
+                }
+                let url = format!(
+                    "{}/pulls/comments/{comment_id}",
+                    github_repo_base(&target.workspace, &target.repository)
+                        .map_err(ProviderPublicationApiError::unavailable)?
+                );
+                let comment: GhPublicationComment = match github_get_json(client.get(&url)) {
+                    Ok(comment) => comment,
+                    Err(error) if error.contains("404 Not Found") => return Ok(None),
+                    Err(error) => return Err(map_publication_read_error(error)),
+                };
+                if !comment
+                    .user
+                    .as_ref()
+                    .is_some_and(|user| user.login.eq_ignore_ascii_case(author_login))
+                {
+                    return Ok(None);
+                }
+                provider_finding_comment_from_github(comment).map(Some)
+            }
+        }
+    }
+
+    fn update_finding_comment(
+        &self,
+        target: &ProviderPublicationTarget,
+        identity: &ProviderCommentIdentity,
+        markdown: &str,
+    ) -> Result<(), ProviderPublicationApiError> {
+        let existing = self.get_finding_comment(target, identity)?.ok_or_else(|| {
+            ProviderPublicationApiError::permission_denied(
+                "The tracked finding comment is missing or belongs to another author.",
+            )
+        })?;
+        if !comment_has_lachesi_finding_marker(&existing.markdown) {
+            return Err(ProviderPublicationApiError::permission_denied(
+                "The tracked provider comment is not a Lachesi finding.",
+            ));
+        }
+
+        let pr_id = publication_pr_id(target.pull_request_id)?;
+        let comment_id = encode_path_segment(&identity.comment_id);
+        let (updated_id, updated_markdown) = match target.provider {
+            PullRequestReviewEventProvider::Bitbucket => {
+                let client = BitbucketClient::from_stored().map_err(map_publication_auth_error)?;
+                let url = format!(
+                    "{}/pullrequests/{pr_id}/comments/{comment_id}",
+                    repo_base(&target.workspace, &target.repository)
+                        .map_err(ProviderPublicationApiError::unavailable)?
+                );
+                let response = send_checked(
+                    client
+                        .put(&url)
+                        .json(&bitbucket_reconciliation_update_body(markdown)),
+                )
+                .map_err(map_publication_write_error)?;
+                let comment: BbPublicationComment = response
+                    .json()
+                    .map_err(|error| ProviderPublicationApiError::unavailable(error.to_string()))?;
+                (
+                    publication_comment_id(comment.id)?,
+                    comment
+                        .content
+                        .map(|content| content.raw)
+                        .unwrap_or_default(),
+                )
+            }
+            PullRequestReviewEventProvider::Github => {
+                let client = GithubClient::from_stored().map_err(map_publication_auth_error)?;
+                let url = format!(
+                    "{}/pulls/comments/{comment_id}",
+                    github_repo_base(&target.workspace, &target.repository)
+                        .map_err(ProviderPublicationApiError::unavailable)?
+                );
+                let response = github_send_checked(
+                    client
+                        .patch(&url)
+                        .json(&github_reconciliation_update_body(markdown)),
+                )
+                .map_err(map_publication_write_error)?;
+                let comment: GhPublicationComment = response
+                    .json()
+                    .map_err(|error| ProviderPublicationApiError::unavailable(error.to_string()))?;
+                (publication_comment_id(comment.id)?, comment.body)
+            }
+        };
+        if updated_id != identity.comment_id || updated_markdown != markdown {
+            return Err(ProviderPublicationApiError::unavailable(
+                "The provider did not preserve the reconciled finding comment.",
+            ));
+        }
+        Ok(())
+    }
+}
+
+fn provider_finding_comment_from_bitbucket(
+    comment: BbPublicationComment,
+) -> Result<ProviderFindingComment, ProviderPublicationApiError> {
+    let identity = ProviderCommentIdentity {
+        comment_id: publication_comment_id(comment.id)?,
+    };
+    let markdown = comment.content.map(|content| content.raw).ok_or_else(|| {
+        ProviderPublicationApiError::invalid_anchor(
+            "The tracked Bitbucket finding has no comment body.",
+        )
+    })?;
+    let anchor = comment
+        .inline
+        .as_ref()
+        .and_then(bitbucket_finding_anchor)
+        .ok_or_else(|| {
+            ProviderPublicationApiError::invalid_anchor(
+                "The tracked Bitbucket finding no longer has a valid inline anchor.",
+            )
+        })?;
+    Ok(ProviderFindingComment {
+        identity,
+        markdown,
+        anchor,
+    })
+}
+
+fn provider_finding_comment_from_github(
+    comment: GhPublicationComment,
+) -> Result<ProviderFindingComment, ProviderPublicationApiError> {
+    let anchor = github_finding_anchor(&comment).ok_or_else(|| {
+        ProviderPublicationApiError::invalid_anchor(
+            "The tracked GitHub finding no longer has a valid inline anchor.",
+        )
+    })?;
+    let identity = ProviderCommentIdentity {
+        comment_id: publication_comment_id(comment.id)?,
+    };
+    Ok(ProviderFindingComment {
+        identity,
+        markdown: comment.body,
+        anchor,
+    })
+}
+
+fn bitbucket_finding_anchor(anchor: &BbPublicationInline) -> Option<FindingLineRange> {
+    if let Some(end_line) = anchor.to {
+        let start_line = anchor.start_to.unwrap_or(end_line);
+        return (start_line > 0 && start_line <= end_line).then(|| FindingLineRange {
+            path: anchor.path.clone(),
+            start_line,
+            end_line,
+            side: FindingAnchorSide::New,
+        });
+    }
+    let end_line = anchor.from?;
+    let start_line = anchor.start_from.unwrap_or(end_line);
+    (start_line > 0 && start_line <= end_line).then(|| FindingLineRange {
+        path: anchor.path.clone(),
+        start_line,
+        end_line,
+        side: FindingAnchorSide::Old,
+    })
+}
+
+fn github_finding_anchor(comment: &GhPublicationComment) -> Option<FindingLineRange> {
+    let path = comment
+        .path
+        .clone()
+        .filter(|path| !path.trim().is_empty())?;
+    let old_side = comment
+        .side
+        .as_deref()
+        .is_some_and(|side| side.eq_ignore_ascii_case("LEFT"));
+    let (end_line, start_line, side) = if old_side {
+        let end_line = comment.original_line.or(comment.line)?;
+        (
+            end_line,
+            comment
+                .original_start_line
+                .or(comment.start_line)
+                .unwrap_or(end_line),
+            FindingAnchorSide::Old,
+        )
+    } else {
+        let end_line = comment.line.or(comment.original_line)?;
+        (
+            end_line,
+            comment
+                .start_line
+                .or(comment.original_start_line)
+                .unwrap_or(end_line),
+            FindingAnchorSide::New,
+        )
+    };
+    (start_line > 0 && start_line <= end_line).then_some(FindingLineRange {
+        path,
+        start_line,
+        end_line,
+        side,
+    })
+}
+
+fn comment_has_lachesi_finding_marker(markdown: &str) -> bool {
+    let controls = markdown
+        .lines()
+        .rev()
+        .skip_while(|line| line.is_empty())
+        .take_while(|line| line.starts_with("<!-- lachesi:") && line.ends_with(" -->"))
+        .collect::<Vec<_>>();
+    controls.iter().any(|line| {
+        line.strip_prefix("<!-- lachesi:finding:")
+            .and_then(|value| value.strip_suffix(" -->"))
+            .is_some_and(|digest| {
+                digest.len() == 64 && digest.bytes().all(|byte| byte.is_ascii_hexdigit())
+            })
+    })
+}
+
+fn bitbucket_reconciliation_update_body(markdown: &str) -> serde_json::Value {
+    json!({ "content": { "raw": markdown } })
+}
+
+fn github_reconciliation_update_body(markdown: &str) -> serde_json::Value {
+    json!({ "body": markdown })
+}
+
+pub fn reconcile_review_findings_native(
+    request: &FindingReconciliationRequest,
+) -> Result<FindingReconciliationSummary, FindingPublicationError> {
+    FindingReconciler::new(
+        StoredProviderInlineCommentApi,
+        SqliteFindingPublicationStore,
+    )
+    .reconcile(request)
+}
+
 pub fn publish_review_finding_native(
     request: &FindingPublicationRequest,
 ) -> Result<PublishedCommentIdentity, FindingPublicationError> {
@@ -3018,6 +3318,87 @@ mod tests {
         assert_eq!(
             publication_comment_id(json!("opaque-comment-id")).expect("opaque id"),
             "opaque-comment-id"
+        );
+    }
+
+    #[test]
+    fn reconciliation_comment_mappers_preserve_provider_ranges_and_bodies() {
+        let markdown =
+            "finding\n\n<!-- lachesi:finding-lineage:abc -->\n<!-- lachesi:finding:def -->";
+        let bitbucket: BbPublicationComment = serde_json::from_value(json!({
+            "id": 9_223_372_036_854_775_000_u64,
+            "content": { "raw": markdown },
+            "inline": {
+                "path": "src/lib.rs",
+                "start_to": 12,
+                "to": 14
+            }
+        }))
+        .expect("Bitbucket reconciliation comment");
+        let bitbucket =
+            provider_finding_comment_from_bitbucket(bitbucket).expect("Bitbucket mapping");
+        assert_eq!(bitbucket.identity.comment_id, "9223372036854775000");
+        assert_eq!(
+            bitbucket.anchor,
+            FindingLineRange {
+                path: "src/lib.rs".to_string(),
+                start_line: 12,
+                end_line: 14,
+                side: FindingAnchorSide::New,
+            }
+        );
+        assert_eq!(bitbucket.markdown, markdown);
+
+        let github: GhPublicationComment = serde_json::from_value(json!({
+            "id": "opaque-comment",
+            "body": markdown,
+            "path": "src/lib.rs",
+            "original_start_line": 20,
+            "original_line": 22,
+            "side": "LEFT"
+        }))
+        .expect("GitHub reconciliation comment");
+        let github = provider_finding_comment_from_github(github).expect("GitHub mapping");
+        assert_eq!(github.identity.comment_id, "opaque-comment");
+        assert_eq!(
+            github.anchor,
+            FindingLineRange {
+                path: "src/lib.rs".to_string(),
+                start_line: 20,
+                end_line: 22,
+                side: FindingAnchorSide::Old,
+            }
+        );
+        assert_eq!(github.markdown, markdown);
+    }
+
+    #[test]
+    fn reconciliation_updates_only_marker_owned_comment_bodies() {
+        let lineage = "a".repeat(64);
+        let exact = "b".repeat(64);
+        let markdown = format!(
+            "finding\n\n<!-- lachesi:finding-lineage:{lineage} -->\n<!-- lachesi:finding:{exact} -->"
+        );
+        assert!(comment_has_lachesi_finding_marker(&markdown));
+        assert!(!comment_has_lachesi_finding_marker(
+            "<!-- lachesi:finding-state:resolved -->"
+        ));
+        assert!(!comment_has_lachesi_finding_marker(
+            "<!-- lachesi:finding-lineage:abc -->"
+        ));
+        assert!(comment_has_lachesi_finding_marker(&format!(
+            "legacy finding\n\n<!-- lachesi:finding:{exact} -->"
+        )));
+        assert!(!comment_has_lachesi_finding_marker(&format!(
+            "<!-- lachesi:finding:{exact} -->\ncontent"
+        )));
+        assert_eq!(
+            bitbucket_reconciliation_update_body(&markdown),
+            json!({ "content": { "raw": markdown } })
+        );
+        assert_eq!(
+            github_reconciliation_update_body(&markdown),
+            json!({ "body": markdown })
         );
     }
 
