@@ -6,6 +6,7 @@ import type {
   PullRequestDetail,
   PullRequestSummary,
   ReviewEffectivenessReport,
+  ReviewEffectivenessSummary,
 } from "@/types";
 
 export const mockConfig: AppConfig = {
@@ -279,6 +280,35 @@ export const mockClosedPrMetrics: ClosedPrMetric[] = [
     syncedAt: "1782920000000",
   },
 ];
+
+export const mockEmptyReviewEffectivenessSummary: ReviewEffectivenessSummary = {
+  reviewCount: 0,
+  findingCount: 0,
+  findingsBySeverity: [],
+  findingsByCategory: [],
+  feedback: {
+    eligibleFindings: 0,
+    findingsWithFeedback: 0,
+    findingsWithoutFeedback: 0,
+    acceptedFindings: 0,
+    falsePositiveFindings: 0,
+    fixedFindings: 0,
+    dismissedFindings: 0,
+    reopenedFindings: 0,
+    coverageRate: { numerator: 0, denominator: 0, basisPoints: null },
+    acceptanceRate: { numerator: 0, denominator: 0, basisPoints: null },
+    falsePositiveRate: { numerator: 0, denominator: 0, basisPoints: null },
+    fixedRate: { numerator: 0, denominator: 0, basisPoints: null },
+  },
+  timeToFirstReview: {
+    sampleCount: 0,
+    totalMs: 0,
+    averageMs: null,
+    medianMs: null,
+    minimumMs: null,
+    maximumMs: null,
+  },
+};
 
 export const mockReviewEffectivenessReport: ReviewEffectivenessReport = {
   schemaVersion: "lachesi.review-effectiveness.v1",

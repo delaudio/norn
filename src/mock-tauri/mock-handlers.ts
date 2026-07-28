@@ -31,6 +31,7 @@ import {
   mockComments,
   mockConfig,
   mockDiffstat,
+  mockEmptyReviewEffectivenessSummary,
   mockPullRequestDetail,
   mockPullRequests,
   mockRawDiff,
@@ -1199,19 +1200,21 @@ export const mockHandlers: Record<string, Handler> = {
   get_review_effectiveness_metrics: (args) => {
     const filter = (args?.filter ??
       mockReviewEffectivenessReport.filter) as ReviewEffectivenessFilter;
-    const selectedRepository = mockReviewEffectivenessReport.repositories.find(
+    const repositories = mockReviewEffectivenessReport.repositories.filter(
       (repository) =>
-        repository.provider === filter.provider &&
-        repository.workspace === filter.workspace &&
-        repository.repo === filter.repo,
+        (filter.provider == null || repository.provider === filter.provider) &&
+        (filter.workspace == null || repository.workspace === filter.workspace) &&
+        (filter.repo == null || repository.repo === filter.repo),
     );
+    const summary =
+      repositories.length === mockReviewEffectivenessReport.repositories.length
+        ? mockReviewEffectivenessReport.summary
+        : (repositories[0]?.summary ?? mockEmptyReviewEffectivenessSummary);
     return {
       ...mockReviewEffectivenessReport,
       filter,
-      summary: selectedRepository?.summary ?? mockReviewEffectivenessReport.summary,
-      repositories: selectedRepository
-        ? [selectedRepository]
-        : mockReviewEffectivenessReport.repositories,
+      summary,
+      repositories,
     };
   },
   sync_closed_pr_metrics: (args) => {

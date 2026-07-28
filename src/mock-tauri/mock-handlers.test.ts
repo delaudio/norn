@@ -192,4 +192,24 @@ describe("mock review effectiveness metrics", () => {
     });
     expect(report.summary).toEqual(report.repositories[0]?.summary);
   });
+
+  it("returns an empty scoped report when no fixture repository matches", () => {
+    const report = mockHandlers.get_review_effectiveness_metrics({
+      filter: {
+        tenantId: "local",
+        provider: "bitbucket",
+        workspace: "example-workspace",
+        repo: "missing-repository",
+      },
+    }) as ReviewEffectivenessReport;
+
+    expect(report.filter.repo).toBe("missing-repository");
+    expect(report.repositories).toEqual([]);
+    expect(report.summary).toMatchObject({
+      reviewCount: 0,
+      findingCount: 0,
+    });
+    expect(report.summary.feedback.acceptanceRate.basisPoints).toBeNull();
+    expect(report.summary.timeToFirstReview.medianMs).toBeNull();
+  });
 });

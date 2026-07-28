@@ -64,7 +64,7 @@ export function OverviewPanel({
   return (
     <div className="flex h-full flex-col overflow-hidden">
       {/* Internal header */}
-      <div className="flex shrink-0 items-center gap-2 border-b border-border px-4 py-2.5">
+      <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-border px-4 py-2.5">
         <Button
           variant="ghost"
           size="sm"
