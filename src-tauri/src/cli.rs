@@ -6,6 +6,11 @@ use serde::Serialize;
 use crate::config::{AiProvider, ReviewProvider};
 use crate::headless_review::{self, HeadlessReviewRequest, ReviewScope};
 use crate::repo_config::{self, LoadedPolicyPack, RepoConfigValidationMessage};
+use crate::review_event::PullRequestReviewEventProvider;
+use crate::review_metrics::{
+    ReviewEffectivenessFilter, ReviewEffectivenessReport, ReviewEffectivenessSummary,
+};
+use crate::review_storage;
 use crate::services::review::ReviewFindingSeverity;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -45,6 +50,13 @@ struct ConfigValidateArgs {
     repo_path: PathBuf,
     profile: Option<String>,
     format: OutputFormat,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct MetricsArgs {
+    filter: ReviewEffectivenessFilter,
+    format: OutputFormat,
+    output: Option<PathBuf>,
 }
 
 #[derive(Serialize)]
@@ -138,7 +150,7 @@ fn review_needs_headless_storage(args: &[String]) -> bool {
 fn is_cli_command(args: &[String]) -> bool {
     matches!(
         args.first().map(String::as_str),
-        Some("config" | "review" | "--help" | "-h")
+        Some("config" | "metrics" | "review" | "--help" | "-h")
     )
 }
 
@@ -152,6 +164,15 @@ fn run_args(args: &[String], stdout: &mut dyn Write, stderr: &mut dyn Write) -> 
         let _ = writeln!(stdout, "{}", review_usage());
         return 0;
     }
+    if args.first().map(String::as_str) == Some("metrics")
+        && args
+            .iter()
+            .skip(1)
+            .any(|arg| arg == "--help" || arg == "-h")
+    {
+        let _ = writeln!(stdout, "{}", metrics_usage());
+        return 0;
+    }
     if args.iter().any(|arg| arg == "--help" || arg == "-h") {
         let _ = writeln!(stdout, "{}", usage());
         return 0;
@@ -161,6 +182,13 @@ fn run_args(args: &[String], stdout: &mut dyn Write, stderr: &mut dyn Write) -> 
         Some("review") => match parse_review_args(args) {
             Ok(args) => run_review(args, stdout, stderr),
             Err(error) => write_review_parse_failure(args, &error, stdout, stderr),
+        },
+        Some("metrics") => match parse_metrics_args(args) {
+            Ok(args) => run_metrics(args, stdout, stderr),
+            Err(error) => {
+                let _ = writeln!(stderr, "{error}\n\n{}", metrics_usage());
+                2
+            }
         },
         _ => match parse_config_validate_args(args) {
             Ok(args) => run_config_validate(args, stdout, stderr),
@@ -445,6 +473,203 @@ fn write_review_failure(
     exit_code
 }
 
+fn parse_metrics_args(args: &[String]) -> Result<MetricsArgs, String> {
+    if args.first().map(String::as_str) != Some("metrics") {
+        return Err("Expected `lachesi metrics`.".to_string());
+    }
+    let mut filter = ReviewEffectivenessFilter::default();
+    let mut format = OutputFormat::Human;
+    let mut output = None;
+    let mut index = 1;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--tenant" => filter.tenant_id = next_value(args, &mut index)?,
+            "--provider" => {
+                filter.provider = Some(match next_value(args, &mut index)?.as_str() {
+                    "github" => PullRequestReviewEventProvider::Github,
+                    "bitbucket" => PullRequestReviewEventProvider::Bitbucket,
+                    _ => return Err("`--provider` must be `github` or `bitbucket`.".to_string()),
+                });
+            }
+            "--workspace" => filter.workspace = Some(next_value(args, &mut index)?),
+            "--repo" => filter.repo = Some(next_value(args, &mut index)?),
+            "--from" => {
+                filter.from_ms = Some(parse_metrics_timestamp(
+                    "--from",
+                    &next_value(args, &mut index)?,
+                )?);
+            }
+            "--to" => {
+                filter.to_ms = Some(parse_metrics_timestamp(
+                    "--to",
+                    &next_value(args, &mut index)?,
+                )?);
+            }
+            "--format" => {
+                format = match next_value(args, &mut index)?.as_str() {
+                    "human" | "text" => OutputFormat::Human,
+                    "json" => OutputFormat::Json,
+                    _ => return Err("`--format` must be `human` or `json`.".to_string()),
+                };
+            }
+            "--json" => format = OutputFormat::Json,
+            "--output" => output = Some(PathBuf::from(next_value(args, &mut index)?)),
+            unknown => return Err(format!("Unknown metrics option `{unknown}`.")),
+        }
+        index += 1;
+    }
+    if filter.repo.is_some() && filter.workspace.is_none() {
+        return Err("`--repo` requires `--workspace`.".to_string());
+    }
+    if matches!((filter.from_ms, filter.to_ms), (Some(from), Some(to)) if from >= to) {
+        return Err("`--from` must be less than `--to`.".to_string());
+    }
+    Ok(MetricsArgs {
+        filter,
+        format,
+        output,
+    })
+}
+
+fn parse_metrics_timestamp(option: &str, value: &str) -> Result<i64, String> {
+    value
+        .parse::<i64>()
+        .ok()
+        .filter(|timestamp| *timestamp >= 0)
+        .ok_or_else(|| format!("`{option}` must be non-negative Unix milliseconds."))
+}
+
+fn run_metrics(args: MetricsArgs, stdout: &mut dyn Write, stderr: &mut dyn Write) -> i32 {
+    let report = match review_storage::review_effectiveness_metrics(args.filter) {
+        Ok(report) => report,
+        Err(error) => {
+            let _ = writeln!(stderr, "Could not aggregate review metrics: {error}");
+            return 1;
+        }
+    };
+    let rendered = match args.format {
+        OutputFormat::Human => format_metrics_human(&report),
+        OutputFormat::Json => match serde_json::to_string_pretty(&report) {
+            Ok(json) => json,
+            Err(error) => {
+                let _ = writeln!(stderr, "Failed to serialize metrics output: {error}");
+                return 7;
+            }
+        },
+    };
+    if let Some(path) = args.output {
+        if let Err(error) = std::fs::write(&path, format!("{rendered}\n")) {
+            let _ = writeln!(stderr, "Failed to write {}: {error}", path.display());
+            return 7;
+        }
+        let _ = writeln!(stderr, "Metrics written to {}.", path.display());
+    } else {
+        let _ = writeln!(stdout, "{rendered}");
+    }
+    0
+}
+
+fn format_metrics_human(report: &ReviewEffectivenessReport) -> String {
+    let mut output = String::new();
+    let summary = &report.summary;
+    output.push_str("Lachesi review effectiveness\n");
+    output.push_str(&format!("Tenant: {}\n", report.filter.tenant_id));
+    if let Some(provider) = report.filter.provider {
+        output.push_str(&format!("Provider: {}\n", provider.as_str()));
+    }
+    if let Some(workspace) = report.filter.workspace.as_deref() {
+        output.push_str(&format!("Workspace: {workspace}\n"));
+    }
+    if let Some(repo) = report.filter.repo.as_deref() {
+        output.push_str(&format!("Repository: {repo}\n"));
+    }
+    output.push_str(&format!(
+        "Window: {} to {} (completion time, start inclusive/end exclusive)\n",
+        report
+            .filter
+            .from_ms
+            .map_or_else(|| "unbounded".to_string(), |value| value.to_string()),
+        report
+            .filter
+            .to_ms
+            .map_or_else(|| "unbounded".to_string(), |value| value.to_string())
+    ));
+    append_metrics_summary(&mut output, summary);
+    if !report.repositories.is_empty() {
+        output.push_str("Repositories:\n");
+        for repository in &report.repositories {
+            output.push_str(&format!(
+                "- {} {}/{}: {} reviews, {} findings\n",
+                repository.provider.as_str(),
+                repository.workspace,
+                repository.repo,
+                repository.summary.review_count,
+                repository.summary.finding_count
+            ));
+        }
+    }
+    output.trim_end().to_string()
+}
+
+fn append_metrics_summary(output: &mut String, summary: &ReviewEffectivenessSummary) {
+    output.push_str(&format!("Reviews: {}\n", summary.review_count));
+    output.push_str(&format!("Findings: {}\n", summary.finding_count));
+    output.push_str(&format!(
+        "By severity: {}\n",
+        format_counts(&summary.findings_by_severity)
+    ));
+    output.push_str(&format!(
+        "By category: {}\n",
+        format_counts(&summary.findings_by_category)
+    ));
+    output.push_str(&format!(
+        "Feedback coverage: {}\n",
+        format_rate(&summary.feedback.coverage_rate)
+    ));
+    output.push_str(&format!(
+        "Accepted: {}\n",
+        format_rate(&summary.feedback.acceptance_rate)
+    ));
+    output.push_str(&format!(
+        "False positives: {}\n",
+        format_rate(&summary.feedback.false_positive_rate)
+    ));
+    output.push_str(&format!(
+        "Fixed: {}\n",
+        format_rate(&summary.feedback.fixed_rate)
+    ));
+    let latency = &summary.time_to_first_review;
+    if let Some(average_ms) = latency.average_ms {
+        output.push_str(&format!(
+            "Time to first review: {average_ms} ms average across {} pull requests\n",
+            latency.sample_count
+        ));
+    } else {
+        output.push_str("Time to first review: no completed pull-request samples\n");
+    }
+}
+
+fn format_counts(counts: &[crate::review_metrics::ReviewMetricCount]) -> String {
+    counts
+        .iter()
+        .map(|item| format!("{}={}", item.key, item.count))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+fn format_rate(rate: &crate::review_metrics::ReviewMetricRate) -> String {
+    match rate.basis_points {
+        Some(basis_points) => format!(
+            "{}/{} ({}.{:02}%)",
+            rate.numerator,
+            rate.denominator,
+            basis_points / 100,
+            basis_points % 100
+        ),
+        None => format!("{}/{} (n/a)", rate.numerator, rate.denominator),
+    }
+}
+
 fn parse_config_validate_args(args: &[String]) -> Result<ConfigValidateArgs, String> {
     if args.first().map(String::as_str) != Some("config")
         || args.get(1).map(String::as_str) != Some("validate")
@@ -603,6 +828,11 @@ Review:
                  [--format markdown|json] [--json] [--output <path>]
                  [--fail-on-findings] [--min-severity info|low|medium|high|critical]
                  [--run-analyzers]
+Metrics:
+  lachesi metrics [--tenant <id>] [--provider github|bitbucket]
+                  [--workspace <name>] [--repo <slug>]
+                  [--from <unix-ms>] [--to <unix-ms>]
+                  [--format human|json] [--json] [--output <path>]
 Config validation:
   lachesi config validate [--repo-path <path>] [--profile <name>]
                           [--format human|json] [--json]"
@@ -619,14 +849,27 @@ fn review_usage() -> &'static str {
                  [--run-analyzers]"
 }
 
+fn metrics_usage() -> &'static str {
+    "Usage:
+  lachesi metrics [--tenant <id>] [--provider github|bitbucket]
+                  [--workspace <name>] [--repo <slug>]
+                  [--from <unix-ms>] [--to <unix-ms>]
+                  [--format human|json] [--json] [--output <path>]
+
+The completion-time window is start-inclusive and end-exclusive.
+The default tenant is `local`."
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        create_headless_data_dir, parse_review_args, review_needs_headless_storage, run_args,
-        ReviewOutputFormat,
+        create_headless_data_dir, format_metrics_human, parse_metrics_args, parse_review_args,
+        review_needs_headless_storage, run_args, OutputFormat, ReviewOutputFormat,
     };
     use crate::config::AiProvider;
     use crate::headless_review::ReviewScope;
+    use crate::review_event::PullRequestReviewEventProvider;
+    use crate::review_metrics::{aggregate_review_effectiveness, ReviewEffectivenessFilter};
     use crate::services::review::ReviewFindingSeverity;
     use std::fs;
     use std::path::PathBuf;
@@ -663,6 +906,69 @@ mod tests {
                 .mode();
             assert_eq!(mode & 0o777, 0o700);
         }
+    }
+
+    #[test]
+    fn metrics_arguments_select_tenant_repository_range_and_json() {
+        let parsed = parse_metrics_args(&[
+            "metrics".to_string(),
+            "--tenant".to_string(),
+            "tenant-acme".to_string(),
+            "--provider".to_string(),
+            "github".to_string(),
+            "--workspace".to_string(),
+            "acme".to_string(),
+            "--repo".to_string(),
+            "payments".to_string(),
+            "--from".to_string(),
+            "1000".to_string(),
+            "--to".to_string(),
+            "2000".to_string(),
+            "--json".to_string(),
+        ])
+        .expect("metrics arguments");
+
+        assert_eq!(parsed.filter.tenant_id, "tenant-acme");
+        assert_eq!(
+            parsed.filter.provider,
+            Some(PullRequestReviewEventProvider::Github)
+        );
+        assert_eq!(parsed.filter.workspace.as_deref(), Some("acme"));
+        assert_eq!(parsed.filter.repo.as_deref(), Some("payments"));
+        assert_eq!(parsed.filter.from_ms, Some(1000));
+        assert_eq!(parsed.filter.to_ms, Some(2000));
+        assert_eq!(parsed.format, OutputFormat::Json);
+    }
+
+    #[test]
+    fn metrics_human_report_documents_zero_feedback_and_latency_samples() {
+        let report = aggregate_review_effectiveness(&[], &[], ReviewEffectivenessFilter::default())
+            .expect("empty metrics");
+        let human = format_metrics_human(&report);
+
+        assert!(human.contains("Tenant: local"));
+        assert!(human.contains("By severity: critical=0, high=0, info=0, low=0, medium=0"));
+        assert!(human
+            .contains("By category: architecture=0, bug=0, docs=0, maintainability=0, other=0"));
+        assert!(human.contains("Feedback coverage: 0/0 (n/a)"));
+        assert!(human.contains("Time to first review: no completed pull-request samples"));
+    }
+
+    #[test]
+    fn metrics_help_returns_zero_without_opening_storage() {
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+        let code = run_args(
+            &["metrics".to_string(), "--help".to_string()],
+            &mut stdout,
+            &mut stderr,
+        );
+
+        assert_eq!(code, 0);
+        assert!(stderr.is_empty());
+        let output = String::from_utf8(stdout).expect("metrics help");
+        assert!(output.contains("lachesi metrics"));
+        assert!(output.contains("start-inclusive and end-exclusive"));
     }
 
     #[test]
