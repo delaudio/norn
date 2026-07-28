@@ -193,8 +193,10 @@ impl AdministrativeAuditEvent {
         validate_identifier("deliveryId", &self.delivery_id)?;
         validate_identifier("tenantId", &self.tenant_id)?;
         validate_timestamp(&self.occurred_at)?;
-        if self.schema_version == AdministrativeAuditSchemaVersion::V1 && self.repository.is_none()
-        {
+        let allows_organization_scope = self.schema_version == AdministrativeAuditSchemaVersion::V2
+            && self.action == AdministrativeAuditAction::AuthorizationDenied
+            && self.target.kind == AdministrativeAuditTargetKind::AuthorizationRequest;
+        if self.repository.is_none() && !allows_organization_scope {
             return Err(AdministrativeAuditValidationError::MissingField(
                 "repository",
             ));
@@ -454,10 +456,28 @@ mod tests {
 
         let mut v2 = v1;
         v2.schema_version = AdministrativeAuditSchemaVersion::V2;
+        v2.action = AdministrativeAuditAction::AuthorizationDenied;
+        v2.target = AdministrativeAuditTarget {
+            kind: AdministrativeAuditTargetKind::AuthorizationRequest,
+            id: "authorization:read-metrics:read-metrics:permission-denied".to_string(),
+        };
+        v2.outcome = AdministrativeAuditOutcome::Denied;
         let prepared = v2.prepare_for_storage().expect("prepared v2 event");
         let value = serde_json::to_value(prepared).expect("serialize v2 event");
         assert_eq!(value["schemaVersion"], "v2");
         assert!(value.get("repository").is_none());
+
+        v2.action = AdministrativeAuditAction::ReviewPublished;
+        v2.target = AdministrativeAuditTarget {
+            kind: AdministrativeAuditTargetKind::Publication,
+            id: "publication:review-1".to_string(),
+        };
+        assert_eq!(
+            v2.prepare_for_storage(),
+            Err(AdministrativeAuditValidationError::MissingField(
+                "repository"
+            ))
+        );
     }
 
     #[test]
