@@ -33,11 +33,9 @@ The signature covers the compact JSON serialization of the typed `bundle`
 object, excluding the integrity envelope. Maps use deterministic key ordering.
 The verifier accepts only a key explicitly trusted for the configured source.
 Unsigned, expired, oversized, identity-mismatched, or incorrectly signed
-bundles are rejected before any layer is applied. Credential-shaped fields are
-also rejected before caching, using the same rule as repository configuration.
-Signed layers apply an additional recursive check that rejects credential-like
-extension keys, including prefixed token, password, secret, credential, and
-username fields.
+bundles are rejected before any layer is applied. Signed layers also apply a
+recursive check before caching that rejects credential-like extension keys
+containing token, password, secret, credential, or username markers.
 Versions are capped at `9007199254740991`, preserving exact JSON/TypeScript
 integer representation in review metadata.
 
@@ -122,10 +120,12 @@ whose target is inside the reviewed repository.
 
 `bundlePath` is resolved relative to the configuration file unless it is
 absolute. Its resolved target must also remain outside the reviewed
-repository. The signed file is one implementation of the public source port;
-a managed or self-hosted adapter may fetch the same envelope centrally. If
-the environment variable is absent, review uses the existing local path
-without reading an organization source.
+repository. A temporarily missing bundle is treated as source unavailability,
+so `useVerifiedCache` can still apply; Lachesi validates its nearest existing
+ancestor to preserve the repository boundary. The signed file is one
+implementation of the public source port; a managed or self-hosted adapter may
+fetch the same envelope centrally. If the environment variable is absent,
+review uses the existing local path without reading an organization source.
 
 Repository-config validation used by desktop and TUI prompt construction
 returns the same organization-aware config used by execution. The shared

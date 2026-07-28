@@ -456,7 +456,91 @@ fn resolve_organization_policy_bundle_path(
             .unwrap_or_else(|| Path::new("."))
             .join(configured_bundle_path)
     };
-    validate_organization_policy_path(repo_path, &bundle_path, "Organization policy bundle")
+    validate_organization_policy_bundle_path(repo_path, &bundle_path)
+}
+
+fn validate_organization_policy_bundle_path(
+    repo_path: &Path,
+    bundle_path: &Path,
+) -> Result<PathBuf, OrganizationPolicyResolutionError> {
+    if !bundle_path.is_absolute() {
+        return Err(OrganizationPolicyResolutionError::InvalidConfiguration(
+            "Organization policy bundle must resolve to an absolute path outside the reviewed repository."
+                .to_string(),
+        ));
+    }
+    let bundle_path = normalize_absolute_path(bundle_path);
+    let repository_input = if repo_path.is_absolute() {
+        normalize_absolute_path(repo_path)
+    } else {
+        normalize_absolute_path(
+            &std::env::current_dir()
+                .map_err(|error| {
+                    OrganizationPolicyResolutionError::InvalidConfiguration(format!(
+                        "Could not resolve the current directory: {error}"
+                    ))
+                })?
+                .join(repo_path),
+        )
+    };
+    let repository = repo_path.canonicalize().map_err(|error| {
+        OrganizationPolicyResolutionError::InvalidConfiguration(format!(
+            "Could not resolve reviewed repository {}: {error}",
+            repo_path.display()
+        ))
+    })?;
+    let existing_ancestor = bundle_path
+        .ancestors()
+        .find(|ancestor| ancestor.exists())
+        .ok_or_else(|| {
+            OrganizationPolicyResolutionError::InvalidConfiguration(format!(
+                "Could not resolve an existing ancestor of organization policy bundle {}.",
+                bundle_path.display()
+            ))
+        })?;
+    let canonical_ancestor = existing_ancestor.canonicalize().map_err(|error| {
+        OrganizationPolicyResolutionError::InvalidConfiguration(format!(
+            "Could not resolve organization policy bundle ancestor {}: {error}",
+            existing_ancestor.display()
+        ))
+    })?;
+    if bundle_path.starts_with(&repository_input)
+        || bundle_path.starts_with(&repository)
+        || canonical_ancestor.starts_with(&repository)
+    {
+        return Err(OrganizationPolicyResolutionError::InvalidConfiguration(
+            "Organization policy bundle must be stored outside the reviewed repository."
+                .to_string(),
+        ));
+    }
+    if bundle_path.exists() {
+        bundle_path.canonicalize().map_err(|error| {
+            OrganizationPolicyResolutionError::InvalidConfiguration(format!(
+                "Could not resolve organization policy bundle {}: {error}",
+                bundle_path.display()
+            ))
+        })
+    } else {
+        Ok(bundle_path)
+    }
+}
+
+fn normalize_absolute_path(path: &Path) -> PathBuf {
+    use std::path::Component;
+
+    let mut normalized = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                normalized.pop();
+            }
+            Component::Prefix(_) | Component::RootDir | Component::Normal(_) => {
+                normalized.push(component.as_os_str());
+            }
+        }
+    }
+    normalized
 }
 
 fn finalize_resolved_organization_policy(
@@ -1016,17 +1100,7 @@ fn reject_signed_layer_secrets(
                     .filter(|character| character.is_ascii_alphanumeric())
                     .collect::<String>()
                     .to_ascii_lowercase();
-                if [
-                    "credential",
-                    "credentials",
-                    "token",
-                    "password",
-                    "secret",
-                    "username",
-                ]
-                .into_iter()
-                .any(|suffix| normalized.ends_with(suffix))
-                {
+                if is_credential_shaped_key(&normalized) {
                     return Err(OrganizationPolicyResolutionError::InvalidBundle(
                         format!(
                             "Signed organization policy field `{child_path}` looks like a credential. Store secrets in the keychain or environment instead."
@@ -1044,6 +1118,19 @@ fn reject_signed_layer_secrets(
         _ => {}
     }
     Ok(())
+}
+
+fn is_credential_shaped_key(normalized: &str) -> bool {
+    [
+        "credential",
+        "credentials",
+        "token",
+        "password",
+        "secret",
+        "username",
+    ]
+    .into_iter()
+    .any(|marker| normalized.contains(marker))
 }
 
 fn validate_organization_layer_schema(
@@ -1424,6 +1511,23 @@ mod tests {
             .expect("admin bundle"),
             admin_bundle.canonicalize().expect("canonical bundle")
         );
+
+        let missing_admin_bundle = admin.join("temporarily-unavailable.bundle.json");
+        assert_eq!(
+            resolve_organization_policy_bundle_path(
+                &repo,
+                &config_path,
+                Path::new("temporarily-unavailable.bundle.json"),
+            )
+            .expect("missing admin bundle can fall back to cache"),
+            missing_admin_bundle
+        );
+        resolve_organization_policy_bundle_path(
+            &repo,
+            &config_path,
+            &repo.join("temporarily-unavailable.bundle.json"),
+        )
+        .expect_err("missing repo-controlled bundle must be rejected");
     }
 
     #[test]
@@ -1728,34 +1832,38 @@ mod tests {
 
     #[test]
     fn credential_shaped_extension_fields_are_rejected_before_caching() {
-        let error = resolve_organization_policy(
-            &config(
-                OrganizationPolicyRequirement::Mandatory,
-                OrganizationPolicyUnavailableBehavior::FailClosed,
-            ),
-            &StaticSource(Ok(signed_bundle(
-                2,
-                json!({
-                    "analyzers": {
-                        "custom": {
-                            "enabled": false,
-                            "config": {"x-api-token": "do-not-cache"}
+        for key in ["x-api-token", "tokenValue", "secretKey", "passwordHash"] {
+            let mut extension = serde_json::Map::new();
+            extension.insert(key.to_string(), json!("do-not-cache"));
+            let error = resolve_organization_policy(
+                &config(
+                    OrganizationPolicyRequirement::Mandatory,
+                    OrganizationPolicyUnavailableBehavior::FailClosed,
+                ),
+                &StaticSource(Ok(signed_bundle(
+                    2,
+                    json!({
+                        "analyzers": {
+                            "custom": {
+                                "enabled": false,
+                                "config": extension
+                            }
                         }
-                    }
-                }),
-                json!({}),
-            ))),
-            &MemoryCache::default(),
-            None,
-            input(),
-        )
-        .expect_err("credential extension field");
+                    }),
+                    json!({}),
+                ))),
+                &MemoryCache::default(),
+                None,
+                input(),
+            )
+            .expect_err("credential extension field");
 
-        assert!(matches!(
-            error,
-            OrganizationPolicyResolutionError::InvalidBundle(message)
-                if message.contains("x-api-token")
-        ));
+            assert!(matches!(
+                error,
+                OrganizationPolicyResolutionError::InvalidBundle(message)
+                    if message.contains(key)
+            ));
+        }
     }
 
     #[test]

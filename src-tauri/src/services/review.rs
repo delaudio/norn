@@ -930,6 +930,7 @@ fn review_analyzer_specs(
     review_profile: Option<&str>,
 ) -> Result<Vec<AnalyzerSpec>, String> {
     match resolved_policy_config {
+        Some(config) if config.analyzers.is_empty() => Ok(default_analyzer_specs(repo_path)),
         Some(config) => Ok(analyzer_specs_from_config(config)),
         None => analyzer_specs_with_profile(repo_path, review_profile),
     }
@@ -6142,6 +6143,30 @@ mod tests {
         let specs = review_analyzer_specs(repo.path(), Some(&config), None)
             .expect("resolved analyzer selection");
         assert!(specs.is_empty());
+    }
+
+    #[test]
+    fn resolved_policy_without_analyzers_preserves_auto_detection() {
+        let repo = tempfile::tempdir().expect("repo temp dir");
+        std::fs::write(
+            repo.path().join("package.json"),
+            r#"{"scripts":{"typecheck":"tsc --noEmit","test":"vitest run"}}"#,
+        )
+        .expect("package fixture");
+        let config = crate::repo_config::RepoReviewConfig {
+            version: "0.1".to_string(),
+            ..crate::repo_config::RepoReviewConfig::default()
+        };
+
+        let specs = review_analyzer_specs(repo.path(), Some(&config), None)
+            .expect("resolved analyzer selection");
+        assert_eq!(
+            specs
+                .iter()
+                .map(|spec| spec.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["typecheck", "test"]
+        );
     }
 
     #[test]
