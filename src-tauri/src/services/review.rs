@@ -942,6 +942,14 @@ fn review_analyzer_specs(
     Ok(specs)
 }
 
+fn should_execute_analyzers(
+    turn_kind: AiReviewTurnKind,
+    run_analyzers: bool,
+    run_required_policy_analyzers: bool,
+) -> bool {
+    run_analyzers && (turn_kind == AiReviewTurnKind::Initial || run_required_policy_analyzers)
+}
+
 fn run_analyzer_command(
     repo_path: &Path,
     spec: &AnalyzerSpec,
@@ -4672,8 +4680,10 @@ fn run_inline_review_pipeline(
     }
     let run_required_policy_analyzers = skip_analyzers && !required_policy_analyzers.is_empty();
     let run_analyzers = !skip_analyzers || run_required_policy_analyzers;
+    let execute_analyzers =
+        should_execute_analyzers(turn_kind, run_analyzers, run_required_policy_analyzers);
 
-    if turn_kind == AiReviewTurnKind::Initial && run_analyzers {
+    if execute_analyzers {
         if let Some(repo_path) = repo_path.as_deref() {
             append_inline_review_log(&store, &key, run_id, "Running local evidence analyzers.");
             let analyzer_specs = review_analyzer_specs(
@@ -4782,7 +4792,7 @@ fn run_inline_review_pipeline(
                 "No local clone configured; skipping local evidence analyzers.",
             );
         }
-    } else if !run_analyzers {
+    } else {
         append_inline_review_log(
             &store,
             &key,
@@ -6085,8 +6095,8 @@ mod tests {
         human_duration, materialize_review_run, normalize_codex_effort, normalize_codex_model,
         parse_claude_fix_result, parse_claude_structured_json, parse_claude_text_result,
         parse_review_resources, resolve_gui_skip_analyzers, review_analyzer_specs,
-        review_findings_from_output, review_profile_for_thread, trim_evidence_output,
-        user_installed_cli_command, validate_isolated_provider_cli,
+        review_findings_from_output, review_profile_for_thread, should_execute_analyzers,
+        trim_evidence_output, user_installed_cli_command, validate_isolated_provider_cli,
         validate_organization_policy_repo_path, AiReviewDraftCommentResult, AiReviewRunStatus,
         AiReviewRunStore, AiReviewStoreData, AiReviewTurnKind, ProviderExecutionContext,
         ReviewEvidenceArtifact, ReviewEvidenceKind, ReviewEvidenceSource, ReviewFindingCategory,
@@ -6197,6 +6207,20 @@ mod tests {
         assert_eq!(specs.len(), 1);
         assert_eq!(specs[0].id, "organization-required");
         assert!(specs[0].required);
+    }
+
+    #[test]
+    fn policy_required_analyzers_execute_on_reply_turns() {
+        assert!(should_execute_analyzers(
+            AiReviewTurnKind::Reply,
+            true,
+            true
+        ));
+        assert!(!should_execute_analyzers(
+            AiReviewTurnKind::Reply,
+            true,
+            false
+        ));
     }
 
     #[test]

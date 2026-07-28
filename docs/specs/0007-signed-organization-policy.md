@@ -21,6 +21,7 @@ closed.
 
 The version 1 bundle contains:
 
+- `schemaVersion: "v1"`
 - `tenantId` and `sourceId`, which must exactly match the request
 - a positive, monotonically increasing `version`
 - `issuedAtMs` and `expiresAtMs`
@@ -30,7 +31,8 @@ The version 1 bundle contains:
   base64 signature
 
 The signature covers the compact JSON serialization of the typed `bundle`
-object, excluding the integrity envelope. Maps use deterministic key ordering.
+object, including `schemaVersion` and excluding the integrity envelope. Maps
+use deterministic key ordering.
 The verifier accepts only a key explicitly trusted for the configured source.
 Unsigned, expired, oversized, identity-mismatched, or incorrectly signed
 bundles are rejected before any layer is applied. Signed layers also apply a
@@ -151,6 +153,8 @@ exception does not execute optional repository analyzer commands. A headless
 review with no diff fails closed instead of skipping a signed required
 analyzer.
 Headless result metadata reports those policy-forced analyzers as executed.
+Required signed analyzers also run on reply turns after policy is resolved
+again; optional analyzers remain limited to explicit initial-review opt-in.
 The resolved-policy appendix contains runtime constraints but omits
 `review.prompt`, whose replacement or extension text is already materialized
 in the review prompt. Execution-time resolution checks the submitted payload;
