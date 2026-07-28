@@ -156,10 +156,9 @@ Headless result metadata reports those policy-forced analyzers as executed.
 Required signed analyzers also run on reply turns after policy is resolved
 again; optional analyzers remain limited to explicit initial-review opt-in.
 The resolved-policy appendix contains runtime constraints but omits
-`review.prompt`, whose replacement or extension text is already materialized
-in the review prompt. Execution-time resolution checks the submitted payload;
-if the resolved prompt text is absent, a separate authoritative instruction
-section supplies it without duplicating text already present.
+`review.prompt`. Execution-time resolution always appends replacement or
+extension text in a separate authoritative instruction section; payload
+substrings never suppress signed instructions.
 
 `.lachesi.local.yaml` is a non-committed override for configured organization
 resolution. It is accepted only when Git reports it as untracked and covered

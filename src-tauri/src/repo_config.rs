@@ -667,12 +667,11 @@ pub(crate) fn load_local_policy_layer(repo_path: &Path) -> Result<Option<JsonVal
 }
 
 fn validate_local_policy_override_state(repo_path: &Path) -> Result<(), String> {
-    let tracked = Command::new("git")
-        .arg("-C")
-        .arg(repo_path)
-        .args(["ls-files", "--error-unmatch", "--", ".lachesi.local.yaml"])
-        .output()
-        .map_err(|error| format!("Failed to inspect local policy tracking state: {error}"))?;
+    let tracked = run_local_policy_git(
+        repo_path,
+        &["ls-files", "--error-unmatch", "--", ".lachesi.local.yaml"],
+    )
+    .map_err(|error| format!("Failed to inspect local policy tracking state: {error}"))?;
     if tracked.status.success() {
         return Err(
             ".lachesi.local.yaml is tracked by Git and cannot be used as a local policy override."
@@ -686,12 +685,11 @@ fn validate_local_policy_override_state(repo_path: &Path) -> Result<(), String> 
         ));
     }
 
-    let ignored = Command::new("git")
-        .arg("-C")
-        .arg(repo_path)
-        .args(["check-ignore", "--quiet", "--", ".lachesi.local.yaml"])
-        .output()
-        .map_err(|error| format!("Failed to inspect local policy ignore state: {error}"))?;
+    let ignored = run_local_policy_git(
+        repo_path,
+        &["check-ignore", "--quiet", "--", ".lachesi.local.yaml"],
+    )
+    .map_err(|error| format!("Failed to inspect local policy ignore state: {error}"))?;
     if ignored.status.success() {
         return Ok(());
     }
@@ -705,6 +703,34 @@ fn validate_local_policy_override_state(repo_path: &Path) -> Result<(), String> 
         "Could not determine whether .lachesi.local.yaml is ignored: {}",
         String::from_utf8_lossy(&ignored.stderr).trim()
     ))
+}
+
+fn run_local_policy_git(repo_path: &Path, args: &[&str]) -> std::io::Result<std::process::Output> {
+    #[cfg(target_os = "macos")]
+    {
+        let command = std::iter::once("git".to_string())
+            .chain(std::iter::once("-C".to_string()))
+            .chain(std::iter::once(shell_quote(
+                repo_path.to_string_lossy().as_ref(),
+            )))
+            .chain(args.iter().map(|arg| shell_quote(arg)))
+            .collect::<Vec<_>>()
+            .join(" ");
+        return Command::new("/bin/zsh").arg("-lc").arg(command).output();
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        Command::new("git")
+            .arg("-C")
+            .arg(repo_path)
+            .args(args)
+            .output()
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn shell_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\\''"))
 }
 
 pub(crate) fn finalize_resolved_config(

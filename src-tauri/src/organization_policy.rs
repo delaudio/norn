@@ -773,28 +773,19 @@ pub fn review_policy_prompt_appendix(config: &RepoReviewConfig) -> Option<String
 
 pub fn execution_policy_prompt_appendix(
     config: &RepoReviewConfig,
-    existing_payload: &str,
+    _existing_payload: &str,
 ) -> Option<String> {
     let prompt = config.review.as_ref()?.prompt.as_ref()?;
-    let prompt_boundary = ["\n\n## Pull request", "\n\n## Review target"]
-        .into_iter()
-        .filter_map(|marker| existing_payload.find(marker))
-        .min();
-    let existing_prompt = prompt_boundary
-        .map(|boundary| &existing_payload[..boundary])
-        .unwrap_or_default();
     let replacement = prompt
         .replace
         .as_deref()
         .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .filter(|value| !existing_prompt.contains(value));
+        .filter(|value| !value.is_empty());
     let extension = prompt
         .extend
         .as_deref()
         .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .filter(|value| !existing_prompt.contains(value));
+        .filter(|value| !value.is_empty());
     if replacement.is_none() && extension.is_none() {
         return None;
     }
@@ -1872,7 +1863,7 @@ mod tests {
     }
 
     #[test]
-    fn execution_prompt_appendix_is_added_only_when_policy_text_is_absent() {
+    fn execution_prompt_appendix_cannot_be_suppressed_by_payload_text() {
         let config = RepoReviewConfig {
             version: "0.1".to_string(),
             review: Some(crate::repo_config::ReviewConfig {
@@ -1891,13 +1882,11 @@ mod tests {
         assert!(appendix.contains("Use the organization review rubric."));
         assert!(appendix.contains("Check every authorization boundary."));
 
-        assert_eq!(
-            execution_policy_prompt_appendix(
-                &config,
-                "Use the organization review rubric.\n\nCheck every authorization boundary.\n\n## Pull request\nExample"
-            ),
-            None
-        );
+        assert!(execution_policy_prompt_appendix(
+            &config,
+            "Use the organization review rubric.\n\nCheck every authorization boundary.\n\n## Pull request\nExample"
+        )
+        .is_some());
         assert!(execution_policy_prompt_appendix(
             &config,
             "A local custom prompt.\n\n## Diff\nUse the organization review rubric.\nCheck every authorization boundary."
