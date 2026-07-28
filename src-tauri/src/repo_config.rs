@@ -592,6 +592,15 @@ pub(crate) fn load_repository_policy_layer(
     if config_path.is_file() {
         let contents = fs::read_to_string(&config_path)
             .map_err(|error| format!("Failed to read {}: {error}", config_path.display()))?;
+        let standalone = load_from_str(repo_path, &config_path, &contents, None);
+        if !standalone.errors.is_empty() {
+            return Err(standalone
+                .errors
+                .into_iter()
+                .map(|error| error.message)
+                .collect::<Vec<_>>()
+                .join("\n"));
+        }
         let yaml = serde_yaml::from_str::<Value>(&contents)
             .map_err(|error| format!("Failed to parse {}: {error}", config_path.display()))?;
         let warnings = unknown_field_warnings(&config_path, &yaml);
@@ -1467,6 +1476,28 @@ review:
             load_repository_policy_layer(&repo).expect("raw organization merge layer");
         assert_eq!(warnings.len(), 1);
         assert!(warnings[0].message.contains("$.review.surprise"));
+        let _ = fs::remove_dir_all(repo);
+    }
+
+    #[test]
+    fn raw_repository_policy_layer_rejects_invalid_standalone_config() {
+        let repo = temp_repo();
+        fs::write(repo.join(".lachesi.yaml"), "review:\n  mode: strict\n")
+            .expect("missing version config");
+
+        let error = load_repository_policy_layer(&repo)
+            .expect_err("missing standalone config version must fail");
+        assert!(error.contains("missing field `version`"));
+
+        fs::write(
+            repo.join(".lachesi.yaml"),
+            "version: 0.1\nanalyzers:\n  check:\n    enabled: true\n",
+        )
+        .expect("invalid analyzer config");
+        let error =
+            load_repository_policy_layer(&repo).expect_err("invalid standalone analyzer must fail");
+        assert!(error.contains("enabled but has no command"));
+
         let _ = fs::remove_dir_all(repo);
     }
 

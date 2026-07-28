@@ -244,6 +244,8 @@ pub fn run(request: HeadlessReviewRequest) -> Result<HeadlessReviewExecution, He
     }
 
     let app_config = config::load();
+    let analyzers_ran =
+        effective_analyzers_ran(request.run_analyzers, resolved_policy_config.as_ref());
     let ai_provider = request.ai_provider.unwrap_or(app_config.ai_provider);
     let (claude_model, claude_effort, codex_model, codex_effort) = match ai_provider {
         AiProvider::Claude => (
@@ -300,10 +302,23 @@ pub fn run(request: HeadlessReviewRequest) -> Result<HeadlessReviewExecution, He
         exit_code: 0,
         warnings: resolved.warnings,
         minimum_severity,
-        analyzers_ran: request.run_analyzers,
+        analyzers_ran,
         target: resolved.target,
         review_run: Some(review_run),
     })
+}
+
+fn effective_analyzers_ran(
+    requested: bool,
+    resolved_policy_config: Option<&repo_config::RepoReviewConfig>,
+) -> bool {
+    requested
+        || resolved_policy_config.is_some_and(|config| {
+            config
+                .analyzers
+                .values()
+                .any(|analyzer| analyzer.enabled && analyzer.required)
+        })
 }
 
 fn strip_private_evidence_payloads(review_run: &mut ReviewRun) {
@@ -1301,14 +1316,14 @@ mod tests {
     use std::sync::atomic::{AtomicU64, Ordering};
 
     use super::{
-        branch_scope_warnings, build_review_payload, format_findings_markdown, format_markdown,
-        is_safe_synthetic_diff_path, is_sensitive_untracked_path, map_native_review_error,
-        map_provider_target_error, markdown_fence, new_file_patch, public_provider_error,
-        repo_identity_matches_target, requested_repo_identity, run,
-        strip_private_evidence_payloads, untracked_relative_path, validate_explicit_repo_identity,
-        validate_requested_identity_shape, working_tree_diff, HeadlessReviewExecution,
-        HeadlessReviewRequest, HeadlessReviewTarget, ReviewScope, HEADLESS_REVIEW_BOUNDARY,
-        MAX_UNTRACKED_FILE_BYTES,
+        branch_scope_warnings, build_review_payload, effective_analyzers_ran,
+        format_findings_markdown, format_markdown, is_safe_synthetic_diff_path,
+        is_sensitive_untracked_path, map_native_review_error, map_provider_target_error,
+        markdown_fence, new_file_patch, public_provider_error, repo_identity_matches_target,
+        requested_repo_identity, run, strip_private_evidence_payloads, untracked_relative_path,
+        validate_explicit_repo_identity, validate_requested_identity_shape, working_tree_diff,
+        HeadlessReviewExecution, HeadlessReviewRequest, HeadlessReviewTarget, ReviewScope,
+        HEADLESS_REVIEW_BOUNDARY, MAX_UNTRACKED_FILE_BYTES,
     };
     use crate::config::{RepoRef, ReviewProvider};
     use crate::services::review::{
@@ -1955,6 +1970,27 @@ mod tests {
             map_native_review_error(HeadlessNativeReviewError::Cancelled).exit_code,
             130
         );
+    }
+
+    #[test]
+    fn policy_required_analyzers_are_reported_as_executed() {
+        let config = crate::repo_config::RepoReviewConfig {
+            version: "0.1".to_string(),
+            analyzers: std::collections::BTreeMap::from([(
+                "organization-check".to_string(),
+                crate::repo_config::AnalyzerConfig {
+                    enabled: true,
+                    required: true,
+                    command: Some("check".to_string()),
+                    ..crate::repo_config::AnalyzerConfig::default()
+                },
+            )]),
+            ..crate::repo_config::RepoReviewConfig::default()
+        };
+
+        assert!(effective_analyzers_ran(false, Some(&config)));
+        assert!(effective_analyzers_ran(true, None));
+        assert!(!effective_analyzers_ran(false, None));
     }
 
     #[test]
