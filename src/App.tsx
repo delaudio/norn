@@ -40,6 +40,7 @@ import {
 } from "@/lib/buildAiReviewPayloadForPr";
 import { shouldIgnoreShortcut } from "@/lib/keyboard";
 import {
+  assertPullRequestMatchesReviewRun,
   buildFindingPublicationRequest,
   filterStageableAiReviewDraftComments,
   summarizeActiveReviewFindings,
@@ -962,16 +963,33 @@ export default function App() {
         skippedAlreadyPublished: 0,
       };
     }
+    const reviewRun = aiReview.activeRun;
+    if (!reviewRun) {
+      throw new Error("The review snapshot is unavailable; rerun the review before staging.");
+    }
+    const snapshot = await loadStablePullRequestReviewSnapshot({
+      workspace: activeSel.workspace,
+      repo: activeSel.repo,
+      provider: activeRepo?.provider ?? reviewProvider,
+      prId: activeSel.prId,
+    });
+    assertPullRequestMatchesReviewRun(reviewRun, snapshot.pr);
+    const stagingContext: AiReviewContext = {
+      ...aiReviewContext,
+      pr: snapshot.pr,
+      branchStatus: snapshot.branchStatus,
+      rawDiff: snapshot.rawDiff,
+    };
 
     const payload = buildAiReviewCommentDraftPayload({
-      pr: aiReviewContext.pr,
+      pr: stagingContext.pr,
       thread: aiReview.activeThread,
-      reviewRun: aiReview.activeRun,
-      branchStatus: aiReviewContext.branchStatus,
-      rawDiff: aiReviewContext.rawDiff,
-      jiraKeys: aiReviewContext.jiraKeys,
-      jiraBaseUrl: aiReviewContext.jiraBaseUrl,
-      jiraContext: aiReviewContext.jiraContext,
+      reviewRun,
+      branchStatus: stagingContext.branchStatus,
+      rawDiff: stagingContext.rawDiff,
+      jiraKeys: stagingContext.jiraKeys,
+      jiraBaseUrl: stagingContext.jiraBaseUrl,
+      jiraContext: stagingContext.jiraContext,
     });
 
     const suggestions = await tauriCall<AiReviewDraftCommentSuggestion[]>(
@@ -984,8 +1002,8 @@ export default function App() {
       },
     );
 
-    const normalized = normalizeAiReviewDraftComments(aiReviewContext.rawDiff, suggestions);
-    const linked = linkAiReviewDraftCommentsToFindings(aiReview.activeRun, normalized.comments);
+    const normalized = normalizeAiReviewDraftComments(stagingContext.rawDiff, suggestions);
+    const linked = linkAiReviewDraftCommentsToFindings(reviewRun, normalized.comments);
     const filtered = filterStageableAiReviewDraftComments(
       linked,
       draftComments.drafts,

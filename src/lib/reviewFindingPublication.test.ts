@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
-import type { AiReviewStore, DraftComment, ReviewRun } from "@/types";
+import type { AiReviewStore, DraftComment, PullRequestDetail, ReviewRun } from "@/types";
 import type { LinkedAiReviewDraftComment } from "./aiReviewDraftComments";
 import {
+  assertPullRequestMatchesReviewRun,
   buildFindingPublicationRequest,
   filterStageableAiReviewDraftComments,
   summarizeActiveReviewFindings,
@@ -171,7 +172,7 @@ describe("buildFindingPublicationRequest", () => {
         draft: false,
         authorDisplayName: "Reviewer",
         reviewers: [],
-        sourceBranch: "feature/invoice-lines",
+        sourceBranch: "feature/invoice-lines-v2-bff-mock",
         destinationBranch: "develop",
         sourceCommitHash: "2222222222222222222222222222222222222222",
         destinationCommitHash: "1111111111111111111111111111111111111111",
@@ -231,7 +232,7 @@ describe("buildFindingPublicationRequest", () => {
       draft: false,
       authorDisplayName: "Reviewer",
       reviewers: [],
-      sourceBranch: "feature/invoice-lines",
+      sourceBranch: "feature/invoice-lines-v2-bff-mock",
       destinationBranch: "develop",
       sourceCommitHash: "2222222222222222222222222222222222222222",
       destinationCommitHash: "1111111111111111111111111111111111111111",
@@ -279,6 +280,34 @@ describe("buildFindingPublicationRequest", () => {
         },
       }),
     ).toThrow("does not match the structured review run");
+  });
+});
+
+describe("assertPullRequestMatchesReviewRun", () => {
+  const pr: PullRequestDetail = {
+    id: 1020,
+    title: "Invoice lines",
+    descriptionRaw: "",
+    state: "OPEN",
+    draft: false,
+    authorDisplayName: "Reviewer",
+    reviewers: [],
+    sourceBranch: activeRun.sourceBranch,
+    destinationBranch: activeRun.destinationBranch,
+    sourceCommitHash: activeRun.reviewedHeadSha ?? null,
+    destinationCommitHash: activeRun.reviewedBaseSha ?? null,
+    createdOn: "",
+    updatedOn: "",
+  };
+
+  it("accepts only the exact provider revision used by the review run", () => {
+    expect(() => assertPullRequestMatchesReviewRun(activeRun, pr)).not.toThrow();
+    expect(() =>
+      assertPullRequestMatchesReviewRun(activeRun, {
+        ...pr,
+        destinationCommitHash: "4444444444444444444444444444444444444444",
+      }),
+    ).toThrow("changed after this review");
   });
 });
 

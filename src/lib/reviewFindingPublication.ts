@@ -47,6 +47,32 @@ export interface BuildFindingPublicationRequestInput {
   draft: DraftComment;
 }
 
+export function assertPullRequestMatchesReviewRun(
+  reviewRun: ReviewRun,
+  pr: PullRequestDetail,
+): void {
+  const reviewedBaseSha = reviewRun.reviewedBaseSha?.trim().toLowerCase();
+  const reviewedHeadSha = reviewRun.reviewedHeadSha?.trim().toLowerCase();
+  const currentBaseSha = pr.destinationCommitHash?.trim().toLowerCase();
+  const currentHeadSha = pr.sourceCommitHash?.trim().toLowerCase();
+  const matches = Boolean(
+    reviewedBaseSha &&
+      reviewedHeadSha &&
+      currentBaseSha &&
+      currentHeadSha &&
+      reviewedBaseSha === currentBaseSha &&
+      reviewedHeadSha === currentHeadSha &&
+      reviewRun.prId === pr.id &&
+      reviewRun.sourceBranch === pr.sourceBranch &&
+      reviewRun.destinationBranch === pr.destinationBranch,
+  );
+  if (!matches) {
+    throw new Error(
+      "The pull request changed after this review; refresh and rerun it before staging findings.",
+    );
+  }
+}
+
 export function buildFindingPublicationRequest({
   provider,
   workspace,
@@ -67,6 +93,7 @@ export function buildFindingPublicationRequest({
   if (!finding) {
     throw new Error("The structured finding linked to this draft is no longer available.");
   }
+  assertPullRequestMatchesReviewRun(reviewRun, pr);
   const headSha = reviewRun.reviewedHeadSha?.trim();
   if (!headSha) {
     throw new Error("The reviewed head commit is unavailable; refresh and restage the finding.");
