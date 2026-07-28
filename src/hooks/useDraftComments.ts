@@ -47,11 +47,18 @@ export type DraftPatch = Partial<Pick<DraftComment, "raw">>;
 export interface PublishResult {
   published: number;
   failed: { draft: DraftComment; error: string }[];
+  errors: string[];
 }
 
 export interface PublishedDraftComment {
   id: string;
   createdOn: string;
+}
+
+export interface PublishFindingDraftsResult {
+  comments: Map<string, PublishedDraftComment>;
+  failures: Map<string, string>;
+  errors: string[];
 }
 
 export interface PublishDraftResult {
@@ -75,6 +82,7 @@ interface UseDraftCommentsResult {
 
 export interface DraftCommentLifecycleOptions {
   publishFindingDraft?: (draft: DraftComment) => Promise<PublishedDraftComment>;
+  publishFindingDrafts?: (drafts: DraftComment[]) => Promise<PublishFindingDraftsResult>;
   onFindingDraftPublished?: (
     draft: DraftComment,
     comment: PublishedDraftComment,
@@ -160,8 +168,13 @@ export function useDraftComments(
   const [drafts, setDrafts] = useState<DraftComment[]>([]);
   const [publishing, setPublishing] = useState(false);
   const [publishingDraftId, setPublishingDraftId] = useState<string | null>(null);
-  const { publishFindingDraft, onFindingDraftPublished, onDraftRemoved, onDraftsDiscarded } =
-    options;
+  const {
+    publishFindingDraft,
+    publishFindingDrafts,
+    onFindingDraftPublished,
+    onDraftRemoved,
+    onDraftsDiscarded,
+  } = options;
 
   const active = provider != null && workspace != null && repo != null && prId != null;
 
@@ -268,11 +281,56 @@ export function useDraftComments(
   );
 
   const publishAll = useCallback(async (): Promise<PublishResult> => {
-    if (!active) return { published: 0, failed: [] };
+    if (!active) return { published: 0, failed: [], errors: [] };
     setPublishing(true);
     const failed: PublishResult["failed"] = [];
+    const errors: string[] = [];
     let published = 0;
-    for (const draft of [...drafts]) {
+    const structuredDrafts = drafts.filter((draft) => draft.findingRef != null);
+    if (structuredDrafts.length > 0 && publishFindingDrafts) {
+      setPublishingDraftId(structuredDrafts[0]?.localId ?? null);
+      let batch: PublishFindingDraftsResult | null = null;
+      try {
+        batch = await publishFindingDrafts(structuredDrafts);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        failed.push(...structuredDrafts.map((draft) => ({ draft, error: message })));
+      }
+      if (batch) {
+        errors.push(...batch.errors);
+        for (const draft of structuredDrafts) {
+          const batchFailure = batch.failures.get(draft.localId);
+          if (batchFailure) {
+            failed.push({ draft, error: batchFailure });
+            continue;
+          }
+          const comment = batch.comments.get(draft.localId);
+          if (!comment) {
+            failed.push({
+              draft,
+              error: "Structured finding reconciliation returned no provider comment.",
+            });
+            continue;
+          }
+          try {
+            if (onFindingDraftPublished) {
+              await onFindingDraftPublished(draft, comment);
+            }
+            published += 1;
+            setDrafts((prev) => prev.filter((candidate) => candidate.localId !== draft.localId));
+          } catch (error) {
+            failed.push({
+              draft,
+              error: error instanceof Error ? error.message : String(error),
+            });
+          }
+        }
+      }
+    }
+    const individuallyPublishedDrafts = publishFindingDrafts
+      ? drafts.filter((draft) => draft.findingRef == null)
+      : drafts;
+    for (const draft of individuallyPublishedDrafts) {
       setPublishingDraftId(draft.localId);
       try {
         const comment = await publishDraftToServer(
@@ -295,7 +353,7 @@ export function useDraftComments(
     }
     setPublishingDraftId(null);
     setPublishing(false);
-    return { published, failed };
+    return { published, failed, errors };
   }, [
     active,
     provider,
@@ -304,6 +362,7 @@ export function useDraftComments(
     prId,
     drafts,
     publishFindingDraft,
+    publishFindingDrafts,
     onFindingDraftPublished,
   ]);
 

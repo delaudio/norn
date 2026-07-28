@@ -5,6 +5,10 @@ import {
   assertPullRequestMatchesReviewRun,
   buildFindingPublicationRequest,
   filterStageableAiReviewDraftComments,
+  latestReviewFindingFingerprintsForRevision,
+  latestTrackedFindingCommentId,
+  latestTrackedFindingComments,
+  selectTrackedFindingCommentsForBatch,
   summarizeActiveReviewFindings,
 } from "./reviewFindingPublication";
 
@@ -311,12 +315,39 @@ describe("assertPullRequestMatchesReviewRun", () => {
   });
 });
 
+describe("latestReviewFindingFingerprintsForRevision", () => {
+  it("uses the newest successful run for a reviewed revision", () => {
+    const latestRun: ReviewRun = {
+      ...activeRun,
+      id: "run-latest",
+      findings: [
+        {
+          ...activeRun.findings[0]!,
+          fingerprint: "latest-finding",
+        },
+      ],
+    };
+
+    expect(
+      latestReviewFindingFingerprintsForRevision(
+        {
+          activeThreadId: null,
+          threads: [],
+          reviewRuns: [activeRun, latestRun],
+        },
+        activeRun.reviewedBaseSha ?? "",
+        activeRun.reviewedHeadSha ?? "",
+      ),
+    ).toEqual(new Set(["latest-finding"]));
+  });
+});
+
 describe("summarizeActiveReviewFindings", () => {
   it("projects current and historical publication state onto the active run", () => {
     const summary = summarizeActiveReviewFindings(store, activeRun);
 
     expect(summary.get("run-1-finding-1")).toMatchObject({
-      alreadyPublished: true,
+      alreadyPublished: false,
       historicalPublishedCount: 1,
       currentPublishedCount: 0,
       currentDraftCount: 0,
@@ -324,6 +355,7 @@ describe("summarizeActiveReviewFindings", () => {
       publicationMode: "inline",
       latestPublishedAt: "2026-06-22T20:10:00.000Z",
     });
+    expect(latestTrackedFindingCommentId(store, "fingerprint-1")).toBe("101");
     expect(summary.get("run-1-finding-2")).toMatchObject({
       alreadyStaged: true,
       currentDraftCount: 1,
@@ -332,10 +364,54 @@ describe("summarizeActiveReviewFindings", () => {
       staleAnchor: false,
     });
   });
+
+  it("batches staged and absent history without resolving current unstaged findings", () => {
+    const selected = selectTrackedFindingCommentsForBatch(
+      [
+        { findingFingerprint: "staged", commentId: "comment-1" },
+        { findingFingerprint: "current-unstaged", commentId: "comment-2" },
+        { findingFingerprint: "absent", commentId: "comment-3" },
+      ],
+      new Set(["staged", "current-unstaged"]),
+      new Set(["staged"]),
+    );
+
+    expect(selected).toEqual([
+      { findingFingerprint: "staged", commentId: "comment-1" },
+      { findingFingerprint: "absent", commentId: "comment-3" },
+    ]);
+  });
+
+  it("tracks only inline provider comments for reconciliation", () => {
+    const generalRun: ReviewRun = {
+      ...previousRun,
+      id: "run-general",
+      findings: [
+        {
+          ...previousRun.findings[0]!,
+          fingerprint: "general-finding",
+          publication: {
+            mode: "general",
+            draftIds: [],
+            remoteCommentIds: ["general-comment"],
+            publishedAt: "2026-06-22T20:11:00.000Z",
+          },
+        },
+      ],
+    };
+
+    expect(
+      latestTrackedFindingComments({
+        activeThreadId: null,
+        threads: [],
+        reviewRuns: [previousRun, generalRun],
+      }),
+    ).toEqual([{ findingFingerprint: "fingerprint-1", commentId: "101" }]);
+  });
 });
 
 describe("filterStageableAiReviewDraftComments", () => {
-  it("skips comments already represented by staged drafts, published findings, or local duplicates", () => {
+  it("allows historical findings to reconcile while skipping current drafts and local duplicates", () => {
     const publicationSummary = summarizeActiveReviewFindings(store, activeRun);
     const existingDrafts: Pick<DraftComment, "path" | "to" | "from" | "raw">[] = [
       {
@@ -391,10 +467,10 @@ describe("filterStageableAiReviewDraftComments", () => {
     expect(
       filterStageableAiReviewDraftComments(comments, existingDrafts, publicationSummary),
     ).toEqual({
-      stageable: [comments[3]],
-      skipped: 3,
+      stageable: [comments[0], comments[3]],
+      skipped: 2,
       skippedAlreadyStaged: 1,
-      skippedAlreadyPublished: 1,
+      skippedAlreadyPublished: 0,
       skippedExistingDrafts: 1,
     });
   });

@@ -4,6 +4,7 @@ mod commands;
 mod config;
 mod credentials;
 pub mod finding_publication;
+pub mod finding_reconciliation;
 mod headless_review;
 pub mod incremental_review;
 mod launch;
@@ -24,7 +25,7 @@ pub use review_storage::{
     write_administrative_audit_jsonl, ReviewCursor, ReviewCursorIdentity, ReviewCursorState,
     ReviewRunCompletion, ReviewRunOutcome,
 };
-pub use services::bitbucket::publish_review_finding_native;
+pub use services::bitbucket::{publish_review_finding_native, reconcile_review_findings_native};
 
 use commands::{bitbucket, context, repositories, review};
 use tauri::{
@@ -134,6 +135,7 @@ pub fn run() {
             bitbucket::get_pr_file_preview,
             bitbucket::list_comments,
             bitbucket::publish_review_finding,
+            bitbucket::reconcile_review_findings,
             bitbucket::create_inline_comment,
             bitbucket::create_general_comment,
             bitbucket::delete_comment,
@@ -305,5 +307,48 @@ mod tauri_ipc_smoke {
             serde_json::from_str(serialized).expect("publication error should contain JSON");
         assert_eq!(publication_error["code"], "invalid_request");
         assert_eq!(publication_error["retryable"], false);
+    }
+
+    #[test]
+    fn reconcile_review_findings_runs_through_tauri_ipc() {
+        let app = mock_builder()
+            .invoke_handler(tauri::generate_handler![
+                bitbucket::reconcile_review_findings
+            ])
+            .build(mock_context(noop_assets()))
+            .expect("mock Tauri app should build");
+        let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
+            .build()
+            .expect("mock webview should build");
+
+        let error = tauri::test::get_ipc_response(
+            &webview,
+            ipc_request(
+                "reconcile_review_findings",
+                json!({
+                    "request": {
+                        "schemaVersion": "v1",
+                        "tenantId": "",
+                        "provider": "github",
+                        "workspace": "acme",
+                        "repository": "payments",
+                        "pullRequestId": 42,
+                        "baseSha": "1111111111111111111111111111111111111111",
+                        "headSha": "2222222222222222222222222222222222222222",
+                        "trackedComments": [],
+                        "currentFindings": []
+                    }
+                }),
+            ),
+        )
+        .expect_err("invalid reconciliation request should use the command error channel");
+
+        let serialized = error
+            .as_str()
+            .expect("reconciliation command errors should cross IPC as strings");
+        let reconciliation_error: serde_json::Value =
+            serde_json::from_str(serialized).expect("reconciliation error should contain JSON");
+        assert_eq!(reconciliation_error["code"], "invalid_request");
+        assert_eq!(reconciliation_error["retryable"], false);
     }
 }

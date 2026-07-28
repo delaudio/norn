@@ -13,7 +13,7 @@ use crate::administrative_audit::{
 };
 use crate::finding_publication::{
     FindingPublicationLease, FindingPublicationRequest, FindingPublicationReservation,
-    ProviderCommentIdentity,
+    ProviderCommentIdentity, ProviderPublicationTarget,
 };
 use crate::review_event::PullRequestReviewEventProvider;
 use crate::review_feedback::{
@@ -2526,6 +2526,46 @@ pub(crate) fn release_finding_publication(lease: &FindingPublicationLease) -> Re
     Ok(())
 }
 
+pub(crate) fn finding_publication_owns_comment(
+    marker: &str,
+    identity: &ProviderCommentIdentity,
+    target: &ProviderPublicationTarget,
+    finding_fingerprint: &str,
+) -> Result<bool, String> {
+    if marker.trim().is_empty()
+        || identity.comment_id.trim().is_empty()
+        || finding_fingerprint.trim().is_empty()
+    {
+        return Ok(false);
+    }
+    let pr_id = shared_review_pr_id(target.pull_request_id)?;
+    let conn = open()?;
+    conn.query_row(
+        r#"
+        SELECT 1
+        FROM shared_finding_publications
+        WHERE marker = ?1 AND status = 'published' AND comment_id = ?2
+          AND tenant_id = ?3 AND provider = ?4
+          AND workspace = ?5 AND repo = ?6 AND pr_id = ?7
+          AND finding_fingerprint = ?8
+        "#,
+        params![
+            marker,
+            identity.comment_id,
+            target.tenant_id,
+            target.provider.as_str(),
+            target.workspace.to_ascii_lowercase(),
+            target.repository.to_ascii_lowercase(),
+            pr_id,
+            finding_fingerprint,
+        ],
+        |_| Ok(()),
+    )
+    .optional()
+    .map(|row| row.is_some())
+    .map_err(|error| error.to_string())
+}
+
 fn shared_job_conversion_error(column: usize, message: impl Into<String>) -> rusqlite::Error {
     rusqlite::Error::FromSqlConversionFailure(
         column,
@@ -3295,6 +3335,20 @@ mod tests {
                 comment_id: "9223372036854775000".to_string(),
             };
             complete_finding_publication(&second_lease, &identity).expect("complete current lease");
+            assert!(finding_publication_owns_comment(
+                &marker,
+                &identity,
+                &request.target(),
+                &request.finding_fingerprint,
+            )
+            .expect("owned publication"));
+            assert!(!finding_publication_owns_comment(
+                &marker,
+                &identity,
+                &request.target(),
+                "another-finding",
+            )
+            .expect("mismatched finding"));
             assert_eq!(
                 reserve_finding_publication(&request, &marker, "lease-3")
                     .expect("idempotent published reservation"),

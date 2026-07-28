@@ -97,6 +97,112 @@ describe("useDraftComments structured finding publication", () => {
     expect(onFindingDraftPublished).toHaveBeenCalledTimes(2);
   });
 
+  it("publishes structured findings as one reconciliation batch", async () => {
+    const publishFindingDraft = vi.fn();
+    const publishFindingDrafts = vi
+      .fn()
+      .mockImplementation(async (drafts: Array<{ localId: string }>) => ({
+        comments: new Map(
+          drafts.map((draft, index) => [
+            draft.localId,
+            {
+              id: `comment-${index + 1}`,
+              createdOn: "2026-07-27T20:00:00.000Z",
+            },
+          ]),
+        ),
+        failures: new Map(),
+        errors: [],
+      }));
+    const onFindingDraftPublished = vi.fn().mockResolvedValue(undefined);
+    const { result } = renderHook(() =>
+      useDraftComments("github", "publication-test", "batch-payments", 42, {
+        publishFindingDraft,
+        publishFindingDrafts,
+        onFindingDraftPublished,
+      }),
+    );
+
+    act(() => {
+      result.current.addDrafts(
+        ["fingerprint-1", "fingerprint-2"].map((fingerprint, index) => ({
+          path: "src/lib.ts",
+          to: 12 + index,
+          from: null,
+          raw: `Finding ${index + 1}`,
+          parentId: null,
+          source: "aiFinding" as const,
+          findingRef: {
+            reviewRunId: "run-1",
+            findingId: `finding-${index + 1}`,
+            findingFingerprint: fingerprint,
+          },
+          publicationMode: "inline" as const,
+          reviewBaseSha: "1111111111111111111111111111111111111111",
+          reviewHeadSha: "2222222222222222222222222222222222222222",
+        })),
+      );
+    });
+
+    await act(async () => {
+      const published = await result.current.publishAll();
+      expect(published).toEqual({ published: 2, failed: [], errors: [] });
+    });
+
+    expect(publishFindingDrafts).toHaveBeenCalledTimes(1);
+    expect(publishFindingDraft).not.toHaveBeenCalled();
+    expect(onFindingDraftPublished).toHaveBeenCalledTimes(2);
+    expect(result.current.drafts).toHaveLength(0);
+  });
+
+  it("records successful batch actions while keeping only failed drafts retryable", async () => {
+    const onFindingDraftPublished = vi.fn().mockResolvedValue(undefined);
+    const { result } = renderHook(() =>
+      useDraftComments("github", "publication-test", "partial-batch-payments", 42, {
+        publishFindingDrafts: async (drafts) => ({
+          comments: new Map([
+            [drafts[0]?.localId ?? "", { id: "comment-1", createdOn: "2026-07-27T20:00:00.000Z" }],
+          ]),
+          failures: new Map([[drafts[1]?.localId ?? "", "provider unavailable"]]),
+          errors: ["A fixed finding comment was missing."],
+        }),
+        onFindingDraftPublished,
+      }),
+    );
+
+    act(() => {
+      result.current.addDrafts(
+        ["fingerprint-1", "fingerprint-2"].map((fingerprint, index) => ({
+          path: "src/lib.ts",
+          to: 20 + index,
+          from: null,
+          raw: `Finding ${index + 1}`,
+          parentId: null,
+          source: "aiFinding" as const,
+          findingRef: {
+            reviewRunId: "run-1",
+            findingId: `finding-${index + 1}`,
+            findingFingerprint: fingerprint,
+          },
+          publicationMode: "inline" as const,
+          reviewBaseSha: "1111111111111111111111111111111111111111",
+          reviewHeadSha: "2222222222222222222222222222222222222222",
+        })),
+      );
+    });
+
+    await act(async () => {
+      const published = await result.current.publishAll();
+      expect(published.published).toBe(1);
+      expect(published.failed).toHaveLength(1);
+      expect(published.failed[0]?.error).toBe("provider unavailable");
+      expect(published.errors).toEqual(["A fixed finding comment was missing."]);
+    });
+
+    expect(onFindingDraftPublished).toHaveBeenCalledTimes(1);
+    expect(result.current.drafts).toHaveLength(1);
+  });
+
   it("removes manual drafts immediately after their non-idempotent provider write", async () => {
     const onFindingDraftPublished = vi
       .fn()

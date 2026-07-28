@@ -2,16 +2,21 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::json;
 use std::path::Path;
+use std::sync::OnceLock;
 
 use crate::config::{self, AppConfig, RepoRef, ReviewProvider};
 use crate::config::{AiProvider, ReviewTerminal};
 use crate::credentials::{self, Credentials};
 use crate::finding_publication::{
-    dry_run_publication_identity, FindingAnchorSide, FindingPublicationError,
+    dry_run_publication_identity, FindingAnchorSide, FindingLineRange, FindingPublicationError,
     FindingPublicationErrorCode, FindingPublicationRequest, FindingPublisher,
     ProviderCommentIdentity, ProviderInlineCommentApi, ProviderInlineCommentPayload,
     ProviderPublicationApiError, ProviderPublicationTarget, ProviderPullRequestRevision,
     PublishedCommentIdentity, SqliteFindingPublicationStore,
+};
+use crate::finding_reconciliation::{
+    dry_run_reconciliation_summary, FindingReconciler, FindingReconciliationRequest,
+    FindingReconciliationSummary, ProviderFindingComment, ProviderFindingReconciliationApi,
 };
 use crate::repo_config::{self, RepoReviewConfigLoadResult};
 use crate::review_event::PullRequestReviewEventProvider;
@@ -80,6 +85,12 @@ impl BitbucketClient {
             .basic_auth(&self.username, Some(&self.token))
     }
 
+    fn put(&self, url: &str) -> reqwest::blocking::RequestBuilder {
+        self.http
+            .put(url)
+            .basic_auth(&self.username, Some(&self.token))
+    }
+
     fn delete(&self, url: &str) -> reqwest::blocking::RequestBuilder {
         self.http
             .delete(url)
@@ -121,6 +132,13 @@ impl GithubClient {
     fn post(&self, url: &str) -> reqwest::blocking::RequestBuilder {
         self.http
             .post(url)
+            .bearer_auth(&self.token)
+            .header(reqwest::header::ACCEPT, "application/vnd.github+json")
+    }
+
+    fn patch(&self, url: &str) -> reqwest::blocking::RequestBuilder {
+        self.http
+            .patch(url)
             .bearer_auth(&self.token)
             .header(reqwest::header::ACCEPT, "application/vnd.github+json")
     }
@@ -743,6 +761,8 @@ struct GhPublicationComment {
     #[serde(default)]
     body: String,
     user: Option<GhUser>,
+    #[serde(default)]
+    pull_request_url: Option<String>,
     path: Option<String>,
     line: Option<u32>,
     original_line: Option<u32>,
@@ -2122,8 +2142,66 @@ pub async fn get_pr_file_preview(
 // Commands — comments
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Default, Clone, Copy)]
-pub struct StoredProviderInlineCommentApi;
+#[derive(Default)]
+pub struct StoredProviderInlineCommentApi {
+    bitbucket_client: OnceLock<Result<BitbucketClient, String>>,
+    github_client: OnceLock<Result<GithubClient, String>>,
+    bitbucket_author_account_id: OnceLock<Result<String, ProviderPublicationApiError>>,
+    github_author_login: OnceLock<Result<String, ProviderPublicationApiError>>,
+}
+
+impl StoredProviderInlineCommentApi {
+    fn bitbucket_client(&self) -> Result<&BitbucketClient, ProviderPublicationApiError> {
+        self.bitbucket_client
+            .get_or_init(BitbucketClient::from_stored)
+            .as_ref()
+            .map_err(|error| map_publication_auth_error(error.clone()))
+    }
+
+    fn github_client(&self) -> Result<&GithubClient, ProviderPublicationApiError> {
+        self.github_client
+            .get_or_init(GithubClient::from_stored)
+            .as_ref()
+            .map_err(|error| map_publication_auth_error(error.clone()))
+    }
+
+    fn bitbucket_author_account_id(&self) -> Result<&str, ProviderPublicationApiError> {
+        self.bitbucket_author_account_id
+            .get_or_init(|| {
+                let user: BbUser = get_json(self.bitbucket_client()?.get(&format!("{BASE}/user")))
+                    .map_err(map_publication_read_error)?;
+                user.account_id
+                    .filter(|account_id| !account_id.trim().is_empty())
+                    .ok_or_else(|| {
+                        ProviderPublicationApiError::unavailable(
+                            "Bitbucket did not return the authenticated account identifier.",
+                        )
+                    })
+            })
+            .as_ref()
+            .map(String::as_str)
+            .map_err(Clone::clone)
+    }
+
+    fn github_author_login(&self) -> Result<&str, ProviderPublicationApiError> {
+        self.github_author_login
+            .get_or_init(|| {
+                let user: GhUser =
+                    github_get_json(self.github_client()?.get("https://api.github.com/user"))
+                        .map_err(map_publication_read_error)?;
+                let login = user.login.trim();
+                if login.is_empty() {
+                    return Err(ProviderPublicationApiError::unavailable(
+                        "GitHub did not return the authenticated account login.",
+                    ));
+                }
+                Ok(login.to_string())
+            })
+            .as_ref()
+            .map(String::as_str)
+            .map_err(Clone::clone)
+    }
+}
 
 impl ProviderInlineCommentApi for StoredProviderInlineCommentApi {
     fn current_revision(
@@ -2132,9 +2210,9 @@ impl ProviderInlineCommentApi for StoredProviderInlineCommentApi {
     ) -> Result<ProviderPullRequestRevision, ProviderPublicationApiError> {
         let detail = match target.provider {
             PullRequestReviewEventProvider::Bitbucket => {
-                let client = BitbucketClient::from_stored().map_err(map_publication_auth_error)?;
+                let client = self.bitbucket_client()?;
                 fetch_pull_request_detail(
-                    &client,
+                    client,
                     &target.workspace,
                     &target.repository,
                     publication_pr_id(target.pull_request_id)?,
@@ -2142,9 +2220,9 @@ impl ProviderInlineCommentApi for StoredProviderInlineCommentApi {
                 .map_err(map_publication_read_error)?
             }
             PullRequestReviewEventProvider::Github => {
-                let client = GithubClient::from_stored().map_err(map_publication_auth_error)?;
+                let client = self.github_client()?;
                 fetch_github_pull_request_detail(
-                    &client,
+                    client,
                     &target.workspace,
                     &target.repository,
                     publication_pr_id(target.pull_request_id)?,
@@ -2171,7 +2249,7 @@ impl ProviderInlineCommentApi for StoredProviderInlineCommentApi {
         marker: &str,
         expected: &ProviderInlineCommentPayload,
     ) -> Result<Option<ProviderCommentIdentity>, ProviderPublicationApiError> {
-        find_published_finding_comment(target, marker, Some(expected))
+        find_published_finding_comment(self, target, marker, Some(expected))
     }
 
     fn find_comment_by_marker(
@@ -2179,7 +2257,7 @@ impl ProviderInlineCommentApi for StoredProviderInlineCommentApi {
         target: &ProviderPublicationTarget,
         marker: &str,
     ) -> Result<Option<ProviderCommentIdentity>, ProviderPublicationApiError> {
-        find_published_finding_comment(target, marker, None)
+        find_published_finding_comment(self, target, marker, None)
     }
 
     fn create_inline_comment(
@@ -2190,7 +2268,7 @@ impl ProviderInlineCommentApi for StoredProviderInlineCommentApi {
         let pr_id = publication_pr_id(target.pull_request_id)?;
         let (comment_id, inline) = match target.provider {
             PullRequestReviewEventProvider::Bitbucket => {
-                let client = BitbucketClient::from_stored().map_err(map_publication_auth_error)?;
+                let client = self.bitbucket_client()?;
                 let url = format!(
                     "{}/pullrequests/{pr_id}/comments",
                     repo_base(&target.workspace, &target.repository)
@@ -2211,7 +2289,7 @@ impl ProviderInlineCommentApi for StoredProviderInlineCommentApi {
                 )
             }
             PullRequestReviewEventProvider::Github => {
-                let client = GithubClient::from_stored().map_err(map_publication_auth_error)?;
+                let client = self.github_client()?;
                 let base = github_repo_base(&target.workspace, &target.repository)
                     .map_err(ProviderPublicationApiError::unavailable)?;
                 let body = github_publication_body(payload);
@@ -2243,7 +2321,7 @@ impl ProviderInlineCommentApi for StoredProviderInlineCommentApi {
         let comment_id = encode_path_segment(&identity.comment_id);
         let result = match target.provider {
             PullRequestReviewEventProvider::Bitbucket => {
-                let client = BitbucketClient::from_stored().map_err(map_publication_auth_error)?;
+                let client = self.bitbucket_client()?;
                 let url = format!(
                     "{}/pullrequests/{}/comments/{comment_id}",
                     repo_base(&target.workspace, &target.repository)
@@ -2253,7 +2331,7 @@ impl ProviderInlineCommentApi for StoredProviderInlineCommentApi {
                 send_checked(client.delete(&url)).map(|_| ())
             }
             PullRequestReviewEventProvider::Github => {
-                let client = GithubClient::from_stored().map_err(map_publication_auth_error)?;
+                let client = self.github_client()?;
                 let url = format!(
                     "{}/pulls/comments/{comment_id}",
                     github_repo_base(&target.workspace, &target.repository)
@@ -2270,6 +2348,269 @@ impl ProviderInlineCommentApi for StoredProviderInlineCommentApi {
     }
 }
 
+impl ProviderFindingReconciliationApi for StoredProviderInlineCommentApi {
+    fn get_finding_comment(
+        &self,
+        target: &ProviderPublicationTarget,
+        identity: &ProviderCommentIdentity,
+    ) -> Result<Option<ProviderFindingComment>, ProviderPublicationApiError> {
+        let pr_id = publication_pr_id(target.pull_request_id)?;
+        let comment_id = encode_path_segment(&identity.comment_id);
+        match target.provider {
+            PullRequestReviewEventProvider::Bitbucket => {
+                let client = self.bitbucket_client()?;
+                let author_account_id = self.bitbucket_author_account_id()?;
+                let url = format!(
+                    "{}/pullrequests/{pr_id}/comments/{comment_id}",
+                    repo_base(&target.workspace, &target.repository)
+                        .map_err(ProviderPublicationApiError::unavailable)?
+                );
+                let comment: BbPublicationComment = match get_json(client.get(&url)) {
+                    Ok(comment) => comment,
+                    Err(error) if error.contains("404 Not Found") => return Ok(None),
+                    Err(error) => return Err(map_publication_read_error(error)),
+                };
+                if comment.deleted
+                    || comment
+                        .user
+                        .as_ref()
+                        .and_then(|user| user.account_id.as_deref())
+                        != Some(author_account_id)
+                {
+                    return Ok(None);
+                }
+                provider_finding_comment_from_bitbucket(comment).map(Some)
+            }
+            PullRequestReviewEventProvider::Github => {
+                let client = self.github_client()?;
+                let author_login = self.github_author_login()?;
+                let repository_base = github_repo_base(&target.workspace, &target.repository)
+                    .map_err(ProviderPublicationApiError::unavailable)?;
+                let url = format!("{repository_base}/pulls/comments/{comment_id}");
+                let comment: GhPublicationComment = match github_get_json(client.get(&url)) {
+                    Ok(comment) => comment,
+                    Err(error) if error.contains("404 Not Found") => return Ok(None),
+                    Err(error) => return Err(map_publication_read_error(error)),
+                };
+                let expected_pull_request_url =
+                    format!("{repository_base}/pulls/{}", target.pull_request_id);
+                if !github_comment_matches_pull_request(&comment, &expected_pull_request_url)
+                    || !comment
+                        .user
+                        .as_ref()
+                        .is_some_and(|user| user.login.eq_ignore_ascii_case(author_login))
+                {
+                    return Ok(None);
+                }
+                provider_finding_comment_from_github(comment).map(Some)
+            }
+        }
+    }
+
+    fn update_finding_comment(
+        &self,
+        target: &ProviderPublicationTarget,
+        identity: &ProviderCommentIdentity,
+        markdown: &str,
+    ) -> Result<(), ProviderPublicationApiError> {
+        let pr_id = publication_pr_id(target.pull_request_id)?;
+        let comment_id = encode_path_segment(&identity.comment_id);
+        let (updated_id, updated_markdown) = match target.provider {
+            PullRequestReviewEventProvider::Bitbucket => {
+                let client = self.bitbucket_client()?;
+                let url = format!(
+                    "{}/pullrequests/{pr_id}/comments/{comment_id}",
+                    repo_base(&target.workspace, &target.repository)
+                        .map_err(ProviderPublicationApiError::unavailable)?
+                );
+                let response = send_checked(
+                    client
+                        .put(&url)
+                        .json(&bitbucket_reconciliation_update_body(markdown)),
+                )
+                .map_err(map_publication_write_error)?;
+                let comment: BbPublicationComment = response
+                    .json()
+                    .map_err(|error| ProviderPublicationApiError::unavailable(error.to_string()))?;
+                (
+                    publication_comment_id(comment.id)?,
+                    comment
+                        .content
+                        .map(|content| content.raw)
+                        .unwrap_or_default(),
+                )
+            }
+            PullRequestReviewEventProvider::Github => {
+                let client = self.github_client()?;
+                let url = format!(
+                    "{}/pulls/comments/{comment_id}",
+                    github_repo_base(&target.workspace, &target.repository)
+                        .map_err(ProviderPublicationApiError::unavailable)?
+                );
+                let response = github_send_checked(
+                    client
+                        .patch(&url)
+                        .json(&github_reconciliation_update_body(markdown)),
+                )
+                .map_err(map_publication_write_error)?;
+                let comment: GhPublicationComment = response
+                    .json()
+                    .map_err(|error| ProviderPublicationApiError::unavailable(error.to_string()))?;
+                (publication_comment_id(comment.id)?, comment.body)
+            }
+        };
+        if updated_id != identity.comment_id || updated_markdown != markdown {
+            return Err(ProviderPublicationApiError::unavailable(
+                "The provider did not preserve the reconciled finding comment.",
+            ));
+        }
+        Ok(())
+    }
+}
+
+fn provider_finding_comment_from_bitbucket(
+    comment: BbPublicationComment,
+) -> Result<ProviderFindingComment, ProviderPublicationApiError> {
+    let identity = ProviderCommentIdentity {
+        comment_id: publication_comment_id(comment.id)?,
+    };
+    let markdown = comment.content.map(|content| content.raw).ok_or_else(|| {
+        ProviderPublicationApiError::invalid_anchor(
+            "The tracked Bitbucket finding has no comment body.",
+        )
+    })?;
+    let anchor = comment.inline.as_ref().and_then(bitbucket_finding_anchor);
+    Ok(ProviderFindingComment {
+        identity,
+        markdown,
+        anchor,
+    })
+}
+
+fn provider_finding_comment_from_github(
+    comment: GhPublicationComment,
+) -> Result<ProviderFindingComment, ProviderPublicationApiError> {
+    let anchor = github_finding_anchor(&comment);
+    let identity = ProviderCommentIdentity {
+        comment_id: publication_comment_id(comment.id)?,
+    };
+    Ok(ProviderFindingComment {
+        identity,
+        markdown: comment.body,
+        anchor,
+    })
+}
+
+fn github_comment_matches_pull_request(
+    comment: &GhPublicationComment,
+    expected_pull_request_url: &str,
+) -> bool {
+    comment
+        .pull_request_url
+        .as_deref()
+        .is_some_and(|url| url.eq_ignore_ascii_case(expected_pull_request_url))
+}
+
+fn bitbucket_finding_anchor(anchor: &BbPublicationInline) -> Option<FindingLineRange> {
+    if let Some(end_line) = anchor.to {
+        let start_line = anchor.start_to.unwrap_or(end_line);
+        return (start_line > 0 && start_line <= end_line).then(|| FindingLineRange {
+            path: anchor.path.clone(),
+            start_line,
+            end_line,
+            side: FindingAnchorSide::New,
+        });
+    }
+    let end_line = anchor.from?;
+    let start_line = anchor.start_from.unwrap_or(end_line);
+    (start_line > 0 && start_line <= end_line).then(|| FindingLineRange {
+        path: anchor.path.clone(),
+        start_line,
+        end_line,
+        side: FindingAnchorSide::Old,
+    })
+}
+
+fn github_finding_anchor(comment: &GhPublicationComment) -> Option<FindingLineRange> {
+    let path = comment
+        .path
+        .clone()
+        .filter(|path| !path.trim().is_empty())?;
+    let old_side = comment
+        .side
+        .as_deref()
+        .is_some_and(|side| side.eq_ignore_ascii_case("LEFT"));
+    let (end_line, start_line, side) = if old_side {
+        let end_line = comment.original_line.or(comment.line)?;
+        (
+            end_line,
+            comment
+                .original_start_line
+                .or(comment.start_line)
+                .unwrap_or(end_line),
+            FindingAnchorSide::Old,
+        )
+    } else {
+        let end_line = comment.line.or(comment.original_line)?;
+        (
+            end_line,
+            comment
+                .start_line
+                .or(comment.original_start_line)
+                .unwrap_or(end_line),
+            FindingAnchorSide::New,
+        )
+    };
+    (start_line > 0 && start_line <= end_line).then_some(FindingLineRange {
+        path,
+        start_line,
+        end_line,
+        side,
+    })
+}
+
+fn bitbucket_reconciliation_update_body(markdown: &str) -> serde_json::Value {
+    json!({ "content": { "raw": markdown } })
+}
+
+fn github_reconciliation_update_body(markdown: &str) -> serde_json::Value {
+    json!({ "body": markdown })
+}
+
+pub fn reconcile_review_findings_native(
+    request: &FindingReconciliationRequest,
+) -> Result<FindingReconciliationSummary, FindingPublicationError> {
+    if dry_run() {
+        eprintln!(
+            "[dry-run] reconcile {} structured findings on PR #{}",
+            request.current_findings.len(),
+            request.pull_request_id
+        );
+        return dry_run_reconciliation_summary(request);
+    }
+    FindingReconciler::new(
+        StoredProviderInlineCommentApi::default(),
+        SqliteFindingPublicationStore,
+    )
+    .reconcile(request)
+}
+
+#[tauri::command]
+pub async fn reconcile_review_findings(
+    request: FindingReconciliationRequest,
+) -> Result<FindingReconciliationSummary, String> {
+    tauri::async_runtime::spawn_blocking(move || reconcile_review_findings_native(&request))
+        .await
+        .map_err(|_| {
+            publication_ipc_error(FindingPublicationError {
+                code: FindingPublicationErrorCode::ProviderUnavailable,
+                retryable: true,
+                message: "The finding reconciliation worker stopped unexpectedly.".to_string(),
+            })
+        })?
+        .map_err(publication_ipc_error)
+}
+
 pub fn publish_review_finding_native(
     request: &FindingPublicationRequest,
 ) -> Result<PublishedCommentIdentity, FindingPublicationError> {
@@ -2284,7 +2625,7 @@ pub fn publish_review_finding_native(
         return dry_run_publication_identity(request);
     }
     FindingPublisher::new(
-        StoredProviderInlineCommentApi,
+        StoredProviderInlineCommentApi::default(),
         SqliteFindingPublicationStore,
     )
     .publish(request)
@@ -2311,6 +2652,7 @@ fn publication_ipc_error(error: FindingPublicationError) -> String {
 }
 
 fn find_published_finding_comment(
+    api: &StoredProviderInlineCommentApi,
     target: &ProviderPublicationTarget,
     marker: &str,
     expected: Option<&ProviderInlineCommentPayload>,
@@ -2318,17 +2660,8 @@ fn find_published_finding_comment(
     let pr_id = publication_pr_id(target.pull_request_id)?;
     match target.provider {
         PullRequestReviewEventProvider::Bitbucket => {
-            let client = BitbucketClient::from_stored().map_err(map_publication_auth_error)?;
-            let user: BbUser = get_json(client.get(&format!("{BASE}/user")))
-                .map_err(map_publication_read_error)?;
-            let author_account_id = user
-                .account_id
-                .filter(|account_id| !account_id.trim().is_empty())
-                .ok_or_else(|| {
-                    ProviderPublicationApiError::unavailable(
-                        "Bitbucket did not return the authenticated account identifier.",
-                    )
-                })?;
+            let client = api.bitbucket_client()?;
+            let author_account_id = api.bitbucket_author_account_id()?;
             let comments_endpoint = format!(
                 "{}/pullrequests/{pr_id}/comments",
                 repo_base(&target.workspace, &target.repository)
@@ -2345,7 +2678,7 @@ fn find_published_finding_comment(
                         comment,
                         marker,
                         expected,
-                        &author_account_id,
+                        author_account_id,
                     )
                 }) {
                     return Ok(Some(ProviderCommentIdentity {
@@ -2362,22 +2695,15 @@ fn find_published_finding_comment(
             }
         }
         PullRequestReviewEventProvider::Github => {
-            let client = GithubClient::from_stored().map_err(map_publication_auth_error)?;
-            let user: GhUser = github_get_json(client.get("https://api.github.com/user"))
-                .map_err(map_publication_read_error)?;
-            let author_login = user.login.trim();
-            if author_login.is_empty() {
-                return Err(ProviderPublicationApiError::unavailable(
-                    "GitHub did not return the authenticated account login.",
-                ));
-            }
+            let client = api.github_client()?;
+            let author_login = api.github_author_login()?;
             let url = format!(
                 "{}/pulls/{pr_id}/comments?per_page=100&page=1",
                 github_repo_base(&target.workspace, &target.repository)
                     .map_err(ProviderPublicationApiError::unavailable)?
             );
             let comments: Vec<GhPublicationComment> =
-                github_paginated_get(&client, url).map_err(map_publication_read_error)?;
+                github_paginated_get(client, url).map_err(map_publication_read_error)?;
             comments
                 .into_iter()
                 .find(|comment| {
@@ -2954,6 +3280,9 @@ mod tests {
                 login: "reviewer-1".to_string(),
                 name: None,
             }),
+            pull_request_url: Some(
+                "https://api.github.com/repos/acme/payments/pulls/42".to_string(),
+            ),
             path: Some("src/lib.rs".to_string()),
             line: Some(14),
             original_line: None,
@@ -2979,6 +3308,9 @@ mod tests {
                 login: "reviewer-1".to_string(),
                 name: None,
             }),
+            pull_request_url: Some(
+                "https://api.github.com/repos/acme/payments/pulls/42".to_string(),
+            ),
             path: Some("src/lib.rs".to_string()),
             line: None,
             original_line: Some(14),
@@ -3018,6 +3350,122 @@ mod tests {
         assert_eq!(
             publication_comment_id(json!("opaque-comment-id")).expect("opaque id"),
             "opaque-comment-id"
+        );
+    }
+
+    #[test]
+    fn reconciliation_comment_mappers_preserve_provider_ranges_and_bodies() {
+        let markdown =
+            "finding\n\n<!-- lachesi:finding-lineage:abc -->\n<!-- lachesi:finding:def -->";
+        let bitbucket: BbPublicationComment = serde_json::from_value(json!({
+            "id": 9_223_372_036_854_775_000_u64,
+            "content": { "raw": markdown },
+            "inline": {
+                "path": "src/lib.rs",
+                "start_to": 12,
+                "to": 14
+            }
+        }))
+        .expect("Bitbucket reconciliation comment");
+        let bitbucket =
+            provider_finding_comment_from_bitbucket(bitbucket).expect("Bitbucket mapping");
+        assert_eq!(bitbucket.identity.comment_id, "9223372036854775000");
+        assert_eq!(
+            bitbucket.anchor,
+            Some(FindingLineRange {
+                path: "src/lib.rs".to_string(),
+                start_line: 12,
+                end_line: 14,
+                side: FindingAnchorSide::New,
+            })
+        );
+        assert_eq!(bitbucket.markdown, markdown);
+
+        let github: GhPublicationComment = serde_json::from_value(json!({
+            "id": "opaque-comment",
+            "body": markdown,
+            "path": "src/lib.rs",
+            "original_start_line": 20,
+            "original_line": 22,
+            "side": "LEFT"
+        }))
+        .expect("GitHub reconciliation comment");
+        let github = provider_finding_comment_from_github(github).expect("GitHub mapping");
+        assert_eq!(github.identity.comment_id, "opaque-comment");
+        assert_eq!(
+            github.anchor,
+            Some(FindingLineRange {
+                path: "src/lib.rs".to_string(),
+                start_line: 20,
+                end_line: 22,
+                side: FindingAnchorSide::Old,
+            })
+        );
+        assert_eq!(github.markdown, markdown);
+    }
+
+    #[test]
+    fn reconciliation_comment_mappers_allow_missing_provider_anchors() {
+        let markdown =
+            "finding\n\n<!-- lachesi:finding-lineage:abc -->\n<!-- lachesi:finding:def -->";
+        let bitbucket: BbPublicationComment = serde_json::from_value(json!({
+            "id": 42,
+            "content": { "raw": markdown }
+        }))
+        .expect("Bitbucket anchorless comment");
+        let github: GhPublicationComment = serde_json::from_value(json!({
+            "id": 43,
+            "body": markdown
+        }))
+        .expect("GitHub anchorless comment");
+
+        assert_eq!(
+            provider_finding_comment_from_bitbucket(bitbucket)
+                .expect("Bitbucket mapping")
+                .anchor,
+            None
+        );
+        assert_eq!(
+            provider_finding_comment_from_github(github)
+                .expect("GitHub mapping")
+                .anchor,
+            None
+        );
+    }
+
+    #[test]
+    fn github_reconciliation_comment_must_belong_to_the_target_pull_request() {
+        let comment: GhPublicationComment = serde_json::from_value(json!({
+            "id": 99,
+            "body": "finding",
+            "pull_request_url": "https://api.github.com/repos/acme/payments/pulls/42"
+        }))
+        .expect("GitHub review comment");
+
+        assert!(github_comment_matches_pull_request(
+            &comment,
+            "https://api.github.com/repos/ACME/PAYMENTS/pulls/42"
+        ));
+        assert!(!github_comment_matches_pull_request(
+            &comment,
+            "https://api.github.com/repos/acme/payments/pulls/43"
+        ));
+    }
+
+    #[test]
+    fn reconciliation_update_bodies_preserve_markdown() {
+        let lineage = "a".repeat(64);
+        let exact = "b".repeat(64);
+        let markdown = format!(
+            "finding\n\n<!-- lachesi:finding-lineage:{lineage} -->\n<!-- lachesi:finding:{exact} -->"
+        );
+        assert_eq!(
+            bitbucket_reconciliation_update_body(&markdown),
+            json!({ "content": { "raw": markdown } })
+        );
+        assert_eq!(
+            github_reconciliation_update_body(&markdown),
+            json!({ "body": markdown })
         );
     }
 

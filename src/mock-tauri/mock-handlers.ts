@@ -8,6 +8,9 @@ import type {
   BranchStatus,
   BranchSyncResult,
   FindingPublicationRequest,
+  FindingReconciliationAction,
+  FindingReconciliationRequest,
+  FindingReconciliationSummary,
   PrComment,
   PrFilePreview,
   PrListFilter,
@@ -767,7 +770,7 @@ function mockPublicationMarkdown(request: FindingPublicationRequest): string {
     if (!request.suggestedFix.endsWith("\n")) markdown += "\n";
     markdown += fence;
   }
-  return `${markdown}\n\n<!-- lachesi:finding:${"0".repeat(64)} -->`;
+  return `${markdown}\n\n<!-- lachesi:finding-lineage:${"0".repeat(64)} -->\n<!-- lachesi:finding:${"0".repeat(64)} -->`;
 }
 
 function findingPublicationKey(request: FindingPublicationRequest): string {
@@ -780,6 +783,14 @@ function findingPublicationKey(request: FindingPublicationRequest): string {
     request.baseSha.toLowerCase(),
     request.headSha.toLowerCase(),
     request.findingFingerprint,
+    request.anchor.path,
+    request.anchor.startLine,
+    request.anchor.endLine,
+    request.anchor.side,
+    request.title,
+    request.body,
+    request.severity,
+    request.suggestedFix ?? null,
   ]);
 }
 
@@ -860,6 +871,96 @@ export function publishMockReviewFinding(
   } satisfies PublishedCommentIdentity;
   mockPublishedFindings.set(key, published);
   return published;
+}
+
+function reconcileMockReviewFindings(
+  request: FindingReconciliationRequest,
+): FindingReconciliationSummary {
+  const currentHead = mockPullRequestDetailState.sourceCommitHash?.toLowerCase();
+  const currentBase = mockPullRequestDetailState.destinationCommitHash?.toLowerCase();
+  if (
+    request.pullRequestId !== mockPullRequestDetailState.id ||
+    request.headSha.toLowerCase() !== currentHead ||
+    request.baseSha.toLowerCase() !== currentBase
+  ) {
+    throw new Error(
+      "The pull request changed after this review. Refresh and rerun the review before reconciling.",
+    );
+  }
+  if (
+    request.currentFindings.some(
+      (finding) =>
+        finding.tenantId !== request.tenantId ||
+        finding.provider !== request.provider ||
+        finding.workspace.toLowerCase() !== request.workspace.toLowerCase() ||
+        finding.repository.toLowerCase() !== request.repository.toLowerCase() ||
+        finding.pullRequestId !== request.pullRequestId ||
+        finding.baseSha.toLowerCase() !== request.baseSha.toLowerCase() ||
+        finding.headSha.toLowerCase() !== request.headSha.toLowerCase(),
+    )
+  ) {
+    throw new Error("Current findings do not match the reconciliation target.");
+  }
+  const tracked = new Map(
+    request.trackedComments.map((comment) => [comment.findingFingerprint, comment.commentId]),
+  );
+  const actions: FindingReconciliationAction[] = [];
+  for (const finding of request.currentFindings) {
+    const previousCommentId = tracked.get(finding.findingFingerprint) ?? null;
+    tracked.delete(finding.findingFingerprint);
+    if (previousCommentId) {
+      actions.push({
+        findingFingerprint: finding.findingFingerprint,
+        kind: "updated",
+        previousCommentId,
+        commentId: previousCommentId,
+        providerMutated: true,
+        error: null,
+      });
+      continue;
+    }
+    const published = publishMockReviewFinding(finding);
+    actions.push({
+      findingFingerprint: finding.findingFingerprint,
+      kind: "created",
+      previousCommentId: null,
+      commentId: published.commentId,
+      providerMutated: true,
+      error: null,
+    });
+  }
+  for (const [findingFingerprint, commentId] of tracked) {
+    actions.push({
+      findingFingerprint,
+      kind: "resolved",
+      previousCommentId: commentId,
+      commentId,
+      providerMutated: true,
+      error: null,
+    });
+  }
+  const count = (kind: FindingReconciliationAction["kind"]) =>
+    actions.filter((action) => action.kind === kind).length;
+  return {
+    schemaVersion: "v1",
+    status: "succeeded",
+    tenantId: request.tenantId,
+    provider: request.provider,
+    workspace: request.workspace,
+    repository: request.repository,
+    pullRequestId: request.pullRequestId,
+    baseSha: request.baseSha,
+    headSha: request.headSha,
+    counts: {
+      unchanged: count("unchanged"),
+      created: count("created"),
+      updated: count("updated"),
+      resolved: count("resolved"),
+      reopened: count("reopened"),
+      failed: count("failed"),
+    },
+    actions,
+  };
 }
 
 /**
@@ -1148,6 +1249,13 @@ export const mockHandlers: Record<string, Handler> = {
       throw new Error("Structured finding publication requires a request.");
     }
     return publishMockReviewFinding(request);
+  },
+  reconcile_review_findings: (args) => {
+    const request = args?.request as FindingReconciliationRequest | undefined;
+    if (!request) {
+      throw new Error("Structured finding reconciliation requires a request.");
+    }
+    return reconcileMockReviewFindings(request);
   },
   create_inline_comment: (args) => {
     const req = (args?.req ?? {}) as NewInlineCommentArgs;

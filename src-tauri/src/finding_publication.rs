@@ -174,6 +174,51 @@ pub trait ProviderInlineCommentApi {
     ) -> Result<(), ProviderPublicationApiError>;
 }
 
+impl<T> ProviderInlineCommentApi for &T
+where
+    T: ProviderInlineCommentApi + ?Sized,
+{
+    fn current_revision(
+        &self,
+        target: &ProviderPublicationTarget,
+    ) -> Result<ProviderPullRequestRevision, ProviderPublicationApiError> {
+        (**self).current_revision(target)
+    }
+
+    fn find_inline_comment(
+        &self,
+        target: &ProviderPublicationTarget,
+        marker: &str,
+        expected: &ProviderInlineCommentPayload,
+    ) -> Result<Option<ProviderCommentIdentity>, ProviderPublicationApiError> {
+        (**self).find_inline_comment(target, marker, expected)
+    }
+
+    fn find_comment_by_marker(
+        &self,
+        target: &ProviderPublicationTarget,
+        marker: &str,
+    ) -> Result<Option<ProviderCommentIdentity>, ProviderPublicationApiError> {
+        (**self).find_comment_by_marker(target, marker)
+    }
+
+    fn create_inline_comment(
+        &self,
+        target: &ProviderPublicationTarget,
+        payload: &ProviderInlineCommentPayload,
+    ) -> Result<ProviderCommentIdentity, ProviderPublicationApiError> {
+        (**self).create_inline_comment(target, payload)
+    }
+
+    fn delete_comment(
+        &self,
+        target: &ProviderPublicationTarget,
+        identity: &ProviderCommentIdentity,
+    ) -> Result<(), ProviderPublicationApiError> {
+        (**self).delete_comment(target, identity)
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ProviderPublicationApiErrorKind {
     InvalidAnchor,
@@ -241,6 +286,54 @@ pub trait FindingPublicationStore {
 
     /// Releases a failed attempt only when the caller still owns the lease.
     fn release(&self, lease: &FindingPublicationLease) -> Result<(), String>;
+
+    /// Confirms that an exact marker and provider comment were durably
+    /// published for the requested target and finding lineage.
+    fn owns_published_comment(
+        &self,
+        marker: &str,
+        identity: &ProviderCommentIdentity,
+        target: &ProviderPublicationTarget,
+        finding_fingerprint: &str,
+    ) -> Result<bool, String> {
+        let _ = (marker, identity, target, finding_fingerprint);
+        Ok(false)
+    }
+}
+
+impl<T> FindingPublicationStore for &T
+where
+    T: FindingPublicationStore + ?Sized,
+{
+    fn reserve(
+        &self,
+        request: &FindingPublicationRequest,
+        marker: &str,
+    ) -> Result<FindingPublicationReservation, String> {
+        (**self).reserve(request, marker)
+    }
+
+    fn complete(
+        &self,
+        lease: &FindingPublicationLease,
+        identity: &ProviderCommentIdentity,
+    ) -> Result<(), String> {
+        (**self).complete(lease, identity)
+    }
+
+    fn release(&self, lease: &FindingPublicationLease) -> Result<(), String> {
+        (**self).release(lease)
+    }
+
+    fn owns_published_comment(
+        &self,
+        marker: &str,
+        identity: &ProviderCommentIdentity,
+        target: &ProviderPublicationTarget,
+        finding_fingerprint: &str,
+    ) -> Result<bool, String> {
+        (**self).owns_published_comment(marker, identity, target, finding_fingerprint)
+    }
 }
 
 #[derive(Debug, Default, Clone, Copy)]
@@ -265,6 +358,21 @@ impl FindingPublicationStore for SqliteFindingPublicationStore {
 
     fn release(&self, lease: &FindingPublicationLease) -> Result<(), String> {
         review_storage::release_finding_publication(lease)
+    }
+
+    fn owns_published_comment(
+        &self,
+        marker: &str,
+        identity: &ProviderCommentIdentity,
+        target: &ProviderPublicationTarget,
+        finding_fingerprint: &str,
+    ) -> Result<bool, String> {
+        review_storage::finding_publication_owns_comment(
+            marker,
+            identity,
+            target,
+            finding_fingerprint,
+        )
     }
 }
 
@@ -443,7 +551,7 @@ impl FindingPublicationRequest {
         Ok(())
     }
 
-    fn target(&self) -> ProviderPublicationTarget {
+    pub(crate) fn target(&self) -> ProviderPublicationTarget {
         ProviderPublicationTarget {
             tenant_id: self.tenant_id.clone(),
             provider: self.provider,
@@ -453,7 +561,7 @@ impl FindingPublicationRequest {
         }
     }
 
-    fn provider_payload(&self, marker: &str) -> ProviderInlineCommentPayload {
+    pub(crate) fn provider_payload(&self, marker: &str) -> ProviderInlineCommentPayload {
         ProviderInlineCommentPayload {
             head_sha: self.head_sha.clone(),
             path: self.anchor.path.clone(),
@@ -464,7 +572,7 @@ impl FindingPublicationRequest {
         }
     }
 
-    fn matches_revision(&self, revision: &ProviderPullRequestRevision) -> bool {
+    pub(crate) fn matches_revision(&self, revision: &ProviderPullRequestRevision) -> bool {
         revision.head_sha.eq_ignore_ascii_case(&self.head_sha)
             && revision.base_sha.eq_ignore_ascii_case(&self.base_sha)
     }
@@ -496,6 +604,17 @@ pub fn finding_marker(request: &FindingPublicationRequest) -> String {
     let base_sha = request.base_sha.to_ascii_lowercase();
     let workspace = request.workspace.to_ascii_lowercase();
     let repository = request.repository.to_ascii_lowercase();
+    let start_line = request.anchor.start_line.to_string();
+    let end_line = request.anchor.end_line.to_string();
+    let anchor_side = match request.anchor.side {
+        FindingAnchorSide::Old => "old",
+        FindingAnchorSide::New => "new",
+    };
+    let suggested_fix_presence = if request.suggested_fix.is_some() {
+        "present"
+    } else {
+        "absent"
+    };
     let mut hasher = Sha256::new();
     for part in [
         request.tenant_id.as_str(),
@@ -506,12 +625,59 @@ pub fn finding_marker(request: &FindingPublicationRequest) -> String {
         base_sha.as_str(),
         head_sha.as_str(),
         request.finding_fingerprint.as_str(),
+        request.anchor.path.as_str(),
+        start_line.as_str(),
+        end_line.as_str(),
+        anchor_side,
+        request.title.as_str(),
+        request.body.as_str(),
+        request.severity.label(),
+        suggested_fix_presence,
+        request.suggested_fix.as_deref().unwrap_or(""),
     ] {
         hasher.update((part.len() as u64).to_be_bytes());
         hasher.update(part.as_bytes());
     }
     let digest = hasher.finalize();
     format!("<!-- lachesi:finding:{digest:x} -->")
+}
+
+pub fn finding_lineage_marker(request: &FindingPublicationRequest) -> String {
+    finding_lineage_marker_for(
+        &request.tenant_id,
+        request.provider,
+        &request.workspace,
+        &request.repository,
+        request.pull_request_id,
+        &request.finding_fingerprint,
+    )
+}
+
+pub(crate) fn finding_lineage_marker_for(
+    tenant_id: &str,
+    provider: PullRequestReviewEventProvider,
+    workspace: &str,
+    repository: &str,
+    pull_request_id: u64,
+    finding_fingerprint: &str,
+) -> String {
+    let pull_request_id = pull_request_id.to_string();
+    let workspace = workspace.to_ascii_lowercase();
+    let repository = repository.to_ascii_lowercase();
+    let mut hasher = Sha256::new();
+    for part in [
+        tenant_id,
+        provider.as_str(),
+        workspace.as_str(),
+        repository.as_str(),
+        pull_request_id.as_str(),
+        finding_fingerprint,
+    ] {
+        hasher.update((part.len() as u64).to_be_bytes());
+        hasher.update(part.as_bytes());
+    }
+    let digest = hasher.finalize();
+    format!("<!-- lachesi:finding-lineage:{digest:x} -->")
 }
 
 pub fn dry_run_publication_identity(
@@ -521,7 +687,7 @@ pub fn dry_run_publication_identity(
     Ok(request.published_identity("dry-run".to_string(), finding_marker(request)))
 }
 
-fn render_finding_markdown(request: &FindingPublicationRequest, marker: &str) -> String {
+pub(crate) fn render_finding_markdown(request: &FindingPublicationRequest, marker: &str) -> String {
     let mut markdown = format!(
         "**{}**\n\n{}\n\nSeverity: **{}**",
         request.title,
@@ -540,6 +706,8 @@ fn render_finding_markdown(request: &FindingPublicationRequest, marker: &str) ->
         markdown.push_str(&fence);
     }
     markdown.push_str("\n\n");
+    markdown.push_str(&finding_lineage_marker(request));
+    markdown.push('\n');
     markdown.push_str(marker);
     markdown
 }
@@ -1215,6 +1383,33 @@ mod tests {
         request.workspace = "ACME".to_string();
         request.repository = "PAYMENTS".to_string();
         assert_eq!(marker, finding_marker(&request));
+
+        request.anchor.start_line = 13;
+        assert_ne!(marker, finding_marker(&request));
+        request.anchor.start_line = 12;
+        request.body = "Updated finding body.".to_string();
+        assert_ne!(marker, finding_marker(&request));
+    }
+
+    #[test]
+    fn lineage_marker_stays_stable_across_review_revisions() {
+        let mut request = request(PullRequestReviewEventProvider::Github);
+        request.finding_fingerprint = "sensitive/source/path:12".to_string();
+        let lineage = finding_lineage_marker(&request);
+        assert!(!lineage.contains("sensitive/source/path"));
+        assert_eq!(
+            lineage.len(),
+            "<!-- lachesi:finding-lineage: -->".len() + 64
+        );
+
+        request.head_sha = "3333333333333333333333333333333333333333".to_string();
+        request.base_sha = "4444444444444444444444444444444444444444".to_string();
+        request.anchor.start_line = 99;
+        request.title = "Updated message".to_string();
+        assert_eq!(lineage, finding_lineage_marker(&request));
+
+        request.finding_fingerprint = "different-fingerprint".to_string();
+        assert_ne!(lineage, finding_lineage_marker(&request));
     }
 
     #[test]
@@ -1224,6 +1419,8 @@ mod tests {
         let markdown = render_finding_markdown(&request, "<!-- marker -->");
 
         assert!(markdown.contains("`````suggestion\nbefore\n````\nafter\n`````"));
+        assert!(markdown.contains("<!-- lachesi:finding-lineage:"));
+        assert!(markdown.ends_with("<!-- marker -->"));
     }
 
     #[test]

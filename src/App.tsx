@@ -19,7 +19,11 @@ import { useClosedPrAnalytics } from "@/hooks/useClosedPrAnalytics";
 import { useConfig } from "@/hooks/useConfig";
 import { useCredentials } from "@/hooks/useCredentials";
 import { authorKey, useCurrentUser } from "@/hooks/useCurrentUser";
-import { type PublishedDraftComment, useDraftComments } from "@/hooks/useDraftComments";
+import {
+  type PublishedDraftComment,
+  type PublishFindingDraftsResult,
+  useDraftComments,
+} from "@/hooks/useDraftComments";
 import { useMenuBarPrSync } from "@/hooks/useMenuBarPrSync";
 import { type PrGroup, usePullRequests } from "@/hooks/usePullRequests";
 import { useReviewReferences } from "@/hooks/useReviewReferences";
@@ -43,9 +47,13 @@ import {
   assertPullRequestMatchesReviewRun,
   buildFindingPublicationRequest,
   filterStageableAiReviewDraftComments,
+  latestReviewFindingFingerprintsForRevision,
+  latestTrackedFindingCommentId,
+  latestTrackedFindingComments,
+  selectTrackedFindingCommentsForBatch,
   summarizeActiveReviewFindings,
 } from "@/lib/reviewFindingPublication";
-import { publishReviewFinding, recordReviewFindingPublicationEvents } from "@/lib/reviewService";
+import { reconcileReviewFindings, recordReviewFindingPublicationEvents } from "@/lib/reviewService";
 import { tauriCall } from "@/lib/tauri";
 import type {
   AiLineQuestionContext,
@@ -56,6 +64,7 @@ import type {
   AiReviewRunState,
   AppSelection,
   DraftComment,
+  FindingReconciliationSummary,
   PrListFilter,
   PullRequestDetail,
   PullRequestSummary,
@@ -429,9 +438,39 @@ export default function App() {
       reviewRun,
       draft,
     });
-    const published = await publishReviewFinding(request);
+    const trackedCommentId = latestTrackedFindingCommentId(
+      aiReview.store,
+      request.findingFingerprint,
+    );
+    const reconciliation = await reconcileReviewFindings({
+      schemaVersion: "v1",
+      tenantId: request.tenantId,
+      provider: request.provider,
+      workspace: request.workspace,
+      repository: request.repository,
+      pullRequestId: request.pullRequestId,
+      baseSha: request.baseSha,
+      headSha: request.headSha,
+      trackedComments: trackedCommentId
+        ? [
+            {
+              findingFingerprint: request.findingFingerprint,
+              commentId: trackedCommentId,
+            },
+          ]
+        : [],
+      currentFindings: [request],
+    });
+    const action = reconciliation.actions.find(
+      (candidate) => candidate.findingFingerprint === request.findingFingerprint,
+    );
+    if (!action || action.kind === "failed" || !action.commentId) {
+      throw new Error(
+        action?.error?.message ?? "The structured finding was not reconciled with the provider.",
+      );
+    }
     return {
-      id: published.commentId,
+      id: action.commentId,
       createdOn: new Date().toISOString(),
     };
   };
@@ -454,6 +493,126 @@ export default function App() {
     ]);
   };
 
+  const publishStructuredFindingDrafts = async (
+    drafts: DraftComment[],
+  ): Promise<PublishFindingDraftsResult> => {
+    if (!activeSel || !aiReviewContext || drafts.length === 0) {
+      throw new Error("The structured finding reconciliation context is unavailable.");
+    }
+    const snapshot = await loadStablePullRequestReviewSnapshot({
+      workspace: activeSel.workspace,
+      repo: activeSel.repo,
+      provider: activeRepo?.provider ?? reviewProvider,
+      prId: activeSel.prId,
+    });
+    const comments = new Map<string, PublishedDraftComment>();
+    const failures = new Map<string, string>();
+    const errors: string[] = [];
+    const requests: Array<{
+      draft: DraftComment;
+      request: ReturnType<typeof buildFindingPublicationRequest>;
+    }> = [];
+    for (const draft of drafts) {
+      try {
+        const reviewRun =
+          aiReview.store?.reviewRuns?.find(
+            (candidate) => candidate.id === draft.findingRef?.reviewRunId,
+          ) ?? null;
+        if (!reviewRun) {
+          throw new Error("A review run linked to the staged finding is no longer available.");
+        }
+        assertPullRequestMatchesReviewRun(reviewRun, snapshot.pr);
+        requests.push({
+          draft,
+          request: buildFindingPublicationRequest({
+            provider: activeRepo?.provider ?? reviewProvider,
+            workspace: activeSel.workspace,
+            repo: activeSel.repo,
+            pr: snapshot.pr,
+            reviewRun,
+            draft,
+          }),
+        });
+      } catch (error) {
+        failures.set(draft.localId, error instanceof Error ? error.message : String(error));
+      }
+    }
+
+    const batches = new Map<string, typeof requests>();
+    for (const entry of requests) {
+      const key = `${entry.request.baseSha.toLowerCase()}:${entry.request.headSha.toLowerCase()}`;
+      const batch = batches.get(key);
+      if (batch) batch.push(entry);
+      else batches.set(key, [entry]);
+    }
+
+    for (const batch of batches.values()) {
+      const first = batch[0];
+      if (!first) continue;
+      const stagedFingerprints = new Set(batch.map(({ request }) => request.findingFingerprint));
+      const currentFingerprints = latestReviewFindingFingerprintsForRevision(
+        aiReview.store,
+        first.request.baseSha,
+        first.request.headSha,
+      );
+      for (const fingerprint of stagedFingerprints) currentFingerprints.add(fingerprint);
+      const trackedComments = selectTrackedFindingCommentsForBatch(
+        latestTrackedFindingComments(aiReview.store),
+        currentFingerprints,
+        stagedFingerprints,
+      );
+      let reconciliation: FindingReconciliationSummary;
+      try {
+        reconciliation = await reconcileReviewFindings({
+          schemaVersion: "v1",
+          tenantId: first.request.tenantId,
+          provider: first.request.provider,
+          workspace: first.request.workspace,
+          repository: first.request.repository,
+          pullRequestId: first.request.pullRequestId,
+          baseSha: first.request.baseSha,
+          headSha: first.request.headSha,
+          trackedComments,
+          currentFindings: batch.map(({ request }) => request),
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        for (const { draft } of batch) failures.set(draft.localId, message);
+        continue;
+      }
+
+      for (const { draft, request } of batch) {
+        const action = reconciliation.actions.find(
+          (candidate) => candidate.findingFingerprint === request.findingFingerprint,
+        );
+        if (!action || action.kind === "failed" || !action.commentId) {
+          failures.set(
+            draft.localId,
+            action?.error?.message ?? "A structured finding was not reconciled with the provider.",
+          );
+          continue;
+        }
+        comments.set(draft.localId, {
+          id: action.commentId,
+          createdOn: new Date().toISOString(),
+        });
+      }
+      errors.push(
+        ...reconciliation.actions
+          .filter(
+            (action) =>
+              action.kind === "failed" && !stagedFingerprints.has(action.findingFingerprint),
+          )
+          .map(
+            (action) =>
+              action.error?.message ??
+              `Finding ${action.findingFingerprint} could not be reconciled with the provider.`,
+          ),
+      );
+    }
+    return { comments, failures, errors };
+  };
+
   const draftComments = useDraftComments(
     activeRepo?.provider ?? reviewProvider,
     activeSel?.workspace ?? null,
@@ -461,6 +620,7 @@ export default function App() {
     activeSel?.prId ?? null,
     {
       publishFindingDraft: publishStructuredFindingDraft,
+      publishFindingDrafts: publishStructuredFindingDrafts,
       onFindingDraftPublished: recordPublishedFindingDraft,
       onDraftRemoved: removeFindingDraft,
       onDraftsDiscarded: async (drafts) => {
