@@ -1,7 +1,7 @@
 ---
 adr: 0009
 title: Render bounded image diffs in supported terminals
-status: Accepted
+status: Implemented
 date: 2026-07-28
 owner: default-agent
 supersedes:
@@ -87,9 +87,11 @@ metadata fallback when graphics are unsupported or decoding fails.
 | Date | Revision | Author | Change |
 |------|----------|--------|--------|
 | 2026-07-28 | r1 | default-agent | Accepted bounded terminal image diff rendering. |
+| 2026-07-28 | r2 | default-agent | Marked implemented after the feature shipped through PR #129. |
 
 ## Approvals
 
 | Role | Name | Date | Signature |
 |------|------|------|-----------|
 | Maintainer | fdg | 2026-07-28 | approved through issue prioritization and implementation instruction |
+| Maintainer | fdg | 2026-07-28 | implementation verified through merged PR #129 |
