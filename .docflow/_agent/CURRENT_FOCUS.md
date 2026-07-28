@@ -11,7 +11,7 @@ If status files and git disagree, git is authoritative; correct this file.
 - **Branch:** `agent/signed-organization-policy`
 - **Active item:** GitHub issue #99 and `.docflow/plan/todo/0004-shared-review-service-program.md`
 - **Blockers:** none; use the available SSH key for signed commits.
-- **Uncommitted work:** organization policy contract, verification, precedence, cache, and review metadata.
+- **Uncommitted work:** delivery log and final branch-review state before PR/merge.
 
 ## Last shipped
 
