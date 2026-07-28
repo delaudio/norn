@@ -13,3 +13,4 @@ metadata.
 | 0006 | Support a terminal UI as a second local review interface | Accepted | 2026-07-23 | default-agent | tui, cli, rust, review-ui |
 | 0007 | Run reviews through a headless local CLI | Implemented | 2026-07-24 | default-agent | cli, headless, review, automation, codex |
 | 0008 | Run shared reviews as an opt-in tenant-isolated service | Accepted | 2026-07-27 | default-agent | service, trust, multi-tenant, open-core, review |
+| 0009 | Render bounded image diffs in supported terminals | Accepted | 2026-07-28 | default-agent | tui, diff, images, terminal |

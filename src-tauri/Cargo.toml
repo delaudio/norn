@@ -35,6 +35,8 @@ reqwest = { version = "0.12", default-features = false, features = ["blocking", 
 keyring = { version = "3", features = ["apple-native"] }
 dirs = "5"
 ratatui = "0.29"
+ratatui-image = { version = "9.0.0", default-features = false, features = ["crossterm"] }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
 crossterm = "0.28"
 ctrlc = "3"
 tempfile = "3"
