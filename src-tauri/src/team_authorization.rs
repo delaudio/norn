@@ -440,12 +440,6 @@ fn denied_reason(
     if request.actor.organization_id != request.organization.id {
         return Some(TeamAuthorizationDeniedReason::OrganizationMismatch);
     }
-    if request.actor.role == TeamRole::Unknown {
-        return Some(TeamAuthorizationDeniedReason::UnknownRole);
-    }
-    if permission == TeamPermission::Unknown {
-        return Some(TeamAuthorizationDeniedReason::UnknownOperation);
-    }
     if request.operation.requires_repository() && request.repository.is_none() {
         return Some(TeamAuthorizationDeniedReason::RepositoryScopeRequired);
     }
@@ -468,6 +462,12 @@ fn denied_reason(
             return Some(TeamAuthorizationDeniedReason::TeamMismatch);
         }
     }
+    if request.actor.role == TeamRole::Unknown {
+        return Some(TeamAuthorizationDeniedReason::UnknownRole);
+    }
+    if permission == TeamPermission::Unknown {
+        return Some(TeamAuthorizationDeniedReason::UnknownOperation);
+    }
     (!request.actor.role.allows(permission))
         .then_some(TeamAuthorizationDeniedReason::PermissionDenied)
 }
@@ -478,7 +478,7 @@ fn authorization_denied_audit_event(
     reason: TeamAuthorizationDeniedReason,
 ) -> AdministrativeAuditEvent {
     AdministrativeAuditEvent {
-        schema_version: AdministrativeAuditSchemaVersion::V1,
+        schema_version: AdministrativeAuditSchemaVersion::V2,
         delivery_id: format!("authorization-denied:{}", request.audit.attempt_id),
         tenant_id: request.organization.id.clone(),
         occurred_at: request.audit.occurred_at_ms.to_string(),
@@ -490,16 +490,7 @@ fn authorization_denied_audit_event(
             },
             id: request.actor.id.clone(),
         },
-        repository: request
-            .repository
-            .as_ref()
-            .filter(|_| request.operation.supports_repository_scope())
-            .map(|repository| AdministrativeAuditRepositoryScope {
-                provider: repository.provider,
-                workspace: repository.workspace.clone(),
-                repo: repository.repo.clone(),
-                pr_id: None,
-            }),
+        repository: audited_repository(request),
         action: AdministrativeAuditAction::AuthorizationDenied,
         target: AdministrativeAuditTarget {
             kind: AdministrativeAuditTargetKind::AuthorizationRequest,
@@ -513,6 +504,23 @@ fn authorization_denied_audit_event(
         outcome: AdministrativeAuditOutcome::Denied,
         correlation_id: request.audit.correlation_id.clone(),
     }
+}
+
+fn audited_repository(
+    request: &TeamAuthorizationRequest,
+) -> Option<AdministrativeAuditRepositoryScope> {
+    let repository = request.repository.as_ref()?;
+    let team = request.team.as_ref()?;
+    (request.operation.supports_repository_scope()
+        && repository.organization_id == request.organization.id
+        && team.organization_id == request.organization.id
+        && repository.team_id == team.id)
+        .then(|| AdministrativeAuditRepositoryScope {
+            provider: repository.provider,
+            workspace: repository.workspace.clone(),
+            repo: repository.repo.clone(),
+            pr_id: None,
+        })
 }
 
 const fn permission_name(permission: TeamPermission) -> &'static str {
@@ -767,6 +775,45 @@ mod tests {
                 TeamAuthorizationDecision::Denied { reason, .. } if reason == expected_reason
             ));
             assert_eq!(sink.events.borrow().len(), 1);
+        }
+    }
+
+    #[test]
+    fn scope_mismatches_precede_unknown_role_and_operation_denials() {
+        let mut unknown_role = request(TeamRole::Unknown, TeamOperation::TriggerReview);
+        unknown_role
+            .repository
+            .as_mut()
+            .expect("repository")
+            .organization_id = "tenant-other".to_string();
+
+        let mut unknown_operation = request(TeamRole::Admin, TeamOperation::TriggerReview);
+        unknown_operation.operation = TeamOperation::Unknown;
+        unknown_operation
+            .repository
+            .as_mut()
+            .expect("repository")
+            .team_id = "team-other".to_string();
+
+        for (request, expected_reason) in [
+            (
+                unknown_role,
+                TeamAuthorizationDeniedReason::OrganizationMismatch,
+            ),
+            (
+                unknown_operation,
+                TeamAuthorizationDeniedReason::TeamMismatch,
+            ),
+        ] {
+            let sink = MemoryAuditSink::default();
+            let decision = authorize_team_operation(&request, &sink).expect("scope decision");
+            assert!(matches!(
+                decision,
+                TeamAuthorizationDecision::Denied { reason, .. } if reason == expected_reason
+            ));
+            let events = sink.events.borrow();
+            assert_eq!(events.len(), 1);
+            assert!(events[0].repository.is_none());
         }
     }
 

@@ -15,6 +15,8 @@ pub const REDACTED_AUDIT_VALUE: &str = "[redacted]";
 pub enum AdministrativeAuditSchemaVersion {
     #[serde(rename = "v1")]
     V1,
+    #[serde(rename = "v2")]
+    V2,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -191,6 +193,12 @@ impl AdministrativeAuditEvent {
         validate_identifier("deliveryId", &self.delivery_id)?;
         validate_identifier("tenantId", &self.tenant_id)?;
         validate_timestamp(&self.occurred_at)?;
+        if self.schema_version == AdministrativeAuditSchemaVersion::V1 && self.repository.is_none()
+        {
+            return Err(AdministrativeAuditValidationError::MissingField(
+                "repository",
+            ));
+        }
         if let Some(repository) = &self.repository {
             validate_identifier("workspace", &repository.workspace)?;
             validate_identifier("repo", &repository.repo)?;
@@ -431,6 +439,25 @@ mod tests {
         let mut unknown = serde_json::to_value(event).expect("serialize");
         unknown["sourceCode"] = json!("secret");
         assert!(serde_json::from_value::<AdministrativeAuditEvent>(unknown).is_err());
+    }
+
+    #[test]
+    fn v2_allows_explicit_organization_scoped_events_without_changing_v1() {
+        let mut v1 = audit_event();
+        v1.repository = None;
+        assert_eq!(
+            v1.prepare_for_storage(),
+            Err(AdministrativeAuditValidationError::MissingField(
+                "repository"
+            ))
+        );
+
+        let mut v2 = v1;
+        v2.schema_version = AdministrativeAuditSchemaVersion::V2;
+        let prepared = v2.prepare_for_storage().expect("prepared v2 event");
+        let value = serde_json::to_value(prepared).expect("serialize v2 event");
+        assert_eq!(value["schemaVersion"], "v2");
+        assert!(value.get("repository").is_none());
     }
 
     #[test]

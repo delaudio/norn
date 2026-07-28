@@ -60,6 +60,10 @@ range as administrative audit events.
 Every valid denied request is converted to an administrative audit event with
 the `authorization_denied` action and `denied` outcome before it reaches the
 configured audit sink. Organization-only denials omit repository scope.
+Authorization denials use administrative audit schema `v2`, which adds
+organization-scoped events while preserving the required repository field and
+stable wire shape of existing `v1` events. A mismatched repository or team is
+also omitted from the denial audit rather than crossing the tenant boundary.
 
 Only bounded identifiers, operation, permission, denial reason, and correlation
 metadata are eligible for storage. The existing audit redaction boundary runs
