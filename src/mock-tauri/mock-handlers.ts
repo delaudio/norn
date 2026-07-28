@@ -20,6 +20,7 @@ import type {
   RepositoryFileContent,
   RepositoryFileDiff,
   RepositoryFileEntry,
+  ReviewEffectivenessFilter,
   ReviewFinding,
   ReviewFindingPublication,
   ReviewFindingPublicationEvent,
@@ -33,6 +34,7 @@ import {
   mockPullRequestDetail,
   mockPullRequests,
   mockRawDiff,
+  mockReviewEffectivenessReport,
 } from "./fixtures";
 
 type Handler = (args?: Record<string, unknown>) => unknown;
@@ -1194,6 +1196,24 @@ export const mockHandlers: Record<string, Handler> = {
   },
 
   list_closed_pr_metrics: () => ({ metrics: mockClosedPrMetrics, syncedCount: 0 }),
+  get_review_effectiveness_metrics: (args) => {
+    const filter = (args?.filter ??
+      mockReviewEffectivenessReport.filter) as ReviewEffectivenessFilter;
+    const selectedRepository = mockReviewEffectivenessReport.repositories.find(
+      (repository) =>
+        repository.provider === filter.provider &&
+        repository.workspace === filter.workspace &&
+        repository.repo === filter.repo,
+    );
+    return {
+      ...mockReviewEffectivenessReport,
+      filter,
+      summary: selectedRepository?.summary ?? mockReviewEffectivenessReport.summary,
+      repositories: selectedRepository
+        ? [selectedRepository]
+        : mockReviewEffectivenessReport.repositories,
+    };
+  },
   sync_closed_pr_metrics: (args) => {
     const updatedAfter = String(
       (args?.options as { updatedAfter?: string } | undefined)?.updatedAfter ?? "",

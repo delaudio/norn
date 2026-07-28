@@ -5,6 +5,7 @@ import type {
   PrComment,
   PullRequestDetail,
   PullRequestSummary,
+  ReviewEffectivenessReport,
 } from "@/types";
 
 export const mockConfig: AppConfig = {
@@ -278,6 +279,140 @@ export const mockClosedPrMetrics: ClosedPrMetric[] = [
     syncedAt: "1782920000000",
   },
 ];
+
+export const mockReviewEffectivenessReport: ReviewEffectivenessReport = {
+  schemaVersion: "lachesi.review-effectiveness.v1",
+  filter: {
+    tenantId: "local",
+    provider: "bitbucket",
+  },
+  summary: {
+    reviewCount: 48,
+    findingCount: 126,
+    findingsBySeverity: [
+      { key: "critical", count: 4 },
+      { key: "high", count: 18 },
+      { key: "medium", count: 57 },
+      { key: "low", count: 47 },
+    ],
+    findingsByCategory: [
+      { key: "correctness", count: 41 },
+      { key: "maintainability", count: 32 },
+      { key: "security", count: 18 },
+      { key: "test", count: 35 },
+    ],
+    feedback: {
+      eligibleFindings: 126,
+      findingsWithFeedback: 101,
+      findingsWithoutFeedback: 25,
+      acceptedFindings: 72,
+      falsePositiveFindings: 9,
+      fixedFindings: 54,
+      dismissedFindings: 11,
+      reopenedFindings: 2,
+      coverageRate: { numerator: 101, denominator: 126, basisPoints: 8015 },
+      acceptanceRate: { numerator: 72, denominator: 126, basisPoints: 5714 },
+      falsePositiveRate: { numerator: 9, denominator: 126, basisPoints: 714 },
+      fixedRate: { numerator: 54, denominator: 126, basisPoints: 4285 },
+    },
+    timeToFirstReview: {
+      sampleCount: 41,
+      totalMs: 174_660_000,
+      averageMs: 4_260_000,
+      medianMs: 3_480_000,
+      minimumMs: 420_000,
+      maximumMs: 21_600_000,
+    },
+  },
+  repositories: [
+    {
+      provider: "bitbucket",
+      workspace: "example-workspace",
+      repo: "frontend-app",
+      summary: {
+        reviewCount: 31,
+        findingCount: 82,
+        findingsBySeverity: [
+          { key: "critical", count: 1 },
+          { key: "high", count: 10 },
+          { key: "medium", count: 39 },
+          { key: "low", count: 32 },
+        ],
+        findingsByCategory: [
+          { key: "correctness", count: 27 },
+          { key: "maintainability", count: 24 },
+          { key: "security", count: 8 },
+          { key: "test", count: 23 },
+        ],
+        feedback: {
+          eligibleFindings: 82,
+          findingsWithFeedback: 70,
+          findingsWithoutFeedback: 12,
+          acceptedFindings: 53,
+          falsePositiveFindings: 5,
+          fixedFindings: 41,
+          dismissedFindings: 7,
+          reopenedFindings: 1,
+          coverageRate: { numerator: 70, denominator: 82, basisPoints: 8536 },
+          acceptanceRate: { numerator: 53, denominator: 82, basisPoints: 6463 },
+          falsePositiveRate: { numerator: 5, denominator: 82, basisPoints: 609 },
+          fixedRate: { numerator: 41, denominator: 82, basisPoints: 5000 },
+        },
+        timeToFirstReview: {
+          sampleCount: 27,
+          totalMs: 99_900_000,
+          averageMs: 3_700_000,
+          medianMs: 3_180_000,
+          minimumMs: 420_000,
+          maximumMs: 14_400_000,
+        },
+      },
+    },
+    {
+      provider: "bitbucket",
+      workspace: "example-workspace",
+      repo: "backend-api",
+      summary: {
+        reviewCount: 17,
+        findingCount: 44,
+        findingsBySeverity: [
+          { key: "critical", count: 3 },
+          { key: "high", count: 8 },
+          { key: "medium", count: 18 },
+          { key: "low", count: 15 },
+        ],
+        findingsByCategory: [
+          { key: "correctness", count: 14 },
+          { key: "maintainability", count: 8 },
+          { key: "security", count: 10 },
+          { key: "test", count: 12 },
+        ],
+        feedback: {
+          eligibleFindings: 44,
+          findingsWithFeedback: 31,
+          findingsWithoutFeedback: 13,
+          acceptedFindings: 19,
+          falsePositiveFindings: 4,
+          fixedFindings: 13,
+          dismissedFindings: 4,
+          reopenedFindings: 1,
+          coverageRate: { numerator: 31, denominator: 44, basisPoints: 7045 },
+          acceptanceRate: { numerator: 19, denominator: 44, basisPoints: 4318 },
+          falsePositiveRate: { numerator: 4, denominator: 44, basisPoints: 909 },
+          fixedRate: { numerator: 13, denominator: 44, basisPoints: 2954 },
+        },
+        timeToFirstReview: {
+          sampleCount: 14,
+          totalMs: 74_760_000,
+          averageMs: 5_340_000,
+          medianMs: 4_560_000,
+          minimumMs: 780_000,
+          maximumMs: 21_600_000,
+        },
+      },
+    },
+  ],
+};
 
 /** A small, real-shaped unified diff used for diff-viewer stories/tests. */
 export const mockRawDiff = `diff --git a/src/app/views/utils/buildRecordsUrlFromSavedView.ts b/src/app/views/utils/buildRecordsUrlFromSavedView.ts

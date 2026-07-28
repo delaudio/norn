@@ -189,6 +189,7 @@ pub struct ReviewLatencyMetrics {
     pub sample_count: u64,
     pub total_ms: u64,
     pub average_ms: Option<u64>,
+    pub median_ms: Option<u64>,
     pub minimum_ms: Option<u64>,
     pub maximum_ms: Option<u64>,
 }
@@ -590,7 +591,7 @@ fn first_review_latency(
             first_by_pr.insert(key, run);
         }
     }
-    let latencies = first_by_pr
+    let mut latencies = first_by_pr
         .into_values()
         .filter_map(|run| {
             let finished = run.finished_at_ms?;
@@ -599,12 +600,26 @@ fn first_review_latency(
                 .flatten()
         })
         .collect::<Vec<_>>();
+    latencies.sort_unstable();
     let total_ms = latencies.iter().copied().sum::<u64>();
     let sample_count = latencies.len() as u64;
+    let median_ms = if latencies.is_empty() {
+        None
+    } else if latencies.len() % 2 == 1 {
+        Some(latencies[latencies.len() / 2])
+    } else {
+        let upper = latencies.len() / 2;
+        Some(
+            ((u128::from(latencies[upper - 1]) + u128::from(latencies[upper])) / 2)
+                .try_into()
+                .expect("median of two u64 values fits in u64"),
+        )
+    };
     ReviewLatencyMetrics {
         sample_count,
         total_ms,
         average_ms: (sample_count > 0).then_some(total_ms / sample_count.max(1)),
+        median_ms,
         minimum_ms: latencies.iter().copied().min(),
         maximum_ms: latencies.iter().copied().max(),
     }
@@ -755,6 +770,7 @@ mod tests {
         assert_eq!(report.summary.feedback.coverage_rate.denominator, 0);
         assert_eq!(report.summary.feedback.coverage_rate.basis_points, None);
         assert_eq!(report.summary.time_to_first_review.sample_count, 0);
+        assert_eq!(report.summary.time_to_first_review.median_ms, None);
         assert!(report.repositories.is_empty());
     }
 
@@ -869,6 +885,44 @@ mod tests {
         assert_eq!(report.repositories[0].repo, "payments");
         assert_eq!(report.summary.time_to_first_review.sample_count, 1);
         assert_eq!(report.summary.time_to_first_review.average_ms, Some(200));
+        assert_eq!(report.summary.time_to_first_review.median_ms, Some(200));
+    }
+
+    #[test]
+    fn first_review_latency_reports_the_integer_median() {
+        let runs = vec![
+            run(
+                "tenant-acme",
+                "payments",
+                1,
+                "run-first",
+                1_000,
+                1_500,
+                vec![],
+            ),
+            run(
+                "tenant-acme",
+                "payments",
+                2,
+                "run-second",
+                2_000,
+                2_700,
+                vec![],
+            ),
+        ];
+
+        let report = aggregate_review_effectiveness(
+            &runs,
+            &[],
+            ReviewEffectivenessFilter {
+                tenant_id: "tenant-acme".to_string(),
+                ..ReviewEffectivenessFilter::default()
+            },
+        )
+        .expect("latency report");
+
+        assert_eq!(report.summary.time_to_first_review.sample_count, 2);
+        assert_eq!(report.summary.time_to_first_review.median_ms, Some(600));
     }
 
     #[test]
@@ -904,6 +958,7 @@ mod tests {
         );
         assert!(value["summary"]["feedback"]["coverageRate"]["numerator"].is_u64());
         assert!(value["summary"]["timeToFirstReview"]["sampleCount"].is_u64());
+        assert!(value["summary"]["timeToFirstReview"]["medianMs"].is_null());
         assert!(serde_json::from_value::<ReviewEffectivenessReport>(value).is_ok());
     }
 

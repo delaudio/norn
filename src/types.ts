@@ -75,6 +75,7 @@ export type AppSelection =
   | { kind: "pr-list" }
   | { kind: "overview" }
   | { kind: "closed-analytics" }
+  | { kind: "review-effectiveness" }
   | { kind: "settings" }
   | {
       kind: "pr";
@@ -623,6 +624,73 @@ export interface ClosedPrAnalyticsSyncOptions {
 
 export interface ClosedPrAnalyticsSyncResult extends ClosedPrAnalyticsSyncOptions {
   syncedCount: number;
+}
+
+export interface ReviewEffectivenessFilter {
+  tenantId: string;
+  provider?: ReviewProvider;
+  workspace?: string;
+  repo?: string;
+  fromMs?: number;
+  toMs?: number;
+}
+
+export interface ReviewMetricCount {
+  key: string;
+  count: number;
+}
+
+export interface ReviewMetricRate {
+  numerator: number;
+  denominator: number;
+  basisPoints: number | null;
+}
+
+export interface ReviewFeedbackMetrics {
+  eligibleFindings: number;
+  findingsWithFeedback: number;
+  findingsWithoutFeedback: number;
+  acceptedFindings: number;
+  falsePositiveFindings: number;
+  fixedFindings: number;
+  dismissedFindings: number;
+  reopenedFindings: number;
+  coverageRate: ReviewMetricRate;
+  acceptanceRate: ReviewMetricRate;
+  falsePositiveRate: ReviewMetricRate;
+  fixedRate: ReviewMetricRate;
+}
+
+export interface ReviewLatencyMetrics {
+  sampleCount: number;
+  totalMs: number;
+  averageMs: number | null;
+  medianMs: number | null;
+  minimumMs: number | null;
+  maximumMs: number | null;
+}
+
+export interface ReviewEffectivenessSummary {
+  reviewCount: number;
+  findingCount: number;
+  findingsBySeverity: ReviewMetricCount[];
+  findingsByCategory: ReviewMetricCount[];
+  feedback: ReviewFeedbackMetrics;
+  timeToFirstReview: ReviewLatencyMetrics;
+}
+
+export interface RepositoryReviewEffectiveness {
+  provider: ReviewProvider;
+  workspace: string;
+  repo: string;
+  summary: ReviewEffectivenessSummary;
+}
+
+export interface ReviewEffectivenessReport {
+  schemaVersion: "lachesi.review-effectiveness.v1";
+  filter: ReviewEffectivenessFilter;
+  summary: ReviewEffectivenessSummary;
+  repositories: RepositoryReviewEffectiveness[];
 }
 
 export type DiffViewMode = "unified" | "split" | "conversation";

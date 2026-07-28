@@ -1349,6 +1349,13 @@ pub fn review_effectiveness_metrics(
         .map_err(|error| error.to_string())
 }
 
+#[tauri::command]
+pub fn get_review_effectiveness_metrics(
+    filter: ReviewEffectivenessFilter,
+) -> Result<ReviewEffectivenessReport, String> {
+    review_effectiveness_metrics(filter)
+}
+
 fn stored_review_run_to_metrics(
     tenant_id: String,
     workspace: String,

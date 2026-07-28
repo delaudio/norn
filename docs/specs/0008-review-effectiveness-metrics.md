@@ -93,8 +93,9 @@ deterministic tie-breaker for equal completion times. Its latency is
 The first-review sample contributes only when that first completion falls
 inside the selected time range. Later reviews never replace an earlier review
 that falls outside the range. `timeToFirstReview` exposes sample count, total,
-integer average, minimum, and maximum milliseconds. Average, minimum, and
-maximum are `null` when there are no samples.
+integer average, median, minimum, and maximum milliseconds. For an even number
+of samples, the median is the integer midpoint of the two central values.
+Average, median, minimum, and maximum are `null` when there are no samples.
 
 This latency measures Lachesi review execution from stored run creation to
 completion. It does not claim to measure time from pull-request creation,
@@ -168,6 +169,7 @@ affect the requested report.
       "sampleCount": 1,
       "totalMs": 500,
       "averageMs": 500,
+      "medianMs": 500,
       "minimumMs": 500,
       "maximumMs": 500
     }

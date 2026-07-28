@@ -81,6 +81,12 @@ const ClosedPrAnalyticsPanel = lazy(() =>
   })),
 );
 
+const ReviewEffectivenessDashboard = lazy(() =>
+  import("@/components/overview/ReviewEffectivenessDashboard").then((module) => ({
+    default: module.ReviewEffectivenessDashboard,
+  })),
+);
+
 const EMPTY_REPOS: RepoRef[] = [];
 
 function lineQuestionLabel(context: AiLineQuestionContext): string {
@@ -644,6 +650,7 @@ export default function App() {
     if (
       selection.kind === "overview" ||
       selection.kind === "closed-analytics" ||
+      selection.kind === "review-effectiveness" ||
       selection.kind === "settings"
     ) {
       setRepositoriesPanelOpen(false);
@@ -762,7 +769,9 @@ export default function App() {
       }
       if (
         e.key === "Escape" &&
-        (selection.kind === "overview" || selection.kind === "closed-analytics")
+        (selection.kind === "overview" ||
+          selection.kind === "closed-analytics" ||
+          selection.kind === "review-effectiveness")
       ) {
         e.preventDefault();
         setSelection({ kind: "pr-list" });
@@ -806,6 +815,7 @@ export default function App() {
 
   const isOverview = selection.kind === "overview";
   const isClosedAnalytics = selection.kind === "closed-analytics";
+  const isReviewEffectiveness = selection.kind === "review-effectiveness";
   const sidebarAuthors = isClosedAnalytics ? closedAnalyticsAuthors : authors;
   const openPaneCount = [
     sidebarOpen,
@@ -1367,7 +1377,10 @@ export default function App() {
         onReviewProviderChange={handleReviewProviderChange}
         headerRight={<ThemeToggle theme={theme} onToggle={toggle} />}
         footer={
-          isOverview || isClosedAnalytics || selection.kind === "settings" ? undefined : (
+          isOverview ||
+          isClosedAnalytics ||
+          isReviewEffectiveness ||
+          selection.kind === "settings" ? undefined : (
             <BottomPaneBar
               panes={{
                 pullRequests: sidebarOpen,
@@ -1430,7 +1443,10 @@ export default function App() {
           ) : undefined
         }
         sidebar={
-          isOverview || selection.kind === "settings" || !sidebarOpen ? undefined : (
+          isOverview ||
+          isReviewEffectiveness ||
+          selection.kind === "settings" ||
+          !sidebarOpen ? undefined : (
             <PrSidebar
               groups={displayedGroups}
               filter={filter}
@@ -1466,9 +1482,24 @@ export default function App() {
               onRefresh={refresh}
               onBack={() => setSelection({ kind: "pr-list" })}
               onOpenClosedAnalytics={() => setSelection({ kind: "closed-analytics" })}
+              onOpenReviewEffectiveness={() => setSelection({ kind: "review-effectiveness" })}
               onSelectPr={(pr) => selectPullRequest(pr)}
               currentUser={currentUser}
             />
+          ) : isReviewEffectiveness ? (
+            <Suspense
+              fallback={
+                <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+                  Loading review effectiveness...
+                </div>
+              }
+            >
+              <ReviewEffectivenessDashboard
+                repositories={activeRepos}
+                provider={reviewProvider}
+                onBack={() => setSelection({ kind: "pr-list" })}
+              />
+            </Suspense>
           ) : isClosedAnalytics ? (
             <Suspense
               fallback={

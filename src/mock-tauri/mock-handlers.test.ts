@@ -3,6 +3,7 @@ import type {
   AiReviewStore,
   FindingPublicationRequest,
   FindingReconciliationSummary,
+  ReviewEffectivenessReport,
 } from "@/types";
 import { mockHandlers, publishMockReviewFinding } from "./mock-handlers";
 
@@ -160,5 +161,35 @@ describe("mock structured review runs", () => {
     });
 
     mockHandlers.delete_saved_review(target);
+  });
+});
+
+describe("mock review effectiveness metrics", () => {
+  it("echoes the filter and returns the selected repository summary", () => {
+    const report = mockHandlers.get_review_effectiveness_metrics({
+      filter: {
+        tenantId: "local",
+        provider: "bitbucket",
+        workspace: "example-workspace",
+        repo: "backend-api",
+        fromMs: 1_000,
+        toMs: 2_000,
+      },
+    }) as ReviewEffectivenessReport;
+
+    expect(report.filter).toEqual({
+      tenantId: "local",
+      provider: "bitbucket",
+      workspace: "example-workspace",
+      repo: "backend-api",
+      fromMs: 1_000,
+      toMs: 2_000,
+    });
+    expect(report.repositories).toHaveLength(1);
+    expect(report.repositories[0]).toMatchObject({
+      workspace: "example-workspace",
+      repo: "backend-api",
+    });
+    expect(report.summary).toEqual(report.repositories[0]?.summary);
   });
 });
