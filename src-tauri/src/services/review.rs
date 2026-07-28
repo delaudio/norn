@@ -9,9 +9,17 @@ use std::time::{Duration, Instant};
 
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
+use crate::administrative_audit::AdministrativeAuditActorKind;
 use crate::config::{self, AiProvider, ReviewProvider as ConfigReviewProvider};
 use crate::local_repo::resolve_local_repo;
+use crate::organization_policy::{
+    execution_policy_prompt_appendix, organization_policy_is_configured,
+    resolve_configured_organization_policy, review_policy_prompt_appendix,
+    AdministrativePolicyAuditContext, ResolvedPolicySourceVersion,
+    SqliteOrganizationPolicyAuditSink,
+};
 use crate::repo_config;
+use crate::review_event::PullRequestReviewEventProvider;
 use crate::review_storage;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -292,6 +300,8 @@ pub struct ReviewRun {
     pub turn_kind: AiReviewTurnKind,
     #[serde(default)]
     pub review_profile: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub policy_sources: Vec<ResolvedPolicySourceVersion>,
     pub created_at: String,
     pub finished_at: Option<String>,
     pub diff_fingerprint: String,
@@ -322,6 +332,9 @@ pub struct HeadlessNativeReviewRequest {
     pub codex_model: Option<String>,
     pub codex_effort: Option<String>,
     pub review_profile: Option<String>,
+    pub policy_sources: Vec<ResolvedPolicySourceVersion>,
+    pub resolved_policy_config: Option<repo_config::RepoReviewConfig>,
+    pub organization_policy_checked: bool,
     pub run_analyzers: bool,
 }
 
@@ -865,28 +878,38 @@ fn configured_analyzer_specs_with_profile(
             .join("\n"));
     }
 
-    let mut specs = Vec::new();
-    if let Some(config) = config.config {
-        for (id, analyzer) in config.analyzers {
-            if !analyzer.enabled {
-                continue;
-            }
-            let command = analyzer.command.unwrap_or_default().trim().to_string();
-            if command.is_empty() {
-                continue;
-            }
-            specs.push(AnalyzerSpec {
-                title: id.replace(['_', '-'], " "),
-                source: analyzer_source(&id),
-                id,
-                command,
-                timeout_seconds: analyzer.timeout_seconds.unwrap_or(120).clamp(1, 900),
-                required: analyzer.required,
-            });
-        }
-    }
+    Ok(config
+        .config
+        .as_ref()
+        .map(analyzer_specs_from_config)
+        .unwrap_or_default())
+}
 
-    Ok(specs)
+fn analyzer_specs_from_config(config: &repo_config::RepoReviewConfig) -> Vec<AnalyzerSpec> {
+    let mut specs = Vec::new();
+    for (id, analyzer) in &config.analyzers {
+        if !analyzer.enabled {
+            continue;
+        }
+        let command = analyzer
+            .command
+            .as_deref()
+            .unwrap_or_default()
+            .trim()
+            .to_string();
+        if command.is_empty() {
+            continue;
+        }
+        specs.push(AnalyzerSpec {
+            title: id.replace(['_', '-'], " "),
+            source: analyzer_source(&id),
+            id: id.clone(),
+            command,
+            timeout_seconds: analyzer.timeout_seconds.unwrap_or(120).clamp(1, 900),
+            required: analyzer.required,
+        });
+    }
+    specs
 }
 
 fn analyzer_specs_with_profile(
@@ -1882,6 +1905,7 @@ fn materialize_review_run(
     thread_id: &str,
     turn_kind: AiReviewTurnKind,
     review_profile: Option<&str>,
+    policy_sources: Vec<ResolvedPolicySourceVersion>,
     created_at: &str,
     finished_at: &str,
     snapshot_payload: &str,
@@ -1948,6 +1972,7 @@ fn materialize_review_run(
         status: AiReviewRunStatus::Succeeded,
         turn_kind,
         review_profile: review_profile.map(ToOwned::to_owned),
+        policy_sources,
         created_at: created_at.to_string(),
         finished_at: Some(finished_at.to_string()),
         diff_fingerprint: stable_hash_hex(snapshot_payload),
@@ -4498,6 +4523,18 @@ fn run_conflict_resolution_pipeline(
     Ok(())
 }
 
+fn validate_organization_policy_repo_path(
+    repo_path: Option<&Path>,
+    organization_policy_configured: bool,
+) -> Result<Option<&Path>, ReviewPipelineFailure> {
+    if repo_path.is_none() && organization_policy_configured {
+        return Err(ReviewPipelineFailure::internal(
+            "Organization policy is configured, but this repository has no local clone. Configure a local repository path before starting review.",
+        ));
+    }
+    Ok(repo_path)
+}
+
 fn run_inline_review_pipeline(
     store: AiReviewRunStore,
     key: String,
@@ -4522,7 +4559,10 @@ fn run_inline_review_pipeline(
     codex_model: Option<String>,
     codex_effort: Option<String>,
     skip_analyzers: bool,
-    review_profile: Option<String>,
+    mut review_profile: Option<String>,
+    mut policy_sources: Vec<ResolvedPolicySourceVersion>,
+    resolved_policy_config_override: Option<repo_config::RepoReviewConfig>,
+    organization_policy_checked: bool,
     isolate_provider: bool,
     repo_path_override: Option<PathBuf>,
     review_provider_override: Option<ReviewProvider>,
@@ -4545,11 +4585,96 @@ fn run_inline_review_pipeline(
     let mut effective_payload = payload.clone();
     let mut effective_fallback_payload = fallback_payload.clone();
     let mut effective_snapshot_payload = snapshot_payload.clone();
+    let mut resolved_policy_config = resolved_policy_config_override;
+
+    if !organization_policy_checked && resolved_policy_config.is_none() {
+        let policy_repo_path = validate_organization_policy_repo_path(
+            repo_path.as_deref(),
+            organization_policy_is_configured(),
+        )?;
+        if let Some(repo_path) = policy_repo_path {
+            let review_provider = review_provider_override
+                .unwrap_or_else(|| review_provider_for_repo(&workspace, &repo));
+            let audit = SqliteOrganizationPolicyAuditSink {
+                context: AdministrativePolicyAuditContext {
+                    provider: match review_provider {
+                        ReviewProvider::Github => PullRequestReviewEventProvider::Github,
+                        ReviewProvider::Bitbucket => PullRequestReviewEventProvider::Bitbucket,
+                    },
+                    workspace: workspace.clone(),
+                    repository: repo.clone(),
+                    pull_request_id: (id > 0).then_some(u64::from(id)),
+                    actor_kind: AdministrativeAuditActorKind::System,
+                    actor_id: "system:local-review".to_string(),
+                    correlation_id: format!("correlation:{thread_id}"),
+                },
+            };
+            let resolved_at_ms = now_ms().parse::<u64>().unwrap_or_default();
+            if let Some(resolved) = resolve_configured_organization_policy(
+                repo_path,
+                review_profile.as_deref(),
+                Some(&audit),
+                resolved_at_ms,
+            )
+            .map_err(|error| ReviewPipelineFailure::internal(error.to_string()))?
+            {
+                policy_sources = resolved.sources;
+                resolved_policy_config = Some(resolved.config);
+            }
+        }
+    }
+    if let Some(appendix) = resolved_policy_config
+        .as_ref()
+        .and_then(review_policy_prompt_appendix)
+    {
+        effective_payload = format!("{effective_payload}\n\n{appendix}");
+        effective_snapshot_payload = format!("{effective_snapshot_payload}\n\n{appendix}");
+        if let Some(fallback) = effective_fallback_payload.as_deref() {
+            effective_fallback_payload = Some(format!("{fallback}\n\n{appendix}"));
+        }
+    }
+    if let Some(config) = resolved_policy_config.as_ref() {
+        if let Some(appendix) = execution_policy_prompt_appendix(config, &effective_payload) {
+            effective_payload = format!("{effective_payload}\n\n{appendix}");
+        }
+        if let Some(appendix) =
+            execution_policy_prompt_appendix(config, &effective_snapshot_payload)
+        {
+            effective_snapshot_payload = format!("{effective_snapshot_payload}\n\n{appendix}");
+        }
+        if let Some(fallback) = effective_fallback_payload.as_mut() {
+            if let Some(appendix) = execution_policy_prompt_appendix(config, fallback) {
+                fallback.push_str("\n\n");
+                fallback.push_str(&appendix);
+            }
+        }
+    }
+    if let Some(profile) = resolved_policy_config
+        .as_ref()
+        .and_then(|config| config.review.as_ref())
+        .and_then(|review| review.profile.clone())
+    {
+        review_profile = Some(profile);
+    }
 
     if turn_kind == AiReviewTurnKind::Initial && !skip_analyzers {
         if let Some(repo_path) = repo_path.as_deref() {
             append_inline_review_log(&store, &key, run_id, "Running local evidence analyzers.");
-            let results = match analyzer_specs_with_profile(repo_path, review_profile.as_deref()) {
+            let analyzer_specs = resolved_policy_config
+                .as_ref()
+                .map(|config| {
+                    let configured = analyzer_specs_from_config(config);
+                    if configured.is_empty() {
+                        default_analyzer_specs(repo_path)
+                    } else {
+                        configured
+                    }
+                })
+                .map(Ok)
+                .unwrap_or_else(|| {
+                    analyzer_specs_with_profile(repo_path, review_profile.as_deref())
+                });
+            let results = match analyzer_specs {
                 Ok(specs) if specs.is_empty() => {
                     append_inline_review_log(
                         &store,
@@ -4632,9 +4757,10 @@ fn run_inline_review_pipeline(
             }
             let evidence_section = analyzer_prompt_section(&results);
             if !evidence_section.is_empty() {
-                effective_payload = format!("{payload}\n\n{evidence_section}");
-                effective_snapshot_payload = format!("{snapshot_payload}\n\n{evidence_section}");
-                if let Some(fallback_payload) = fallback_payload.as_deref() {
+                effective_payload = format!("{effective_payload}\n\n{evidence_section}");
+                effective_snapshot_payload =
+                    format!("{effective_snapshot_payload}\n\n{evidence_section}");
+                if let Some(fallback_payload) = effective_fallback_payload.as_deref() {
                     effective_fallback_payload =
                         Some(format!("{fallback_payload}\n\n{evidence_section}"));
                 }
@@ -4958,6 +5084,7 @@ fn run_inline_review_pipeline(
         &thread_id,
         turn_kind,
         review_profile.as_deref(),
+        policy_sources,
         &started_at,
         &generated_at,
         &effective_snapshot_payload,
@@ -5107,6 +5234,9 @@ pub fn start_inline_review_native(
             codex_effort,
             skip_analyzers,
             review_profile,
+            Vec::new(),
+            None,
+            false,
             false,
             None,
             None,
@@ -5138,6 +5268,9 @@ pub fn run_headless_review_native(
         codex_model,
         codex_effort,
         review_profile,
+        policy_sources,
+        resolved_policy_config,
+        organization_policy_checked,
         run_analyzers,
     } = request;
     let store = AiReviewRunStore::default();
@@ -5194,6 +5327,9 @@ pub fn run_headless_review_native(
         codex_effort,
         !run_analyzers,
         review_profile,
+        policy_sources,
+        resolved_policy_config,
+        organization_policy_checked,
         true,
         Some(repo_path),
         Some(review_provider),
@@ -5398,6 +5534,15 @@ fn resolve_gui_skip_analyzers(_requested: Option<bool>) -> bool {
     true
 }
 
+fn review_profile_for_thread(review_store: &AiReviewStoreData, thread_id: &str) -> Option<String> {
+    review_store
+        .review_runs
+        .iter()
+        .rev()
+        .find(|run| run.thread_id.as_deref() == Some(thread_id))
+        .and_then(|run| run.review_profile.clone())
+}
+
 #[tauri::command]
 pub async fn reply_inline_review(
     store: tauri::State<'_, AiReviewRunStore>,
@@ -5426,6 +5571,7 @@ pub async fn reply_inline_review(
     let key = pr_key(&workspace, &repo, id);
     let mut review_store = load_review_store(&workspace, &repo, id)?
         .ok_or_else(|| "No saved AI review exists for this pull request yet.".to_string())?;
+    let review_profile = review_profile_for_thread(&review_store, &thread_id);
     let thread = find_review_thread(&review_store, &thread_id)?;
     let resume_session_id = if ai_provider == AiProvider::Claude {
         thread.claude_session_id.clone()
@@ -5489,7 +5635,10 @@ pub async fn reply_inline_review(
             codex_model,
             codex_effort,
             true,
+            review_profile,
+            Vec::new(),
             None,
+            false,
             false,
             None,
             None,
@@ -5918,20 +6067,54 @@ pub fn reset_ai_review_fix_state(
 #[cfg(test)]
 mod tests {
     use super::{
-        apply_review_finding_publication_event, begin_inline_review_run, build_claude_text_command,
-        build_codex_text_command, extract_review_findings, format_claude_stream_log_line,
-        get_ai_review_run_state_native, human_duration, materialize_review_run,
-        normalize_codex_effort, normalize_codex_model, parse_claude_fix_result,
-        parse_claude_structured_json, parse_claude_text_result, parse_review_resources,
-        resolve_gui_skip_analyzers, review_findings_from_output, trim_evidence_output,
-        user_installed_cli_command, validate_isolated_provider_cli, AiReviewDraftCommentResult,
-        AiReviewRunStatus, AiReviewRunStore, AiReviewTurnKind, ProviderExecutionContext,
-        ReviewEvidenceArtifact, ReviewEvidenceKind, ReviewEvidenceSource, ReviewFindingCategory,
-        ReviewFindingConfidence, ReviewFindingPublication, ReviewFindingPublicationEvent,
-        ReviewFindingPublicationEventKind, ReviewFindingSeverity, ReviewProvider,
-        ReviewPublicationMode, STRUCTURED_REVIEW_SCHEMA_VERSION,
+        analyzer_specs_from_config, apply_review_finding_publication_event,
+        begin_inline_review_run, build_claude_text_command, build_codex_text_command,
+        extract_review_findings, format_claude_stream_log_line, get_ai_review_run_state_native,
+        human_duration, materialize_review_run, normalize_codex_effort, normalize_codex_model,
+        parse_claude_fix_result, parse_claude_structured_json, parse_claude_text_result,
+        parse_review_resources, resolve_gui_skip_analyzers, review_findings_from_output,
+        review_profile_for_thread, trim_evidence_output, user_installed_cli_command,
+        validate_isolated_provider_cli, validate_organization_policy_repo_path,
+        AiReviewDraftCommentResult, AiReviewRunStatus, AiReviewRunStore, AiReviewStoreData,
+        AiReviewTurnKind, ProviderExecutionContext, ReviewEvidenceArtifact, ReviewEvidenceKind,
+        ReviewEvidenceSource, ReviewFindingCategory, ReviewFindingConfidence,
+        ReviewFindingPublication, ReviewFindingPublicationEvent, ReviewFindingPublicationEventKind,
+        ReviewFindingSeverity, ReviewProvider, ReviewPublicationMode,
+        STRUCTURED_REVIEW_SCHEMA_VERSION,
     };
     use serde_json::json;
+
+    #[test]
+    fn configured_organization_policy_requires_a_local_repo() {
+        let error = validate_organization_policy_repo_path(None, true)
+            .expect_err("configured policy without repo path");
+        assert!(error.to_string().contains("no local clone"));
+        assert!(validate_organization_policy_repo_path(None, false)
+            .expect("unconfigured policy")
+            .is_none());
+    }
+
+    #[test]
+    fn resolved_policy_config_supplies_required_analyzers() {
+        let config = crate::repo_config::RepoReviewConfig {
+            version: "0.1".to_string(),
+            analyzers: std::collections::BTreeMap::from([(
+                "organization-security".to_string(),
+                crate::repo_config::AnalyzerConfig {
+                    enabled: true,
+                    command: Some("security-check".to_string()),
+                    required: true,
+                    ..crate::repo_config::AnalyzerConfig::default()
+                },
+            )]),
+            ..crate::repo_config::RepoReviewConfig::default()
+        };
+
+        let specs = analyzer_specs_from_config(&config);
+        assert_eq!(specs.len(), 1);
+        assert_eq!(specs[0].command, "security-check");
+        assert!(specs[0].required);
+    }
 
     #[test]
     fn parses_structured_output_from_claude_json_envelope() {
@@ -6502,6 +6685,14 @@ Fix: render a useful empty state.
             "thread-1",
             AiReviewTurnKind::Initial,
             Some("agentic-balanced"),
+            vec![crate::organization_policy::ResolvedPolicySourceVersion {
+                tenant_id: "tenant-acme".to_string(),
+                source_id: "engineering".to_string(),
+                version: 3,
+                digest: "a".repeat(64),
+                key_id: "root-2026".to_string(),
+                from_cache: false,
+            }],
             "1750076400000",
             "1750076460000",
             "diff payload snapshot",
@@ -6514,6 +6705,7 @@ Fix: render a useful empty state.
         assert_eq!(run.findings.len(), 1);
         assert_eq!(run.provider, ReviewProvider::Github);
         assert_eq!(run.review_profile.as_deref(), Some("agentic-balanced"));
+        assert_eq!(run.policy_sources[0].version, 3);
         assert_eq!(
             run.reviewed_base_sha.as_deref(),
             Some("1111111111111111111111111111111111111111")
@@ -6531,6 +6723,41 @@ Fix: render a useful empty state.
             run.evidence[0].payload.as_deref(),
             run.summary_markdown.as_deref()
         );
+    }
+
+    #[test]
+    fn reply_profile_comes_from_latest_run_for_the_same_thread() {
+        let run = materialize_review_run(
+            "acme",
+            "lachesi",
+            Some(ReviewProvider::Github),
+            1731,
+            "feature/review-schema",
+            "main",
+            None,
+            None,
+            "thread-profile",
+            AiReviewTurnKind::Initial,
+            Some("organization-strict"),
+            Vec::new(),
+            "1750076400000",
+            "1750076460000",
+            "diff payload snapshot",
+            "No findings.",
+            ReviewEvidenceSource::Codex,
+            Vec::new(),
+        )
+        .expect("review run should materialize");
+        let store = AiReviewStoreData {
+            review_runs: vec![run],
+            ..AiReviewStoreData::default()
+        };
+
+        assert_eq!(
+            review_profile_for_thread(&store, "thread-profile").as_deref(),
+            Some("organization-strict")
+        );
+        assert_eq!(review_profile_for_thread(&store, "another-thread"), None);
     }
 
     #[test]
@@ -6557,6 +6784,7 @@ Fix: render a useful empty state.
             "thread-1",
             AiReviewTurnKind::Initial,
             None,
+            Vec::new(),
             "1750076400000",
             "1750076460000",
             "diff payload snapshot",
@@ -6595,6 +6823,7 @@ Fix: invalidate the query after the mutation succeeds."#;
             "thread-1",
             AiReviewTurnKind::Initial,
             None,
+            Vec::new(),
             "1750076400000",
             "1750076460000",
             "diff payload snapshot",
@@ -6637,6 +6866,7 @@ Fix: invalidate the query after the mutation succeeds."#;
             "thread-1",
             AiReviewTurnKind::Initial,
             None,
+            Vec::new(),
             "1750076400000",
             "1750076460000",
             "diff payload snapshot",

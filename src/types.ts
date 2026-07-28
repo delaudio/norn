@@ -460,6 +460,7 @@ export interface ReviewRun {
   status: AiReviewRunStatus;
   turnKind: AiReviewTurnKind;
   reviewProfile: string | null;
+  policySources?: ResolvedPolicySourceVersion[];
   createdAt: string;
   finishedAt: string | null;
   diffFingerprint: string;
@@ -467,6 +468,15 @@ export interface ReviewRun {
   summaryMarkdown: string | null;
   evidence: ReviewEvidenceArtifact[];
   findings: ReviewFinding[];
+}
+
+export interface ResolvedPolicySourceVersion {
+  tenantId: string;
+  sourceId: string;
+  version: number;
+  digest: string;
+  keyId: string;
+  fromCache: boolean;
 }
 
 export interface ReviewFindingRef {

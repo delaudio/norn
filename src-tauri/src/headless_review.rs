@@ -6,9 +6,15 @@ use std::process::Command;
 
 use serde::Serialize;
 
+use crate::administrative_audit::AdministrativeAuditActorKind;
 use crate::config::{self, AiProvider, ReviewProvider};
 use crate::local_repo;
+use crate::organization_policy::{
+    resolve_configured_organization_policy, AdministrativePolicyAuditContext,
+    SqliteOrganizationPolicyAuditSink,
+};
 use crate::repo_config::{self, ReviewSeverity};
+use crate::review_event::PullRequestReviewEventProvider;
 use crate::services::bitbucket::get_stable_pull_request_review_snapshot_native;
 use crate::services::review::{
     run_headless_review_native, HeadlessNativeReviewError, HeadlessNativeReviewRequest,
@@ -153,9 +159,46 @@ struct ResolvedTarget {
 pub fn run(request: HeadlessReviewRequest) -> Result<HeadlessReviewExecution, HeadlessReviewError> {
     validate_requested_identity_shape(&request)?;
     let repo_path = resolve_repo_root_for_request(&request)?;
-    let config_result =
+    let mut config_result =
         repo_config::load_from_repo_path_with_profile(&repo_path, request.profile.as_deref())
             .map_err(HeadlessReviewError::config)?;
+    let mut resolved = resolve_target(&request, &repo_path)?;
+    let mut policy_sources = Vec::new();
+    let mut resolved_policy_config = None;
+    let resolved_at_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_millis() as u64)
+        .unwrap_or_default();
+    let audit = SqliteOrganizationPolicyAuditSink {
+        context: AdministrativePolicyAuditContext {
+            provider: match resolved.provider {
+                ReviewProvider::Github => PullRequestReviewEventProvider::Github,
+                ReviewProvider::Bitbucket => PullRequestReviewEventProvider::Bitbucket,
+            },
+            workspace: resolved.workspace.clone(),
+            repository: resolved.repo.clone(),
+            pull_request_id: (resolved.pr_id > 0).then_some(u64::from(resolved.pr_id)),
+            actor_kind: AdministrativeAuditActorKind::System,
+            actor_id: "system:headless-review".to_string(),
+            correlation_id: format!("correlation:headless-{}-{resolved_at_ms}", resolved.pr_id),
+        },
+    };
+    if let Some(organization_policy) = resolve_configured_organization_policy(
+        &repo_path,
+        request.profile.as_deref(),
+        Some(&audit),
+        resolved_at_ms,
+    )
+    .map_err(|error| HeadlessReviewError::config(error.to_string()))?
+    {
+        config_result.config = Some(organization_policy.config.clone());
+        config_result.selected_profile = organization_policy.selected_profile;
+        config_result.loaded_policy_packs = organization_policy.loaded_policy_packs;
+        config_result.warnings = organization_policy.warnings;
+        config_result.errors.clear();
+        resolved_policy_config = Some(organization_policy.config);
+        policy_sources = organization_policy.sources;
+    }
     if !config_result.errors.is_empty() {
         return Err(HeadlessReviewError::config(
             config_result
@@ -166,8 +209,6 @@ pub fn run(request: HeadlessReviewRequest) -> Result<HeadlessReviewExecution, He
                 .join("\n"),
         ));
     }
-
-    let mut resolved = resolve_target(&request, &repo_path)?;
     resolved.warnings.extend(
         config_result
             .warnings
@@ -182,7 +223,12 @@ pub fn run(request: HeadlessReviewRequest) -> Result<HeadlessReviewExecution, He
         .and_then(|review| review.findings.as_ref())
         .and_then(|findings| findings.min_severity)
         .map(severity_from_repo);
-    let selected_profile = config_result.selected_profile.clone();
+    let selected_profile = config_result
+        .config
+        .as_ref()
+        .and_then(|config| config.review.as_ref())
+        .and_then(|review| review.profile.clone())
+        .or_else(|| config_result.selected_profile.clone());
 
     if resolved.diff.trim().is_empty() {
         if request.run_analyzers {
@@ -245,6 +291,9 @@ pub fn run(request: HeadlessReviewRequest) -> Result<HeadlessReviewExecution, He
         codex_model,
         codex_effort,
         review_profile: selected_profile,
+        policy_sources,
+        resolved_policy_config,
+        organization_policy_checked: true,
         run_analyzers: request.run_analyzers,
     })
     .map_err(map_native_review_error)?;
@@ -1497,6 +1546,7 @@ mod tests {
             status: AiReviewRunStatus::Succeeded,
             turn_kind: AiReviewTurnKind::Initial,
             review_profile: None,
+            policy_sources: Vec::new(),
             created_at: "1".to_string(),
             finished_at: Some("2".to_string()),
             diff_fingerprint: "fingerprint".to_string(),
@@ -1557,6 +1607,7 @@ mod tests {
                 status: AiReviewRunStatus::Succeeded,
                 turn_kind: AiReviewTurnKind::Initial,
                 review_profile: Some("strict".to_string()),
+                policy_sources: Vec::new(),
                 created_at: "1".to_string(),
                 finished_at: Some("2".to_string()),
                 diff_fingerprint: "fingerprint".to_string(),

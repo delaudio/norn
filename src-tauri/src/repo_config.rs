@@ -3,6 +3,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Deserializer, Serialize};
+use serde_json::Value as JsonValue;
 use serde_yaml::Value;
 
 const CONFIG_FILE: &str = ".lachesi.yaml";
@@ -549,6 +550,133 @@ fn validate_config(
     }
 }
 
+pub(crate) fn validate_resolved_config(config: &RepoReviewConfig) -> Result<(), String> {
+    let mut errors = Vec::new();
+    validate_config(Path::new("<resolved-policy>"), config, &mut errors);
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(errors
+            .into_iter()
+            .map(|error| error.message)
+            .collect::<Vec<_>>()
+            .join("\n"))
+    }
+}
+
+pub(crate) fn validate_external_config_layer(value: &Value) -> Result<(), String> {
+    let path = Path::new("<organization-policy>");
+    let mut messages = unknown_field_warnings(path, value);
+    messages.extend(forbidden_field_errors(path, value));
+    if messages.is_empty() {
+        Ok(())
+    } else {
+        Err(messages
+            .into_iter()
+            .map(|message| message.message)
+            .collect::<Vec<_>>()
+            .join("\n"))
+    }
+}
+
+pub(crate) fn load_repository_policy_layer(
+    repo_path: &Path,
+) -> Result<(Option<JsonValue>, Vec<RepoConfigValidationMessage>), String> {
+    let config_path = repo_path.join(CONFIG_FILE);
+    if config_path.is_file() {
+        let contents = fs::read_to_string(&config_path)
+            .map_err(|error| format!("Failed to read {}: {error}", config_path.display()))?;
+        let yaml = serde_yaml::from_str::<Value>(&contents)
+            .map_err(|error| format!("Failed to parse {}: {error}", config_path.display()))?;
+        let warnings = unknown_field_warnings(&config_path, &yaml);
+        let secret_errors = forbidden_field_errors(&config_path, &yaml);
+        if !secret_errors.is_empty() {
+            return Err(secret_errors
+                .into_iter()
+                .map(|message| message.message)
+                .collect::<Vec<_>>()
+                .join("\n"));
+        }
+        return serde_json::to_value(yaml)
+            .map(|layer| (Some(layer), warnings))
+            .map_err(|error| format!("Failed to normalize {}: {error}", config_path.display()));
+    }
+
+    let loaded = load_from_repo_path(repo_path)?;
+    let warnings = loaded.warnings;
+    loaded
+        .config
+        .map(|config| {
+            serde_json::to_value(config)
+                .map(compact_policy_layer)
+                .map_err(|error| format!("Failed to normalize .lachesi config: {error}"))
+        })
+        .transpose()
+        .map(|layer| (layer, warnings))
+}
+
+pub(crate) fn load_local_policy_layer(repo_path: &Path) -> Result<Option<JsonValue>, String> {
+    let path = repo_path.join(".lachesi.local.yaml");
+    if !path.is_file() {
+        return Ok(None);
+    }
+    let contents = fs::read_to_string(&path)
+        .map_err(|error| format!("Failed to read {}: {error}", path.display()))?;
+    let yaml = serde_yaml::from_str::<Value>(&contents)
+        .map_err(|error| format!("Failed to parse {}: {error}", path.display()))?;
+    let mut messages = unknown_field_warnings(&path, &yaml);
+    messages.extend(forbidden_field_errors(&path, &yaml));
+    if !messages.is_empty() {
+        return Err(messages
+            .into_iter()
+            .map(|message| message.message)
+            .collect::<Vec<_>>()
+            .join("\n"));
+    }
+    serde_json::to_value(yaml)
+        .map(Some)
+        .map_err(|error| format!("Failed to normalize {}: {error}", path.display()))
+}
+
+pub(crate) fn finalize_resolved_config(
+    repo_path: &Path,
+    config: &RepoReviewConfig,
+    profile_override: Option<&str>,
+) -> Result<RepoReviewConfigLoadResult, String> {
+    let contents = serde_yaml::to_string(config)
+        .map_err(|error| format!("Failed to serialize resolved policy: {error}"))?;
+    Ok(load_from_str(
+        repo_path,
+        Path::new("<resolved-policy>"),
+        &contents,
+        profile_override,
+    ))
+}
+
+fn compact_policy_layer(value: JsonValue) -> JsonValue {
+    match value {
+        JsonValue::Object(object) => JsonValue::Object(
+            object
+                .into_iter()
+                .filter_map(|(key, value)| {
+                    let value = compact_policy_layer(value);
+                    let empty = match &value {
+                        JsonValue::Null => true,
+                        JsonValue::Array(items) => items.is_empty(),
+                        JsonValue::Object(object) => object.is_empty(),
+                        _ => false,
+                    };
+                    (!empty).then_some((key, value))
+                })
+                .collect(),
+        ),
+        JsonValue::Array(items) => {
+            JsonValue::Array(items.into_iter().map(compact_policy_layer).collect())
+        }
+        value => value,
+    }
+}
+
 fn apply_review_profile(
     config_path: &Path,
     config: &mut RepoReviewConfig,
@@ -881,8 +1009,21 @@ fn collect_unknown_fields(
     context: Option<&str>,
     warnings: &mut Vec<RepoConfigValidationMessage>,
 ) {
-    let Value::Mapping(mapping) = value else {
-        return;
+    let mapping = match value {
+        Value::Mapping(mapping) => mapping,
+        Value::Sequence(items) => {
+            for (index, item) in items.iter().enumerate() {
+                collect_unknown_fields(
+                    config_path,
+                    item,
+                    &format!("{path}[{index}]"),
+                    context,
+                    warnings,
+                );
+            }
+            return;
+        }
+        _ => return,
     };
 
     for (key, child) in mapping {
@@ -1103,7 +1244,10 @@ fn collect_forbidden_fields(
 
 #[cfg(test)]
 mod tests {
-    use super::{load_from_repo_path, load_from_str, RepoReviewConfigLoadResult};
+    use super::{
+        load_from_repo_path, load_from_str, load_repository_policy_layer,
+        validate_external_config_layer, RepoReviewConfigLoadResult,
+    };
     use std::fs;
     use std::path::{Path, PathBuf};
     use std::sync::atomic::{AtomicU64, Ordering};
@@ -1217,6 +1361,67 @@ token: abc123
 
         assert_eq!(result.errors.len(), 1);
         assert!(result.errors[0].message.contains("looks like a credential"));
+    }
+
+    #[test]
+    fn raw_repository_policy_layer_rejects_credentials() {
+        let repo = temp_repo();
+        fs::write(
+            repo.join(".lachesi.yaml"),
+            r#"
+version: 0.1
+provider:
+  apiToken: should-not-be-here
+  password: neither-should-this
+"#,
+        )
+        .expect("write config");
+
+        let error = load_repository_policy_layer(&repo)
+            .expect_err("raw organization merge layer must reject credentials");
+        assert!(error.contains("$.provider.apiToken"));
+        assert!(error.contains("$.provider.password"));
+        let _ = fs::remove_dir_all(repo);
+    }
+
+    #[test]
+    fn raw_repository_policy_layer_preserves_unknown_field_warnings() {
+        let repo = temp_repo();
+        fs::write(
+            repo.join(".lachesi.yaml"),
+            r#"
+version: 0.1
+review:
+  mode: strict
+  surprise: true
+"#,
+        )
+        .expect("write config");
+
+        let (_, warnings) =
+            load_repository_policy_layer(&repo).expect("raw organization merge layer");
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].message.contains("$.review.surprise"));
+        let _ = fs::remove_dir_all(repo);
+    }
+
+    #[test]
+    fn external_policy_layer_rejects_unknown_fields_inside_arrays() {
+        let layer = serde_yaml::from_str(
+            r#"
+policy:
+  rules:
+    - id: signed-rule
+      severity: high
+      instruction: Enforce the rule.
+      enforcemnt: analyzer
+"#,
+        )
+        .expect("policy layer fixture");
+
+        let error = validate_external_config_layer(&layer)
+            .expect_err("unknown signed rule field must be rejected");
+        assert!(error.contains("$.policy.rules[0].enforcemnt"));
     }
 
     #[test]
