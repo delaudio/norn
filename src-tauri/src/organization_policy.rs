@@ -317,8 +317,12 @@ fn policy_resolution_audit_event(
 ) -> AdministrativeAuditEvent {
     let delivery_hash = Sha256::digest(
         format!(
-            "{}:{}:{}:{}",
-            source.tenant_id, source.source_id, source.version, context.correlation_id
+            "{}:{}:{}:{}:{}",
+            source.tenant_id,
+            source.source_id,
+            source.version,
+            context.correlation_id,
+            resolved_at_ms
         )
         .as_bytes(),
     );
@@ -2011,6 +2015,21 @@ mod tests {
         assert_eq!(event.action, AdministrativeAuditAction::PolicyResolved);
         assert_eq!(event.target.id, "policy:engineering:v12");
         event.prepare_for_storage().expect("valid audit event");
+
+        let next_turn = policy_resolution_audit_event(
+            &AdministrativePolicyAuditContext {
+                provider: PullRequestReviewEventProvider::Github,
+                workspace: "acme".to_string(),
+                repository: "payments".to_string(),
+                pull_request_id: Some(42),
+                actor_kind: AdministrativeAuditActorKind::Service,
+                actor_id: "service:review-worker".to_string(),
+                correlation_id: "correlation:job-42".to_string(),
+            },
+            &metadata,
+            NOW + 1,
+        );
+        assert_ne!(event.delivery_id, next_turn.delivery_id);
     }
 
     #[test]
