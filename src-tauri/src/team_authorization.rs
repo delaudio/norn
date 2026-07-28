@@ -475,7 +475,9 @@ fn denied_reason(
     if authenticated_actor.organization_id != request.organization.id {
         return Some(TeamAuthorizationDeniedReason::OrganizationMismatch);
     }
-    if request.operation.requires_repository() && request.repository.is_none() {
+    if request.operation.requires_repository()
+        && (request.team.is_none() || request.repository.is_none())
+    {
         return Some(TeamAuthorizationDeniedReason::RepositoryScopeRequired);
     }
     if let Some(team) = &request.team {
@@ -518,7 +520,7 @@ fn authorization_denied_audit_event(
     AdministrativeAuditEvent {
         schema_version: AdministrativeAuditSchemaVersion::V2,
         delivery_id: format!("authorization-denied:{}", request.audit.attempt_id),
-        tenant_id: request.organization.id.clone(),
+        tenant_id: authenticated_actor.organization_id.clone(),
         occurred_at: request.audit.occurred_at_ms.to_string(),
         actor: AdministrativeAuditActor {
             kind: match authenticated_actor.kind {
@@ -528,7 +530,7 @@ fn authorization_denied_audit_event(
             },
             id: authenticated_actor.id.clone(),
         },
-        repository: audited_repository(request),
+        repository: audited_repository(authenticated_actor, request),
         action: AdministrativeAuditAction::AuthorizationDenied,
         target: AdministrativeAuditTarget {
             kind: AdministrativeAuditTargetKind::AuthorizationRequest,
@@ -545,13 +547,15 @@ fn authorization_denied_audit_event(
 }
 
 fn audited_repository(
+    authenticated_actor: &TeamActor,
     request: &TeamAuthorizationRequest,
 ) -> Option<AdministrativeAuditRepositoryScope> {
     let repository = request.repository.as_ref()?;
     let team = request.team.as_ref()?;
     (request.operation.supports_repository_scope()
-        && repository.organization_id == request.organization.id
-        && team.organization_id == request.organization.id
+        && request.organization.id == authenticated_actor.organization_id
+        && repository.organization_id == authenticated_actor.organization_id
+        && team.organization_id == authenticated_actor.organization_id
         && repository.team_id == team.id)
         .then(|| AdministrativeAuditRepositoryScope {
             provider: repository.provider,
@@ -885,12 +889,12 @@ mod tests {
 
     #[test]
     fn repository_operations_fail_closed_without_repository_scope() {
-        let mut request = request(TeamRole::Admin, TeamOperation::PublishReview);
-        request.repository = None;
-        request.team = None;
+        let mut missing_repository = request(TeamRole::Admin, TeamOperation::PublishReview);
+        missing_repository.repository = None;
+        missing_repository.team = None;
         let sink = MemoryAuditSink::default();
 
-        let decision = authorize_case(&request, &sink).expect("scope decision");
+        let decision = authorize_case(&missing_repository, &sink).expect("scope decision");
 
         assert!(matches!(
             decision,
@@ -905,6 +909,40 @@ mod tests {
             .expect("serialize organization audit")
             .get("repository")
             .is_none());
+
+        let mut missing_team = request(TeamRole::Admin, TeamOperation::PublishReview);
+        missing_team.team = None;
+        let missing_team_sink = MemoryAuditSink::default();
+        assert!(matches!(
+            authorize_case(&missing_team, &missing_team_sink).expect("missing team decision"),
+            TeamAuthorizationDecision::Denied {
+                reason: TeamAuthorizationDeniedReason::RepositoryScopeRequired,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn organization_mismatch_is_audited_only_in_the_authenticated_tenant() {
+        let mut request = request(TeamRole::Member, TeamOperation::TriggerReview);
+        request.organization.id = "tenant-other".to_string();
+        request.team.as_mut().expect("team").organization_id = "tenant-other".to_string();
+        let repository = request.repository.as_mut().expect("repository");
+        repository.organization_id = "tenant-other".to_string();
+        let sink = MemoryAuditSink::default();
+
+        let decision = authorize_case(&request, &sink).expect("organization mismatch");
+
+        assert!(matches!(
+            decision,
+            TeamAuthorizationDecision::Denied {
+                reason: TeamAuthorizationDeniedReason::OrganizationMismatch,
+                ..
+            }
+        ));
+        let event = &sink.events.borrow()[0];
+        assert_eq!(event.tenant_id, "tenant-acme");
+        assert!(event.repository.is_none());
     }
 
     #[test]

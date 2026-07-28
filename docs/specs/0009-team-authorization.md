@@ -79,6 +79,9 @@ Only bounded identifiers, operation, permission, denial reason, and correlation
 metadata are eligible for storage. The existing audit redaction boundary runs
 before the sink receives an event. If audit preparation or persistence fails,
 authorization fails closed and does not expose the sink error.
+The audit tenant always comes from the authenticated principal, never from the
+operation request. Repository metadata is included only when organization,
+team, and repository all match that trusted tenant.
 
 ## Local mode
 

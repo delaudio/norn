@@ -193,9 +193,16 @@ impl AdministrativeAuditEvent {
         validate_identifier("deliveryId", &self.delivery_id)?;
         validate_identifier("tenantId", &self.tenant_id)?;
         validate_timestamp(&self.occurred_at)?;
+        if self.action == AdministrativeAuditAction::AuthorizationDenied
+            && (self.target.kind != AdministrativeAuditTargetKind::AuthorizationRequest
+                || self.outcome != AdministrativeAuditOutcome::Denied)
+        {
+            return Err(AdministrativeAuditValidationError::InvalidAuthorizationDenial);
+        }
         let allows_organization_scope = self.schema_version == AdministrativeAuditSchemaVersion::V2
             && self.action == AdministrativeAuditAction::AuthorizationDenied
-            && self.target.kind == AdministrativeAuditTargetKind::AuthorizationRequest;
+            && self.target.kind == AdministrativeAuditTargetKind::AuthorizationRequest
+            && self.outcome == AdministrativeAuditOutcome::Denied;
         if self.repository.is_none() && !allows_organization_scope {
             return Err(AdministrativeAuditValidationError::MissingField(
                 "repository",
@@ -357,6 +364,7 @@ pub enum AdministrativeAuditValidationError {
     FieldTooLong(&'static str),
     InvalidPullRequestId,
     InvalidTimestamp,
+    InvalidAuthorizationDenial,
     UnredactedSensitiveValue(&'static str),
 }
 
@@ -374,6 +382,9 @@ impl fmt::Display for AdministrativeAuditValidationError {
             Self::InvalidTimestamp => {
                 formatter.write_str("`occurredAt` is outside the supported epoch range")
             }
+            Self::InvalidAuthorizationDenial => formatter.write_str(
+                "`authorization_denied` requires an authorization target and denied outcome",
+            ),
             Self::UnredactedSensitiveValue(field) => {
                 write!(formatter, "`{field}` contains unredacted sensitive data")
             }
@@ -467,6 +478,12 @@ mod tests {
         assert_eq!(value["schemaVersion"], "v2");
         assert!(value.get("repository").is_none());
 
+        v2.outcome = AdministrativeAuditOutcome::Succeeded;
+        assert_eq!(
+            v2.prepare_for_storage(),
+            Err(AdministrativeAuditValidationError::InvalidAuthorizationDenial)
+        );
+        v2.outcome = AdministrativeAuditOutcome::Denied;
         v2.action = AdministrativeAuditAction::ReviewPublished;
         v2.target = AdministrativeAuditTarget {
             kind: AdministrativeAuditTargetKind::Publication,
