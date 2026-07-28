@@ -8,6 +8,7 @@ import type {
   ReviewProvider,
   ReviewPublicationMode,
   ReviewRun,
+  TrackedFindingComment,
 } from "@/types";
 import type { LinkedAiReviewDraftComment } from "./aiReviewDraftComments";
 
@@ -269,27 +270,54 @@ export function latestTrackedFindingCommentId(
   store: AiReviewStore | null | undefined,
   findingFingerprint: string,
 ): string | null {
-  let latest: { commentId: string; publishedAt: number; order: number } | null = null;
+  return (
+    latestTrackedFindingComments(store).find(
+      (comment) => comment.findingFingerprint === findingFingerprint,
+    )?.commentId ?? null
+  );
+}
+
+export function latestTrackedFindingComments(
+  store: AiReviewStore | null | undefined,
+): TrackedFindingComment[] {
+  const latest = new Map<string, { commentId: string; publishedAt: number; order: number }>();
   let order = 0;
   for (const run of store?.reviewRuns ?? []) {
     for (const finding of run.findings) {
-      if (finding.fingerprint !== findingFingerprint) continue;
       const publication = finding.publication;
       const remoteCommentIds = publication?.remoteCommentIds ?? [];
       const commentId = remoteCommentIds[remoteCommentIds.length - 1];
       if (!commentId) continue;
       const publishedAt = parseTimestamp(publication?.publishedAt);
+      const current = latest.get(finding.fingerprint);
       if (
-        latest == null ||
-        publishedAt > latest.publishedAt ||
-        (publishedAt === latest.publishedAt && order > latest.order)
+        current == null ||
+        publishedAt > current.publishedAt ||
+        (publishedAt === current.publishedAt && order > current.order)
       ) {
-        latest = { commentId, publishedAt, order };
+        latest.set(finding.fingerprint, { commentId, publishedAt, order });
       }
       order += 1;
     }
   }
-  return latest?.commentId ?? null;
+  return [...latest]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([findingFingerprint, comment]) => ({
+      findingFingerprint,
+      commentId: comment.commentId,
+    }));
+}
+
+export function selectTrackedFindingCommentsForBatch(
+  trackedComments: TrackedFindingComment[],
+  currentFindingFingerprints: ReadonlySet<string>,
+  stagedFindingFingerprints: ReadonlySet<string>,
+): TrackedFindingComment[] {
+  return trackedComments.filter(
+    (comment) =>
+      stagedFindingFingerprints.has(comment.findingFingerprint) ||
+      !currentFindingFingerprints.has(comment.findingFingerprint),
+  );
 }
 
 export function filterStageableAiReviewDraftComments(

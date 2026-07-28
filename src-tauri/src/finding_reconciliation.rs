@@ -170,6 +170,11 @@ pub struct FindingReconciler<A, S> {
     store: S,
 }
 
+struct FencedUpdateFailure {
+    error: FindingPublicationError,
+    provider_mutated: bool,
+}
+
 impl<A, S> FindingReconciler<A, S>
 where
     A: ProviderFindingReconciliationApi,
@@ -209,6 +214,7 @@ where
                     fingerprint,
                     Some(previous_identity.comment_id),
                     None,
+                    false,
                     error,
                 ));
                 continue;
@@ -220,6 +226,7 @@ where
                         fingerprint,
                         Some(previous_identity.comment_id),
                         None,
+                        false,
                         publication_api_error(error),
                     ));
                     continue;
@@ -240,6 +247,7 @@ where
                             fingerprint,
                             Some(previous_identity.comment_id),
                             None,
+                            false,
                             error,
                         ),
                     });
@@ -248,6 +256,7 @@ where
                         fingerprint,
                         Some(previous_identity.comment_id.clone()),
                         None,
+                        false,
                         FindingPublicationError {
                             code: FindingPublicationErrorCode::AnchorRejected,
                             retryable: false,
@@ -275,6 +284,7 @@ where
                     fingerprint,
                     Some(previous_identity.comment_id),
                     None,
+                    false,
                     FindingPublicationError {
                         code: FindingPublicationErrorCode::PermissionDenied,
                         retryable: false,
@@ -290,6 +300,7 @@ where
                     fingerprint,
                     Some(previous_identity.comment_id),
                     None,
+                    false,
                     FindingPublicationError {
                         code: FindingPublicationErrorCode::PermissionDenied,
                         retryable: false,
@@ -323,7 +334,7 @@ where
 
         for (fingerprint, current_finding) in current {
             if let Err(error) = self.ensure_current_revision(request, &target) {
-                actions.push(failed_action(fingerprint, None, None, error));
+                actions.push(failed_action(fingerprint, None, None, false, error));
                 continue;
             }
             actions.push(match publisher.publish(current_finding) {
@@ -334,7 +345,7 @@ where
                     Some(published.comment_id),
                     true,
                 ),
-                Err(error) => failed_action(fingerprint, None, None, error),
+                Err(error) => failed_action(fingerprint, None, None, false, error),
             });
         }
 
@@ -369,7 +380,7 @@ where
             };
             let mutated = provider_comment.markdown != desired;
             if mutated {
-                if let Err(error) = self.update_fenced(
+                if let Err(failure) = self.update_fenced(
                     request,
                     &target,
                     &provider_comment.identity,
@@ -380,7 +391,8 @@ where
                         fingerprint,
                         Some(previous_id.clone()),
                         Some(previous_id),
-                        error,
+                        failure.provider_mutated,
+                        failure.error,
                     );
                 }
             }
@@ -396,7 +408,7 @@ where
         let published = match publisher.publish(current) {
             Ok(published) => published,
             Err(error) => {
-                return failed_action(fingerprint, Some(previous_id), None, error);
+                return failed_action(fingerprint, Some(previous_id), None, false, error);
             }
         };
         let resolved = resolved_markdown(
@@ -405,7 +417,7 @@ where
             &previous_exact_marker,
         );
         if !was_resolved && provider_comment.markdown != resolved {
-            if let Err(error) = self.update_fenced(
+            if let Err(failure) = self.update_fenced(
                 request,
                 &target,
                 &provider_comment.identity,
@@ -416,7 +428,8 @@ where
                     fingerprint,
                     Some(previous_id),
                     Some(published.comment_id),
-                    error,
+                    true,
+                    failure.error,
                 );
             }
         }
@@ -471,11 +484,12 @@ where
                 Some(comment_id),
                 true,
             ),
-            Err(error) => failed_action(
+            Err(failure) => failed_action(
                 fingerprint,
                 Some(comment_id.clone()),
                 Some(comment_id),
-                error,
+                failure.provider_mutated,
+                failure.error,
             ),
         }
     }
@@ -487,16 +501,36 @@ where
         identity: &ProviderCommentIdentity,
         previous_markdown: &str,
         desired_markdown: &str,
-    ) -> Result<(), FindingPublicationError> {
-        self.ensure_current_revision(request, target)?;
+    ) -> Result<(), FencedUpdateFailure> {
+        self.ensure_current_revision(request, target)
+            .map_err(|error| FencedUpdateFailure {
+                error,
+                provider_mutated: false,
+            })?;
         self.api
             .update_finding_comment(target, identity, desired_markdown)
-            .map_err(publication_api_error)?;
+            .map_err(|error| {
+                let provider_mutated =
+                    matches!(error.kind, ProviderPublicationApiErrorKind::Unavailable);
+                FencedUpdateFailure {
+                    error: publication_api_error(error),
+                    provider_mutated,
+                }
+            })?;
         if let Err(error) = self.ensure_current_revision(request, target) {
-            self.api
+            return match self
+                .api
                 .update_finding_comment(target, identity, previous_markdown)
-                .map_err(publication_api_error)?;
-            return Err(error);
+            {
+                Ok(()) => Err(FencedUpdateFailure {
+                    error,
+                    provider_mutated: false,
+                }),
+                Err(rollback_error) => Err(FencedUpdateFailure {
+                    error: publication_api_error(rollback_error),
+                    provider_mutated: true,
+                }),
+            };
         }
         Ok(())
     }
@@ -663,12 +697,9 @@ fn failed_action(
     finding_fingerprint: String,
     previous_comment_id: Option<String>,
     comment_id: Option<String>,
+    provider_mutated: bool,
     error: FindingPublicationError,
 ) -> FindingReconciliationAction {
-    let provider_mutated = previous_comment_id
-        .as_ref()
-        .zip(comment_id.as_ref())
-        .is_some_and(|(previous, current)| previous != current);
     FindingReconciliationAction {
         finding_fingerprint,
         kind: FindingReconciliationActionKind::Failed,
@@ -824,6 +855,7 @@ mod tests {
         update_count: u32,
         fail_next_update: bool,
         drift_after_next_update: bool,
+        fail_rollback_after_drift: bool,
     }
 
     #[derive(Debug)]
@@ -842,6 +874,7 @@ mod tests {
                 update_count: 0,
                 fail_next_update: false,
                 drift_after_next_update: false,
+                fail_rollback_after_drift: false,
             }))
         }
     }
@@ -886,6 +919,12 @@ mod tests {
 
         fn set_drift_after_next_update(&self) {
             self.0.lock().unwrap().drift_after_next_update = true;
+        }
+
+        fn set_drift_and_fail_rollback(&self) {
+            let mut state = self.0.lock().unwrap();
+            state.drift_after_next_update = true;
+            state.fail_rollback_after_drift = true;
         }
     }
 
@@ -1013,6 +1052,10 @@ mod tests {
             if state.drift_after_next_update {
                 state.drift_after_next_update = false;
                 state.revision.head_sha = "4444444444444444444444444444444444444444".to_string();
+                if state.fail_rollback_after_drift {
+                    state.fail_rollback_after_drift = false;
+                    state.fail_next_update = true;
+                }
             }
             Ok(())
         }
@@ -1290,6 +1333,25 @@ mod tests {
                 .markdown,
             original
         );
+    }
+
+    #[test]
+    fn failed_revision_rollback_reports_possible_provider_mutation() {
+        let api = MockApi::default();
+        let store = MockStore::default();
+        let previous = finding("changed", OLD_HEAD_SHA);
+        let tracked = api.insert(&previous, "comment-changed", false, &[]);
+        let mut current = finding("changed", HEAD_SHA);
+        current.body = "Updated content.".to_string();
+        api.set_drift_and_fail_rollback();
+
+        let summary = FindingReconciler::new(&api, &store)
+            .reconcile(&request(vec![tracked], vec![current]))
+            .expect("partial summary after failed rollback");
+
+        assert_eq!(summary.status, FindingReconciliationStatus::Partial);
+        assert_eq!(summary.counts.failed, 1);
+        assert!(summary.actions[0].provider_mutated);
     }
 
     #[test]

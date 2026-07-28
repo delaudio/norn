@@ -97,6 +97,61 @@ describe("useDraftComments structured finding publication", () => {
     expect(onFindingDraftPublished).toHaveBeenCalledTimes(2);
   });
 
+  it("publishes structured findings as one reconciliation batch", async () => {
+    const publishFindingDraft = vi.fn();
+    const publishFindingDrafts = vi.fn().mockImplementation(
+      async (drafts: Array<{ localId: string }>) =>
+        new Map(
+          drafts.map((draft, index) => [
+            draft.localId,
+            {
+              id: `comment-${index + 1}`,
+              createdOn: "2026-07-27T20:00:00.000Z",
+            },
+          ]),
+        ),
+    );
+    const onFindingDraftPublished = vi.fn().mockResolvedValue(undefined);
+    const { result } = renderHook(() =>
+      useDraftComments("github", "publication-test", "batch-payments", 42, {
+        publishFindingDraft,
+        publishFindingDrafts,
+        onFindingDraftPublished,
+      }),
+    );
+
+    act(() => {
+      result.current.addDrafts(
+        ["fingerprint-1", "fingerprint-2"].map((fingerprint, index) => ({
+          path: "src/lib.ts",
+          to: 12 + index,
+          from: null,
+          raw: `Finding ${index + 1}`,
+          parentId: null,
+          source: "aiFinding" as const,
+          findingRef: {
+            reviewRunId: "run-1",
+            findingId: `finding-${index + 1}`,
+            findingFingerprint: fingerprint,
+          },
+          publicationMode: "inline" as const,
+          reviewBaseSha: "1111111111111111111111111111111111111111",
+          reviewHeadSha: "2222222222222222222222222222222222222222",
+        })),
+      );
+    });
+
+    await act(async () => {
+      const published = await result.current.publishAll();
+      expect(published).toEqual({ published: 2, failed: [] });
+    });
+
+    expect(publishFindingDrafts).toHaveBeenCalledTimes(1);
+    expect(publishFindingDraft).not.toHaveBeenCalled();
+    expect(onFindingDraftPublished).toHaveBeenCalledTimes(2);
+    expect(result.current.drafts).toHaveLength(0);
+  });
+
   it("removes manual drafts immediately after their non-idempotent provider write", async () => {
     const onFindingDraftPublished = vi
       .fn()

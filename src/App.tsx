@@ -44,12 +44,11 @@ import {
   buildFindingPublicationRequest,
   filterStageableAiReviewDraftComments,
   latestTrackedFindingCommentId,
+  latestTrackedFindingComments,
+  selectTrackedFindingCommentsForBatch,
   summarizeActiveReviewFindings,
 } from "@/lib/reviewFindingPublication";
-import {
-  reconcileReviewFindings,
-  recordReviewFindingPublicationEvents,
-} from "@/lib/reviewService";
+import { reconcileReviewFindings, recordReviewFindingPublicationEvents } from "@/lib/reviewService";
 import { tauriCall } from "@/lib/tauri";
 import type {
   AiLineQuestionContext,
@@ -488,6 +487,93 @@ export default function App() {
     ]);
   };
 
+  const publishStructuredFindingDrafts = async (
+    drafts: DraftComment[],
+  ): Promise<Map<string, PublishedDraftComment>> => {
+    if (!activeSel || !aiReviewContext || drafts.length === 0) {
+      throw new Error("The structured finding reconciliation context is unavailable.");
+    }
+    const snapshot = await loadStablePullRequestReviewSnapshot({
+      workspace: activeSel.workspace,
+      repo: activeSel.repo,
+      provider: activeRepo?.provider ?? reviewProvider,
+      prId: activeSel.prId,
+    });
+    const requests = drafts.map((draft) => {
+      const reviewRun =
+        aiReview.store?.reviewRuns?.find(
+          (candidate) => candidate.id === draft.findingRef?.reviewRunId,
+        ) ?? null;
+      if (!reviewRun) {
+        throw new Error("A review run linked to the staged findings is no longer available.");
+      }
+      assertPullRequestMatchesReviewRun(reviewRun, snapshot.pr);
+      return {
+        draft,
+        reviewRun,
+        request: buildFindingPublicationRequest({
+          provider: activeRepo?.provider ?? reviewProvider,
+          workspace: activeSel.workspace,
+          repo: activeSel.repo,
+          pr: snapshot.pr,
+          reviewRun,
+          draft,
+        }),
+      };
+    });
+    const first = requests[0];
+    if (!first) {
+      throw new Error("Structured finding reconciliation requires at least one finding.");
+    }
+    if (
+      requests.some(
+        ({ request, reviewRun }) =>
+          reviewRun.id !== first.reviewRun.id ||
+          request.baseSha.toLowerCase() !== first.request.baseSha.toLowerCase() ||
+          request.headSha.toLowerCase() !== first.request.headSha.toLowerCase(),
+      )
+    ) {
+      throw new Error("Publish staged findings from one reviewed pull request revision at a time.");
+    }
+    const stagedFingerprints = new Set(requests.map(({ request }) => request.findingFingerprint));
+    const currentFingerprints = new Set(
+      first.reviewRun.findings.map((finding) => finding.fingerprint),
+    );
+    const trackedComments = selectTrackedFindingCommentsForBatch(
+      latestTrackedFindingComments(aiReview.store),
+      currentFingerprints,
+      stagedFingerprints,
+    );
+    const reconciliation = await reconcileReviewFindings({
+      schemaVersion: "v1",
+      tenantId: first.request.tenantId,
+      provider: first.request.provider,
+      workspace: first.request.workspace,
+      repository: first.request.repository,
+      pullRequestId: first.request.pullRequestId,
+      baseSha: first.request.baseSha,
+      headSha: first.request.headSha,
+      trackedComments,
+      currentFindings: requests.map(({ request }) => request),
+    });
+    const comments = new Map<string, PublishedDraftComment>();
+    for (const { draft, request } of requests) {
+      const action = reconciliation.actions.find(
+        (candidate) => candidate.findingFingerprint === request.findingFingerprint,
+      );
+      if (!action || action.kind === "failed" || !action.commentId) {
+        throw new Error(
+          action?.error?.message ?? "A structured finding was not reconciled with the provider.",
+        );
+      }
+      comments.set(draft.localId, {
+        id: action.commentId,
+        createdOn: new Date().toISOString(),
+      });
+    }
+    return comments;
+  };
+
   const draftComments = useDraftComments(
     activeRepo?.provider ?? reviewProvider,
     activeSel?.workspace ?? null,
@@ -495,6 +581,7 @@ export default function App() {
     activeSel?.prId ?? null,
     {
       publishFindingDraft: publishStructuredFindingDraft,
+      publishFindingDrafts: publishStructuredFindingDrafts,
       onFindingDraftPublished: recordPublishedFindingDraft,
       onDraftRemoved: removeFindingDraft,
       onDraftsDiscarded: async (drafts) => {

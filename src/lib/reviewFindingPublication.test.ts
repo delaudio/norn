@@ -6,6 +6,7 @@ import {
   buildFindingPublicationRequest,
   filterStageableAiReviewDraftComments,
   latestTrackedFindingCommentId,
+  selectTrackedFindingCommentsForBatch,
   summarizeActiveReviewFindings,
 } from "./reviewFindingPublication";
 
@@ -333,6 +334,23 @@ describe("summarizeActiveReviewFindings", () => {
       alreadyPublished: false,
       staleAnchor: false,
     });
+  });
+
+  it("batches staged and absent history without resolving current unstaged findings", () => {
+    const selected = selectTrackedFindingCommentsForBatch(
+      [
+        { findingFingerprint: "staged", commentId: "comment-1" },
+        { findingFingerprint: "current-unstaged", commentId: "comment-2" },
+        { findingFingerprint: "absent", commentId: "comment-3" },
+      ],
+      new Set(["staged", "current-unstaged"]),
+      new Set(["staged"]),
+    );
+
+    expect(selected).toEqual([
+      { findingFingerprint: "staged", commentId: "comment-1" },
+      { findingFingerprint: "absent", commentId: "comment-3" },
+    ]);
   });
 });
 
