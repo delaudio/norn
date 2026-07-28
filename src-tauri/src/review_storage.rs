@@ -26,9 +26,10 @@ use crate::review_job::{
     ReviewJobStatus as SharedReviewJobStatus,
 };
 use crate::review_metrics::{
-    aggregate_review_effectiveness, ReviewEffectivenessFilter, ReviewEffectivenessFinding,
-    ReviewEffectivenessReport, ReviewEffectivenessRun, ReviewEffectivenessRunStatus,
-    ReviewMetricCategory, ReviewMetricSeverity,
+    aggregate_review_effectiveness, validate_review_effectiveness_filter,
+    ReviewEffectivenessFilter, ReviewEffectivenessFinding, ReviewEffectivenessReport,
+    ReviewEffectivenessRun, ReviewEffectivenessRunStatus, ReviewMetricCategory,
+    ReviewMetricSeverity,
 };
 
 const APP_DIR: &str = "lachesi";
@@ -1237,7 +1238,7 @@ pub fn get_finding_feedback_state(
 pub fn review_effectiveness_metrics(
     filter: ReviewEffectivenessFilter,
 ) -> Result<ReviewEffectivenessReport, String> {
-    validate_audit_identifier("tenantId", &filter.tenant_id).map_err(|error| error.to_string())?;
+    validate_review_effectiveness_filter(&filter).map_err(|error| error.to_string())?;
     let conn = open()?;
     let mut store_statement = conn
         .prepare(
@@ -1245,20 +1246,29 @@ pub fn review_effectiveness_metrics(
             SELECT tenant_id, workspace, repo, pr_id, store_json
             FROM ai_review_stores
             WHERE tenant_id = ?1
+              AND (?2 IS NULL OR workspace = ?2)
+              AND (?3 IS NULL OR repo = ?3)
             ORDER BY workspace ASC, repo ASC, pr_id ASC
             "#,
         )
         .map_err(|error| error.to_string())?;
     let store_rows = store_statement
-        .query_map(params![&filter.tenant_id], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, String>(2)?,
-                row.get::<_, i64>(3)?,
-                row.get::<_, String>(4)?,
-            ))
-        })
+        .query_map(
+            params![
+                &filter.tenant_id,
+                filter.workspace.as_deref(),
+                filter.repo.as_deref()
+            ],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, i64>(3)?,
+                    row.get::<_, String>(4)?,
+                ))
+            },
+        )
         .map_err(|error| error.to_string())?;
     let mut runs = Vec::new();
     for row in store_rows {
@@ -1281,19 +1291,30 @@ pub fn review_effectiveness_metrics(
                     ))
                 }
             }
+            if filter.provider.is_some_and(|provider| {
+                run_value
+                    .get("provider")
+                    .and_then(serde_json::Value::as_str)
+                    .is_some_and(|stored| stored != provider.as_str())
+            }) {
+                continue;
+            }
             let run = serde_json::from_value::<StoredReviewRun>(run_value).map_err(|error| {
                 format!("Could not parse structured review run for {workspace}/{repo}: {error}")
             })?;
-            runs.push(stored_review_run_to_metrics(
+            if let Some(run) = stored_review_run_to_metrics(
                 tenant_id.clone(),
                 workspace.clone(),
                 repo.clone(),
                 pr_id,
                 run,
-            )?);
+            )? {
+                runs.push(run);
+            }
         }
     }
 
+    let provider_filter = filter.provider.map(|provider| provider.as_str());
     let mut feedback_statement = conn
         .prepare(
             r#"
@@ -1301,12 +1322,23 @@ pub fn review_effectiveness_metrics(
               review_run_id, finding_fingerprint, action, occurred_at, actor_id, reason
             FROM review_finding_feedback_events
             WHERE tenant_id = ?1
+              AND (?2 IS NULL OR provider = ?2)
+              AND (?3 IS NULL OR workspace = ?3)
+              AND (?4 IS NULL OR repo = ?4)
             ORDER BY CAST(occurred_at AS INTEGER) ASC, event_id ASC
             "#,
         )
         .map_err(|error| error.to_string())?;
     let feedback_rows = feedback_statement
-        .query_map(params![&filter.tenant_id], row_to_finding_feedback_event)
+        .query_map(
+            params![
+                &filter.tenant_id,
+                provider_filter,
+                filter.workspace.as_deref(),
+                filter.repo.as_deref()
+            ],
+            row_to_finding_feedback_event,
+        )
         .map_err(|error| error.to_string())?;
     let mut feedback_events = Vec::new();
     for row in feedback_rows {
@@ -1323,7 +1355,10 @@ fn stored_review_run_to_metrics(
     repo: String,
     pr_id: u64,
     run: StoredReviewRun,
-) -> Result<ReviewEffectivenessRun, String> {
+) -> Result<Option<ReviewEffectivenessRun>, String> {
+    if matches!(run.status.as_str(), "idle" | "running") {
+        return Ok(None);
+    }
     let provider = match run.provider.as_str() {
         "github" => PullRequestReviewEventProvider::Github,
         "bitbucket" => PullRequestReviewEventProvider::Bitbucket,
@@ -1385,7 +1420,7 @@ fn stored_review_run_to_metrics(
             })
         })
         .collect::<Result<Vec<_>, String>>()?;
-    Ok(ReviewEffectivenessRun {
+    Ok(Some(ReviewEffectivenessRun {
         tenant_id,
         provider,
         workspace,
@@ -1396,7 +1431,7 @@ fn stored_review_run_to_metrics(
         created_at_ms,
         finished_at_ms,
         findings,
-    })
+    }))
 }
 
 fn get_finding_feedback_state_from(
@@ -4444,21 +4479,34 @@ mod tests {
         with_test_data_dir("review-effectiveness", |_| {
             let store_json = |run_id: &str, created_at: i64, finished_at: i64| {
                 serde_json::json!({
-                    "reviewRuns": [{
-                        "id": run_id,
-                        "provider": "github",
-                        "status": "succeeded",
-                        "sourceBranch": "feature",
-                        "destinationBranch": "main",
-                        "createdAt": created_at.to_string(),
-                        "finishedAt": finished_at.to_string(),
-                        "threadId": null,
-                        "findings": [{
-                            "fingerprint": "finding-abc",
-                            "severity": "high",
-                            "category": "bug"
-                        }]
-                    }]
+                    "reviewRuns": [
+                        {
+                            "id": run_id,
+                            "provider": "github",
+                            "status": "succeeded",
+                            "sourceBranch": "feature",
+                            "destinationBranch": "main",
+                            "createdAt": created_at.to_string(),
+                            "finishedAt": finished_at.to_string(),
+                            "threadId": null,
+                            "findings": [{
+                                "fingerprint": "finding-abc",
+                                "severity": "high",
+                                "category": "bug"
+                            }]
+                        },
+                        {
+                            "id": format!("{run_id}-running"),
+                            "provider": "github",
+                            "status": "running",
+                            "sourceBranch": "feature",
+                            "destinationBranch": "main",
+                            "createdAt": (created_at + 1).to_string(),
+                            "finishedAt": null,
+                            "threadId": null,
+                            "findings": []
+                        }
+                    ]
                 })
                 .to_string()
             };
@@ -4541,6 +4589,67 @@ mod tests {
             assert_eq!(other.summary.review_count, 2);
             assert_eq!(other.summary.finding_count, 2);
             assert_eq!(other.summary.feedback.findings_with_feedback, 0);
+        });
+    }
+
+    #[test]
+    fn review_effectiveness_filters_storage_before_decoding() {
+        with_test_data_dir("review-effectiveness-storage-filter", |_| {
+            let payments = serde_json::json!({
+                "reviewRuns": [
+                    {
+                        "id": "run-github",
+                        "provider": "github",
+                        "status": "succeeded",
+                        "sourceBranch": "feature",
+                        "destinationBranch": "main",
+                        "createdAt": "1000",
+                        "finishedAt": "1500",
+                        "threadId": null,
+                        "findings": []
+                    },
+                    {
+                        "id": "run-malformed-bitbucket",
+                        "provider": "bitbucket",
+                        "status": "succeeded"
+                    }
+                ]
+            })
+            .to_string();
+            save_review_json_for_tenant("tenant-acme", "acme", "payments", 42, &payments, false)
+                .expect("save selected repository");
+            save_review_json_for_tenant("tenant-acme", "acme", "catalog", 7, "{not-json", false)
+                .expect("save malformed out-of-scope repository");
+            let conn = open().expect("open feedback storage");
+            conn.execute(
+                r#"
+                INSERT INTO review_finding_feedback_events (
+                  event_id, tenant_id, provider, workspace, repo, pr_id,
+                  review_run_id, finding_fingerprint, action, occurred_at,
+                  actor_id, reason
+                )
+                VALUES (
+                  'feedback-malformed', 'tenant-acme', 'github', 'acme',
+                  'catalog', 7, 'run-catalog', 'finding-catalog', 'accepted',
+                  '1600', '', NULL
+                )
+                "#,
+                [],
+            )
+            .expect("insert malformed out-of-scope feedback");
+
+            let report = review_effectiveness_metrics(ReviewEffectivenessFilter {
+                tenant_id: "tenant-acme".to_string(),
+                provider: Some(PullRequestReviewEventProvider::Github),
+                workspace: Some("acme".to_string()),
+                repo: Some("payments".to_string()),
+                ..ReviewEffectivenessFilter::default()
+            })
+            .expect("decode only selected storage");
+
+            assert_eq!(report.summary.review_count, 1);
+            assert_eq!(report.repositories.len(), 1);
+            assert_eq!(report.repositories[0].repo, "payments");
         });
     }
 

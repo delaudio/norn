@@ -259,7 +259,7 @@ pub fn aggregate_review_effectiveness(
     feedback_events: &[ReviewFindingFeedbackEvent],
     filter: ReviewEffectivenessFilter,
 ) -> Result<ReviewEffectivenessReport, ReviewEffectivenessError> {
-    validate_filter(&filter)?;
+    validate_review_effectiveness_filter(&filter)?;
     for run in runs.iter().filter(|run| {
         run.tenant_id == filter.tenant_id && run_matches_repository_filter(run, &filter)
     }) {
@@ -374,7 +374,9 @@ fn aggregate_summary(
     }
 }
 
-fn validate_filter(filter: &ReviewEffectivenessFilter) -> Result<(), ReviewEffectivenessError> {
+pub(crate) fn validate_review_effectiveness_filter(
+    filter: &ReviewEffectivenessFilter,
+) -> Result<(), ReviewEffectivenessError> {
     if filter.tenant_id.trim().is_empty() || filter.tenant_id != filter.tenant_id.trim() {
         return Err(ReviewEffectivenessError::InvalidFilter(
             "`tenantId` must be non-empty without surrounding whitespace",
