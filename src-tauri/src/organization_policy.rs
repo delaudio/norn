@@ -549,6 +549,21 @@ fn finalize_resolved_organization_policy(
     profile_override: Option<&str>,
 ) -> Result<(), OrganizationPolicyResolutionError> {
     let enforced_profile_override = enforced_profile_override(resolved.enforced_layer.as_ref());
+    if let Some(Some(profile_id)) = enforced_profile_override {
+        let profile_is_signed = resolved
+            .enforced_layer
+            .as_ref()
+            .and_then(Value::as_object)
+            .and_then(|layer| layer.get("profiles"))
+            .and_then(Value::as_object)
+            .is_some_and(|profiles| profiles.contains_key(profile_id));
+        if !profile_is_signed {
+            return Err(OrganizationPolicyResolutionError::InvalidLayer(format!(
+                "Enforced organization review profile `{profile_id}` must be defined in the signed enforced layer."
+            )));
+        }
+    }
+    replace_enforced_owned_definitions(&mut resolved.config, resolved.enforced_layer.as_ref())?;
     let enforced_profile = enforced_profile_override.unwrap_or(profile_override);
     let finalized =
         crate::repo_config::finalize_resolved_config(repo_path, &resolved.config, enforced_profile)
@@ -579,6 +594,40 @@ fn finalize_resolved_organization_policy(
     resolved.loaded_policy_packs = finalized.loaded_policy_packs;
     resolved.warnings.extend(finalized.warnings);
     resolved.config = reapply_enforced_layer(finalized_config, resolved.enforced_layer.as_ref())?;
+    Ok(())
+}
+
+fn replace_enforced_owned_definitions(
+    config: &mut RepoReviewConfig,
+    enforced: Option<&Value>,
+) -> Result<(), OrganizationPolicyResolutionError> {
+    let Some(enforced) = enforced.and_then(Value::as_object) else {
+        return Ok(());
+    };
+    if let Some(profiles) = enforced.get("profiles").and_then(Value::as_object) {
+        for (id, value) in profiles {
+            let profile =
+                serde_json::from_value::<crate::repo_config::ReviewProfileConfig>(value.clone())
+                    .map_err(|error| {
+                        OrganizationPolicyResolutionError::InvalidLayer(format!(
+                            "Invalid signed enforced profile `{id}`: {error}"
+                        ))
+                    })?;
+            config.profiles.insert(id.clone(), profile);
+        }
+    }
+    if let Some(analyzers) = enforced.get("analyzers").and_then(Value::as_object) {
+        for (id, value) in analyzers {
+            let analyzer =
+                serde_json::from_value::<crate::repo_config::AnalyzerConfig>(value.clone())
+                    .map_err(|error| {
+                        OrganizationPolicyResolutionError::InvalidLayer(format!(
+                            "Invalid signed enforced analyzer `{id}`: {error}"
+                        ))
+                    })?;
+            config.analyzers.insert(id.clone(), analyzer);
+        }
+    }
     Ok(())
 }
 
@@ -1067,24 +1116,39 @@ fn reject_organization_version_override(
 fn reject_repository_policy_indirection(
     layer: &Value,
 ) -> Result<(), OrganizationPolicyResolutionError> {
-    let Some(policy) = layer
+    if let Some(policy) = layer
         .as_object()
         .and_then(|object| object.get("policy"))
         .and_then(Value::as_object)
-    else {
-        return Ok(());
-    };
-    let forbidden = ["packs", "sources"]
-        .into_iter()
-        .filter(|field| policy.contains_key(*field))
-        .collect::<Vec<_>>();
-    if forbidden.is_empty() {
-        return Ok(());
+    {
+        let forbidden = ["packs", "sources"]
+            .into_iter()
+            .filter(|field| policy.contains_key(*field))
+            .collect::<Vec<_>>();
+        if !forbidden.is_empty() {
+            return Err(OrganizationPolicyResolutionError::InvalidBundle(format!(
+                "Signed organization policy cannot reference repository-controlled policy {}. Embed rules directly in the signed bundle.",
+                forbidden.join(" or ")
+            )));
+        }
     }
-    Err(OrganizationPolicyResolutionError::InvalidBundle(format!(
-        "Signed organization policy cannot reference repository-controlled policy {}. Embed rules directly in the signed bundle.",
-        forbidden.join(" or ")
-    )))
+    if let Some((profile_id, _)) = layer
+        .as_object()
+        .and_then(|object| object.get("profiles"))
+        .and_then(Value::as_object)
+        .and_then(|profiles| {
+            profiles.iter().find(|(_, profile)| {
+                profile
+                    .as_object()
+                    .is_some_and(|profile| profile.contains_key("policyPacks"))
+            })
+        })
+    {
+        return Err(OrganizationPolicyResolutionError::InvalidBundle(format!(
+            "Signed organization profile `{profile_id}` cannot reference repository-controlled policy packs. Embed rules directly in the signed bundle."
+        )));
+    }
+    Ok(())
 }
 
 fn reject_signed_layer_secrets(
@@ -1647,7 +1711,8 @@ mod tests {
                     (
                         "strict".to_string(),
                         crate::repo_config::ReviewProfileConfig {
-                            mode: Some(crate::repo_config::ReviewMode::Strict),
+                            mode: Some(crate::repo_config::ReviewMode::Fast),
+                            policy_packs: vec![".lachesi/packs/repository".to_string()],
                             analyzers: BTreeMap::from([(
                                 "security".to_string(),
                                 crate::repo_config::ProfileAnalyzerRequirement::Required,
@@ -1659,7 +1724,7 @@ mod tests {
                 analyzers: BTreeMap::from([(
                     "security".to_string(),
                     crate::repo_config::AnalyzerConfig {
-                        command: Some("security-check".to_string()),
+                        command: Some("repository-check".to_string()),
                         ..crate::repo_config::AnalyzerConfig::default()
                     },
                 )]),
@@ -1669,7 +1734,22 @@ mod tests {
             selected_profile: None,
             loaded_policy_packs: Vec::new(),
             warnings: Vec::new(),
-            enforced_layer: Some(json!({"review": {"profile": "strict"}})),
+            enforced_layer: Some(json!({
+                "review": {"profile": "strict"},
+                "profiles": {
+                    "strict": {
+                        "mode": "strict",
+                        "analyzers": {"security": "required"}
+                    }
+                },
+                "analyzers": {
+                    "security": {
+                        "enabled": true,
+                        "required": true,
+                        "command": "organization-check"
+                    }
+                }
+            })),
         };
 
         finalize_resolved_organization_policy(repo.path(), &mut resolved, Some("fast"))
@@ -1680,6 +1760,15 @@ mod tests {
         assert_eq!(review.mode, Some(crate::repo_config::ReviewMode::Strict));
         assert!(resolved.config.analyzers["security"].enabled);
         assert!(resolved.config.analyzers["security"].required);
+        assert_eq!(
+            resolved.config.analyzers["security"].command.as_deref(),
+            Some("organization-check")
+        );
+        assert!(resolved
+            .config
+            .policy
+            .as_ref()
+            .is_none_or(|policy| policy.packs.is_empty()));
     }
 
     #[test]
@@ -1707,7 +1796,7 @@ mod tests {
             error,
             OrganizationPolicyResolutionError::InvalidLayer(_)
         ));
-        assert!(error.to_string().contains("was not found"));
+        assert!(error.to_string().contains("signed enforced layer"));
     }
 
     #[test]
@@ -1915,6 +2004,31 @@ mod tests {
                     if message.contains("repository-controlled")
             ));
         }
+
+        let error = resolve_organization_policy(
+            &config(
+                OrganizationPolicyRequirement::Mandatory,
+                OrganizationPolicyUnavailableBehavior::FailClosed,
+            ),
+            &StaticSource(Ok(signed_bundle(
+                2,
+                json!({
+                    "profiles": {
+                        "strict": {"policyPacks": [".lachesi/packs/security"]}
+                    }
+                }),
+                json!({}),
+            ))),
+            &MemoryCache::default(),
+            None,
+            input(),
+        )
+        .expect_err("profile repository indirection");
+        assert!(matches!(
+            error,
+            OrganizationPolicyResolutionError::InvalidBundle(message)
+                if message.contains("profile `strict`")
+        ));
     }
 
     #[test]

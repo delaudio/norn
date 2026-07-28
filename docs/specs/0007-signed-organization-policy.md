@@ -42,8 +42,9 @@ Versions are capped at `9007199254740991`, preserving exact JSON/TypeScript
 integer representation in review metadata.
 
 Signed layers cannot use `policy.packs` or `policy.sources`, because those
-paths resolve inside the reviewed repository. Organization rules must be
-embedded directly in the signed `defaults` or `enforced` layer.
+paths resolve inside the reviewed repository. Signed profiles cannot use
+`policyPacks` for the same reason. Organization rules must be embedded directly
+in the signed `defaults` or `enforced` layer.
 
 ## Deterministic precedence
 
@@ -62,8 +63,11 @@ supported `RepoReviewConfig`. Repository policy packs and the selected profile
 are expanded before the signed `enforced` layer is applied for the final time,
 so repository-controlled indirection cannot override enforced settings.
 When `enforced.review.profile` is present, that profile is selected for
-expansion instead of any caller-supplied profile override. Resolution fails
-closed if that enforced profile does not exist.
+expansion instead of any caller-supplied profile override. The selected profile
+must be defined in the signed `enforced.profiles` map, and enforced profile and
+analyzer definitions replace merged repository definitions rather than
+inheriting fields from them. Resolution fails closed if that signed profile
+does not exist.
 
 This ordering lets a repository specialize organization defaults, lets a
 developer apply local non-secret configuration, and guarantees that mandatory

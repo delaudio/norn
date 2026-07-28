@@ -358,6 +358,21 @@ fn load_from_lachesi_dir(
     repo_path: &Path,
     profile_override: Option<&str>,
 ) -> Result<Option<RepoReviewConfigLoadResult>, String> {
+    let Some(config) = synthesize_lachesi_dir_config(repo_path)? else {
+        return Ok(None);
+    };
+    let lachesi_dir = repo_path.join(".lachesi");
+    let contents = serde_yaml::to_string(&config)
+        .map_err(|error| format!("Failed to synthesize .lachesi config: {error}"))?;
+    Ok(Some(load_from_str(
+        repo_path,
+        &lachesi_dir,
+        &contents,
+        profile_override,
+    )))
+}
+
+fn synthesize_lachesi_dir_config(repo_path: &Path) -> Result<Option<RepoReviewConfig>, String> {
     let lachesi_dir = repo_path.join(".lachesi");
     if !lachesi_dir.is_dir() {
         return Ok(None);
@@ -367,7 +382,6 @@ fn load_from_lachesi_dir(
         version: SUPPORTED_VERSION.to_string(),
         ..RepoReviewConfig::default()
     };
-
     if let Some(prompt) = load_lachesi_dir_prompt(&lachesi_dir)? {
         config.review = Some(ReviewConfig {
             prompt: Some(PromptConfig {
@@ -377,7 +391,6 @@ fn load_from_lachesi_dir(
             ..ReviewConfig::default()
         });
     }
-
     let packs = discover_lachesi_dir_policy_packs(repo_path)?;
     if !packs.is_empty() {
         config.policy = Some(PolicyConfig {
@@ -385,15 +398,7 @@ fn load_from_lachesi_dir(
             ..PolicyConfig::default()
         });
     }
-
-    let contents = serde_yaml::to_string(&config)
-        .map_err(|error| format!("Failed to synthesize .lachesi config: {error}"))?;
-    Ok(Some(load_from_str(
-        repo_path,
-        &lachesi_dir,
-        &contents,
-        profile_override,
-    )))
+    Ok(Some(config))
 }
 
 fn load_lachesi_dir_prompt(lachesi_dir: &Path) -> Result<Option<String>, String> {
@@ -603,17 +608,14 @@ pub(crate) fn load_repository_policy_layer(
             .map_err(|error| format!("Failed to normalize {}: {error}", config_path.display()));
     }
 
-    let loaded = load_from_repo_path(repo_path)?;
-    let warnings = loaded.warnings;
-    loaded
-        .config
+    synthesize_lachesi_dir_config(repo_path)?
         .map(|config| {
             serde_json::to_value(config)
                 .map(compact_policy_layer)
                 .map_err(|error| format!("Failed to normalize .lachesi config: {error}"))
         })
         .transpose()
-        .map(|layer| (layer, warnings))
+        .map(|layer| (layer, Vec::new()))
 }
 
 pub(crate) fn load_local_policy_layer(repo_path: &Path) -> Result<Option<JsonValue>, String> {
@@ -1307,8 +1309,9 @@ fn collect_forbidden_fields(
 #[cfg(test)]
 mod tests {
     use super::{
-        load_from_repo_path, load_from_str, load_local_policy_layer, load_repository_policy_layer,
-        validate_external_config_layer, RepoReviewConfigLoadResult,
+        finalize_resolved_config, load_from_repo_path, load_from_str, load_local_policy_layer,
+        load_repository_policy_layer, validate_external_config_layer, RepoReviewConfig,
+        RepoReviewConfigLoadResult,
     };
     use std::fs;
     use std::path::{Path, PathBuf};
@@ -1950,6 +1953,49 @@ policy:
             .and_then(|prompt| prompt.extend.as_deref())
             .expect("policy prompt");
         assert_eq!(policy_prompt, "Pack prompt.");
+        assert_eq!(config.policy.expect("policy").rules.len(), 1);
+        let _ = fs::remove_dir_all(repo);
+    }
+
+    #[test]
+    fn raw_implicit_policy_layer_is_finalized_once() {
+        let repo = temp_repo();
+        let pack_dir = repo.join(".lachesi/packs/team-rules");
+        fs::create_dir_all(&pack_dir).expect("create pack dir");
+        fs::write(
+            pack_dir.join("pack.yaml"),
+            r#"
+id: team-rules
+review:
+  prompt:
+    extend: Pack prompt.
+policy:
+  rules:
+    - id: team.boundary
+      severity: high
+      instruction: Keep provider calls behind native services.
+"#,
+        )
+        .expect("write pack");
+
+        let (layer, warnings) =
+            load_repository_policy_layer(&repo).expect("raw repository policy layer");
+        assert!(warnings.is_empty());
+        let config = serde_json::from_value::<RepoReviewConfig>(layer.expect("implicit layer"))
+            .expect("implicit config");
+        let finalized =
+            finalize_resolved_config(&repo, &config, None).expect("finalized implicit config");
+
+        assert!(finalized.errors.is_empty(), "{:?}", finalized.errors);
+        assert_eq!(finalized.loaded_policy_packs.len(), 1);
+        let config = finalized.config.expect("final config");
+        assert_eq!(
+            config
+                .review
+                .and_then(|review| review.prompt)
+                .and_then(|prompt| prompt.extend),
+            Some("Pack prompt.".to_string())
+        );
         assert_eq!(config.policy.expect("policy").rules.len(), 1);
         let _ = fs::remove_dir_all(repo);
     }
