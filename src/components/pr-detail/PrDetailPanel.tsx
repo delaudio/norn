@@ -1012,8 +1012,10 @@ export function PrDetailPanel({
     setPublishError(null);
     const res = await publishAll();
     await refreshComments();
-    if (res.failed.length > 0) {
-      setPublishError(`${res.failed.length} comment(s) failed to publish: ${res.failed[0].error}`);
+    if (res.failed.length > 0 || res.errors.length > 0) {
+      const firstError = res.failed[0]?.error ?? res.errors[0] ?? "Unknown reconciliation failure.";
+      const failureCount = res.failed.length + res.errors.length;
+      setPublishError(`${failureCount} comment(s) failed to reconcile: ${firstError}`);
     }
   }, [publishAll, refreshComments]);
 

@@ -14,8 +14,8 @@ use crate::finding_publication::{
     PublishedCommentIdentity, SqliteFindingPublicationStore,
 };
 use crate::finding_reconciliation::{
-    FindingReconciler, FindingReconciliationRequest, FindingReconciliationSummary,
-    ProviderFindingComment, ProviderFindingReconciliationApi,
+    dry_run_reconciliation_summary, FindingReconciler, FindingReconciliationRequest,
+    FindingReconciliationSummary, ProviderFindingComment, ProviderFindingReconciliationApi,
 };
 use crate::repo_config::{self, RepoReviewConfigLoadResult};
 use crate::review_event::PullRequestReviewEventProvider;
@@ -2576,6 +2576,14 @@ fn github_reconciliation_update_body(markdown: &str) -> serde_json::Value {
 pub fn reconcile_review_findings_native(
     request: &FindingReconciliationRequest,
 ) -> Result<FindingReconciliationSummary, FindingPublicationError> {
+    if dry_run() {
+        eprintln!(
+            "[dry-run] reconcile {} structured findings on PR #{}",
+            request.current_findings.len(),
+            request.pull_request_id
+        );
+        return dry_run_reconciliation_summary(request);
+    }
     FindingReconciler::new(
         StoredProviderInlineCommentApi,
         SqliteFindingPublicationStore,

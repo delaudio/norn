@@ -19,7 +19,11 @@ import { useClosedPrAnalytics } from "@/hooks/useClosedPrAnalytics";
 import { useConfig } from "@/hooks/useConfig";
 import { useCredentials } from "@/hooks/useCredentials";
 import { authorKey, useCurrentUser } from "@/hooks/useCurrentUser";
-import { type PublishedDraftComment, useDraftComments } from "@/hooks/useDraftComments";
+import {
+  type PublishedDraftComment,
+  type PublishFindingDraftsResult,
+  useDraftComments,
+} from "@/hooks/useDraftComments";
 import { useMenuBarPrSync } from "@/hooks/useMenuBarPrSync";
 import { type PrGroup, usePullRequests } from "@/hooks/usePullRequests";
 import { useReviewReferences } from "@/hooks/useReviewReferences";
@@ -489,7 +493,7 @@ export default function App() {
 
   const publishStructuredFindingDrafts = async (
     drafts: DraftComment[],
-  ): Promise<Map<string, PublishedDraftComment>> => {
+  ): Promise<PublishFindingDraftsResult> => {
     if (!activeSel || !aiReviewContext || drafts.length === 0) {
       throw new Error("The structured finding reconciliation context is unavailable.");
     }
@@ -557,21 +561,33 @@ export default function App() {
       currentFindings: requests.map(({ request }) => request),
     });
     const comments = new Map<string, PublishedDraftComment>();
+    const failures = new Map<string, string>();
     for (const { draft, request } of requests) {
       const action = reconciliation.actions.find(
         (candidate) => candidate.findingFingerprint === request.findingFingerprint,
       );
       if (!action || action.kind === "failed" || !action.commentId) {
-        throw new Error(
+        failures.set(
+          draft.localId,
           action?.error?.message ?? "A structured finding was not reconciled with the provider.",
         );
+        continue;
       }
       comments.set(draft.localId, {
         id: action.commentId,
         createdOn: new Date().toISOString(),
       });
     }
-    return comments;
+    const errors = reconciliation.actions
+      .filter(
+        (action) => action.kind === "failed" && !stagedFingerprints.has(action.findingFingerprint),
+      )
+      .map(
+        (action) =>
+          action.error?.message ??
+          `Finding ${action.findingFingerprint} could not be reconciled with the provider.`,
+      );
+    return { comments, failures, errors };
   };
 
   const draftComments = useDraftComments(

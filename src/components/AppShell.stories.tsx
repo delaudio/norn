@@ -133,7 +133,7 @@ function AppShellHarness() {
             removeDraft={() => {}}
             discardAll={() => {}}
             publishDraft={async () => ({ draft: null, comment: null, error: null })}
-            publishAll={async () => ({ published: 0, failed: [] })}
+            publishAll={async () => ({ published: 0, failed: [], errors: [] })}
           />
         }
       />

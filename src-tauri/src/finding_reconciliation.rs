@@ -556,6 +556,48 @@ where
     }
 }
 
+pub fn dry_run_reconciliation_summary(
+    request: &FindingReconciliationRequest,
+) -> Result<FindingReconciliationSummary, FindingPublicationError> {
+    request.validate()?;
+    let mut current = request
+        .current_findings
+        .iter()
+        .map(|finding| (finding.finding_fingerprint.clone(), finding))
+        .collect::<BTreeMap<_, _>>();
+    let mut actions =
+        Vec::with_capacity(request.tracked_comments.len().saturating_add(current.len()));
+    for tracked in &request.tracked_comments {
+        let current_finding = current.remove(&tracked.finding_fingerprint);
+        actions.push(successful_action(
+            tracked.finding_fingerprint.clone(),
+            if current_finding.is_some() {
+                FindingReconciliationActionKind::Updated
+            } else {
+                FindingReconciliationActionKind::Resolved
+            },
+            Some(tracked.comment_id.clone()),
+            Some(tracked.comment_id.clone()),
+            false,
+        ));
+    }
+    for (fingerprint, finding) in current {
+        let marker = finding_marker(finding);
+        let digest = marker
+            .strip_prefix("<!-- lachesi:finding:")
+            .and_then(|value| value.strip_suffix(" -->"))
+            .unwrap_or("unknown");
+        actions.push(successful_action(
+            fingerprint,
+            FindingReconciliationActionKind::Created,
+            None,
+            Some(format!("dry-run-{}", &digest[..digest.len().min(16)])),
+            false,
+        ));
+    }
+    Ok(request.summary(actions))
+}
+
 impl FindingReconciliationRequest {
     fn validate(&self) -> Result<(), FindingPublicationError> {
         validate_identifier("tenantId", &self.tenant_id)?;
@@ -1491,5 +1533,29 @@ mod tests {
                 }]
             })
         );
+    }
+
+    #[test]
+    fn dry_run_summary_is_deterministic_without_provider_mutations() {
+        let summary = dry_run_reconciliation_summary(&request(
+            vec![TrackedFindingComment {
+                finding_fingerprint: "fixed".to_string(),
+                comment_id: "comment-fixed".to_string(),
+            }],
+            vec![finding("new", HEAD_SHA)],
+        ))
+        .expect("dry-run summary");
+
+        assert_eq!(summary.status, FindingReconciliationStatus::Succeeded);
+        assert_eq!(summary.counts.resolved, 1);
+        assert_eq!(summary.counts.created, 1);
+        assert!(summary
+            .actions
+            .iter()
+            .all(|action| !action.provider_mutated));
+        assert!(summary.actions[1]
+            .comment_id
+            .as_deref()
+            .is_some_and(|comment_id| comment_id.starts_with("dry-run-")));
     }
 }
