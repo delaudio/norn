@@ -365,6 +365,7 @@ pub struct OrganizationPolicyResolutionInput {
 pub struct ResolvedOrganizationPolicy {
     pub config: RepoReviewConfig,
     pub sources: Vec<ResolvedPolicySourceVersion>,
+    pub required_analyzers: Vec<String>,
     pub selected_profile: Option<String>,
     pub loaded_policy_packs: Vec<crate::repo_config::LoadedPolicyPack>,
     pub warnings: Vec<crate::repo_config::RepoConfigValidationMessage>,
@@ -594,7 +595,36 @@ fn finalize_resolved_organization_policy(
     resolved.loaded_policy_packs = finalized.loaded_policy_packs;
     resolved.warnings.extend(finalized.warnings);
     resolved.config = reapply_enforced_layer(finalized_config, resolved.enforced_layer.as_ref())?;
+    resolved.required_analyzers =
+        enforced_required_analyzer_ids(&resolved.config, resolved.enforced_layer.as_ref());
     Ok(())
+}
+
+fn enforced_required_analyzer_ids(
+    config: &RepoReviewConfig,
+    enforced: Option<&Value>,
+) -> Vec<String> {
+    let Some(enforced_analyzers) = enforced
+        .and_then(Value::as_object)
+        .and_then(|layer| layer.get("analyzers"))
+        .and_then(Value::as_object)
+    else {
+        return Vec::new();
+    };
+    enforced_analyzers
+        .keys()
+        .filter(|id| {
+            config.analyzers.get(*id).is_some_and(|analyzer| {
+                analyzer.enabled
+                    && analyzer.required
+                    && analyzer
+                        .command
+                        .as_deref()
+                        .is_some_and(|command| !command.trim().is_empty())
+            })
+        })
+        .cloned()
+        .collect()
 }
 
 fn replace_enforced_owned_definitions(
@@ -892,6 +922,7 @@ pub fn resolve_organization_policy(
     Ok(ResolvedOrganizationPolicy {
         config,
         sources,
+        required_analyzers: Vec::new(),
         selected_profile: None,
         loaded_policy_packs: Vec::new(),
         warnings: Vec::new(),
@@ -1731,6 +1762,7 @@ mod tests {
                 ..RepoReviewConfig::default()
             },
             sources: Vec::new(),
+            required_analyzers: Vec::new(),
             selected_profile: None,
             loaded_policy_packs: Vec::new(),
             warnings: Vec::new(),
@@ -1764,6 +1796,7 @@ mod tests {
             resolved.config.analyzers["security"].command.as_deref(),
             Some("organization-check")
         );
+        assert_eq!(resolved.required_analyzers, vec!["security"]);
         assert!(resolved
             .config
             .policy
@@ -1784,6 +1817,7 @@ mod tests {
                 ..RepoReviewConfig::default()
             },
             sources: Vec::new(),
+            required_analyzers: Vec::new(),
             selected_profile: None,
             loaded_policy_packs: Vec::new(),
             warnings: Vec::new(),

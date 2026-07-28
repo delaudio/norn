@@ -164,6 +164,7 @@ pub fn run(request: HeadlessReviewRequest) -> Result<HeadlessReviewExecution, He
             .map_err(HeadlessReviewError::config)?;
     let mut resolved = resolve_target(&request, &repo_path)?;
     let mut policy_sources = Vec::new();
+    let mut required_policy_analyzers = Vec::new();
     let mut resolved_policy_config = None;
     let resolved_at_ms = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -196,6 +197,7 @@ pub fn run(request: HeadlessReviewRequest) -> Result<HeadlessReviewExecution, He
         config_result.loaded_policy_packs = organization_policy.loaded_policy_packs;
         config_result.warnings = organization_policy.warnings;
         config_result.errors.clear();
+        required_policy_analyzers = organization_policy.required_analyzers;
         resolved_policy_config = Some(organization_policy.config);
         policy_sources = organization_policy.sources;
     }
@@ -226,11 +228,7 @@ pub fn run(request: HeadlessReviewRequest) -> Result<HeadlessReviewExecution, He
     let selected_profile = config_result.selected_profile.clone();
 
     if resolved.diff.trim().is_empty() {
-        if request.run_analyzers {
-            return Err(HeadlessReviewError::target(
-                "No changes to review; local analyzers were not run.",
-            ));
-        }
+        validate_empty_diff_analyzers(request.run_analyzers, &required_policy_analyzers)?;
         return Ok(HeadlessReviewExecution {
             schema_version: "lachesi.headless-review.v1".to_string(),
             status: "succeeded".to_string(),
@@ -244,8 +242,7 @@ pub fn run(request: HeadlessReviewRequest) -> Result<HeadlessReviewExecution, He
     }
 
     let app_config = config::load();
-    let analyzers_ran =
-        effective_analyzers_ran(request.run_analyzers, resolved_policy_config.as_ref());
+    let analyzers_ran = effective_analyzers_ran(request.run_analyzers, &required_policy_analyzers);
     let ai_provider = request.ai_provider.unwrap_or(app_config.ai_provider);
     let (claude_model, claude_effort, codex_model, codex_effort) = match ai_provider {
         AiProvider::Claude => (
@@ -289,6 +286,7 @@ pub fn run(request: HeadlessReviewRequest) -> Result<HeadlessReviewExecution, He
         codex_effort,
         review_profile: selected_profile,
         policy_sources,
+        required_policy_analyzers,
         resolved_policy_config,
         organization_policy_checked: true,
         run_analyzers: request.run_analyzers,
@@ -308,17 +306,26 @@ pub fn run(request: HeadlessReviewRequest) -> Result<HeadlessReviewExecution, He
     })
 }
 
-fn effective_analyzers_ran(
+fn validate_empty_diff_analyzers(
     requested: bool,
-    resolved_policy_config: Option<&repo_config::RepoReviewConfig>,
-) -> bool {
-    requested
-        || resolved_policy_config.is_some_and(|config| {
-            config
-                .analyzers
-                .values()
-                .any(|analyzer| analyzer.enabled && analyzer.required)
-        })
+    required_policy_analyzers: &[String],
+) -> Result<(), HeadlessReviewError> {
+    if !required_policy_analyzers.is_empty() {
+        return Err(HeadlessReviewError::analyzer(format!(
+            "No changes to review; required organization analyzers were not run: {}.",
+            required_policy_analyzers.join(", ")
+        )));
+    }
+    if requested {
+        return Err(HeadlessReviewError::target(
+            "No changes to review; local analyzers were not run.",
+        ));
+    }
+    Ok(())
+}
+
+fn effective_analyzers_ran(requested: bool, required_policy_analyzers: &[String]) -> bool {
+    requested || !required_policy_analyzers.is_empty()
 }
 
 fn strip_private_evidence_payloads(review_run: &mut ReviewRun) {
@@ -1321,9 +1328,10 @@ mod tests {
         is_sensitive_untracked_path, map_native_review_error, map_provider_target_error,
         markdown_fence, new_file_patch, public_provider_error, repo_identity_matches_target,
         requested_repo_identity, run, strip_private_evidence_payloads, untracked_relative_path,
-        validate_explicit_repo_identity, validate_requested_identity_shape, working_tree_diff,
-        HeadlessReviewExecution, HeadlessReviewRequest, HeadlessReviewTarget, ReviewScope,
-        HEADLESS_REVIEW_BOUNDARY, MAX_UNTRACKED_FILE_BYTES,
+        validate_empty_diff_analyzers, validate_explicit_repo_identity,
+        validate_requested_identity_shape, working_tree_diff, HeadlessReviewExecution,
+        HeadlessReviewRequest, HeadlessReviewTarget, ReviewScope, HEADLESS_REVIEW_BOUNDARY,
+        MAX_UNTRACKED_FILE_BYTES,
     };
     use crate::config::{RepoRef, ReviewProvider};
     use crate::services::review::{
@@ -1974,23 +1982,20 @@ mod tests {
 
     #[test]
     fn policy_required_analyzers_are_reported_as_executed() {
-        let config = crate::repo_config::RepoReviewConfig {
-            version: "0.1".to_string(),
-            analyzers: std::collections::BTreeMap::from([(
-                "organization-check".to_string(),
-                crate::repo_config::AnalyzerConfig {
-                    enabled: true,
-                    required: true,
-                    command: Some("check".to_string()),
-                    ..crate::repo_config::AnalyzerConfig::default()
-                },
-            )]),
-            ..crate::repo_config::RepoReviewConfig::default()
-        };
+        assert!(effective_analyzers_ran(
+            false,
+            &["organization-check".to_string()]
+        ));
+        assert!(effective_analyzers_ran(true, &[]));
+        assert!(!effective_analyzers_ran(false, &[]));
+    }
 
-        assert!(effective_analyzers_ran(false, Some(&config)));
-        assert!(effective_analyzers_ran(true, None));
-        assert!(!effective_analyzers_ran(false, None));
+    #[test]
+    fn empty_diff_fails_closed_for_required_policy_analyzers() {
+        let error = validate_empty_diff_analyzers(false, &["organization-check".to_string()])
+            .expect_err("required analyzer must not be skipped");
+        assert_eq!(error.exit_code, 5);
+        assert!(error.message.contains("organization-check"));
     }
 
     #[test]

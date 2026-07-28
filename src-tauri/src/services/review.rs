@@ -333,6 +333,7 @@ pub struct HeadlessNativeReviewRequest {
     pub codex_effort: Option<String>,
     pub review_profile: Option<String>,
     pub policy_sources: Vec<ResolvedPolicySourceVersion>,
+    pub required_policy_analyzers: Vec<String>,
     pub resolved_policy_config: Option<repo_config::RepoReviewConfig>,
     pub organization_policy_checked: bool,
     pub run_analyzers: bool,
@@ -928,26 +929,17 @@ fn review_analyzer_specs(
     repo_path: &Path,
     resolved_policy_config: Option<&repo_config::RepoReviewConfig>,
     review_profile: Option<&str>,
-    required_only: bool,
+    only_analyzer_ids: Option<&HashSet<String>>,
 ) -> Result<Vec<AnalyzerSpec>, String> {
     let mut specs = match resolved_policy_config {
         Some(config) if config.analyzers.is_empty() => Ok(default_analyzer_specs(repo_path)),
         Some(config) => Ok(analyzer_specs_from_config(config)),
         None => analyzer_specs_with_profile(repo_path, review_profile),
     }?;
-    if required_only {
-        specs.retain(|spec| spec.required);
+    if let Some(only_analyzer_ids) = only_analyzer_ids {
+        specs.retain(|spec| only_analyzer_ids.contains(&spec.id));
     }
     Ok(specs)
-}
-
-fn resolved_policy_requires_analyzers(config: Option<&repo_config::RepoReviewConfig>) -> bool {
-    config.is_some_and(|config| {
-        config
-            .analyzers
-            .values()
-            .any(|analyzer| analyzer.enabled && analyzer.required)
-    })
 }
 
 fn run_analyzer_command(
@@ -4587,6 +4579,7 @@ fn run_inline_review_pipeline(
     skip_analyzers: bool,
     mut review_profile: Option<String>,
     mut policy_sources: Vec<ResolvedPolicySourceVersion>,
+    mut required_policy_analyzers: HashSet<String>,
     resolved_policy_config_override: Option<repo_config::RepoReviewConfig>,
     organization_policy_checked: bool,
     isolate_provider: bool,
@@ -4645,6 +4638,7 @@ fn run_inline_review_pipeline(
             .map_err(|error| ReviewPipelineFailure::internal(error.to_string()))?
             {
                 policy_sources = resolved.sources;
+                required_policy_analyzers = resolved.required_analyzers.into_iter().collect();
                 review_profile = resolved.selected_profile;
                 resolved_policy_config = Some(resolved.config);
             }
@@ -4676,8 +4670,7 @@ fn run_inline_review_pipeline(
             }
         }
     }
-    let run_required_policy_analyzers =
-        skip_analyzers && resolved_policy_requires_analyzers(resolved_policy_config.as_ref());
+    let run_required_policy_analyzers = skip_analyzers && !required_policy_analyzers.is_empty();
     let run_analyzers = !skip_analyzers || run_required_policy_analyzers;
 
     if turn_kind == AiReviewTurnKind::Initial && run_analyzers {
@@ -4687,7 +4680,7 @@ fn run_inline_review_pipeline(
                 repo_path,
                 resolved_policy_config.as_ref(),
                 review_profile.as_deref(),
-                run_required_policy_analyzers,
+                run_required_policy_analyzers.then_some(&required_policy_analyzers),
             );
             let results = match analyzer_specs {
                 Ok(specs) if specs.is_empty() => {
@@ -5250,6 +5243,7 @@ pub fn start_inline_review_native(
             skip_analyzers,
             review_profile,
             Vec::new(),
+            HashSet::new(),
             None,
             false,
             false,
@@ -5284,6 +5278,7 @@ pub fn run_headless_review_native(
         codex_effort,
         review_profile,
         policy_sources,
+        required_policy_analyzers,
         resolved_policy_config,
         organization_policy_checked,
         run_analyzers,
@@ -5343,6 +5338,7 @@ pub fn run_headless_review_native(
         !run_analyzers,
         review_profile,
         policy_sources,
+        required_policy_analyzers.into_iter().collect(),
         resolved_policy_config,
         organization_policy_checked,
         true,
@@ -5652,6 +5648,7 @@ pub async fn reply_inline_review(
             true,
             review_profile,
             Vec::new(),
+            HashSet::new(),
             None,
             false,
             false,
@@ -6087,9 +6084,9 @@ mod tests {
         extract_review_findings, format_claude_stream_log_line, get_ai_review_run_state_native,
         human_duration, materialize_review_run, normalize_codex_effort, normalize_codex_model,
         parse_claude_fix_result, parse_claude_structured_json, parse_claude_text_result,
-        parse_review_resources, resolve_gui_skip_analyzers, resolved_policy_requires_analyzers,
-        review_analyzer_specs, review_findings_from_output, review_profile_for_thread,
-        trim_evidence_output, user_installed_cli_command, validate_isolated_provider_cli,
+        parse_review_resources, resolve_gui_skip_analyzers, review_analyzer_specs,
+        review_findings_from_output, review_profile_for_thread, trim_evidence_output,
+        user_installed_cli_command, validate_isolated_provider_cli,
         validate_organization_policy_repo_path, AiReviewDraftCommentResult, AiReviewRunStatus,
         AiReviewRunStore, AiReviewStoreData, AiReviewTurnKind, ProviderExecutionContext,
         ReviewEvidenceArtifact, ReviewEvidenceKind, ReviewEvidenceSource, ReviewFindingCategory,
@@ -6147,7 +6144,7 @@ mod tests {
             ..crate::repo_config::RepoReviewConfig::default()
         };
 
-        let specs = review_analyzer_specs(repo.path(), Some(&config), None, false)
+        let specs = review_analyzer_specs(repo.path(), Some(&config), None, None)
             .expect("resolved analyzer selection");
         assert!(specs.is_empty());
     }
@@ -6165,7 +6162,7 @@ mod tests {
             ..crate::repo_config::RepoReviewConfig::default()
         };
 
-        let specs = review_analyzer_specs(repo.path(), Some(&config), None, false)
+        let specs = review_analyzer_specs(repo.path(), Some(&config), None, None)
             .expect("resolved analyzer selection");
         assert_eq!(
             specs
@@ -6189,36 +6186,17 @@ mod tests {
             version: "0.1".to_string(),
             analyzers: std::collections::BTreeMap::from([
                 ("organization-required".to_string(), analyzer(true)),
-                ("repository-optional".to_string(), analyzer(false)),
+                ("repository-required".to_string(), analyzer(true)),
             ]),
             ..crate::repo_config::RepoReviewConfig::default()
         };
 
-        let specs = review_analyzer_specs(repo.path(), Some(&config), None, true)
+        let enforced_ids = std::collections::HashSet::from(["organization-required".to_string()]);
+        let specs = review_analyzer_specs(repo.path(), Some(&config), None, Some(&enforced_ids))
             .expect("required analyzer selection");
         assert_eq!(specs.len(), 1);
         assert_eq!(specs[0].id, "organization-required");
         assert!(specs[0].required);
-    }
-
-    #[test]
-    fn resolved_policy_detects_required_analyzers() {
-        let config = crate::repo_config::RepoReviewConfig {
-            version: "0.1".to_string(),
-            analyzers: std::collections::BTreeMap::from([(
-                "organization-security".to_string(),
-                crate::repo_config::AnalyzerConfig {
-                    enabled: true,
-                    required: true,
-                    command: Some("security-check".to_string()),
-                    ..crate::repo_config::AnalyzerConfig::default()
-                },
-            )]),
-            ..crate::repo_config::RepoReviewConfig::default()
-        };
-
-        assert!(resolved_policy_requires_analyzers(Some(&config)));
-        assert!(!resolved_policy_requires_analyzers(None));
     }
 
     #[test]

@@ -144,7 +144,11 @@ organization defaults cannot supply a missing or invalid repository version.
 Normal desktop and TUI review continues to skip analyzer execution because
 evidence is expected upstream. An explicitly enabled and `required` analyzer
 in resolved organization policy is the exception and must run successfully;
-that exception does not execute optional repository analyzer commands.
+the forced set contains only analyzer definitions owned by the signed
+`enforced.analyzers` layer and never repository or local definitions. That
+exception does not execute optional repository analyzer commands. A headless
+review with no diff fails closed instead of skipping a signed required
+analyzer.
 Headless result metadata reports those policy-forced analyzers as executed.
 The resolved-policy appendix contains runtime constraints but omits
 `review.prompt`, whose replacement or extension text is already materialized
