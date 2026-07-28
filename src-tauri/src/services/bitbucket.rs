@@ -709,7 +709,9 @@ struct GhPublicationComment {
     user: Option<GhUser>,
     path: Option<String>,
     line: Option<u32>,
+    original_line: Option<u32>,
     start_line: Option<u32>,
+    original_start_line: Option<u32>,
     side: Option<String>,
     start_side: Option<String>,
 }
@@ -2466,14 +2468,21 @@ fn github_anchor_matches(
         FindingAnchorSide::New => "RIGHT",
         FindingAnchorSide::Old => "LEFT",
     };
+    let (line, start_line) = match payload.side {
+        FindingAnchorSide::New => (comment.line, comment.start_line),
+        FindingAnchorSide::Old => (
+            comment.original_line.or(comment.line),
+            comment.original_start_line.or(comment.start_line),
+        ),
+    };
     comment.path.as_deref() == Some(payload.path.as_str())
-        && comment.line == Some(payload.end_line)
+        && line == Some(payload.end_line)
         && comment
             .side
             .as_deref()
             .is_some_and(|value| value.eq_ignore_ascii_case(side))
         && if payload.start_line < payload.end_line {
-            comment.start_line == Some(payload.start_line)
+            start_line == Some(payload.start_line)
                 && comment
                     .start_side
                     .as_deref()
@@ -2906,7 +2915,9 @@ mod tests {
             }),
             path: Some("src/lib.rs".to_string()),
             line: Some(14),
+            original_line: None,
             start_line: Some(12),
+            original_start_line: None,
             side: Some("RIGHT".to_string()),
             start_side: Some("RIGHT".to_string()),
         };
@@ -2919,6 +2930,25 @@ mod tests {
             "<!-- lachesi:finding:abc -->",
             Some(&publication_payload(FindingAnchorSide::New)),
             "REVIEWER-1"
+        ));
+        let github_old_response = GhPublicationComment {
+            id: json!(100),
+            body: "finding\n\n<!-- lachesi:finding:def -->".to_string(),
+            user: Some(GhUser {
+                login: "reviewer-1".to_string(),
+                name: None,
+            }),
+            path: Some("src/lib.rs".to_string()),
+            line: None,
+            original_line: Some(14),
+            start_line: None,
+            original_start_line: Some(12),
+            side: Some("LEFT".to_string()),
+            start_side: Some("LEFT".to_string()),
+        };
+        assert!(github_anchor_matches(
+            &github_old_response,
+            &publication_payload(FindingAnchorSide::Old)
         ));
         assert!(!github_publication_comment_matches(
             &github_response,
