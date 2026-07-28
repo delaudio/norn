@@ -618,7 +618,22 @@ pub(crate) fn load_repository_policy_layer(
 
 pub(crate) fn load_local_policy_layer(repo_path: &Path) -> Result<Option<JsonValue>, String> {
     let path = repo_path.join(".lachesi.local.yaml");
-    if !path.is_file() {
+    let metadata = match fs::symlink_metadata(&path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => {
+            return Err(format!(
+                "Failed to inspect local policy override {}: {error}",
+                path.display()
+            ))
+        }
+    };
+    if metadata.file_type().is_symlink() {
+        return Err(
+            ".lachesi.local.yaml must be a regular file and cannot be a symbolic link.".to_string(),
+        );
+    }
+    if !metadata.is_file() {
         return Ok(None);
     }
     validate_local_policy_override_state(repo_path)?;
@@ -1513,6 +1528,38 @@ review:
         let _ = fs::remove_dir_all(ignored_repo);
         let _ = fs::remove_dir_all(unignored_repo);
         let _ = fs::remove_dir_all(tracked_repo);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn local_policy_layer_rejects_symbolic_links() {
+        use std::os::unix::fs::symlink;
+
+        let repo = temp_repo();
+        assert!(std::process::Command::new("git")
+            .arg("init")
+            .arg("-q")
+            .arg(&repo)
+            .status()
+            .expect("git init")
+            .success());
+        fs::write(repo.join(".gitignore"), ".lachesi.local.yaml\n").expect("ignore fixture");
+        fs::write(
+            repo.join("tracked-policy.yaml"),
+            "review:\n  mode: strict\n",
+        )
+        .expect("target fixture");
+        symlink(
+            repo.join("tracked-policy.yaml"),
+            repo.join(".lachesi.local.yaml"),
+        )
+        .expect("local policy symlink fixture");
+
+        assert!(load_local_policy_layer(&repo)
+            .expect_err("symlinked local policy")
+            .contains("cannot be a symbolic link"));
+
+        let _ = fs::remove_dir_all(repo);
     }
 
     #[test]
