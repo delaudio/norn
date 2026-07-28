@@ -11,7 +11,7 @@ If status files and git disagree, git is authoritative; correct this file.
 - **Branch:** `agent/reconcile-provider-comments`
 - **Active item:** GitHub issue #98 and `.docflow/plan/todo/0004-shared-review-service-program.md`
 - **Blockers:** none; use the available SSH key for signed commits.
-- **Uncommitted work:** issue #98 provider-comment reconciliation implementation and validation.
+- **Uncommitted work:** issue #98 branch review, integration, and closeout.
 
 ## Last shipped
 
