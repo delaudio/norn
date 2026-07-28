@@ -51,6 +51,9 @@ repository-scoped.
 
 Scope checks run before the role matrix. Matching repository names in another
 organization or team never grant access.
+Organization-only operations reject repository or team fields instead of
+silently changing scope. Audit timestamps use the same bounded millisecond
+range as administrative audit events.
 
 ## Denial audit
 

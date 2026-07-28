@@ -242,7 +242,7 @@ fn validate_redactable_stored(
     Ok(())
 }
 
-fn validate_timestamp(value: &str) -> Result<(), AdministrativeAuditValidationError> {
+pub(crate) fn validate_timestamp(value: &str) -> Result<(), AdministrativeAuditValidationError> {
     if value.is_empty() || !value.bytes().all(|byte| byte.is_ascii_digit()) {
         return Err(AdministrativeAuditValidationError::InvalidTimestamp);
     }
