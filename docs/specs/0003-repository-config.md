@@ -117,6 +117,11 @@ Secrets are never resolved from repo config. Credential resolution remains:
 2. development environment variables
 3. unavailable
 
+When a signed organization source is explicitly configured, its defaults and
+enforced layers wrap the repository and local layers according to
+[Spec 0007](./0007-signed-organization-policy.md). Repositories without that
+source retain the local order above and perform no organization-policy fetch.
+
 ## v0.1 Schema
 
 ```yaml

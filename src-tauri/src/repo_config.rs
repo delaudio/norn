@@ -1,8 +1,10 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
 use serde::{Deserialize, Deserializer, Serialize};
+use serde_json::Value as JsonValue;
 use serde_yaml::Value;
 
 const CONFIG_FILE: &str = ".lachesi.yaml";
@@ -356,6 +358,21 @@ fn load_from_lachesi_dir(
     repo_path: &Path,
     profile_override: Option<&str>,
 ) -> Result<Option<RepoReviewConfigLoadResult>, String> {
+    let Some(config) = synthesize_lachesi_dir_config(repo_path)? else {
+        return Ok(None);
+    };
+    let lachesi_dir = repo_path.join(".lachesi");
+    let contents = serde_yaml::to_string(&config)
+        .map_err(|error| format!("Failed to synthesize .lachesi config: {error}"))?;
+    Ok(Some(load_from_str(
+        repo_path,
+        &lachesi_dir,
+        &contents,
+        profile_override,
+    )))
+}
+
+fn synthesize_lachesi_dir_config(repo_path: &Path) -> Result<Option<RepoReviewConfig>, String> {
     let lachesi_dir = repo_path.join(".lachesi");
     if !lachesi_dir.is_dir() {
         return Ok(None);
@@ -365,7 +382,6 @@ fn load_from_lachesi_dir(
         version: SUPPORTED_VERSION.to_string(),
         ..RepoReviewConfig::default()
     };
-
     if let Some(prompt) = load_lachesi_dir_prompt(&lachesi_dir)? {
         config.review = Some(ReviewConfig {
             prompt: Some(PromptConfig {
@@ -375,7 +391,6 @@ fn load_from_lachesi_dir(
             ..ReviewConfig::default()
         });
     }
-
     let packs = discover_lachesi_dir_policy_packs(repo_path)?;
     if !packs.is_empty() {
         config.policy = Some(PolicyConfig {
@@ -383,15 +398,7 @@ fn load_from_lachesi_dir(
             ..PolicyConfig::default()
         });
     }
-
-    let contents = serde_yaml::to_string(&config)
-        .map_err(|error| format!("Failed to synthesize .lachesi config: {error}"))?;
-    Ok(Some(load_from_str(
-        repo_path,
-        &lachesi_dir,
-        &contents,
-        profile_override,
-    )))
+    Ok(Some(config))
 }
 
 fn load_lachesi_dir_prompt(lachesi_dir: &Path) -> Result<Option<String>, String> {
@@ -546,6 +553,222 @@ fn validate_config(
                 format!("Analyzer `{id}` is enabled but has no command."),
             ));
         }
+    }
+}
+
+pub(crate) fn validate_resolved_config(config: &RepoReviewConfig) -> Result<(), String> {
+    let mut errors = Vec::new();
+    validate_config(Path::new("<resolved-policy>"), config, &mut errors);
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(errors
+            .into_iter()
+            .map(|error| error.message)
+            .collect::<Vec<_>>()
+            .join("\n"))
+    }
+}
+
+pub(crate) fn validate_external_config_layer(value: &Value) -> Result<(), String> {
+    let path = Path::new("<organization-policy>");
+    let mut messages = unknown_field_warnings(path, value);
+    messages.extend(forbidden_field_errors(path, value));
+    if messages.is_empty() {
+        Ok(())
+    } else {
+        Err(messages
+            .into_iter()
+            .map(|message| message.message)
+            .collect::<Vec<_>>()
+            .join("\n"))
+    }
+}
+
+pub(crate) fn load_repository_policy_layer(
+    repo_path: &Path,
+) -> Result<(Option<JsonValue>, Vec<RepoConfigValidationMessage>), String> {
+    let config_path = repo_path.join(CONFIG_FILE);
+    if config_path.is_file() {
+        let contents = fs::read_to_string(&config_path)
+            .map_err(|error| format!("Failed to read {}: {error}", config_path.display()))?;
+        let standalone = load_from_str(repo_path, &config_path, &contents, None);
+        if !standalone.errors.is_empty() {
+            return Err(standalone
+                .errors
+                .into_iter()
+                .map(|error| error.message)
+                .collect::<Vec<_>>()
+                .join("\n"));
+        }
+        let yaml = serde_yaml::from_str::<Value>(&contents)
+            .map_err(|error| format!("Failed to parse {}: {error}", config_path.display()))?;
+        let warnings = unknown_field_warnings(&config_path, &yaml);
+        let secret_errors = forbidden_field_errors(&config_path, &yaml);
+        if !secret_errors.is_empty() {
+            return Err(secret_errors
+                .into_iter()
+                .map(|message| message.message)
+                .collect::<Vec<_>>()
+                .join("\n"));
+        }
+        return serde_json::to_value(yaml)
+            .map(|layer| (Some(layer), warnings))
+            .map_err(|error| format!("Failed to normalize {}: {error}", config_path.display()));
+    }
+
+    synthesize_lachesi_dir_config(repo_path)?
+        .map(|config| {
+            serde_json::to_value(config)
+                .map(compact_policy_layer)
+                .map_err(|error| format!("Failed to normalize .lachesi config: {error}"))
+        })
+        .transpose()
+        .map(|layer| (layer, Vec::new()))
+}
+
+pub(crate) fn load_local_policy_layer(repo_path: &Path) -> Result<Option<JsonValue>, String> {
+    let path = repo_path.join(".lachesi.local.yaml");
+    let metadata = match fs::symlink_metadata(&path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => {
+            return Err(format!(
+                "Failed to inspect local policy override {}: {error}",
+                path.display()
+            ))
+        }
+    };
+    if metadata.file_type().is_symlink() {
+        return Err(
+            ".lachesi.local.yaml must be a regular file and cannot be a symbolic link.".to_string(),
+        );
+    }
+    if !metadata.is_file() {
+        return Ok(None);
+    }
+    validate_local_policy_override_state(repo_path)?;
+    let contents = fs::read_to_string(&path)
+        .map_err(|error| format!("Failed to read {}: {error}", path.display()))?;
+    let yaml = serde_yaml::from_str::<Value>(&contents)
+        .map_err(|error| format!("Failed to parse {}: {error}", path.display()))?;
+    let mut messages = unknown_field_warnings(&path, &yaml);
+    messages.extend(forbidden_field_errors(&path, &yaml));
+    if !messages.is_empty() {
+        return Err(messages
+            .into_iter()
+            .map(|message| message.message)
+            .collect::<Vec<_>>()
+            .join("\n"));
+    }
+    serde_json::to_value(yaml)
+        .map(Some)
+        .map_err(|error| format!("Failed to normalize {}: {error}", path.display()))
+}
+
+fn validate_local_policy_override_state(repo_path: &Path) -> Result<(), String> {
+    let tracked = run_local_policy_git(
+        repo_path,
+        &["ls-files", "--error-unmatch", "--", ".lachesi.local.yaml"],
+    )
+    .map_err(|error| format!("Failed to inspect local policy tracking state: {error}"))?;
+    if tracked.status.success() {
+        return Err(
+            ".lachesi.local.yaml is tracked by Git and cannot be used as a local policy override."
+                .to_string(),
+        );
+    }
+    if tracked.status.code() != Some(1) {
+        return Err(format!(
+            "Could not determine whether .lachesi.local.yaml is tracked: {}",
+            String::from_utf8_lossy(&tracked.stderr).trim()
+        ));
+    }
+
+    let ignored = run_local_policy_git(
+        repo_path,
+        &["check-ignore", "--quiet", "--", ".lachesi.local.yaml"],
+    )
+    .map_err(|error| format!("Failed to inspect local policy ignore state: {error}"))?;
+    if ignored.status.success() {
+        return Ok(());
+    }
+    if ignored.status.code() == Some(1) {
+        return Err(
+            ".lachesi.local.yaml must be untracked and covered by a Git ignore rule before it can be used."
+                .to_string(),
+        );
+    }
+    Err(format!(
+        "Could not determine whether .lachesi.local.yaml is ignored: {}",
+        String::from_utf8_lossy(&ignored.stderr).trim()
+    ))
+}
+
+fn run_local_policy_git(repo_path: &Path, args: &[&str]) -> std::io::Result<std::process::Output> {
+    #[cfg(target_os = "macos")]
+    {
+        let command = std::iter::once("git".to_string())
+            .chain(std::iter::once("-C".to_string()))
+            .chain(std::iter::once(shell_quote(
+                repo_path.to_string_lossy().as_ref(),
+            )))
+            .chain(args.iter().map(|arg| shell_quote(arg)))
+            .collect::<Vec<_>>()
+            .join(" ");
+        return Command::new("/bin/zsh").arg("-lc").arg(command).output();
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        Command::new("git")
+            .arg("-C")
+            .arg(repo_path)
+            .args(args)
+            .output()
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn shell_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\\''"))
+}
+
+pub(crate) fn finalize_resolved_config(
+    repo_path: &Path,
+    config: &RepoReviewConfig,
+    profile_override: Option<&str>,
+) -> Result<RepoReviewConfigLoadResult, String> {
+    let contents = serde_yaml::to_string(config)
+        .map_err(|error| format!("Failed to serialize resolved policy: {error}"))?;
+    Ok(load_from_str(
+        repo_path,
+        Path::new("<resolved-policy>"),
+        &contents,
+        profile_override,
+    ))
+}
+
+fn compact_policy_layer(value: JsonValue) -> JsonValue {
+    match value {
+        JsonValue::Object(object) => JsonValue::Object(
+            object
+                .into_iter()
+                .filter_map(|(key, value)| {
+                    let value = compact_policy_layer(value);
+                    let empty = match &value {
+                        JsonValue::Null => true,
+                        JsonValue::Array(items) => items.is_empty(),
+                        JsonValue::Object(object) => object.is_empty(),
+                        _ => false,
+                    };
+                    (!empty).then_some((key, value))
+                })
+                .collect(),
+        ),
+        JsonValue::Array(items) => {
+            JsonValue::Array(items.into_iter().map(compact_policy_layer).collect())
+        }
+        value => value,
     }
 }
 
@@ -803,7 +1026,9 @@ fn merge_policy_pack(
         target.suppressions.extend(pack_policy.suppressions);
     }
 
-    config.profiles.extend(pack.profiles);
+    for (id, profile) in pack.profiles {
+        config.profiles.entry(id).or_insert(profile);
+    }
 
     for (id, analyzer) in pack.analyzers {
         config.analyzers.entry(id).or_insert(analyzer);
@@ -881,8 +1106,24 @@ fn collect_unknown_fields(
     context: Option<&str>,
     warnings: &mut Vec<RepoConfigValidationMessage>,
 ) {
-    let Value::Mapping(mapping) = value else {
+    if context == Some("opaque") {
         return;
+    }
+    let mapping = match value {
+        Value::Mapping(mapping) => mapping,
+        Value::Sequence(items) => {
+            for (index, item) in items.iter().enumerate() {
+                collect_unknown_fields(
+                    config_path,
+                    item,
+                    &format!("{path}[{index}]"),
+                    context,
+                    warnings,
+                );
+            }
+            return;
+        }
+        _ => return,
     };
 
     for (key, child) in mapping {
@@ -1036,6 +1277,7 @@ fn next_context(context: Option<&str>, key: &str) -> Option<&'static str> {
         (Some("review"), "findings") => Some("findings"),
         (Some("profile"), "prompt") => Some("prompt"),
         (Some("profile"), "analyzers") => Some("profileAnalyzerMap"),
+        (Some("analyzer"), "config") => Some("opaque"),
         (Some("policy"), "sources") => Some("policySource"),
         (Some("policy"), "rules") => Some("rule"),
         (Some("policy"), "pathRules") => Some("pathRule"),
@@ -1103,7 +1345,11 @@ fn collect_forbidden_fields(
 
 #[cfg(test)]
 mod tests {
-    use super::{load_from_repo_path, load_from_str, RepoReviewConfigLoadResult};
+    use super::{
+        finalize_resolved_config, load_from_repo_path, load_from_str, load_local_policy_layer,
+        load_repository_policy_layer, validate_external_config_layer, RepoReviewConfig,
+        RepoReviewConfigLoadResult,
+    };
     use std::fs;
     use std::path::{Path, PathBuf};
     use std::sync::atomic::{AtomicU64, Ordering};
@@ -1217,6 +1463,207 @@ token: abc123
 
         assert_eq!(result.errors.len(), 1);
         assert!(result.errors[0].message.contains("looks like a credential"));
+    }
+
+    #[test]
+    fn raw_repository_policy_layer_rejects_credentials() {
+        let repo = temp_repo();
+        fs::write(
+            repo.join(".lachesi.yaml"),
+            r#"
+version: 0.1
+provider:
+  apiToken: should-not-be-here
+  password: neither-should-this
+"#,
+        )
+        .expect("write config");
+
+        let error = load_repository_policy_layer(&repo)
+            .expect_err("raw organization merge layer must reject credentials");
+        assert!(error.contains("$.provider.apiToken"));
+        assert!(error.contains("$.provider.password"));
+        let _ = fs::remove_dir_all(repo);
+    }
+
+    #[test]
+    fn raw_repository_policy_layer_preserves_unknown_field_warnings() {
+        let repo = temp_repo();
+        fs::write(
+            repo.join(".lachesi.yaml"),
+            r#"
+version: 0.1
+review:
+  mode: strict
+  surprise: true
+"#,
+        )
+        .expect("write config");
+
+        let (_, warnings) =
+            load_repository_policy_layer(&repo).expect("raw organization merge layer");
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].message.contains("$.review.surprise"));
+        let _ = fs::remove_dir_all(repo);
+    }
+
+    #[test]
+    fn raw_repository_policy_layer_rejects_invalid_standalone_config() {
+        let repo = temp_repo();
+        fs::write(repo.join(".lachesi.yaml"), "review:\n  mode: strict\n")
+            .expect("missing version config");
+
+        let error = load_repository_policy_layer(&repo)
+            .expect_err("missing standalone config version must fail");
+        assert!(error.contains("missing field `version`"));
+
+        fs::write(
+            repo.join(".lachesi.yaml"),
+            "version: 0.1\nanalyzers:\n  check:\n    enabled: true\n",
+        )
+        .expect("invalid analyzer config");
+        let error =
+            load_repository_policy_layer(&repo).expect_err("invalid standalone analyzer must fail");
+        assert!(error.contains("enabled but has no command"));
+
+        let _ = fs::remove_dir_all(repo);
+    }
+
+    #[test]
+    fn local_policy_layer_must_be_untracked_and_ignored() {
+        let ignored_repo = temp_repo();
+        assert!(std::process::Command::new("git")
+            .arg("init")
+            .arg("-q")
+            .arg(&ignored_repo)
+            .status()
+            .expect("git init")
+            .success());
+        fs::write(ignored_repo.join(".gitignore"), ".lachesi.local.yaml\n")
+            .expect("ignore fixture");
+        fs::write(
+            ignored_repo.join(".lachesi.local.yaml"),
+            "review:\n  mode: strict\n",
+        )
+        .expect("local policy fixture");
+        assert!(load_local_policy_layer(&ignored_repo)
+            .expect("ignored local policy")
+            .is_some());
+
+        let unignored_repo = temp_repo();
+        assert!(std::process::Command::new("git")
+            .arg("init")
+            .arg("-q")
+            .arg(&unignored_repo)
+            .status()
+            .expect("git init")
+            .success());
+        fs::write(
+            unignored_repo.join(".lachesi.local.yaml"),
+            "review:\n  mode: strict\n",
+        )
+        .expect("local policy fixture");
+        assert!(load_local_policy_layer(&unignored_repo)
+            .expect_err("unignored local policy")
+            .contains("covered by a Git ignore rule"));
+
+        let tracked_repo = temp_repo();
+        assert!(std::process::Command::new("git")
+            .arg("init")
+            .arg("-q")
+            .arg(&tracked_repo)
+            .status()
+            .expect("git init")
+            .success());
+        fs::write(
+            tracked_repo.join(".lachesi.local.yaml"),
+            "review:\n  mode: strict\n",
+        )
+        .expect("local policy fixture");
+        assert!(std::process::Command::new("git")
+            .arg("-C")
+            .arg(&tracked_repo)
+            .args(["add", ".lachesi.local.yaml"])
+            .status()
+            .expect("git add")
+            .success());
+        assert!(load_local_policy_layer(&tracked_repo)
+            .expect_err("tracked local policy")
+            .contains("tracked by Git"));
+
+        let _ = fs::remove_dir_all(ignored_repo);
+        let _ = fs::remove_dir_all(unignored_repo);
+        let _ = fs::remove_dir_all(tracked_repo);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn local_policy_layer_rejects_symbolic_links() {
+        use std::os::unix::fs::symlink;
+
+        let repo = temp_repo();
+        assert!(std::process::Command::new("git")
+            .arg("init")
+            .arg("-q")
+            .arg(&repo)
+            .status()
+            .expect("git init")
+            .success());
+        fs::write(repo.join(".gitignore"), ".lachesi.local.yaml\n").expect("ignore fixture");
+        fs::write(
+            repo.join("tracked-policy.yaml"),
+            "review:\n  mode: strict\n",
+        )
+        .expect("target fixture");
+        symlink(
+            repo.join("tracked-policy.yaml"),
+            repo.join(".lachesi.local.yaml"),
+        )
+        .expect("local policy symlink fixture");
+
+        assert!(load_local_policy_layer(&repo)
+            .expect_err("symlinked local policy")
+            .contains("cannot be a symbolic link"));
+
+        let _ = fs::remove_dir_all(repo);
+    }
+
+    #[test]
+    fn external_policy_layer_rejects_unknown_fields_inside_arrays() {
+        let layer = serde_yaml::from_str(
+            r#"
+policy:
+  rules:
+    - id: signed-rule
+      severity: high
+      instruction: Enforce the rule.
+      enforcemnt: analyzer
+"#,
+        )
+        .expect("policy layer fixture");
+
+        let error = validate_external_config_layer(&layer)
+            .expect_err("unknown signed rule field must be rejected");
+        assert!(error.contains("$.policy.rules[0].enforcemnt"));
+    }
+
+    #[test]
+    fn external_policy_layer_accepts_free_form_analyzer_config() {
+        let layer = serde_yaml::from_str(
+            r#"
+analyzers:
+  custom:
+    enabled: true
+    command: custom-check
+    config:
+      threshold: 10
+      nested:
+        mode: strict
+"#,
+        )
+        .expect("external layer fixture");
+
+        validate_external_config_layer(&layer).expect("free-form analyzer config");
     }
 
     #[test]
@@ -1565,6 +2012,49 @@ policy:
             .and_then(|prompt| prompt.extend.as_deref())
             .expect("policy prompt");
         assert_eq!(policy_prompt, "Pack prompt.");
+        assert_eq!(config.policy.expect("policy").rules.len(), 1);
+        let _ = fs::remove_dir_all(repo);
+    }
+
+    #[test]
+    fn raw_implicit_policy_layer_is_finalized_once() {
+        let repo = temp_repo();
+        let pack_dir = repo.join(".lachesi/packs/team-rules");
+        fs::create_dir_all(&pack_dir).expect("create pack dir");
+        fs::write(
+            pack_dir.join("pack.yaml"),
+            r#"
+id: team-rules
+review:
+  prompt:
+    extend: Pack prompt.
+policy:
+  rules:
+    - id: team.boundary
+      severity: high
+      instruction: Keep provider calls behind native services.
+"#,
+        )
+        .expect("write pack");
+
+        let (layer, warnings) =
+            load_repository_policy_layer(&repo).expect("raw repository policy layer");
+        assert!(warnings.is_empty());
+        let config = serde_json::from_value::<RepoReviewConfig>(layer.expect("implicit layer"))
+            .expect("implicit config");
+        let finalized =
+            finalize_resolved_config(&repo, &config, None).expect("finalized implicit config");
+
+        assert!(finalized.errors.is_empty(), "{:?}", finalized.errors);
+        assert_eq!(finalized.loaded_policy_packs.len(), 1);
+        let config = finalized.config.expect("final config");
+        assert_eq!(
+            config
+                .review
+                .and_then(|review| review.prompt)
+                .and_then(|prompt| prompt.extend),
+            Some("Pack prompt.".to_string())
+        );
         assert_eq!(config.policy.expect("policy").rules.len(), 1);
         let _ = fs::remove_dir_all(repo);
     }

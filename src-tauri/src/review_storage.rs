@@ -34,6 +34,13 @@ const SHARED_REVIEW_JOB_LEASE_MS: i64 = 15 * 60 * 1000;
 const FINDING_PUBLICATION_LEASE_MS: i64 = 5 * 60 * 1000;
 const MAX_SHARED_REVIEW_JOB_ATTEMPTS: u32 = 3;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct StoredOrganizationPolicyBundle {
+    pub envelope_json: String,
+    pub digest: String,
+    pub verified_at_ms: u64,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum SharedReviewEventFreshness {
     Newer,
@@ -643,6 +650,33 @@ fn migrate(conn: &mut Connection) -> Result<(), String> {
         .map_err(|error| error.to_string())?;
     migration.commit().map_err(|error| error.to_string())?;
 
+    let migration = conn
+        .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+        .map_err(|error| error.to_string())?;
+    migration
+        .execute_batch(
+            r#"
+            CREATE TABLE IF NOT EXISTS organization_policy_bundles (
+              tenant_id TEXT NOT NULL,
+              source_id TEXT NOT NULL,
+              version INTEGER NOT NULL CHECK (version > 0),
+              digest TEXT NOT NULL,
+              verified_at_ms INTEGER NOT NULL CHECK (verified_at_ms >= 0),
+              expires_at_ms INTEGER NOT NULL CHECK (expires_at_ms > 0),
+              envelope_json TEXT NOT NULL,
+              PRIMARY KEY (tenant_id, source_id)
+            );
+            "#,
+        )
+        .map_err(|error| error.to_string())?;
+    migration
+        .execute(
+            "INSERT OR IGNORE INTO schema_migrations(version) VALUES (7)",
+            [],
+        )
+        .map_err(|error| error.to_string())?;
+    migration.commit().map_err(|error| error.to_string())?;
+
     Ok(())
 }
 
@@ -651,6 +685,129 @@ fn now_ms() -> String {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis().to_string())
         .unwrap_or_else(|_| "0".to_string())
+}
+
+pub(crate) fn load_organization_policy_bundle(
+    tenant_id: &str,
+    source_id: &str,
+) -> Result<Option<StoredOrganizationPolicyBundle>, String> {
+    validate_audit_identifier("tenantId", tenant_id).map_err(|error| error.to_string())?;
+    validate_audit_identifier("sourceId", source_id).map_err(|error| error.to_string())?;
+    let conn = open()?;
+    conn.query_row(
+        r#"
+        SELECT envelope_json, digest, verified_at_ms
+        FROM organization_policy_bundles
+        WHERE tenant_id = ?1 AND source_id = ?2
+        "#,
+        params![tenant_id, source_id],
+        |row| {
+            let verified_at_ms = row.get::<_, i64>(2)?;
+            Ok(StoredOrganizationPolicyBundle {
+                envelope_json: row.get(0)?,
+                digest: row.get(1)?,
+                verified_at_ms: verified_at_ms as u64,
+            })
+        },
+    )
+    .optional()
+    .map_err(|error| error.to_string())
+}
+
+pub(crate) fn store_organization_policy_bundle(
+    tenant_id: &str,
+    source_id: &str,
+    version: u64,
+    digest: &str,
+    verified_at_ms: u64,
+    expires_at_ms: u64,
+    envelope_json: &str,
+) -> Result<(), String> {
+    validate_audit_identifier("tenantId", tenant_id).map_err(|error| error.to_string())?;
+    validate_audit_identifier("sourceId", source_id).map_err(|error| error.to_string())?;
+    if version == 0 || version > i64::MAX as u64 {
+        return Err("Organization policy version must be a positive signed integer.".to_string());
+    }
+    if verified_at_ms > i64::MAX as u64 || expires_at_ms > i64::MAX as u64 {
+        return Err("Organization policy timestamp exceeds the storage limit.".to_string());
+    }
+    if digest.len() != 64 || !digest.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return Err("Organization policy digest must be a SHA-256 hex value.".to_string());
+    }
+
+    let mut conn = open()?;
+    let transaction = conn
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .map_err(|error| error.to_string())?;
+    let existing = transaction
+        .query_row(
+            r#"
+            SELECT version, digest
+            FROM organization_policy_bundles
+            WHERE tenant_id = ?1 AND source_id = ?2
+            "#,
+            params![tenant_id, source_id],
+            |row| Ok((row.get::<_, i64>(0)? as u64, row.get::<_, String>(1)?)),
+        )
+        .optional()
+        .map_err(|error| error.to_string())?;
+    if let Some((cached_version, cached_digest)) = existing {
+        if version < cached_version {
+            return Err(format!(
+                "Organization policy rollback rejected: cached version is {cached_version}, received version is {version}."
+            ));
+        }
+        if version == cached_version && digest != cached_digest {
+            return Err(format!(
+                "Organization policy version {version} has different signed content than the cached bundle."
+            ));
+        }
+    }
+    transaction
+        .execute(
+            r#"
+            INSERT INTO organization_policy_bundles (
+              tenant_id, source_id, version, digest, verified_at_ms,
+              expires_at_ms, envelope_json
+            )
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+            ON CONFLICT(tenant_id, source_id) DO UPDATE SET
+              version = excluded.version,
+              digest = excluded.digest,
+              verified_at_ms = excluded.verified_at_ms,
+              expires_at_ms = excluded.expires_at_ms,
+              envelope_json = excluded.envelope_json
+            "#,
+            params![
+                tenant_id,
+                source_id,
+                version as i64,
+                digest,
+                verified_at_ms as i64,
+                expires_at_ms as i64,
+                envelope_json
+            ],
+        )
+        .map_err(|error| error.to_string())?;
+    transaction.commit().map_err(|error| error.to_string())
+}
+
+pub(crate) fn delete_organization_policy_bundle(
+    tenant_id: &str,
+    source_id: &str,
+) -> Result<(), String> {
+    validate_audit_identifier("tenantId", tenant_id).map_err(|error| error.to_string())?;
+    validate_audit_identifier("sourceId", source_id).map_err(|error| error.to_string())?;
+    let conn = open()?;
+    conn.execute(
+        r#"
+        DELETE FROM organization_policy_bundles
+        WHERE tenant_id = ?1 AND source_id = ?2
+        "#,
+        params![tenant_id, source_id],
+    )
+    .map(|_| ())
+    .map_err(|error| error.to_string())
 }
 
 pub fn set_team_audit_collection_enabled(tenant_id: &str, enabled: bool) -> Result<(), String> {
@@ -4077,7 +4234,69 @@ mod tests {
                 .expect("query migrations")
                 .collect::<rusqlite::Result<_>>()
                 .expect("read migration versions");
-            assert_eq!(versions, vec![1, 2, 3, 4, 5, 6]);
+            assert_eq!(versions, vec![1, 2, 3, 4, 5, 6, 7]);
+        });
+    }
+
+    #[test]
+    fn organization_policy_cache_is_monotonic_and_tenant_scoped() {
+        with_test_data_dir("organization-policy-cache", |_| {
+            let digest_v2 = "2".repeat(64);
+            store_organization_policy_bundle(
+                "tenant-acme",
+                "engineering",
+                2,
+                &digest_v2,
+                1_000,
+                2_000,
+                r#"{"bundle":{"version":2}}"#,
+            )
+            .expect("store initial bundle");
+            store_organization_policy_bundle(
+                "tenant-other",
+                "engineering",
+                1,
+                &"1".repeat(64),
+                1_000,
+                2_000,
+                r#"{"bundle":{"version":1}}"#,
+            )
+            .expect("store other tenant bundle");
+
+            let cached = load_organization_policy_bundle("tenant-acme", "engineering")
+                .expect("load cache")
+                .expect("cached bundle");
+            assert_eq!(cached.digest, digest_v2);
+            assert_eq!(cached.verified_at_ms, 1_000);
+            assert_eq!(
+                load_organization_policy_bundle("tenant-missing", "engineering")
+                    .expect("tenant isolation"),
+                None
+            );
+
+            let rollback = store_organization_policy_bundle(
+                "tenant-acme",
+                "engineering",
+                1,
+                &"1".repeat(64),
+                1_500,
+                2_500,
+                r#"{"bundle":{"version":1}}"#,
+            )
+            .expect_err("rollback");
+            assert!(rollback.contains("rollback rejected"));
+
+            let conflict = store_organization_policy_bundle(
+                "tenant-acme",
+                "engineering",
+                2,
+                &"3".repeat(64),
+                1_500,
+                2_500,
+                r#"{"bundle":{"version":2,"changed":true}}"#,
+            )
+            .expect_err("same version mutation");
+            assert!(conflict.contains("different signed content"));
         });
     }
 

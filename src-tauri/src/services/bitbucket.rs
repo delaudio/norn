@@ -1567,7 +1567,7 @@ pub fn validate_repo_review_config_native(
     repo_path: &Path,
     review_profile: Option<&str>,
 ) -> Result<RepoReviewConfigLoadResult, String> {
-    if review_profile
+    let mut result = if review_profile
         .map(str::trim)
         .filter(|profile| !profile.is_empty())
         .is_some()
@@ -1575,7 +1575,26 @@ pub fn validate_repo_review_config_native(
         repo_config::load_from_repo_path_with_profile(repo_path, review_profile)
     } else {
         repo_config::load_from_repo_path(repo_path)
+    }?;
+    let now_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_millis() as u64)
+        .unwrap_or_default();
+    if let Some(resolved) = crate::organization_policy::resolve_configured_organization_policy(
+        repo_path,
+        review_profile,
+        None,
+        now_ms,
+    )
+    .map_err(|error| error.to_string())?
+    {
+        result.selected_profile = resolved.selected_profile;
+        result.loaded_policy_packs = resolved.loaded_policy_packs;
+        result.warnings = resolved.warnings;
+        result.config = Some(resolved.config);
+        result.errors.clear();
     }
+    Ok(result)
 }
 
 #[tauri::command]

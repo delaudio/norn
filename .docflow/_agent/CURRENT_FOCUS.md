@@ -8,15 +8,16 @@ If status files and git disagree, git is authoritative; correct this file.
 
 ## Active state
 
-- **Branch:** `agent/reconcile-provider-comments`
-- **Active item:** GitHub issue #98 and `.docflow/plan/todo/0004-shared-review-service-program.md`
+- **Branch:** `agent/signed-organization-policy`
+- **Active item:** GitHub issue #99 and `.docflow/plan/todo/0004-shared-review-service-program.md`
 - **Blockers:** none; use the available SSH key for signed commits.
-- **Uncommitted work:** issue #98 branch review, integration, and closeout.
+- **Uncommitted work:** PR creation, CI, and squash merge.
 
 ## Last shipped
 
-`18f961a` - publish structured inline findings through PR #125.
+`3db9c1d` - reconcile provider finding comments through PR #126.
 
 ## Next item
 
-Implement GitHub issue #99 after provider-comment reconciliation merges.
+Implement GitHub issue #127 after signed organization policy merges, then
+resume GitHub issue #100.

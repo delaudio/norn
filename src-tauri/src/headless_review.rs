@@ -6,9 +6,15 @@ use std::process::Command;
 
 use serde::Serialize;
 
+use crate::administrative_audit::AdministrativeAuditActorKind;
 use crate::config::{self, AiProvider, ReviewProvider};
 use crate::local_repo;
+use crate::organization_policy::{
+    resolve_configured_organization_policy, AdministrativePolicyAuditContext,
+    OrganizationPolicyAuditSink, SqliteOrganizationPolicyAuditSink,
+};
 use crate::repo_config::{self, ReviewSeverity};
+use crate::review_event::PullRequestReviewEventProvider;
 use crate::services::bitbucket::get_stable_pull_request_review_snapshot_native;
 use crate::services::review::{
     run_headless_review_native, HeadlessNativeReviewError, HeadlessNativeReviewRequest,
@@ -153,21 +159,56 @@ struct ResolvedTarget {
 pub fn run(request: HeadlessReviewRequest) -> Result<HeadlessReviewExecution, HeadlessReviewError> {
     validate_requested_identity_shape(&request)?;
     let repo_path = resolve_repo_root_for_request(&request)?;
-    let config_result =
+    let mut config_result =
         repo_config::load_from_repo_path_with_profile(&repo_path, request.profile.as_deref())
             .map_err(HeadlessReviewError::config)?;
-    if !config_result.errors.is_empty() {
-        return Err(HeadlessReviewError::config(
-            config_result
-                .errors
-                .iter()
-                .map(|error| format!("{}: {}", error.path, error.message))
-                .collect::<Vec<_>>()
-                .join("\n"),
-        ));
+    let mut policy_sources = Vec::new();
+    let mut required_policy_analyzers = Vec::new();
+    let mut resolved_policy_config = None;
+    let resolved_at_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_millis() as u64)
+        .unwrap_or_default();
+    if let Some(organization_policy) = resolve_configured_organization_policy(
+        &repo_path,
+        request.profile.as_deref(),
+        None,
+        resolved_at_ms,
+    )
+    .map_err(|error| HeadlessReviewError::config(error.to_string()))?
+    {
+        config_result.config = Some(organization_policy.config.clone());
+        config_result.selected_profile = organization_policy.selected_profile;
+        config_result.loaded_policy_packs = organization_policy.loaded_policy_packs;
+        config_result.warnings = organization_policy.warnings;
+        config_result.errors.clear();
+        required_policy_analyzers = organization_policy.required_analyzers;
+        resolved_policy_config = Some(organization_policy.config);
+        policy_sources = organization_policy.sources;
     }
-
+    ensure_config_valid(&config_result)?;
     let mut resolved = resolve_target(&request, &repo_path)?;
+    if !policy_sources.is_empty() {
+        let audit = SqliteOrganizationPolicyAuditSink {
+            context: AdministrativePolicyAuditContext {
+                provider: match resolved.provider {
+                    ReviewProvider::Github => PullRequestReviewEventProvider::Github,
+                    ReviewProvider::Bitbucket => PullRequestReviewEventProvider::Bitbucket,
+                },
+                workspace: resolved.workspace.clone(),
+                repository: resolved.repo.clone(),
+                pull_request_id: (resolved.pr_id > 0).then_some(u64::from(resolved.pr_id)),
+                actor_kind: AdministrativeAuditActorKind::System,
+                actor_id: "system:headless-review".to_string(),
+                correlation_id: format!("correlation:headless-{}-{resolved_at_ms}", resolved.pr_id),
+            },
+        };
+        for source in &policy_sources {
+            audit
+                .record(source, resolved_at_ms)
+                .map_err(HeadlessReviewError::config)?;
+        }
+    }
     resolved.warnings.extend(
         config_result
             .warnings
@@ -185,11 +226,7 @@ pub fn run(request: HeadlessReviewRequest) -> Result<HeadlessReviewExecution, He
     let selected_profile = config_result.selected_profile.clone();
 
     if resolved.diff.trim().is_empty() {
-        if request.run_analyzers {
-            return Err(HeadlessReviewError::target(
-                "No changes to review; local analyzers were not run.",
-            ));
-        }
+        validate_empty_diff_analyzers(request.run_analyzers, &required_policy_analyzers)?;
         return Ok(HeadlessReviewExecution {
             schema_version: "lachesi.headless-review.v1".to_string(),
             status: "succeeded".to_string(),
@@ -203,6 +240,7 @@ pub fn run(request: HeadlessReviewRequest) -> Result<HeadlessReviewExecution, He
     }
 
     let app_config = config::load();
+    let analyzers_ran = effective_analyzers_ran(request.run_analyzers, &required_policy_analyzers);
     let ai_provider = request.ai_provider.unwrap_or(app_config.ai_provider);
     let (claude_model, claude_effort, codex_model, codex_effort) = match ai_provider {
         AiProvider::Claude => (
@@ -245,6 +283,10 @@ pub fn run(request: HeadlessReviewRequest) -> Result<HeadlessReviewExecution, He
         codex_model,
         codex_effort,
         review_profile: selected_profile,
+        policy_sources,
+        required_policy_analyzers,
+        resolved_policy_config,
+        organization_policy_checked: true,
         run_analyzers: request.run_analyzers,
     })
     .map_err(map_native_review_error)?;
@@ -256,10 +298,48 @@ pub fn run(request: HeadlessReviewRequest) -> Result<HeadlessReviewExecution, He
         exit_code: 0,
         warnings: resolved.warnings,
         minimum_severity,
-        analyzers_ran: request.run_analyzers,
+        analyzers_ran,
         target: resolved.target,
         review_run: Some(review_run),
     })
+}
+
+fn ensure_config_valid(
+    config_result: &repo_config::RepoReviewConfigLoadResult,
+) -> Result<(), HeadlessReviewError> {
+    if config_result.errors.is_empty() {
+        return Ok(());
+    }
+    Err(HeadlessReviewError::config(
+        config_result
+            .errors
+            .iter()
+            .map(|error| format!("{}: {}", error.path, error.message))
+            .collect::<Vec<_>>()
+            .join("\n"),
+    ))
+}
+
+fn validate_empty_diff_analyzers(
+    requested: bool,
+    required_policy_analyzers: &[String],
+) -> Result<(), HeadlessReviewError> {
+    if !required_policy_analyzers.is_empty() {
+        return Err(HeadlessReviewError::analyzer(format!(
+            "No changes to review; required organization analyzers were not run: {}.",
+            required_policy_analyzers.join(", ")
+        )));
+    }
+    if requested {
+        return Err(HeadlessReviewError::target(
+            "No changes to review; local analyzers were not run.",
+        ));
+    }
+    Ok(())
+}
+
+fn effective_analyzers_ran(requested: bool, required_policy_analyzers: &[String]) -> bool {
+    requested || !required_policy_analyzers.is_empty()
 }
 
 fn strip_private_evidence_payloads(review_run: &mut ReviewRun) {
@@ -1257,11 +1337,12 @@ mod tests {
     use std::sync::atomic::{AtomicU64, Ordering};
 
     use super::{
-        branch_scope_warnings, build_review_payload, format_findings_markdown, format_markdown,
-        is_safe_synthetic_diff_path, is_sensitive_untracked_path, map_native_review_error,
-        map_provider_target_error, markdown_fence, new_file_patch, public_provider_error,
-        repo_identity_matches_target, requested_repo_identity, run,
-        strip_private_evidence_payloads, untracked_relative_path, validate_explicit_repo_identity,
+        branch_scope_warnings, build_review_payload, effective_analyzers_ran, ensure_config_valid,
+        format_findings_markdown, format_markdown, is_safe_synthetic_diff_path,
+        is_sensitive_untracked_path, map_native_review_error, map_provider_target_error,
+        markdown_fence, new_file_patch, public_provider_error, repo_identity_matches_target,
+        requested_repo_identity, run, strip_private_evidence_payloads, untracked_relative_path,
+        validate_empty_diff_analyzers, validate_explicit_repo_identity,
         validate_requested_identity_shape, working_tree_diff, HeadlessReviewExecution,
         HeadlessReviewRequest, HeadlessReviewTarget, ReviewScope, HEADLESS_REVIEW_BOUNDARY,
         MAX_UNTRACKED_FILE_BYTES,
@@ -1497,6 +1578,7 @@ mod tests {
             status: AiReviewRunStatus::Succeeded,
             turn_kind: AiReviewTurnKind::Initial,
             review_profile: None,
+            policy_sources: Vec::new(),
             created_at: "1".to_string(),
             finished_at: Some("2".to_string()),
             diff_fingerprint: "fingerprint".to_string(),
@@ -1557,6 +1639,7 @@ mod tests {
                 status: AiReviewRunStatus::Succeeded,
                 turn_kind: AiReviewTurnKind::Initial,
                 review_profile: Some("strict".to_string()),
+                policy_sources: Vec::new(),
                 created_at: "1".to_string(),
                 finished_at: Some("2".to_string()),
                 diff_fingerprint: "fingerprint".to_string(),
@@ -1909,6 +1992,45 @@ mod tests {
             map_native_review_error(HeadlessNativeReviewError::Cancelled).exit_code,
             130
         );
+    }
+
+    #[test]
+    fn policy_required_analyzers_are_reported_as_executed() {
+        assert!(effective_analyzers_ran(
+            false,
+            &["organization-check".to_string()]
+        ));
+        assert!(effective_analyzers_ran(true, &[]));
+        assert!(!effective_analyzers_ran(false, &[]));
+    }
+
+    #[test]
+    fn empty_diff_fails_closed_for_required_policy_analyzers() {
+        let error = validate_empty_diff_analyzers(false, &["organization-check".to_string()])
+            .expect_err("required analyzer must not be skipped");
+        assert_eq!(error.exit_code, 5);
+        assert!(error.message.contains("organization-check"));
+    }
+
+    #[test]
+    fn config_errors_fail_before_target_resolution() {
+        let result = crate::repo_config::RepoReviewConfigLoadResult {
+            repo_path: "/tmp/repo".to_string(),
+            config_path: "/tmp/repo/.lachesi.yaml".to_string(),
+            exists: true,
+            config: None,
+            selected_profile: None,
+            loaded_policy_packs: Vec::new(),
+            warnings: Vec::new(),
+            errors: vec![crate::repo_config::RepoConfigValidationMessage {
+                path: "/tmp/repo/.lachesi.yaml".to_string(),
+                message: "version is required".to_string(),
+            }],
+        };
+
+        let error = ensure_config_valid(&result).expect_err("invalid config");
+        assert_eq!(error.exit_code, 2);
+        assert!(error.message.contains("version is required"));
     }
 
     #[test]
