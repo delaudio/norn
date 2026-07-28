@@ -8,16 +8,15 @@ If status files and git disagree, git is authoritative; correct this file.
 
 ## Active state
 
-- **Branch:** `agent/signed-organization-policy`
-- **Active item:** GitHub issue #99 and `.docflow/plan/todo/0004-shared-review-service-program.md`
+- **Branch:** `agent/tui-image-diff`
+- **Active item:** GitHub issue #127 and `.docflow/plan/todo/0005-terminal-image-diffs.md`
 - **Blockers:** none; use the available SSH key for signed commits.
-- **Uncommitted work:** PR creation, CI, and squash merge.
+- **Uncommitted work:** implement bounded terminal image diff rendering.
 
 ## Last shipped
 
-`3db9c1d` - reconcile provider finding comments through PR #126.
+`dfca54e` - resolve signed organization policy through PR #128.
 
 ## Next item
 
-Implement GitHub issue #127 after signed organization policy merges, then
-resume GitHub issue #100.
+Complete GitHub issue #127, then resume GitHub issue #100.
