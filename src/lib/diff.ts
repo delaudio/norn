@@ -56,6 +56,35 @@ export function changeOldLine(change: ChangeData): number | undefined {
   return undefined;
 }
 
+function diffPrefixForChange(change: ChangeData): string {
+  if (change.type === "insert") return "+";
+  if (change.type === "delete") return "-";
+  return " ";
+}
+
+export function buildTargetedHunkDiff(file: FileData, change: ChangeData): string {
+  const changeKey = getChangeKey(change);
+  const hunk = file.hunks.find((candidate) =>
+    candidate.changes.some((item) => getChangeKey(item) === changeKey),
+  );
+  const oldPath = file.oldPath || "/dev/null";
+  const newPath = file.newPath || "/dev/null";
+  const lines = [
+    `diff --git a/${file.oldPath || newPath} b/${file.newPath || oldPath}`,
+    oldPath === "/dev/null" ? "--- /dev/null" : `--- a/${oldPath}`,
+    newPath === "/dev/null" ? "+++ /dev/null" : `+++ b/${newPath}`,
+  ];
+  if (hunk) {
+    lines.push(hunk.content);
+    for (const hunkChange of hunk.changes) {
+      lines.push(`${diffPrefixForChange(hunkChange)}${hunkChange.content}`);
+    }
+  } else {
+    lines.push(`${diffPrefixForChange(change)}${change.content}`);
+  }
+  return lines.join("\n");
+}
+
 /**
  * Resolve a Bitbucket inline anchor (`to` = new side, `from` = old side) to a
  * react-diff-view change key, so existing comments / drafts can be rendered as

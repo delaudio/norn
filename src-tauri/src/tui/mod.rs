@@ -15,8 +15,9 @@ use crate::config::{self, AiProvider, AppConfig, RepoRef};
 use crate::local_repo;
 use crate::services::bitbucket::{
     create_general_comment_native, get_pr_diff_native, get_pull_request_native,
-    list_comments_native, list_pull_requests_native, validate_repo_review_config_native,
-    ListPrOptions, PrComment, PullRequestDetail, PullRequestSummary,
+    get_stable_pull_request_review_snapshot_native, list_comments_native,
+    list_pull_requests_native, validate_repo_review_config_native, ListPrOptions, PrComment,
+    PullRequestDetail, PullRequestSummary,
 };
 use crate::services::review::{
     get_ai_review_run_state_native, load_ai_review_store_native, start_inline_review_native,
@@ -644,39 +645,30 @@ impl TuiApp {
     }
 
     fn start_ai_review(&mut self) {
-        if self.detail.as_ref().map(|detail| detail.id) != self.selected_pull_request_id() {
-            self.load_selected_pr();
-        }
         let Some((provider, workspace, repo, pr_id)) = self.selected_review_target() else {
             self.status = "Select a pull request before starting AI review".to_string();
             return;
         };
-        let Some(detail) = self.detail.as_ref().filter(|detail| detail.id == pr_id) else {
-            self.status = "Load pull request detail before starting AI review".to_string();
-            return;
+        let snapshot = match get_stable_pull_request_review_snapshot_native(
+            Some(provider),
+            &workspace,
+            &repo,
+            pr_id,
+        ) {
+            Ok(snapshot) => snapshot,
+            Err(error) => {
+                self.error = Some(error);
+                self.status = "Failed to load stable PR snapshot for AI review".to_string();
+                return;
+            }
         };
+        let detail = snapshot.detail;
+        let diff = snapshot.diff;
         let title = detail.title.clone();
         let source_branch = detail.source_branch.clone();
         let destination_branch = detail.destination_branch.clone();
-        let diff = match self
-            .diff
-            .as_deref()
-            .map(str::trim)
-            .filter(|diff| !diff.is_empty())
-        {
-            Some(diff) => diff.to_string(),
-            None => match get_pr_diff_native(Some(provider), &workspace, &repo, pr_id) {
-                Ok(diff) => {
-                    self.diff = Some(diff.clone());
-                    diff
-                }
-                Err(error) => {
-                    self.error = Some(error);
-                    self.status = "Failed to load diff for AI review".to_string();
-                    return;
-                }
-            },
-        };
+        let reviewed_base_sha = detail.destination_commit_hash.clone();
+        let reviewed_head_sha = detail.source_commit_hash.clone();
         let prompt = match self.review_prompt_for_selected_repo() {
             Ok(prompt) => prompt,
             Err(error) => {
@@ -685,7 +677,9 @@ impl TuiApp {
                 return;
             }
         };
-        let payload = build_review_payload(&prompt, detail, &diff);
+        let payload = build_review_payload(&prompt, &detail, &diff);
+        self.detail = Some(detail);
+        self.diff = Some(diff);
         match start_inline_review_native(
             self.ai_review_store.clone(),
             workspace.clone(),
@@ -694,6 +688,8 @@ impl TuiApp {
             title,
             source_branch,
             destination_branch,
+            reviewed_base_sha,
+            reviewed_head_sha,
             payload,
             Some("Review this pull request from the terminal UI.".to_string()),
             None,
@@ -1532,7 +1528,7 @@ mod tests {
             raw: "pending".to_string(),
         });
         app.comments.push(PrComment {
-            id: 1,
+            id: "1".to_string(),
             parent_id: None,
             content_raw: "remote".to_string(),
             content_html: None,
@@ -1565,7 +1561,7 @@ mod tests {
                 Err("remote rejected comment".to_string())
             } else {
                 Ok(PrComment {
-                    id: 10,
+                    id: "10".to_string(),
                     parent_id: None,
                     content_raw: raw,
                     content_html: None,

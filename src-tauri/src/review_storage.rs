@@ -11,6 +11,10 @@ use crate::administrative_audit::{
     validate_identifier as validate_audit_identifier, AdministrativeAuditAppendResult,
     AdministrativeAuditEvent,
 };
+use crate::finding_publication::{
+    FindingPublicationLease, FindingPublicationRequest, FindingPublicationReservation,
+    ProviderCommentIdentity,
+};
 use crate::review_event::PullRequestReviewEventProvider;
 use crate::review_feedback::{
     derive_finding_feedback_state, ReviewFindingFeedbackAction, ReviewFindingFeedbackEvent,
@@ -27,6 +31,7 @@ const DB_FILE: &str = "lachesi.sqlite3";
 const LEGACY_REVIEWS_DIR: &str = "reviews";
 const MAX_ADMINISTRATIVE_AUDIT_TIMESTAMP_MS: i64 = 4_102_444_800_000;
 const SHARED_REVIEW_JOB_LEASE_MS: i64 = 15 * 60 * 1000;
+const FINDING_PUBLICATION_LEASE_MS: i64 = 5 * 60 * 1000;
 const MAX_SHARED_REVIEW_JOB_ATTEMPTS: u32 = 3;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -591,6 +596,53 @@ fn migrate(conn: &mut Connection) -> Result<(), String> {
         )
         .map_err(|error| error.to_string())?;
     migration.commit().map_err(|error| error.to_string())?;
+
+    let migration = conn
+        .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+        .map_err(|error| error.to_string())?;
+    migration
+        .execute_batch(
+            r#"
+            CREATE TABLE IF NOT EXISTS shared_finding_publications (
+              marker TEXT PRIMARY KEY,
+              tenant_id TEXT NOT NULL,
+              provider TEXT NOT NULL CHECK (provider IN ('github', 'bitbucket')),
+              workspace TEXT NOT NULL,
+              repo TEXT NOT NULL,
+              pr_id INTEGER NOT NULL CHECK (pr_id > 0),
+              base_sha TEXT NOT NULL,
+              head_sha TEXT NOT NULL,
+              finding_fingerprint TEXT NOT NULL,
+              status TEXT NOT NULL CHECK (status IN ('publishing', 'published')),
+              lease_token TEXT,
+              lease_expires_at_ms INTEGER CHECK (lease_expires_at_ms >= 0),
+              comment_id TEXT,
+              created_at_ms INTEGER NOT NULL CHECK (created_at_ms >= 0),
+              updated_at_ms INTEGER NOT NULL CHECK (updated_at_ms >= 0),
+              CHECK (
+                (status = 'publishing' AND lease_token IS NOT NULL
+                  AND lease_expires_at_ms IS NOT NULL AND comment_id IS NULL)
+                OR
+                (status = 'published' AND lease_token IS NULL
+                  AND lease_expires_at_ms IS NULL AND comment_id IS NOT NULL)
+              )
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_shared_finding_publications_target
+              ON shared_finding_publications(
+                tenant_id, provider, workspace, repo, pr_id, base_sha, head_sha
+              );
+            "#,
+        )
+        .map_err(|error| error.to_string())?;
+    migration
+        .execute(
+            "INSERT OR IGNORE INTO schema_migrations(version) VALUES (6)",
+            [],
+        )
+        .map_err(|error| error.to_string())?;
+    migration.commit().map_err(|error| error.to_string())?;
+
     Ok(())
 }
 
@@ -2293,6 +2345,187 @@ fn now_ms_i64() -> i64 {
     now_ms().parse().unwrap_or(0)
 }
 
+pub(crate) fn reserve_finding_publication(
+    request: &FindingPublicationRequest,
+    marker: &str,
+    lease_token: &str,
+) -> Result<FindingPublicationReservation, String> {
+    request.validate()?;
+    if marker.trim().is_empty() || lease_token.trim().is_empty() {
+        return Err("Publication marker and lease token are required.".to_string());
+    }
+    let pr_id = shared_review_pr_id(request.pull_request_id)?;
+    let canonical_base_sha = request.base_sha.to_ascii_lowercase();
+    let canonical_head_sha = request.head_sha.to_ascii_lowercase();
+    let canonical_workspace = request.workspace.to_ascii_lowercase();
+    let canonical_repository = request.repository.to_ascii_lowercase();
+    let now = now_ms_i64();
+    let lease_expires_at = now.saturating_add(FINDING_PUBLICATION_LEASE_MS);
+    let mut conn = open()?;
+    let transaction = conn
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .map_err(|error| error.to_string())?;
+    let existing = transaction
+        .query_row(
+            r#"
+            SELECT tenant_id, provider, workspace, repo, pr_id, base_sha, head_sha,
+                   finding_fingerprint, status, lease_expires_at_ms, comment_id
+            FROM shared_finding_publications
+            WHERE marker = ?1
+            "#,
+            params![marker],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, i64>(4)?,
+                    row.get::<_, String>(5)?,
+                    row.get::<_, String>(6)?,
+                    row.get::<_, String>(7)?,
+                    row.get::<_, String>(8)?,
+                    row.get::<_, Option<i64>>(9)?,
+                    row.get::<_, Option<String>>(10)?,
+                ))
+            },
+        )
+        .optional()
+        .map_err(|error| error.to_string())?;
+
+    if let Some((
+        tenant_id,
+        provider,
+        workspace,
+        repo,
+        stored_pr_id,
+        base_sha,
+        head_sha,
+        finding_fingerprint,
+        status,
+        stored_lease_expires_at,
+        comment_id,
+    )) = existing
+    {
+        if tenant_id != request.tenant_id
+            || provider != request.provider.as_str()
+            || !workspace.eq_ignore_ascii_case(&request.workspace)
+            || !repo.eq_ignore_ascii_case(&request.repository)
+            || stored_pr_id != pr_id
+            || !base_sha.eq_ignore_ascii_case(&request.base_sha)
+            || !head_sha.eq_ignore_ascii_case(&request.head_sha)
+            || finding_fingerprint != request.finding_fingerprint
+        {
+            return Err("Publication marker identity collision.".to_string());
+        }
+        if status == "published" {
+            let comment_id = comment_id
+                .filter(|value| !value.is_empty())
+                .ok_or_else(|| {
+                    "Published finding is missing its provider comment id.".to_string()
+                })?;
+            transaction.commit().map_err(|error| error.to_string())?;
+            return Ok(FindingPublicationReservation::Published(
+                ProviderCommentIdentity { comment_id },
+            ));
+        }
+        if stored_lease_expires_at.is_some_and(|expires_at| expires_at > now) {
+            transaction.commit().map_err(|error| error.to_string())?;
+            return Ok(FindingPublicationReservation::InProgress);
+        }
+        let updated = transaction
+            .execute(
+                r#"
+                UPDATE shared_finding_publications
+                SET lease_token = ?2, lease_expires_at_ms = ?3, updated_at_ms = ?4
+                WHERE marker = ?1 AND status = 'publishing'
+                  AND lease_expires_at_ms <= ?4
+                "#,
+                params![marker, lease_token, lease_expires_at, now],
+            )
+            .map_err(|error| error.to_string())?;
+        if updated != 1 {
+            return Err("Publication reservation changed while being reclaimed.".to_string());
+        }
+    } else {
+        transaction
+            .execute(
+                r#"
+                INSERT INTO shared_finding_publications (
+                  marker, tenant_id, provider, workspace, repo, pr_id, base_sha,
+                  head_sha, finding_fingerprint, status, lease_token,
+                  lease_expires_at_ms, comment_id, created_at_ms, updated_at_ms
+                )
+                VALUES (
+                  ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 'publishing', ?10, ?11,
+                  NULL, ?12, ?12
+                )
+                "#,
+                params![
+                    marker,
+                    request.tenant_id,
+                    request.provider.as_str(),
+                    canonical_workspace,
+                    canonical_repository,
+                    pr_id,
+                    canonical_base_sha,
+                    canonical_head_sha,
+                    request.finding_fingerprint,
+                    lease_token,
+                    lease_expires_at,
+                    now,
+                ],
+            )
+            .map_err(|error| error.to_string())?;
+    }
+    transaction.commit().map_err(|error| error.to_string())?;
+    Ok(FindingPublicationReservation::Acquired(
+        FindingPublicationLease {
+            marker: marker.to_string(),
+            token: lease_token.to_string(),
+        },
+    ))
+}
+
+pub(crate) fn complete_finding_publication(
+    lease: &FindingPublicationLease,
+    identity: &ProviderCommentIdentity,
+) -> Result<(), String> {
+    if identity.comment_id.trim().is_empty() {
+        return Err("Provider comment id is required.".to_string());
+    }
+    let conn = open()?;
+    let updated = conn
+        .execute(
+            r#"
+            UPDATE shared_finding_publications
+            SET status = 'published', lease_token = NULL, lease_expires_at_ms = NULL,
+                comment_id = ?3, updated_at_ms = ?4
+            WHERE marker = ?1 AND status = 'publishing' AND lease_token = ?2
+            "#,
+            params![lease.marker, lease.token, identity.comment_id, now_ms_i64()],
+        )
+        .map_err(|error| error.to_string())?;
+    if updated == 1 {
+        Ok(())
+    } else {
+        Err("Publication lease was fenced before completion.".to_string())
+    }
+}
+
+pub(crate) fn release_finding_publication(lease: &FindingPublicationLease) -> Result<(), String> {
+    let conn = open()?;
+    conn.execute(
+        r#"
+        DELETE FROM shared_finding_publications
+        WHERE marker = ?1 AND status = 'publishing' AND lease_token = ?2
+        "#,
+        params![lease.marker, lease.token],
+    )
+    .map_err(|error| error.to_string())?;
+    Ok(())
+}
+
 fn shared_job_conversion_error(column: usize, message: impl Into<String>) -> rusqlite::Error {
     rusqlite::Error::FromSqlConversionFailure(
         column,
@@ -2958,6 +3191,9 @@ mod tests {
         AdministrativeAuditSchemaVersion, AdministrativeAuditTarget, AdministrativeAuditTargetKind,
         REDACTED_AUDIT_VALUE,
     };
+    use crate::finding_publication::{
+        FindingAnchorSide, FindingLineRange, FindingPublicationSchemaVersion, FindingSeverity,
+    };
     use crate::review_event::{
         PullRequestClosedOutcome, PullRequestEventActor, PullRequestReviewEvent,
         PullRequestReviewEventKind, PullRequestReviewEventSchemaVersion, PullRequestRevision,
@@ -2993,6 +3229,86 @@ mod tests {
             repo: "payments".to_string(),
             pr_id: 42,
         }
+    }
+
+    fn finding_publication_request() -> FindingPublicationRequest {
+        FindingPublicationRequest {
+            schema_version: FindingPublicationSchemaVersion::V1,
+            tenant_id: "tenant-acme".to_string(),
+            provider: PullRequestReviewEventProvider::Github,
+            workspace: "acme".to_string(),
+            repository: "payments".to_string(),
+            pull_request_id: 42,
+            base_sha: "1111111111111111111111111111111111111111".to_string(),
+            head_sha: "2222222222222222222222222222222222222222".to_string(),
+            finding_fingerprint: "finding:src/lib.rs:12".to_string(),
+            anchor: FindingLineRange {
+                path: "src/lib.rs".to_string(),
+                start_line: 12,
+                end_line: 14,
+                side: FindingAnchorSide::New,
+            },
+            title: "Guard the nullable value".to_string(),
+            body: "The error path can omit this value.".to_string(),
+            severity: FindingSeverity::High,
+            suggested_fix: None,
+        }
+    }
+
+    #[test]
+    fn finding_publication_reservations_are_durable_idempotent_and_fenced() {
+        with_test_data_dir("finding-publication-reservation", |_| {
+            let request = finding_publication_request();
+            let marker = crate::finding_publication::finding_marker(&request);
+            let first = reserve_finding_publication(&request, &marker, "lease-1")
+                .expect("first reservation");
+            let FindingPublicationReservation::Acquired(first_lease) = first else {
+                panic!("first publisher should acquire the marker");
+            };
+
+            assert_eq!(
+                reserve_finding_publication(&request, &marker, "lease-2")
+                    .expect("concurrent reservation"),
+                FindingPublicationReservation::InProgress
+            );
+
+            let conn = open().expect("open publication database");
+            conn.execute(
+                "UPDATE shared_finding_publications SET lease_expires_at_ms = 0 WHERE marker = ?1",
+                params![marker],
+            )
+            .expect("expire first lease");
+            let reclaimed = reserve_finding_publication(&request, &marker, "lease-2")
+                .expect("reclaim expired reservation");
+            let FindingPublicationReservation::Acquired(second_lease) = reclaimed else {
+                panic!("expired reservation should be reclaimed");
+            };
+            assert!(complete_finding_publication(
+                &first_lease,
+                &ProviderCommentIdentity {
+                    comment_id: "stale-comment".to_string()
+                }
+            )
+            .is_err());
+
+            let identity = ProviderCommentIdentity {
+                comment_id: "9223372036854775000".to_string(),
+            };
+            complete_finding_publication(&second_lease, &identity).expect("complete current lease");
+            assert_eq!(
+                reserve_finding_publication(&request, &marker, "lease-3")
+                    .expect("idempotent published reservation"),
+                FindingPublicationReservation::Published(identity)
+            );
+            release_finding_publication(&first_lease).expect("stale release is harmless");
+            assert_eq!(
+                reserve_finding_publication(&request, &marker, "lease-4")
+                    .expect("published state survives stale release"),
+                FindingPublicationReservation::Published(ProviderCommentIdentity {
+                    comment_id: "9223372036854775000".to_string()
+                })
+            );
+        });
     }
 
     fn completion(
@@ -3707,7 +4023,7 @@ mod tests {
                 .expect("query migrations")
                 .collect::<rusqlite::Result<_>>()
                 .expect("read migration versions");
-            assert_eq!(versions, vec![1, 2, 3, 4, 5]);
+            assert_eq!(versions, vec![1, 2, 3, 4, 5, 6]);
         });
     }
 

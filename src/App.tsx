@@ -19,7 +19,7 @@ import { useClosedPrAnalytics } from "@/hooks/useClosedPrAnalytics";
 import { useConfig } from "@/hooks/useConfig";
 import { useCredentials } from "@/hooks/useCredentials";
 import { authorKey, useCurrentUser } from "@/hooks/useCurrentUser";
-import { useDraftComments } from "@/hooks/useDraftComments";
+import { type PublishedDraftComment, useDraftComments } from "@/hooks/useDraftComments";
 import { useMenuBarPrSync } from "@/hooks/useMenuBarPrSync";
 import { type PrGroup, usePullRequests } from "@/hooks/usePullRequests";
 import { useReviewReferences } from "@/hooks/useReviewReferences";
@@ -31,15 +31,21 @@ import {
   normalizeAiReviewDraftComments,
 } from "@/lib/aiReviewDraftComments";
 import { buildReviewPromptDisplayMessage } from "@/lib/aiReviewPromptDisplay";
+import { buildBackgroundReviewStartArgs } from "@/lib/backgroundReviewStart";
 import { buildAiFixPayload } from "@/lib/buildAiFixPayload";
-import { buildAiReviewPayloadForPr } from "@/lib/buildAiReviewPayloadForPr";
-import { buildReviewPayload } from "@/lib/buildReviewPayload";
+import {
+  buildAiReviewPayloadForPr,
+  loadStablePullRequestReviewSnapshot,
+  resolveLineQuestionHunkFromReviewSnapshot,
+} from "@/lib/buildAiReviewPayloadForPr";
 import { shouldIgnoreShortcut } from "@/lib/keyboard";
 import {
+  assertPullRequestMatchesReviewRun,
+  buildFindingPublicationRequest,
   filterStageableAiReviewDraftComments,
   summarizeActiveReviewFindings,
 } from "@/lib/reviewFindingPublication";
-import { resolveReviewPrompt } from "@/lib/reviewPrompt";
+import { publishReviewFinding, recordReviewFindingPublicationEvents } from "@/lib/reviewService";
 import { tauriCall } from "@/lib/tauri";
 import type {
   AiLineQuestionContext,
@@ -50,13 +56,13 @@ import type {
   AiReviewRunState,
   AppSelection,
   DraftComment,
-  PrComment,
   PrListFilter,
+  PullRequestDetail,
   PullRequestSummary,
   RepoRef,
-  ReviewProvider,
-  ReviewFindingPublicationEvent,
   RepoReviewConfigLoadResult,
+  ReviewFindingPublicationEvent,
+  ReviewProvider,
 } from "@/types";
 import { repoKey } from "@/types";
 
@@ -243,19 +249,18 @@ export default function App() {
           trigger: "menuBar",
         });
         const started = await tauriCall<AiReviewRunState>("start_inline_review", {
-          workspace: pr.workspace,
-          repo: pr.repo,
-          id: pr.id,
-          title: detail.title || `PR #${pr.id}`,
-          payload,
-          sourceBranch: detail.sourceBranch,
-          destinationBranch: detail.destinationBranch,
-          aiProvider: config?.aiProvider ?? "claude",
-          claudeModel: config?.claudeModel ?? null,
-          claudeEffort: config?.claudeEffort ?? null,
-          codexModel: config?.codexModel ?? null,
-          codexEffort: config?.codexEffort ?? null,
-          reviewProfile: null,
+          ...buildBackgroundReviewStartArgs({
+            workspace: pr.workspace,
+            repo: pr.repo,
+            prId: pr.id,
+            detail,
+            payload,
+            aiProvider: config?.aiProvider ?? "claude",
+            claudeModel: config?.claudeModel ?? null,
+            claudeEffort: config?.claudeEffort ?? null,
+            codexModel: config?.codexModel ?? null,
+            codexEffort: config?.codexEffort ?? null,
+          }),
           skipAnalyzers: true,
         });
         await updateJob("running", started.threadId);
@@ -349,10 +354,10 @@ export default function App() {
     events: ReviewFindingPublicationEvent[],
   ): Promise<void> => {
     if (!activeSel || events.length === 0) return;
-    await tauriCall("record_ai_review_finding_publication", {
+    await recordReviewFindingPublicationEvents({
       workspace: activeSel.workspace,
       repo: activeSel.repo,
-      id: activeSel.prId,
+      prId: activeSel.prId,
       events,
     });
     await aiReview.refreshStore();
@@ -396,7 +401,45 @@ export default function App() {
     await removeFindingDrafts([draft]);
   };
 
-  const publishFindingDraft = async (draft: DraftComment, comment: PrComment): Promise<void> => {
+  const publishStructuredFindingDraft = async (
+    draft: DraftComment,
+  ): Promise<PublishedDraftComment> => {
+    if (!activeSel || !aiReviewContext || !draft.findingRef) {
+      throw new Error("The structured finding publication context is unavailable.");
+    }
+    const reviewRun =
+      aiReview.store?.reviewRuns?.find(
+        (candidate) => candidate.id === draft.findingRef?.reviewRunId,
+      ) ?? null;
+    if (!reviewRun) {
+      throw new Error("The review run linked to this draft is no longer available.");
+    }
+    const snapshot = await loadStablePullRequestReviewSnapshot({
+      workspace: activeSel.workspace,
+      repo: activeSel.repo,
+      provider: activeRepo?.provider ?? reviewProvider,
+      prId: activeSel.prId,
+    });
+    assertPullRequestMatchesReviewRun(reviewRun, snapshot.pr);
+    const request = buildFindingPublicationRequest({
+      provider: activeRepo?.provider ?? reviewProvider,
+      workspace: activeSel.workspace,
+      repo: activeSel.repo,
+      pr: snapshot.pr,
+      reviewRun,
+      draft,
+    });
+    const published = await publishReviewFinding(request);
+    return {
+      id: published.commentId,
+      createdOn: new Date().toISOString(),
+    };
+  };
+
+  const recordPublishedFindingDraft = async (
+    draft: DraftComment,
+    comment: PublishedDraftComment,
+  ): Promise<void> => {
     if (!draft.findingRef) return;
     await recordFindingPublicationEvents([
       {
@@ -417,7 +460,8 @@ export default function App() {
     activeSel?.repo ?? null,
     activeSel?.prId ?? null,
     {
-      onDraftPublished: publishFindingDraft,
+      publishFindingDraft: publishStructuredFindingDraft,
+      onFindingDraftPublished: recordPublishedFindingDraft,
       onDraftRemoved: removeFindingDraft,
       onDraftsDiscarded: async (drafts) => {
         await removeFindingDrafts(drafts);
@@ -616,41 +660,42 @@ export default function App() {
   const buildActiveReviewRequest = async (): Promise<{
     payload: string;
     displayMessage: string;
+    pr: PullRequestDetail;
   } | null> => {
-    if (!activeSel || !aiReviewContext) return null;
-    const { prompt, warnings } = await resolveReviewPrompt(
-      `${activeSel.workspace}/${activeSel.repo}`,
-      activeRepo?.localPath,
-      selectedReviewProfile || null,
-    );
-    if (warnings.length > 0) {
-      console.warn("Lachesi repo config warnings:", warnings);
-    }
-    const payload = buildReviewPayload({
-      prompt,
-      pr: aiReviewContext.pr,
-      branchStatus: aiReviewContext.branchStatus,
-      rawDiff: aiReviewContext.rawDiff,
-      jiraKeys: aiReviewContext.jiraKeys,
-      jiraBaseUrl: aiReviewContext.jiraBaseUrl,
-      jiraContext: aiReviewContext.jiraContext,
+    if (!activeSel) return null;
+    const { payload, pr } = await buildAiReviewPayloadForPr({
+      workspace: activeSel.workspace,
+      repo: activeSel.repo,
+      provider: activeRepo?.provider ?? reviewProvider,
+      prId: activeSel.prId,
+      repoConfig: activeRepo,
+      jiraBaseUrl: config?.jiraBaseUrl ?? null,
+      jiraContextEnabled: Boolean(config?.hasJira && config?.jiraBaseUrl),
+      reviewProfile: selectedReviewProfile || null,
       reviewReferences: reviewReferences.references,
     });
     return {
       payload,
       displayMessage: buildReviewPromptDisplayMessage(payload),
+      pr,
     };
-  };
-
-  const buildActiveReviewPayload = async (): Promise<string | null> => {
-    return (await buildActiveReviewRequest())?.payload ?? null;
   };
 
   const buildLineQuestionRequest = async (
     lineContext: AiLineQuestionContext,
     question: string,
-  ): Promise<{ payload: string; displayMessage: string } | null> => {
-    if (!activeSel || !aiReviewContext) return null;
+  ): Promise<{ payload: string; displayMessage: string; pr: PullRequestDetail } | null> => {
+    if (!activeSel) return null;
+    const snapshot = await loadStablePullRequestReviewSnapshot({
+      workspace: activeSel.workspace,
+      repo: activeSel.repo,
+      provider: activeRepo?.provider ?? reviewProvider,
+      prId: activeSel.prId,
+    });
+    const currentHunkDiff = resolveLineQuestionHunkFromReviewSnapshot(
+      snapshot.rawDiff,
+      lineContext,
+    );
     const label = lineQuestionLabel(lineContext);
     const displayMessage = [`Question about \`${label}\``, "", question.trim()].join("\n");
     const payload = [
@@ -658,8 +703,8 @@ export default function App() {
       "Answer directly and concisely.",
       "",
       "## Pull request",
-      `${aiReviewContext.pr.title} (#${aiReviewContext.pr.id})`,
-      `Branch: ${aiReviewContext.pr.sourceBranch} -> ${aiReviewContext.pr.destinationBranch}`,
+      `${snapshot.pr.title} (#${snapshot.pr.id})`,
+      `Branch: ${snapshot.pr.sourceBranch} -> ${snapshot.pr.destinationBranch}`,
       "",
       "## Selected line",
       `File: ${lineContext.path}`,
@@ -670,7 +715,7 @@ export default function App() {
       "",
       "## Diff hunk",
       "```diff",
-      lineContext.hunkDiff.trim(),
+      currentHunkDiff.trim(),
       "```",
       "",
       "## Reviewer question",
@@ -678,7 +723,7 @@ export default function App() {
     ]
       .filter((line): line is string => line != null)
       .join("\n");
-    return { payload, displayMessage };
+    return { payload, displayMessage, pr: snapshot.pr };
   };
 
   const hasAssistantReview =
@@ -698,6 +743,7 @@ export default function App() {
       : null;
 
   const handleRunInlineReview = (
+    reviewTarget: PullRequestDetail,
     payload: string,
     displayMessage?: string | null,
     options: {
@@ -706,9 +752,8 @@ export default function App() {
       reviewProfile?: string | null;
     } = {},
   ) => {
-    if (!activeSel || !aiReviewContext) return;
+    if (!activeSel) return;
     const selectionForReview = activeSel;
-    const contextForReview = aiReviewContext;
     setReviewPanelOpen(true);
     void (async () => {
       let job: AiReviewJob | null = null;
@@ -730,9 +775,9 @@ export default function App() {
           workspace: selectionForReview.workspace,
           repo: selectionForReview.repo,
           prId: selectionForReview.prId,
-          prTitle: contextForReview.pr.title || `PR #${selectionForReview.prId}`,
-          sourceBranch: contextForReview.pr.sourceBranch,
-          destinationBranch: contextForReview.pr.destinationBranch,
+          prTitle: reviewTarget.title || `PR #${selectionForReview.prId}`,
+          sourceBranch: reviewTarget.sourceBranch,
+          destinationBranch: reviewTarget.destinationBranch,
           trigger: "manual",
         });
         await aiReview.run({
@@ -740,9 +785,11 @@ export default function App() {
           displayMessage,
           reviewKind: options.reviewKind ?? null,
           threadTitle: options.threadTitle ?? null,
-          title: contextForReview.pr.title || `PR #${selectionForReview.prId}`,
-          sourceBranch: contextForReview.pr.sourceBranch,
-          destinationBranch: contextForReview.pr.destinationBranch,
+          title: reviewTarget.title || `PR #${selectionForReview.prId}`,
+          sourceBranch: reviewTarget.sourceBranch,
+          destinationBranch: reviewTarget.destinationBranch,
+          reviewedBaseSha: reviewTarget.destinationCommitHash ?? null,
+          reviewedHeadSha: reviewTarget.sourceCommitHash ?? null,
           aiProvider: config?.aiProvider ?? "claude",
           claudeModel: config?.claudeModel ?? null,
           claudeEffort: config?.claudeEffort ?? null,
@@ -793,9 +840,11 @@ export default function App() {
       if (aiReview.activeThread?.id) {
         setReviewPanelOpen(true);
         void aiReview.reply({
-          title: aiReviewContext.pr.title || `PR #${activeSel.prId}`,
-          sourceBranch: aiReviewContext.pr.sourceBranch,
-          destinationBranch: aiReviewContext.pr.destinationBranch,
+          title: request.pr.title || `PR #${activeSel.prId}`,
+          sourceBranch: request.pr.sourceBranch,
+          destinationBranch: request.pr.destinationBranch,
+          reviewedBaseSha: request.pr.destinationCommitHash ?? null,
+          reviewedHeadSha: request.pr.sourceCommitHash ?? null,
           threadId: aiReview.activeThread.id,
           userMessage: request.displayMessage,
           basePayload: request.payload,
@@ -806,7 +855,7 @@ export default function App() {
           codexEffort: config?.codexEffort ?? null,
         });
       } else {
-        handleRunInlineReview(request.payload, request.displayMessage, {
+        handleRunInlineReview(request.pr, request.payload, request.displayMessage, {
           reviewProfile: selectedReviewProfile || null,
         });
       }
@@ -817,15 +866,15 @@ export default function App() {
 
   const handleAskClaude = async (userMessage: string) => {
     try {
-      const basePayload = await buildActiveReviewPayload();
-      if (!basePayload) return;
+      const request = await buildActiveReviewRequest();
+      if (!request) return;
       const payload = [
-        basePayload.trim(),
+        request.payload.trim(),
         "",
         "## Initial question from the reviewer",
         userMessage.trim(),
       ].join("\n");
-      handleRunInlineReview(payload, userMessage.trim());
+      handleRunInlineReview(request.pr, payload, userMessage.trim());
     } catch (error) {
       window.alert(error instanceof Error ? error.message : String(error));
     }
@@ -835,7 +884,7 @@ export default function App() {
     try {
       const request = await buildLineQuestionRequest(lineContext, question);
       if (!request) return;
-      handleRunInlineReview(request.payload, request.displayMessage, {
+      handleRunInlineReview(request.pr, request.payload, request.displayMessage, {
         reviewKind: "lineQuestion",
         threadTitle: "Line question",
       });
@@ -847,16 +896,18 @@ export default function App() {
   const handleReplyToReview = async (threadId: string, userMessage: string) => {
     if (!activeSel || !aiReviewContext) return;
     try {
-      const basePayload = await buildActiveReviewPayload();
-      if (!basePayload) return;
+      const request = await buildActiveReviewRequest();
+      if (!request) return;
       setReviewPanelOpen(true);
       void aiReview.reply({
-        title: aiReviewContext.pr.title || `PR #${activeSel.prId}`,
-        sourceBranch: aiReviewContext.pr.sourceBranch,
-        destinationBranch: aiReviewContext.pr.destinationBranch,
+        title: request.pr.title || `PR #${activeSel.prId}`,
+        sourceBranch: request.pr.sourceBranch,
+        destinationBranch: request.pr.destinationBranch,
+        reviewedBaseSha: request.pr.destinationCommitHash ?? null,
+        reviewedHeadSha: request.pr.sourceCommitHash ?? null,
         threadId,
         userMessage,
-        basePayload,
+        basePayload: request.payload,
         aiProvider: config?.aiProvider ?? "claude",
         claudeModel: config?.claudeModel ?? null,
         claudeEffort: config?.claudeEffort ?? null,
@@ -920,16 +971,33 @@ export default function App() {
         skippedAlreadyPublished: 0,
       };
     }
+    const reviewRun = aiReview.activeRun;
+    if (!reviewRun) {
+      throw new Error("The review snapshot is unavailable; rerun the review before staging.");
+    }
+    const snapshot = await loadStablePullRequestReviewSnapshot({
+      workspace: activeSel.workspace,
+      repo: activeSel.repo,
+      provider: activeRepo?.provider ?? reviewProvider,
+      prId: activeSel.prId,
+    });
+    assertPullRequestMatchesReviewRun(reviewRun, snapshot.pr);
+    const stagingContext: AiReviewContext = {
+      ...aiReviewContext,
+      pr: snapshot.pr,
+      branchStatus: snapshot.branchStatus,
+      rawDiff: snapshot.rawDiff,
+    };
 
     const payload = buildAiReviewCommentDraftPayload({
-      pr: aiReviewContext.pr,
+      pr: stagingContext.pr,
       thread: aiReview.activeThread,
-      reviewRun: aiReview.activeRun,
-      branchStatus: aiReviewContext.branchStatus,
-      rawDiff: aiReviewContext.rawDiff,
-      jiraKeys: aiReviewContext.jiraKeys,
-      jiraBaseUrl: aiReviewContext.jiraBaseUrl,
-      jiraContext: aiReviewContext.jiraContext,
+      reviewRun,
+      branchStatus: stagingContext.branchStatus,
+      rawDiff: stagingContext.rawDiff,
+      jiraKeys: stagingContext.jiraKeys,
+      jiraBaseUrl: stagingContext.jiraBaseUrl,
+      jiraContext: stagingContext.jiraContext,
     });
 
     const suggestions = await tauriCall<AiReviewDraftCommentSuggestion[]>(
@@ -942,8 +1010,8 @@ export default function App() {
       },
     );
 
-    const normalized = normalizeAiReviewDraftComments(aiReviewContext.rawDiff, suggestions);
-    const linked = linkAiReviewDraftCommentsToFindings(aiReview.activeRun, normalized.comments);
+    const normalized = normalizeAiReviewDraftComments(stagingContext.rawDiff, suggestions);
+    const linked = linkAiReviewDraftCommentsToFindings(reviewRun, normalized.comments);
     const filtered = filterStageableAiReviewDraftComments(
       linked,
       draftComments.drafts,
@@ -961,6 +1029,8 @@ export default function App() {
         source: comment.findingRef ? "aiFinding" : "manual",
         findingRef: comment.findingRef,
         publicationMode: comment.publicationMode,
+        reviewBaseSha: comment.findingRef ? (aiReview.activeRun?.reviewedBaseSha ?? null) : null,
+        reviewHeadSha: comment.findingRef ? (aiReview.activeRun?.reviewedHeadSha ?? null) : null,
       })),
     );
     await stageFindingDrafts(stagedDrafts);

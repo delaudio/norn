@@ -201,7 +201,6 @@ export interface AiLineQuestionContext {
   to: number | null;
   from: number | null;
   lineText: string;
-  hunkDiff: string;
 }
 
 export type AiReviewRunStatus = "idle" | "running" | "succeeded" | "failed" | "cancelled";
@@ -304,10 +303,46 @@ export interface ReviewFindingAnchor {
   side: ReviewAnchorSide;
 }
 
+export interface FindingPublicationRequest {
+  schemaVersion: "v1";
+  tenantId: string;
+  provider: ReviewProvider;
+  workspace: string;
+  repository: string;
+  pullRequestId: number;
+  baseSha: string;
+  headSha: string;
+  findingFingerprint: string;
+  anchor: {
+    path: string;
+    startLine: number;
+    endLine: number;
+    side: ReviewAnchorSide;
+  };
+  title: string;
+  body: string;
+  severity: ReviewFindingSeverity;
+  suggestedFix?: string;
+}
+
+export interface PublishedCommentIdentity {
+  tenantId: string;
+  provider: ReviewProvider;
+  workspace: string;
+  repository: string;
+  pullRequestId: number;
+  commentId: string;
+  findingMarker: string;
+  path: string;
+  startLine: number;
+  endLine: number;
+  side: ReviewAnchorSide;
+}
+
 export interface ReviewFindingPublication {
   mode: ReviewPublicationMode;
   draftIds: string[];
-  remoteCommentIds: number[];
+  remoteCommentIds: string[];
   publishedAt: string | null;
 }
 
@@ -319,7 +354,7 @@ export interface ReviewFindingPublicationEvent {
   findingFingerprint: string;
   mode: ReviewPublicationMode;
   draftId: string | null;
-  remoteCommentId: number | null;
+  remoteCommentId: string | null;
   publishedAt: string | null;
 }
 
@@ -359,6 +394,8 @@ export interface ReviewRun {
   prId: number;
   sourceBranch: string;
   destinationBranch: string;
+  reviewedBaseSha?: string | null;
+  reviewedHeadSha?: string | null;
   status: AiReviewRunStatus;
   turnKind: AiReviewTurnKind;
   reviewProfile: string | null;
@@ -448,8 +485,8 @@ export interface InlineAnchor {
 }
 
 export interface PrComment {
-  id: number;
-  parentId: number | null;
+  id: string;
+  parentId: string | null;
   contentRaw: string;
   contentHtml?: string | null;
   userDisplayName: string;
@@ -674,11 +711,13 @@ export interface DraftComment {
   to: number | null;
   from: number | null;
   raw: string;
-  parentId: number | null;
+  parentId: string | null;
   createdAt: number;
   source?: "manual" | "aiFinding";
   findingRef?: ReviewFindingRef | null;
   publicationMode?: ReviewPublicationMode | null;
+  reviewBaseSha?: string | null;
+  reviewHeadSha?: string | null;
 }
 
 /** Helper: a stable string key for a repo. */

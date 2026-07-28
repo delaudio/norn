@@ -182,8 +182,8 @@ pub struct ReviewFindingPublication {
     pub mode: ReviewPublicationMode,
     #[serde(default)]
     pub draft_ids: Vec<String>,
-    #[serde(default)]
-    pub remote_comment_ids: Vec<u64>,
+    #[serde(default, deserialize_with = "deserialize_remote_comment_ids")]
+    pub remote_comment_ids: Vec<String>,
     pub published_at: Option<String>,
 }
 
@@ -235,8 +235,42 @@ pub struct ReviewFindingPublicationEvent {
     pub finding_fingerprint: String,
     pub mode: ReviewPublicationMode,
     pub draft_id: Option<String>,
-    pub remote_comment_id: Option<u64>,
+    #[serde(default, deserialize_with = "deserialize_optional_remote_comment_id")]
+    pub remote_comment_id: Option<String>,
     pub published_at: Option<String>,
+}
+
+fn remote_comment_id_from_value<E: serde::de::Error>(
+    value: serde_json::Value,
+) -> Result<String, E> {
+    match value {
+        serde_json::Value::String(value) if !value.trim().is_empty() => Ok(value),
+        serde_json::Value::Number(value) if value.as_u64().is_some() => Ok(value.to_string()),
+        _ => Err(E::custom(
+            "remote comment ids must be non-empty strings or unsigned integers",
+        )),
+    }
+}
+
+fn deserialize_remote_comment_ids<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Vec::<serde_json::Value>::deserialize(deserializer)?
+        .into_iter()
+        .map(remote_comment_id_from_value)
+        .collect()
+}
+
+fn deserialize_optional_remote_comment_id<'de, D>(
+    deserializer: D,
+) -> Result<Option<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Option::<serde_json::Value>::deserialize(deserializer)?
+        .map(remote_comment_id_from_value)
+        .transpose()
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
@@ -250,6 +284,10 @@ pub struct ReviewRun {
     pub pr_id: u32,
     pub source_branch: String,
     pub destination_branch: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reviewed_base_sha: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reviewed_head_sha: Option<String>,
     pub status: AiReviewRunStatus,
     pub turn_kind: AiReviewTurnKind,
     #[serde(default)]
@@ -275,6 +313,8 @@ pub struct HeadlessNativeReviewRequest {
     pub title: String,
     pub source_branch: String,
     pub destination_branch: String,
+    pub reviewed_base_sha: Option<String>,
+    pub reviewed_head_sha: Option<String>,
     pub payload: String,
     pub ai_provider: AiProvider,
     pub claude_model: Option<String>,
@@ -1837,6 +1877,8 @@ fn materialize_review_run(
     pr_id: u32,
     source_branch: &str,
     destination_branch: &str,
+    reviewed_base_sha: Option<&str>,
+    reviewed_head_sha: Option<&str>,
     thread_id: &str,
     turn_kind: AiReviewTurnKind,
     review_profile: Option<&str>,
@@ -1901,6 +1943,8 @@ fn materialize_review_run(
         pr_id,
         source_branch: source_branch.to_string(),
         destination_branch: destination_branch.to_string(),
+        reviewed_base_sha: reviewed_base_sha.map(ToOwned::to_owned),
+        reviewed_head_sha: reviewed_head_sha.map(ToOwned::to_owned),
         status: AiReviewRunStatus::Succeeded,
         turn_kind,
         review_profile: review_profile.map(ToOwned::to_owned),
@@ -1968,13 +2012,15 @@ fn apply_review_finding_publication_event(
             if let Some(draft_id) = event.draft_id.as_deref() {
                 publication.draft_ids.retain(|current| current != draft_id);
             }
-            if let Some(remote_comment_id) = event.remote_comment_id {
+            if let Some(remote_comment_id) = event.remote_comment_id.as_deref() {
                 if !publication
                     .remote_comment_ids
                     .iter()
-                    .any(|current| *current == remote_comment_id)
+                    .any(|current| current == remote_comment_id)
                 {
-                    publication.remote_comment_ids.push(remote_comment_id);
+                    publication
+                        .remote_comment_ids
+                        .push(remote_comment_id.to_string());
                 }
             }
             publication.published_at = Some(event.published_at.clone().unwrap_or_else(now_ms));
@@ -4461,6 +4507,8 @@ fn run_inline_review_pipeline(
     id: u32,
     source_branch: String,
     destination_branch: String,
+    reviewed_base_sha: Option<String>,
+    reviewed_head_sha: Option<String>,
     thread_id: String,
     turn_kind: AiReviewTurnKind,
     started_at: String,
@@ -4905,6 +4953,8 @@ fn run_inline_review_pipeline(
         id,
         &source_branch,
         &destination_branch,
+        reviewed_base_sha.as_deref(),
+        reviewed_head_sha.as_deref(),
         &thread_id,
         turn_kind,
         review_profile.as_deref(),
@@ -4972,6 +5022,8 @@ pub fn start_inline_review_native(
     title: String,
     source_branch: String,
     destination_branch: String,
+    reviewed_base_sha: Option<String>,
+    reviewed_head_sha: Option<String>,
     payload: String,
     display_message: Option<String>,
     review_kind: Option<String>,
@@ -5039,6 +5091,8 @@ pub fn start_inline_review_native(
             id,
             source_branch,
             destination_branch,
+            reviewed_base_sha,
+            reviewed_head_sha,
             thread_id,
             AiReviewTurnKind::Initial,
             started_at,
@@ -5075,6 +5129,8 @@ pub fn run_headless_review_native(
         title,
         source_branch,
         destination_branch,
+        reviewed_base_sha,
+        reviewed_head_sha,
         payload,
         ai_provider,
         claude_model,
@@ -5122,6 +5178,8 @@ pub fn run_headless_review_native(
         pr_id,
         source_branch,
         destination_branch,
+        reviewed_base_sha,
+        reviewed_head_sha,
         thread_id.clone(),
         AiReviewTurnKind::Initial,
         started_at,
@@ -5296,6 +5354,8 @@ pub async fn start_inline_review(
     title: String,
     source_branch: String,
     destination_branch: String,
+    reviewed_base_sha: Option<String>,
+    reviewed_head_sha: Option<String>,
     payload: String,
     display_message: Option<String>,
     review_kind: Option<String>,
@@ -5318,6 +5378,8 @@ pub async fn start_inline_review(
         title,
         source_branch,
         destination_branch,
+        reviewed_base_sha,
+        reviewed_head_sha,
         payload,
         display_message,
         review_kind,
@@ -5345,6 +5407,8 @@ pub async fn reply_inline_review(
     title: String,
     source_branch: String,
     destination_branch: String,
+    reviewed_base_sha: Option<String>,
+    reviewed_head_sha: Option<String>,
     thread_id: String,
     user_message: String,
     base_payload: String,
@@ -5410,6 +5474,8 @@ pub async fn reply_inline_review(
             id,
             source_branch,
             destination_branch,
+            reviewed_base_sha,
+            reviewed_head_sha,
             thread_id,
             AiReviewTurnKind::Reply,
             started_at,
@@ -5861,10 +5927,11 @@ mod tests {
         user_installed_cli_command, validate_isolated_provider_cli, AiReviewDraftCommentResult,
         AiReviewRunStatus, AiReviewRunStore, AiReviewTurnKind, ProviderExecutionContext,
         ReviewEvidenceArtifact, ReviewEvidenceKind, ReviewEvidenceSource, ReviewFindingCategory,
-        ReviewFindingConfidence, ReviewFindingPublicationEvent, ReviewFindingPublicationEventKind,
-        ReviewFindingSeverity, ReviewProvider, ReviewPublicationMode,
-        STRUCTURED_REVIEW_SCHEMA_VERSION,
+        ReviewFindingConfidence, ReviewFindingPublication, ReviewFindingPublicationEvent,
+        ReviewFindingPublicationEventKind, ReviewFindingSeverity, ReviewProvider,
+        ReviewPublicationMode, STRUCTURED_REVIEW_SCHEMA_VERSION,
     };
+    use serde_json::json;
 
     #[test]
     fn parses_structured_output_from_claude_json_envelope() {
@@ -6430,6 +6497,8 @@ Fix: render a useful empty state.
             1731,
             "feature/review-schema",
             "main",
+            Some("1111111111111111111111111111111111111111"),
+            Some("2222222222222222222222222222222222222222"),
             "thread-1",
             AiReviewTurnKind::Initial,
             Some("agentic-balanced"),
@@ -6445,6 +6514,14 @@ Fix: render a useful empty state.
         assert_eq!(run.findings.len(), 1);
         assert_eq!(run.provider, ReviewProvider::Github);
         assert_eq!(run.review_profile.as_deref(), Some("agentic-balanced"));
+        assert_eq!(
+            run.reviewed_base_sha.as_deref(),
+            Some("1111111111111111111111111111111111111111")
+        );
+        assert_eq!(
+            run.reviewed_head_sha.as_deref(),
+            Some("2222222222222222222222222222222222222222")
+        );
         let summary = run.summary_markdown.as_deref().unwrap_or_default();
         assert!(summary.contains("## Review"));
         assert!(summary.contains("## Resources"));
@@ -6475,6 +6552,8 @@ Fix: render a useful empty state.
             1731,
             "feature/review-schema",
             "main",
+            None,
+            None,
             "thread-1",
             AiReviewTurnKind::Initial,
             None,
@@ -6511,6 +6590,8 @@ Fix: invalidate the query after the mutation succeeds."#;
             1731,
             "feature/review-schema",
             "main",
+            None,
+            None,
             "thread-1",
             AiReviewTurnKind::Initial,
             None,
@@ -6551,6 +6632,8 @@ Fix: invalidate the query after the mutation succeeds."#;
             1731,
             "feature/review-schema",
             "main",
+            None,
+            None,
             "thread-1",
             AiReviewTurnKind::Initial,
             None,
@@ -6590,7 +6673,7 @@ Fix: invalidate the query after the mutation succeeds."#;
             finding_fingerprint,
             mode: ReviewPublicationMode::Inline,
             draft_id: Some("draft-1".to_string()),
-            remote_comment_id: Some(42),
+            remote_comment_id: Some("42".to_string()),
             published_at: Some("1750076500000".to_string()),
         };
         apply_review_finding_publication_event(finding, &publish);
@@ -6607,7 +6690,7 @@ Fix: invalidate the query after the mutation succeeds."#;
                 .publication
                 .as_ref()
                 .map(|publication| publication.remote_comment_ids.as_slice()),
-            Some(&[42][..])
+            Some(&["42".to_string()][..])
         );
         assert_eq!(
             finding
@@ -6616,6 +6699,33 @@ Fix: invalidate the query after the mutation succeeds."#;
                 .and_then(|publication| publication.published_at.as_deref()),
             Some("1750076500000")
         );
+    }
+
+    #[test]
+    fn publication_comment_ids_accept_legacy_numbers_and_preserve_strings() {
+        let publication: ReviewFindingPublication = serde_json::from_value(json!({
+            "mode": "inline",
+            "draftIds": [],
+            "remoteCommentIds": [42, "9223372036854775000"],
+            "publishedAt": "1750076500000"
+        }))
+        .expect("legacy and current publication ids");
+        assert_eq!(
+            publication.remote_comment_ids,
+            vec!["42".to_string(), "9223372036854775000".to_string()]
+        );
+
+        let event: ReviewFindingPublicationEvent = serde_json::from_value(json!({
+            "kind": "publishDraft",
+            "reviewRunId": "run-1",
+            "findingFingerprint": "finding-1",
+            "mode": "inline",
+            "draftId": "draft-1",
+            "remoteCommentId": 42,
+            "publishedAt": "1750076500000"
+        }))
+        .expect("legacy numeric event id");
+        assert_eq!(event.remote_comment_id.as_deref(), Some("42"));
     }
 }
 fn review_provider_for_repo(workspace: &str, repo: &str) -> ReviewProvider {

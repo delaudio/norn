@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
-import type { AiReviewStore, DraftComment, ReviewRun } from "@/types";
+import type { AiReviewStore, DraftComment, PullRequestDetail, ReviewRun } from "@/types";
 import type { LinkedAiReviewDraftComment } from "./aiReviewDraftComments";
 import {
+  assertPullRequestMatchesReviewRun,
+  buildFindingPublicationRequest,
   filterStageableAiReviewDraftComments,
   summarizeActiveReviewFindings,
 } from "./reviewFindingPublication";
@@ -15,6 +17,8 @@ const previousRun: ReviewRun = {
   prId: 1020,
   sourceBranch: "feature/invoice-lines-v2-bff-mock",
   destinationBranch: "develop",
+  reviewedBaseSha: "1111111111111111111111111111111111111111",
+  reviewedHeadSha: "2222222222222222222222222222222222222222",
   status: "succeeded",
   turnKind: "initial",
   reviewProfile: null,
@@ -48,7 +52,7 @@ const previousRun: ReviewRun = {
       publication: {
         mode: "inline",
         draftIds: [],
-        remoteCommentIds: [101],
+        remoteCommentIds: ["101"],
         publishedAt: "2026-06-22T20:10:00.000Z",
       },
     },
@@ -64,6 +68,8 @@ const activeRun: ReviewRun = {
   prId: 1020,
   sourceBranch: "feature/invoice-lines-v2-bff-mock",
   destinationBranch: "develop",
+  reviewedBaseSha: "1111111111111111111111111111111111111111",
+  reviewedHeadSha: "2222222222222222222222222222222222222222",
   status: "succeeded",
   turnKind: "reply",
   reviewProfile: null,
@@ -89,7 +95,7 @@ const activeRun: ReviewRun = {
       anchor: {
         path: "src/app/modules/invoice-lines/invoice-lines-v2.controller.ts",
         startLine: 29,
-        endLine: null,
+        endLine: 30,
         side: "new",
       },
       suggestedFix: null,
@@ -131,6 +137,179 @@ const store: AiReviewStore = {
   threads: [],
   reviewRuns: [previousRun, activeRun],
 };
+
+describe("buildFindingPublicationRequest", () => {
+  it("builds the explicit provider-neutral request from the staged finding draft", () => {
+    const draft: DraftComment = {
+      localId: "draft-1",
+      prId: 1020,
+      path: "src/app/modules/invoice-lines/invoice-lines-v2.controller.ts",
+      to: 29,
+      from: null,
+      raw: "Publish the edited reviewer-facing explanation.",
+      parentId: null,
+      createdAt: 0,
+      source: "aiFinding",
+      findingRef: {
+        reviewRunId: "run-1",
+        findingId: "run-1-finding-1",
+        findingFingerprint: "fingerprint-1",
+      },
+      publicationMode: "inline",
+      reviewBaseSha: "1111111111111111111111111111111111111111",
+      reviewHeadSha: "2222222222222222222222222222222222222222",
+    };
+
+    const request = buildFindingPublicationRequest({
+      provider: "bitbucket",
+      workspace: "example-workspace",
+      repo: "backend-api",
+      pr: {
+        id: 1020,
+        title: "Invoice lines",
+        descriptionRaw: "",
+        state: "OPEN",
+        draft: false,
+        authorDisplayName: "Reviewer",
+        reviewers: [],
+        sourceBranch: "feature/invoice-lines-v2-bff-mock",
+        destinationBranch: "develop",
+        sourceCommitHash: "2222222222222222222222222222222222222222",
+        destinationCommitHash: "1111111111111111111111111111111111111111",
+        createdOn: "",
+        updatedOn: "",
+      },
+      reviewRun: activeRun,
+      draft,
+    });
+
+    expect(request).toMatchObject({
+      schemaVersion: "v1",
+      tenantId: "local",
+      provider: "bitbucket",
+      workspace: "example-workspace",
+      repository: "backend-api",
+      pullRequestId: 1020,
+      baseSha: "1111111111111111111111111111111111111111",
+      headSha: "2222222222222222222222222222222222222222",
+      findingFingerprint: "fingerprint-1",
+      anchor: {
+        path: "src/app/modules/invoice-lines/invoice-lines-v2.controller.ts",
+        startLine: 29,
+        endLine: 30,
+        side: "new",
+      },
+      body: "Publish the edited reviewer-facing explanation.",
+      severity: "high",
+    });
+  });
+
+  it("rejects draft head and active target metadata that diverge from the review run", () => {
+    const draft: DraftComment = {
+      localId: "draft-1",
+      prId: 1020,
+      path: "src/app/modules/invoice-lines/invoice-lines-v2.controller.ts",
+      to: 29,
+      from: null,
+      raw: "Publish the edited reviewer-facing explanation.",
+      parentId: null,
+      createdAt: 0,
+      source: "aiFinding",
+      findingRef: {
+        reviewRunId: "run-1",
+        findingId: "run-1-finding-1",
+        findingFingerprint: "fingerprint-1",
+      },
+      publicationMode: "inline",
+      reviewBaseSha: "1111111111111111111111111111111111111111",
+      reviewHeadSha: "3333333333333333333333333333333333333333",
+    };
+    const pr = {
+      id: 1020,
+      title: "Invoice lines",
+      descriptionRaw: "",
+      state: "OPEN" as const,
+      draft: false,
+      authorDisplayName: "Reviewer",
+      reviewers: [],
+      sourceBranch: "feature/invoice-lines-v2-bff-mock",
+      destinationBranch: "develop",
+      sourceCommitHash: "2222222222222222222222222222222222222222",
+      destinationCommitHash: "1111111111111111111111111111111111111111",
+      createdOn: "",
+      updatedOn: "",
+    };
+
+    expect(() =>
+      buildFindingPublicationRequest({
+        provider: "bitbucket",
+        workspace: "example-workspace",
+        repo: "backend-api",
+        pr,
+        reviewRun: activeRun,
+        draft,
+      }),
+    ).toThrow("does not belong to the reviewed head");
+
+    expect(() =>
+      buildFindingPublicationRequest({
+        provider: "bitbucket",
+        workspace: "example-workspace",
+        repo: "backend-api",
+        pr,
+        reviewRun: activeRun,
+        draft: {
+          ...draft,
+          reviewBaseSha: "4444444444444444444444444444444444444444",
+          reviewHeadSha: activeRun.reviewedHeadSha ?? null,
+        },
+      }),
+    ).toThrow("does not belong to the reviewed base");
+
+    expect(() =>
+      buildFindingPublicationRequest({
+        provider: "github",
+        workspace: "other-workspace",
+        repo: "backend-api",
+        pr,
+        reviewRun: activeRun,
+        draft: {
+          ...draft,
+          reviewBaseSha: activeRun.reviewedBaseSha ?? null,
+          reviewHeadSha: activeRun.reviewedHeadSha ?? null,
+        },
+      }),
+    ).toThrow("does not match the structured review run");
+  });
+});
+
+describe("assertPullRequestMatchesReviewRun", () => {
+  const pr: PullRequestDetail = {
+    id: 1020,
+    title: "Invoice lines",
+    descriptionRaw: "",
+    state: "OPEN",
+    draft: false,
+    authorDisplayName: "Reviewer",
+    reviewers: [],
+    sourceBranch: activeRun.sourceBranch,
+    destinationBranch: activeRun.destinationBranch,
+    sourceCommitHash: activeRun.reviewedHeadSha ?? null,
+    destinationCommitHash: activeRun.reviewedBaseSha ?? null,
+    createdOn: "",
+    updatedOn: "",
+  };
+
+  it("accepts only the exact provider revision used by the review run", () => {
+    expect(() => assertPullRequestMatchesReviewRun(activeRun, pr)).not.toThrow();
+    expect(() =>
+      assertPullRequestMatchesReviewRun(activeRun, {
+        ...pr,
+        destinationCommitHash: "4444444444444444444444444444444444444444",
+      }),
+    ).toThrow("changed after this review");
+  });
+});
 
 describe("summarizeActiveReviewFindings", () => {
   it("projects current and historical publication state onto the active run", () => {

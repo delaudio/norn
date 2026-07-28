@@ -7,9 +7,11 @@ import type {
   AiReviewStore,
   BranchStatus,
   BranchSyncResult,
+  FindingPublicationRequest,
   PrComment,
   PrFilePreview,
   PrListFilter,
+  PublishedCommentIdentity,
   PullRequestPage,
   RepositoryBlameLine,
   RepositoryFileContent,
@@ -18,6 +20,7 @@ import type {
   ReviewFinding,
   ReviewFindingPublication,
   ReviewFindingPublicationEvent,
+  ReviewRun,
 } from "@/types";
 import {
   mockClosedPrMetrics,
@@ -38,6 +41,8 @@ interface SavedReview {
 
 let mockCommentId = 100000;
 let mockPullRequestDetailState = mockPullRequestDetail;
+const mockPublishedFindings = new Map<string, PublishedCommentIdentity>();
+const mockReviewStoreMemory = new Map<string, AiReviewStore>();
 const mockFixStates = new Map<string, AiReviewFixState>();
 const mockReviewRunStates = new Map<string, AiReviewRunState>();
 const mockReviewRunTimers = new Map<string, number[]>();
@@ -365,15 +370,22 @@ function loadSavedReviewFromStore(args: Record<string, unknown> | undefined): Sa
 function loadReviewStore(): Map<string, AiReviewStore> {
   try {
     const raw = localStorage.getItem(REVIEW_STORE_KEY);
-    if (!raw) return new Map();
-    const obj = JSON.parse(raw) as Record<string, AiReviewStore>;
-    return new Map(Object.entries(obj));
+    if (raw) {
+      const obj = JSON.parse(raw) as Record<string, AiReviewStore>;
+      const stored = new Map(Object.entries(obj));
+      mockReviewStoreMemory.clear();
+      for (const [key, review] of stored) mockReviewStoreMemory.set(key, review);
+      return stored;
+    }
   } catch {
-    return new Map();
+    // Use the in-memory browser mock when localStorage is unavailable.
   }
+  return new Map(mockReviewStoreMemory);
 }
 
 function saveReviewStore(store: Map<string, AiReviewStore>): void {
+  mockReviewStoreMemory.clear();
+  for (const [key, review] of store) mockReviewStoreMemory.set(key, review);
   try {
     const obj = Object.fromEntries(store);
     localStorage.setItem(REVIEW_STORE_KEY, JSON.stringify(obj));
@@ -511,6 +523,26 @@ function defaultReplyContent(userMessage: string): string {
   return `I reviewed your follow-up.\n\n- I considered: ${userMessage}\n- The earlier findings still mostly stand, but I would narrow them to the actionable items only.\n- If you want, I can produce a shorter final review focused on bugs and regressions.`;
 }
 
+interface MockCompletedReviewInput {
+  provider: ReviewRun["provider"];
+  workspace: string;
+  repo: string;
+  prId: number;
+  sourceBranch: string;
+  destinationBranch: string;
+  reviewedBaseSha: string | null;
+  reviewedHeadSha: string | null;
+  reviewProfile: string | null;
+}
+
+function mockReviewProvider(workspace: string, repo: string): ReviewRun["provider"] {
+  return (
+    mockConfig.repos.find(
+      (candidate) => candidate.workspace === workspace && candidate.repo === repo,
+    )?.provider ?? mockConfig.reviewProvider
+  );
+}
+
 function enqueueMockInlineReviewSuccess(
   key: string,
   title: string,
@@ -518,6 +550,7 @@ function enqueueMockInlineReviewSuccess(
   threadId: string,
   content: string,
   turnKind: "initial" | "reply",
+  review: MockCompletedReviewInput,
 ): void {
   clearMockReviewRunTimer(key);
   for (const [delay, line] of [
@@ -543,6 +576,55 @@ function enqueueMockInlineReviewSuccess(
     thread.updatedAt = message.createdAt;
     thread.claudeSessionId = thread.claudeSessionId ?? `mock-session-${threadId}`;
     currentStore.activeThreadId = threadId;
+    const runId = nowId("run");
+    currentStore.reviewRuns = [
+      ...(currentStore.reviewRuns ?? []),
+      {
+        id: runId,
+        schemaVersion: "v0.1",
+        provider: review.provider,
+        workspace: review.workspace,
+        repo: review.repo,
+        prId: review.prId,
+        sourceBranch: review.sourceBranch,
+        destinationBranch: review.destinationBranch,
+        reviewedBaseSha: review.reviewedBaseSha,
+        reviewedHeadSha: review.reviewedHeadSha,
+        status: "succeeded",
+        turnKind,
+        reviewProfile: review.reviewProfile,
+        createdAt: message.createdAt,
+        finishedAt: message.createdAt,
+        diffFingerprint: `mock:${review.reviewedBaseSha ?? "unknown"}:${review.reviewedHeadSha ?? "unknown"}`,
+        threadId,
+        summaryMarkdown: content,
+        evidence: [],
+        findings: [
+          {
+            id: `${runId}-finding-1`,
+            fingerprint: "mock:build-records-url:filter-id",
+            title: "Add filter id regression coverage",
+            severity: "medium",
+            confidence: "high",
+            category: "test",
+            status: "new",
+            summary: "The changed filter id path needs regression coverage.",
+            rationale: null,
+            ruleId: null,
+            source: "llm",
+            anchor: {
+              path: "src/app/views/utils/buildRecordsUrlFromSavedView.ts",
+              startLine: 17,
+              endLine: 17,
+              side: "new",
+            },
+            suggestedFix: "Add a focused test for the generated filter query.",
+            evidenceIds: [],
+            publication: null,
+          },
+        ],
+      },
+    ];
     setReviewStore(reviewStoreKey, currentStore);
     updateReviewRunState(key, {
       prTitle: title,
@@ -644,7 +726,140 @@ interface NewInlineCommentArgs {
   to: number | null;
   from: number | null;
   raw: string;
-  parentId: number | null;
+  parentId: string | null;
+}
+
+function publicationByteLength(value: string): number {
+  return new TextEncoder().encode(value).length;
+}
+
+function validatePublicationIdentifier(value: string, field: string): void {
+  if (!value.trim()) {
+    throw new Error(`Structured finding publication requires ${field}.`);
+  }
+  if (value !== value.trim()) {
+    throw new Error(`Structured finding publication ${field} must not contain whitespace.`);
+  }
+  if (publicationByteLength(value) > 512) {
+    throw new Error(`Structured finding publication ${field} is too long.`);
+  }
+}
+
+function validatePublicationText(value: string, field: string, maximum: number): void {
+  if (!value.trim()) {
+    throw new Error(`Structured finding publication requires ${field}.`);
+  }
+  if (publicationByteLength(value) > maximum) {
+    throw new Error(`Structured finding publication ${field} is too long.`);
+  }
+}
+
+function mockPublicationMarkdown(request: FindingPublicationRequest): string {
+  const severity = `${request.severity.charAt(0).toUpperCase()}${request.severity.slice(1)}`;
+  let markdown = `**${request.title}**\n\n${request.body}\n\nSeverity: **${severity}**`;
+  if (request.suggestedFix != null) {
+    const longestBacktickRun = Math.max(
+      0,
+      ...request.suggestedFix.split(/[^`]+/).map((run) => run.length),
+    );
+    const fence = "`".repeat(Math.max(3, longestBacktickRun + 1));
+    markdown += `\n\nSuggested fix:\n\n${fence}suggestion\n${request.suggestedFix}`;
+    if (!request.suggestedFix.endsWith("\n")) markdown += "\n";
+    markdown += fence;
+  }
+  return `${markdown}\n\n<!-- lachesi:finding:${"0".repeat(64)} -->`;
+}
+
+function findingPublicationKey(request: FindingPublicationRequest): string {
+  return JSON.stringify([
+    request.tenantId,
+    request.provider,
+    request.workspace.toLowerCase(),
+    request.repository.toLowerCase(),
+    request.pullRequestId,
+    request.baseSha.toLowerCase(),
+    request.headSha.toLowerCase(),
+    request.findingFingerprint,
+  ]);
+}
+
+export function publishMockReviewFinding(
+  request: FindingPublicationRequest,
+): PublishedCommentIdentity {
+  validatePublicationIdentifier(request.tenantId, "tenantId");
+  validatePublicationIdentifier(request.workspace, "workspace");
+  validatePublicationIdentifier(request.repository, "repository");
+  validatePublicationIdentifier(request.findingFingerprint, "findingFingerprint");
+  validatePublicationText(request.title, "title", 1024);
+  validatePublicationText(request.body, "body", 64 * 1024);
+  if (request.suggestedFix != null) {
+    validatePublicationText(request.suggestedFix, "suggestedFix", 64 * 1024);
+  }
+  if (publicationByteLength(mockPublicationMarkdown(request)) > 32 * 1024) {
+    throw new Error("Structured finding publication markdown is too long.");
+  }
+
+  const headSha = request.headSha.toLowerCase();
+  const baseSha = request.baseSha.toLowerCase();
+  if (
+    !/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(headSha) ||
+    !/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(baseSha)
+  ) {
+    throw new Error("Structured finding publication requires a full commit SHA.");
+  }
+  if (request.pullRequestId <= 0 || !Number.isInteger(request.pullRequestId)) {
+    throw new Error("Structured finding publication requires a valid pull request id.");
+  }
+  if (request.pullRequestId !== mockPullRequestDetailState.id) {
+    throw new Error("The pull request is unavailable in the browser mock.");
+  }
+  const anchor = request.anchor;
+  if (
+    !anchor?.path.trim() ||
+    anchor.path.startsWith("/") ||
+    anchor.path.includes("\\") ||
+    anchor.path.split("/").includes("..") ||
+    anchor.path.includes("\0") ||
+    publicationByteLength(anchor.path) > 4096 ||
+    !Number.isInteger(anchor.startLine) ||
+    !Number.isInteger(anchor.endLine) ||
+    anchor.startLine <= 0 ||
+    anchor.endLine < anchor.startLine
+  ) {
+    throw new Error("Structured finding publication requires a valid inline anchor.");
+  }
+
+  const currentHead = mockPullRequestDetailState.sourceCommitHash?.toLowerCase();
+  const currentBase = mockPullRequestDetailState.destinationCommitHash?.toLowerCase();
+  if (!currentHead || !currentBase) {
+    throw new Error("The current pull request revision is unavailable in the browser mock.");
+  }
+  if (headSha !== currentHead || baseSha !== currentBase) {
+    throw new Error(
+      "The pull request changed after this review. Refresh and rerun the review before publishing.",
+    );
+  }
+
+  const key = findingPublicationKey(request);
+  const existing = mockPublishedFindings.get(key);
+  if (existing) return existing;
+
+  mockCommentId += 1;
+  const published = {
+    tenantId: request.tenantId,
+    provider: request.provider,
+    workspace: request.workspace,
+    repository: request.repository,
+    pullRequestId: request.pullRequestId,
+    commentId: String(mockCommentId),
+    findingMarker: `<!-- lachesi:finding:mock-${mockCommentId} -->`,
+    path: request.anchor.path,
+    startLine: request.anchor.startLine,
+    endLine: request.anchor.endLine,
+    side: request.anchor.side,
+  } satisfies PublishedCommentIdentity;
+  mockPublishedFindings.set(key, published);
+  return published;
 }
 
 /**
@@ -927,11 +1142,18 @@ export const mockHandlers: Record<string, Handler> = {
   },
   list_comments: () => mockComments,
 
+  publish_review_finding: (args) => {
+    const request = args?.request as FindingPublicationRequest | undefined;
+    if (!request) {
+      throw new Error("Structured finding publication requires a request.");
+    }
+    return publishMockReviewFinding(request);
+  },
   create_inline_comment: (args) => {
     const req = (args?.req ?? {}) as NewInlineCommentArgs;
     mockCommentId += 1;
     const comment: PrComment = {
-      id: mockCommentId,
+      id: String(mockCommentId),
       parentId: req.parentId ?? null,
       contentRaw: req.raw,
       userDisplayName: "Alex Reviewer",
@@ -945,8 +1167,8 @@ export const mockHandlers: Record<string, Handler> = {
     const raw = (args?.raw ?? "") as string;
     mockCommentId += 1;
     const comment: PrComment = {
-      id: mockCommentId,
-      parentId: (args?.parentId as number | null) ?? null,
+      id: String(mockCommentId),
+      parentId: (args?.parentId as string | null) ?? null,
       contentRaw: raw,
       userDisplayName: "Alex Reviewer",
       createdOn: new Date(0).toISOString(),
@@ -1039,6 +1261,9 @@ export const mockHandlers: Record<string, Handler> = {
   start_inline_review: (args) => {
     const key = runKey(args);
     const title = String(args?.title ?? `PR #${String(args?.id ?? "")}`);
+    const workspace = String(args?.workspace ?? "");
+    const repo = String(args?.repo ?? "");
+    const prId = Number(args?.id ?? 0);
     const storeKey = reviewKey(args);
     const threadId = nowId("thread");
     const now = String(Date.now());
@@ -1059,6 +1284,7 @@ export const mockHandlers: Record<string, Handler> = {
           messages: displayMessage ? [createMessage("user", displayMessage)] : [],
         },
       ],
+      reviewRuns: getReviewStore(storeKey)?.reviewRuns ?? [],
     };
     setReviewStore(storeKey, nextStore);
     const next = updateReviewRunState(key, {
@@ -1098,12 +1324,26 @@ export const mockHandlers: Record<string, Handler> = {
       threadId,
       defaultInitialReviewContent(),
       "initial",
+      {
+        provider: mockReviewProvider(workspace, repo),
+        workspace,
+        repo,
+        prId,
+        sourceBranch: String(args?.sourceBranch ?? ""),
+        destinationBranch: String(args?.destinationBranch ?? ""),
+        reviewedBaseSha: String(args?.reviewedBaseSha ?? "").trim() || null,
+        reviewedHeadSha: String(args?.reviewedHeadSha ?? "").trim() || null,
+        reviewProfile: reviewProfile || null,
+      },
     );
     return next;
   },
   reply_inline_review: (args) => {
     const key = runKey(args);
     const title = String(args?.title ?? `PR #${String(args?.id ?? "")}`);
+    const workspace = String(args?.workspace ?? "");
+    const repo = String(args?.repo ?? "");
+    const prId = Number(args?.id ?? 0);
     const storeKey = reviewKey(args);
     const threadId = String(args?.threadId ?? "");
     const userMessage = String(args?.userMessage ?? "").trim();
@@ -1148,6 +1388,17 @@ export const mockHandlers: Record<string, Handler> = {
       threadId,
       defaultReplyContent(userMessage),
       "reply",
+      {
+        provider: mockReviewProvider(workspace, repo),
+        workspace,
+        repo,
+        prId,
+        sourceBranch: String(args?.sourceBranch ?? ""),
+        destinationBranch: String(args?.destinationBranch ?? ""),
+        reviewedBaseSha: String(args?.reviewedBaseSha ?? "").trim() || null,
+        reviewedHeadSha: String(args?.reviewedHeadSha ?? "").trim() || null,
+        reviewProfile: null,
+      },
     );
     return next;
   },

@@ -162,13 +162,10 @@ export function linkAiReviewDraftCommentsToFindings(
       .filter((finding) => !usedFindingIds.has(finding.id))
       .map((finding) => {
         const distance = anchorDistance(finding, comment);
-        if (distance == null || distance > 3) {
+        if (distance !== 0) {
           return null;
         }
-        const score =
-          100 -
-          distance * 10 +
-          keywordOverlapScore(comment.raw, `${finding.title} ${finding.summary}`);
+        const score = 100 + keywordOverlapScore(comment.raw, `${finding.title} ${finding.summary}`);
         return { finding, score };
       })
       .filter(
@@ -180,9 +177,19 @@ export function linkAiReviewDraftCommentsToFindings(
     if (match) {
       usedFindingIds.add(match.id);
     }
+    const matchLine = match?.anchor?.endLine ?? match?.anchor?.startLine ?? null;
+    const anchoredComment =
+      match?.anchor && matchLine != null
+        ? {
+            ...comment,
+            path: match.anchor.path,
+            to: match.anchor.side === "new" ? matchLine : null,
+            from: match.anchor.side === "old" ? matchLine : null,
+          }
+        : comment;
 
     return {
-      ...comment,
+      ...anchoredComment,
       findingRef: match
         ? {
             reviewRunId: reviewRun.id,

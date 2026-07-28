@@ -1,8 +1,11 @@
 import type {
   AiReviewStore,
   DraftComment,
+  FindingPublicationRequest,
+  PullRequestDetail,
   ReviewFinding,
   ReviewFindingAnchor,
+  ReviewProvider,
   ReviewPublicationMode,
   ReviewRun,
 } from "@/types";
@@ -33,6 +36,131 @@ export interface FilterStageableAiReviewDraftCommentsResult {
 interface FindingRunMatch {
   runId: string;
   finding: ReviewFinding;
+}
+
+export interface BuildFindingPublicationRequestInput {
+  provider: ReviewProvider;
+  workspace: string;
+  repo: string;
+  pr: PullRequestDetail;
+  reviewRun: ReviewRun;
+  draft: DraftComment;
+}
+
+export function assertPullRequestMatchesReviewRun(
+  reviewRun: ReviewRun,
+  pr: PullRequestDetail,
+): void {
+  const reviewedBaseSha = reviewRun.reviewedBaseSha?.trim().toLowerCase();
+  const reviewedHeadSha = reviewRun.reviewedHeadSha?.trim().toLowerCase();
+  const currentBaseSha = pr.destinationCommitHash?.trim().toLowerCase();
+  const currentHeadSha = pr.sourceCommitHash?.trim().toLowerCase();
+  const matches = Boolean(
+    reviewedBaseSha &&
+      reviewedHeadSha &&
+      currentBaseSha &&
+      currentHeadSha &&
+      reviewedBaseSha === currentBaseSha &&
+      reviewedHeadSha === currentHeadSha &&
+      reviewRun.prId === pr.id &&
+      reviewRun.sourceBranch === pr.sourceBranch &&
+      reviewRun.destinationBranch === pr.destinationBranch,
+  );
+  if (!matches) {
+    throw new Error(
+      "The pull request changed after this review; refresh and rerun it before staging findings.",
+    );
+  }
+}
+
+export function buildFindingPublicationRequest({
+  provider,
+  workspace,
+  repo,
+  pr,
+  reviewRun,
+  draft,
+}: BuildFindingPublicationRequestInput): FindingPublicationRequest {
+  const findingRef = draft.findingRef;
+  if (!findingRef || findingRef.reviewRunId !== reviewRun.id) {
+    throw new Error("The draft is not linked to this review run.");
+  }
+  const finding = reviewRun.findings.find(
+    (candidate) =>
+      candidate.id === findingRef.findingId &&
+      candidate.fingerprint === findingRef.findingFingerprint,
+  );
+  if (!finding) {
+    throw new Error("The structured finding linked to this draft is no longer available.");
+  }
+  assertPullRequestMatchesReviewRun(reviewRun, pr);
+  const headSha = reviewRun.reviewedHeadSha?.trim();
+  if (!headSha) {
+    throw new Error("The reviewed head commit is unavailable; refresh and restage the finding.");
+  }
+  const baseSha = reviewRun.reviewedBaseSha?.trim();
+  if (!baseSha) {
+    throw new Error("The reviewed base commit is unavailable; refresh and restage the finding.");
+  }
+  const draftHeadSha = draft.reviewHeadSha?.trim();
+  if (!draftHeadSha || draftHeadSha.toLowerCase() !== headSha.toLowerCase()) {
+    throw new Error("The staged draft does not belong to the reviewed head commit.");
+  }
+  const draftBaseSha = draft.reviewBaseSha?.trim();
+  if (!draftBaseSha || draftBaseSha.toLowerCase() !== baseSha.toLowerCase()) {
+    throw new Error("The staged draft does not belong to the reviewed base commit.");
+  }
+  const sameTarget =
+    provider === reviewRun.provider &&
+    workspace.trim().toLowerCase() === reviewRun.workspace.trim().toLowerCase() &&
+    repo.trim().toLowerCase() === reviewRun.repo.trim().toLowerCase() &&
+    pr.id === reviewRun.prId &&
+    draft.prId === reviewRun.prId;
+  if (!sameTarget) {
+    throw new Error("The active pull request does not match the structured review run.");
+  }
+  const line = draft.to ?? draft.from;
+  const side = draft.to != null ? "new" : draft.from != null ? "old" : null;
+  if (!draft.path.trim() || line == null || side == null) {
+    throw new Error("The structured finding draft no longer has a valid inline anchor.");
+  }
+  const findingAnchor = finding.anchor;
+  const findingEndLine = findingAnchor?.endLine ?? findingAnchor?.startLine;
+  if (
+    !findingAnchor ||
+    findingEndLine == null ||
+    draft.path !== findingAnchor.path ||
+    side !== findingAnchor.side ||
+    line < findingAnchor.startLine ||
+    line > findingEndLine
+  ) {
+    throw new Error("The staged draft no longer matches the structured finding anchor.");
+  }
+  if (!draft.raw.trim()) {
+    throw new Error("The structured finding draft cannot be empty.");
+  }
+
+  return {
+    schemaVersion: "v1",
+    tenantId: "local",
+    provider: reviewRun.provider,
+    workspace: reviewRun.workspace,
+    repository: reviewRun.repo,
+    pullRequestId: reviewRun.prId,
+    baseSha,
+    headSha,
+    findingFingerprint: finding.fingerprint,
+    anchor: {
+      path: findingAnchor.path,
+      startLine: findingAnchor.startLine,
+      endLine: findingEndLine,
+      side: findingAnchor.side,
+    },
+    title: finding.title,
+    body: draft.raw,
+    severity: finding.severity,
+    ...(finding.suggestedFix ? { suggestedFix: finding.suggestedFix } : {}),
+  };
 }
 
 function anchorKey(anchor: ReviewFindingAnchor | null): string | null {

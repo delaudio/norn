@@ -1882,7 +1882,7 @@ mod tests {
             updated_on: String::new(),
         };
         let comments = vec![PrComment {
-            id: 1,
+            id: "1".to_string(),
             parent_id: None,
             content_raw: "Looks good".to_string(),
             content_html: None,

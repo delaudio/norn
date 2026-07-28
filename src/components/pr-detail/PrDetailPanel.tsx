@@ -131,35 +131,6 @@ interface ConversationThreadItem {
   draft: DraftComment | null;
 }
 
-function diffPrefixForChange(change: ChangeData): string {
-  if (change.type === "insert") return "+";
-  if (change.type === "delete") return "-";
-  return " ";
-}
-
-function buildTargetedHunkDiff(file: FileData, change: ChangeData): string {
-  const changeKey = getChangeKey(change);
-  const hunk = file.hunks.find((candidate) =>
-    candidate.changes.some((item) => getChangeKey(item) === changeKey),
-  );
-  const oldPath = file.oldPath || "/dev/null";
-  const newPath = file.newPath || "/dev/null";
-  const lines = [
-    `diff --git a/${file.oldPath || newPath} b/${file.newPath || oldPath}`,
-    oldPath === "/dev/null" ? "--- /dev/null" : `--- a/${oldPath}`,
-    newPath === "/dev/null" ? "+++ /dev/null" : `+++ b/${newPath}`,
-  ];
-  if (hunk) {
-    lines.push(hunk.content);
-    for (const hunkChange of hunk.changes) {
-      lines.push(`${diffPrefixForChange(hunkChange)}${hunkChange.content}`);
-    }
-  } else {
-    lines.push(`${diffPrefixForChange(change)}${change.content}`);
-  }
-  return lines.join("\n");
-}
-
 function aiLineQuestionLabel(context: Pick<AiLineQuestionContext, "path" | "to" | "from">): string {
   const line = context.to ?? context.from;
   return line == null ? context.path : `${context.path}:${line}`;
@@ -205,8 +176,8 @@ function commentSortValue(value: string): number {
 
 function groupThreads(comments: PrComment[]): PrComment[][] {
   const roots: PrComment[] = [];
-  const repliesByParent = new Map<number, PrComment[]>();
-  const seenRootIds = new Set<number>();
+  const repliesByParent = new Map<string, PrComment[]>();
+  const seenRootIds = new Set<string>();
 
   for (const comment of comments) {
     if (comment.parentId == null) {
@@ -372,8 +343,8 @@ interface ConversationReviewViewProps {
   drafts: DraftComment[];
   viewMode: DiffViewMode;
   onViewModeChange: (mode: DiffViewMode) => void;
-  replyDraftsByParent: Map<number, DraftComment[]>;
-  onAddReply: (rootId: number, anchor: InlineAnchor | null, raw: string) => void;
+  replyDraftsByParent: Map<string, DraftComment[]>;
+  onAddReply: (rootId: string, anchor: InlineAnchor | null, raw: string) => void;
   activeDraftId: string | null;
   publishingDraftId: string | null;
   onFocusDraft: (localId: string) => void;
@@ -797,7 +768,6 @@ export function PrDetailPanel({
       to: anchor.to,
       from: anchor.from,
       lineText: anchor.change.content,
-      hunkDiff: buildTargetedHunkDiff(file, anchor.change),
     };
     setLineAskTarget({ context, label: aiLineQuestionLabel(context) });
     setLineAskQuestion("");
@@ -818,7 +788,7 @@ export function PrDetailPanel({
   );
 
   const replyDraftsByParent = useMemo(() => {
-    const map = new Map<number, DraftComment[]>();
+    const map = new Map<string, DraftComment[]>();
     for (const d of drafts) {
       if (d.parentId == null) continue;
       const arr = map.get(d.parentId) ?? [];
@@ -829,7 +799,7 @@ export function PrDetailPanel({
   }, [drafts]);
 
   const addReply = useCallback(
-    (rootId: number, anchor: InlineAnchor | null, raw: string) => {
+    (rootId: string, anchor: InlineAnchor | null, raw: string) => {
       addDraft({
         parentId: rootId,
         path: anchor?.path ?? "",

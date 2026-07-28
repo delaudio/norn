@@ -9,7 +9,7 @@ use serde::Serialize;
 use crate::config::{self, AiProvider, ReviewProvider};
 use crate::local_repo;
 use crate::repo_config::{self, ReviewSeverity};
-use crate::services::bitbucket::{get_pr_diff_native, get_pull_request_native};
+use crate::services::bitbucket::get_stable_pull_request_review_snapshot_native;
 use crate::services::review::{
     run_headless_review_native, HeadlessNativeReviewError, HeadlessNativeReviewRequest,
     ReviewFinding, ReviewFindingSeverity, ReviewProvider as ReviewRunProvider, ReviewRun,
@@ -144,6 +144,8 @@ struct ResolvedTarget {
     title: String,
     source_branch: String,
     destination_branch: String,
+    reviewed_base_sha: Option<String>,
+    reviewed_head_sha: Option<String>,
     diff: String,
     warnings: Vec<String>,
 }
@@ -234,6 +236,8 @@ pub fn run(request: HeadlessReviewRequest) -> Result<HeadlessReviewExecution, He
         title: resolved.title,
         source_branch: resolved.source_branch,
         destination_branch: resolved.destination_branch,
+        reviewed_base_sha: resolved.reviewed_base_sha,
+        reviewed_head_sha: resolved.reviewed_head_sha,
         payload,
         ai_provider,
         claude_model,
@@ -628,10 +632,14 @@ fn resolve_target(
             let pr_id = request
                 .pr_id
                 .ok_or_else(|| HeadlessReviewError::target("`--pr` is required for PR scope."))?;
-            let detail = get_pull_request_native(Some(provider), &workspace, &repo, pr_id)
-                .map_err(map_provider_target_error)?;
-            let diff = get_pr_diff_native(Some(provider), &workspace, &repo, pr_id)
-                .map_err(map_provider_target_error)?;
+            let snapshot = get_stable_pull_request_review_snapshot_native(
+                Some(provider),
+                &workspace,
+                &repo,
+                pr_id,
+            )
+            .map_err(map_provider_target_error)?;
+            let detail = snapshot.detail;
             Ok(ResolvedTarget {
                 target: HeadlessReviewTarget {
                     scope: request.scope.label().to_string(),
@@ -647,9 +655,11 @@ fn resolve_target(
                 repo,
                 pr_id,
                 title: detail.title,
+                reviewed_base_sha: detail.destination_commit_hash,
+                reviewed_head_sha: detail.source_commit_hash,
                 source_branch: detail.source_branch,
                 destination_branch: detail.destination_branch,
-                diff,
+                diff: snapshot.diff,
                 warnings: Vec::new(),
             })
         }
@@ -716,6 +726,8 @@ fn local_target(
         title,
         source_branch: source,
         destination_branch: destination,
+        reviewed_base_sha: None,
+        reviewed_head_sha: None,
         diff,
         warnings,
     }
@@ -1480,6 +1492,8 @@ mod tests {
             pr_id: 0,
             source_branch: "feature".to_string(),
             destination_branch: "main".to_string(),
+            reviewed_base_sha: None,
+            reviewed_head_sha: None,
             status: AiReviewRunStatus::Succeeded,
             turn_kind: AiReviewTurnKind::Initial,
             review_profile: None,
@@ -1538,6 +1552,8 @@ mod tests {
                 pr_id: 42,
                 source_branch: "feature".to_string(),
                 destination_branch: "main".to_string(),
+                reviewed_base_sha: Some("1111111111111111111111111111111111111111".to_string()),
+                reviewed_head_sha: Some("2222222222222222222222222222222222222222".to_string()),
                 status: AiReviewRunStatus::Succeeded,
                 turn_kind: AiReviewTurnKind::Initial,
                 review_profile: Some("strict".to_string()),
