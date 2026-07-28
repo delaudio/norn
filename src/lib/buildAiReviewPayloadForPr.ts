@@ -12,6 +12,7 @@ import type {
   PullRequestDetail,
   RepoRef,
   ReviewProvider,
+  ReviewReference,
 } from "@/types";
 
 export interface AiReviewPayloadForPr {
@@ -150,6 +151,7 @@ export async function buildAiReviewPayloadForPr({
   jiraBaseUrl,
   jiraContextEnabled,
   reviewProfile,
+  reviewReferences,
 }: {
   workspace: string;
   repo: string;
@@ -159,6 +161,7 @@ export async function buildAiReviewPayloadForPr({
   jiraBaseUrl: string | null;
   jiraContextEnabled: boolean;
   reviewProfile?: string | null;
+  reviewReferences?: ReviewReference[];
 }): Promise<AiReviewPayloadForPr> {
   const { pr, rawDiff, branchStatus } = await loadStablePullRequestReviewSnapshot({
     workspace,
@@ -191,7 +194,7 @@ export async function buildAiReviewPayloadForPr({
     jiraKeys,
     jiraBaseUrl,
     jiraContext,
-    reviewReferences: loadReviewReferences(workspace, repo, prId),
+    reviewReferences: reviewReferences ?? loadReviewReferences(workspace, repo, prId),
   });
   return {
     payload,

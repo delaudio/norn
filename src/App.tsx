@@ -414,11 +414,18 @@ export default function App() {
     if (!reviewRun) {
       throw new Error("The review run linked to this draft is no longer available.");
     }
+    const snapshot = await loadStablePullRequestReviewSnapshot({
+      workspace: activeSel.workspace,
+      repo: activeSel.repo,
+      provider: activeRepo?.provider ?? reviewProvider,
+      prId: activeSel.prId,
+    });
+    assertPullRequestMatchesReviewRun(reviewRun, snapshot.pr);
     const request = buildFindingPublicationRequest({
       provider: activeRepo?.provider ?? reviewProvider,
       workspace: activeSel.workspace,
       repo: activeSel.repo,
-      pr: aiReviewContext.pr,
+      pr: snapshot.pr,
       reviewRun,
       draft,
     });
@@ -665,6 +672,7 @@ export default function App() {
       jiraBaseUrl: config?.jiraBaseUrl ?? null,
       jiraContextEnabled: Boolean(config?.hasJira && config?.jiraBaseUrl),
       reviewProfile: selectedReviewProfile || null,
+      reviewReferences: reviewReferences.references,
     });
     return {
       payload,

@@ -1,9 +1,19 @@
-import { describe, expect, it } from "vitest";
-import type { PullRequestDetail } from "@/types";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { loadReviewReferences } from "@/lib/reviewReferencesStorage";
+import { tauriCall } from "@/lib/tauri";
+import type { PullRequestDetail, ReviewReference } from "@/types";
 import {
   assertStablePullRequestSnapshot,
+  buildAiReviewPayloadForPr,
   resolveLineQuestionHunkFromReviewSnapshot,
 } from "./buildAiReviewPayloadForPr";
+
+vi.mock("@/lib/tauri", () => ({
+  tauriCall: vi.fn(),
+}));
+vi.mock("@/lib/reviewReferencesStorage", () => ({
+  loadReviewReferences: vi.fn(),
+}));
 
 const detail: PullRequestDetail = {
   id: 42,
@@ -101,5 +111,53 @@ describe("resolveLineQuestionHunkFromReviewSnapshot", () => {
         lineText: "const state = 'new';",
       }),
     ).toThrow("selected line changed");
+  });
+});
+
+describe("buildAiReviewPayloadForPr", () => {
+  beforeEach(() => {
+    vi.mocked(tauriCall).mockReset();
+    vi.mocked(loadReviewReferences).mockReset();
+  });
+
+  it("uses current review references instead of a stale persisted copy", async () => {
+    const persistedReference: ReviewReference = {
+      id: "persisted",
+      type: "note",
+      source: "manual",
+      title: "Persisted reference",
+      body: "Stale persisted guidance",
+      createdAt: 1,
+      updatedAt: 1,
+    };
+    const currentReference: ReviewReference = {
+      ...persistedReference,
+      id: "current",
+      title: "Current reference",
+      body: "Current unsaved guidance",
+      updatedAt: 2,
+    };
+    vi.mocked(loadReviewReferences).mockReturnValue([persistedReference]);
+    vi.mocked(tauriCall)
+      .mockResolvedValueOnce(detail)
+      .mockResolvedValueOnce(
+        "diff --git a/a.ts b/a.ts\n--- a/a.ts\n+++ b/a.ts\n@@ -1 +1 @@\n-old\n+new",
+      )
+      .mockResolvedValueOnce({ ahead: 1, behind: 0 })
+      .mockResolvedValueOnce(detail)
+      .mockResolvedValueOnce(detail);
+
+    const result = await buildAiReviewPayloadForPr({
+      workspace: "acme",
+      repo: "frontend",
+      prId: detail.id,
+      jiraBaseUrl: null,
+      jiraContextEnabled: false,
+      reviewReferences: [currentReference],
+    });
+
+    expect(result.payload).toContain("Current unsaved guidance");
+    expect(result.payload).not.toContain("Stale persisted guidance");
+    expect(loadReviewReferences).not.toHaveBeenCalled();
   });
 });
