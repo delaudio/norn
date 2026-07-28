@@ -176,8 +176,8 @@ function commentSortValue(value: string): number {
 
 function groupThreads(comments: PrComment[]): PrComment[][] {
   const roots: PrComment[] = [];
-  const repliesByParent = new Map<number, PrComment[]>();
-  const seenRootIds = new Set<number>();
+  const repliesByParent = new Map<string, PrComment[]>();
+  const seenRootIds = new Set<string>();
 
   for (const comment of comments) {
     if (comment.parentId == null) {
@@ -343,8 +343,8 @@ interface ConversationReviewViewProps {
   drafts: DraftComment[];
   viewMode: DiffViewMode;
   onViewModeChange: (mode: DiffViewMode) => void;
-  replyDraftsByParent: Map<number, DraftComment[]>;
-  onAddReply: (rootId: number, anchor: InlineAnchor | null, raw: string) => void;
+  replyDraftsByParent: Map<string, DraftComment[]>;
+  onAddReply: (rootId: string, anchor: InlineAnchor | null, raw: string) => void;
   activeDraftId: string | null;
   publishingDraftId: string | null;
   onFocusDraft: (localId: string) => void;
@@ -788,7 +788,7 @@ export function PrDetailPanel({
   );
 
   const replyDraftsByParent = useMemo(() => {
-    const map = new Map<number, DraftComment[]>();
+    const map = new Map<string, DraftComment[]>();
     for (const d of drafts) {
       if (d.parentId == null) continue;
       const arr = map.get(d.parentId) ?? [];
@@ -799,7 +799,7 @@ export function PrDetailPanel({
   }, [drafts]);
 
   const addReply = useCallback(
-    (rootId: number, anchor: InlineAnchor | null, raw: string) => {
+    (rootId: string, anchor: InlineAnchor | null, raw: string) => {
       addDraft({
         parentId: rootId,
         path: anchor?.path ?? "",

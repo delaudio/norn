@@ -1528,7 +1528,7 @@ mod tests {
             raw: "pending".to_string(),
         });
         app.comments.push(PrComment {
-            id: 1,
+            id: "1".to_string(),
             parent_id: None,
             content_raw: "remote".to_string(),
             content_html: None,
@@ -1561,7 +1561,7 @@ mod tests {
                 Err("remote rejected comment".to_string())
             } else {
                 Ok(PrComment {
-                    id: 10,
+                    id: "10".to_string(),
                     parent_id: None,
                     content_raw: raw,
                     content_html: None,

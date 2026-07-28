@@ -298,7 +298,7 @@ index 5fdfc9cb3..154929261 100644
 
 export const mockComments: PrComment[] = [
   {
-    id: 9001,
+    id: "9001",
     parentId: null,
     contentRaw: "Should we guard against `filterId` being undefined here?",
     userDisplayName: "Sam Author",
@@ -311,8 +311,8 @@ export const mockComments: PrComment[] = [
     },
   },
   {
-    id: 9002,
-    parentId: 9001,
+    id: "9002",
+    parentId: "9001",
     contentRaw: "Good catch - the row type now makes it required, so it can't be undefined.",
     userDisplayName: "Alex Reviewer",
     createdOn: "2026-06-16T16:25:00.000Z",

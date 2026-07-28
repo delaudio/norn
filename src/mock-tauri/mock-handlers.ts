@@ -726,7 +726,7 @@ interface NewInlineCommentArgs {
   to: number | null;
   from: number | null;
   raw: string;
-  parentId: number | null;
+  parentId: string | null;
 }
 
 function publicationByteLength(value: string): number {
@@ -1153,7 +1153,7 @@ export const mockHandlers: Record<string, Handler> = {
     const req = (args?.req ?? {}) as NewInlineCommentArgs;
     mockCommentId += 1;
     const comment: PrComment = {
-      id: mockCommentId,
+      id: String(mockCommentId),
       parentId: req.parentId ?? null,
       contentRaw: req.raw,
       userDisplayName: "Alex Reviewer",
@@ -1167,8 +1167,8 @@ export const mockHandlers: Record<string, Handler> = {
     const raw = (args?.raw ?? "") as string;
     mockCommentId += 1;
     const comment: PrComment = {
-      id: mockCommentId,
-      parentId: (args?.parentId as number | null) ?? null,
+      id: String(mockCommentId),
+      parentId: (args?.parentId as string | null) ?? null,
       contentRaw: raw,
       userDisplayName: "Alex Reviewer",
       createdOn: new Date(0).toISOString(),

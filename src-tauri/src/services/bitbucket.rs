@@ -1,5 +1,5 @@
 use serde::de::DeserializeOwned;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::json;
 use std::path::Path;
 
@@ -174,6 +174,38 @@ fn encode_path(value: &str) -> String {
         .map(encode_path_segment)
         .collect::<Vec<_>>()
         .join("/")
+}
+
+fn comment_id_from_value(value: serde_json::Value) -> Result<String, String> {
+    match value {
+        serde_json::Value::Number(number) if number.as_u64().is_some() => Ok(number.to_string()),
+        serde_json::Value::String(value) if !value.trim().is_empty() => Ok(value),
+        _ => Err("Provider returned an invalid comment id.".to_string()),
+    }
+}
+
+fn deserialize_comment_id<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    comment_id_from_value(serde_json::Value::deserialize(deserializer)?)
+        .map_err(serde::de::Error::custom)
+}
+
+fn deserialize_optional_comment_id<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    Option::<serde_json::Value>::deserialize(deserializer)?
+        .map(comment_id_from_value)
+        .transpose()
+        .map_err(serde::de::Error::custom)
+}
+
+fn bitbucket_comment_id_number(value: &str) -> Result<u64, String> {
+    value
+        .parse::<u64>()
+        .map_err(|_| "Bitbucket comment ids must be unsigned decimal numbers.".to_string())
 }
 
 fn image_mime_type(path: &str) -> Option<&'static str> {
@@ -537,12 +569,14 @@ struct BbInline {
 
 #[derive(Deserialize)]
 struct BbParent {
-    id: u32,
+    #[serde(deserialize_with = "deserialize_comment_id")]
+    id: String,
 }
 
 #[derive(Deserialize)]
 struct BbComment {
-    id: u32,
+    #[serde(deserialize_with = "deserialize_comment_id")]
+    id: String,
     content: Option<BbContent>,
     user: Option<BbAuthor>,
     #[serde(default)]
@@ -669,7 +703,8 @@ struct GhContentFile {
 
 #[derive(Deserialize)]
 struct GhReviewComment {
-    id: u32,
+    #[serde(deserialize_with = "deserialize_comment_id")]
+    id: String,
     #[serde(default)]
     body: String,
     #[serde(default)]
@@ -685,13 +720,14 @@ struct GhReviewComment {
     original_line: Option<u32>,
     #[serde(default)]
     side: Option<String>,
-    #[serde(default)]
-    in_reply_to_id: Option<u32>,
+    #[serde(default, deserialize_with = "deserialize_optional_comment_id")]
+    in_reply_to_id: Option<String>,
 }
 
 #[derive(Deserialize)]
 struct GhIssueComment {
-    id: u32,
+    #[serde(deserialize_with = "deserialize_comment_id")]
+    id: String,
     #[serde(default)]
     body: String,
     #[serde(default)]
@@ -823,8 +859,8 @@ pub struct InlineAnchor {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PrComment {
-    pub id: u32,
-    pub parent_id: Option<u32>,
+    pub id: String,
+    pub parent_id: Option<String>,
     pub content_raw: String,
     pub content_html: Option<String>,
     pub user_display_name: String,
@@ -879,7 +915,7 @@ pub struct NewInlineComment {
     to: Option<u32>,
     from: Option<u32>,
     raw: String,
-    parent_id: Option<u32>,
+    parent_id: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -2381,13 +2417,7 @@ fn safe_bitbucket_publication_next_url(
 }
 
 fn publication_comment_id(value: serde_json::Value) -> Result<String, ProviderPublicationApiError> {
-    match value {
-        serde_json::Value::Number(number) if number.as_u64().is_some() => Ok(number.to_string()),
-        serde_json::Value::String(value) if !value.trim().is_empty() => Ok(value),
-        _ => Err(ProviderPublicationApiError::unavailable(
-            "The provider returned an invalid comment identifier.",
-        )),
-    }
+    comment_id_from_value(value).map_err(ProviderPublicationApiError::unavailable)
 }
 
 fn publication_pr_id(pull_request_id: u64) -> Result<u32, ProviderPublicationApiError> {
@@ -2645,7 +2675,7 @@ pub async fn create_inline_comment(
                 req.path, req.raw
             );
             return Ok(PrComment {
-                id: 0,
+                id: "dry-run".to_string(),
                 parent_id: req.parent_id,
                 content_raw: req.raw,
                 content_html: None,
@@ -2675,8 +2705,8 @@ pub async fn create_inline_comment(
                     inline.insert("from".into(), json!(from));
                 }
                 let mut body = json!({ "content": { "raw": req.raw }, "inline": inline });
-                if let Some(parent_id) = req.parent_id {
-                    body["parent"] = json!({ "id": parent_id });
+                if let Some(parent_id) = req.parent_id.as_deref() {
+                    body["parent"] = json!({ "id": bitbucket_comment_id_number(parent_id)? });
                 }
                 let bb: BbComment = get_json(client.post(&url).json(&body))?;
                 Ok(map_comment(bb))
@@ -2685,6 +2715,7 @@ pub async fn create_inline_comment(
                 let client = GithubClient::from_stored()?;
                 let base = github_repo_base(&workspace, &repo)?;
                 if let Some(parent_id) = req.parent_id {
+                    let parent_id = encode_path_segment(&parent_id);
                     let url = format!("{base}/pulls/{id}/comments/{parent_id}/replies");
                     let comment: GhReviewComment =
                         github_get_json(client.post(&url).json(&json!({ "body": req.raw })))?;
@@ -2719,7 +2750,7 @@ pub async fn create_general_comment(
     repo: String,
     id: u32,
     raw: String,
-    parent_id: Option<u32>,
+    parent_id: Option<String>,
 ) -> Result<PrComment, String> {
     run(move || create_general_comment_native(provider, &workspace, &repo, id, raw, parent_id))
         .await
@@ -2731,12 +2762,12 @@ pub fn create_general_comment_native(
     repo: &str,
     id: u32,
     raw: String,
-    parent_id: Option<u32>,
+    parent_id: Option<String>,
 ) -> Result<PrComment, String> {
     if dry_run() {
         eprintln!("[dry-run] general comment on PR #{id}: {raw}");
         return Ok(PrComment {
-            id: 0,
+            id: "dry-run".to_string(),
             parent_id,
             content_raw: raw,
             content_html: None,
@@ -2751,8 +2782,8 @@ pub fn create_general_comment_native(
             let client = BitbucketClient::from_stored()?;
             let url = format!("{}/pullrequests/{id}/comments", repo_base(workspace, repo)?);
             let mut body = json!({ "content": { "raw": raw } });
-            if let Some(parent_id) = parent_id {
-                body["parent"] = json!({ "id": parent_id });
+            if let Some(parent_id) = parent_id.as_deref() {
+                body["parent"] = json!({ "id": bitbucket_comment_id_number(parent_id)? });
             }
             let bb: BbComment = get_json(client.post(&url).json(&body))?;
             Ok(map_comment(bb))
@@ -2761,6 +2792,7 @@ pub fn create_general_comment_native(
             let client = GithubClient::from_stored()?;
             let base = github_repo_base(workspace, repo)?;
             if let Some(parent_id) = parent_id {
+                let parent_id = encode_path_segment(&parent_id);
                 let url = format!("{base}/pulls/{id}/comments/{parent_id}/replies");
                 if let Ok(comment) = github_get_json::<GhReviewComment>(
                     client.post(&url).json(&json!({ "body": raw })),
@@ -2782,11 +2814,12 @@ pub async fn delete_comment(
     workspace: String,
     repo: String,
     id: u32,
-    comment_id: u32,
+    comment_id: String,
 ) -> Result<(), String> {
     run(move || match provider_for(provider, &workspace, &repo) {
         ReviewProvider::Bitbucket => {
             let client = BitbucketClient::from_stored()?;
+            let comment_id = encode_path_segment(&comment_id);
             let url = format!(
                 "{}/pullrequests/{id}/comments/{comment_id}",
                 repo_base(&workspace, &repo)?
@@ -2797,6 +2830,7 @@ pub async fn delete_comment(
         ReviewProvider::Github => {
             let client = GithubClient::from_stored()?;
             let base = github_repo_base(&workspace, &repo)?;
+            let comment_id = encode_path_segment(&comment_id);
             let review_url = format!("{base}/pulls/comments/{comment_id}");
             match github_send_checked(client.delete(&review_url)) {
                 Ok(_) => Ok(()),
@@ -2985,6 +3019,31 @@ mod tests {
             publication_comment_id(json!("opaque-comment-id")).expect("opaque id"),
             "opaque-comment-id"
         );
+    }
+
+    #[test]
+    fn normal_comment_dtos_preserve_large_and_opaque_provider_ids() {
+        let github: GhReviewComment = serde_json::from_value(json!({
+            "id": 9_223_372_036_854_775_000_u64,
+            "body": "review",
+            "path": "src/lib.rs",
+            "line": 12,
+            "side": "RIGHT",
+            "in_reply_to_id": "opaque-parent"
+        }))
+        .expect("GitHub review comment");
+        let mapped = map_gh_review_comment(github);
+        assert_eq!(mapped.id, "9223372036854775000");
+        assert_eq!(mapped.parent_id.as_deref(), Some("opaque-parent"));
+
+        let bitbucket: BbComment = serde_json::from_value(json!({
+            "id": 9_223_372_036_854_775_000_u64,
+            "parent": { "id": "9223372036854774999" }
+        }))
+        .expect("Bitbucket comment");
+        let mapped = map_comment(bitbucket);
+        assert_eq!(mapped.id, "9223372036854775000");
+        assert_eq!(mapped.parent_id.as_deref(), Some("9223372036854774999"));
     }
 
     #[test]

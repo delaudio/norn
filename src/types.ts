@@ -485,8 +485,8 @@ export interface InlineAnchor {
 }
 
 export interface PrComment {
-  id: number;
-  parentId: number | null;
+  id: string;
+  parentId: string | null;
   contentRaw: string;
   contentHtml?: string | null;
   userDisplayName: string;
@@ -711,7 +711,7 @@ export interface DraftComment {
   to: number | null;
   from: number | null;
   raw: string;
-  parentId: number | null;
+  parentId: string | null;
   createdAt: number;
   source?: "manual" | "aiFinding";
   findingRef?: ReviewFindingRef | null;

@@ -19,7 +19,11 @@ function loadDrafts(
 ): DraftComment[] {
   try {
     const raw = localStorage.getItem(storageKey(provider, workspace, repo, prId));
-    return raw ? (JSON.parse(raw) as DraftComment[]) : [];
+    const parsed = raw ? (JSON.parse(raw) as DraftComment[]) : [];
+    return parsed.map((draft) => ({
+      ...draft,
+      parentId: draft.parentId == null ? null : String(draft.parentId),
+    }));
   } catch {
     return [];
   }

@@ -3,8 +3,8 @@ import { CommentThread } from "./CommentThread";
 
 export interface ReviewThreadProps {
   comments: PrComment[];
-  replyDraftsByParent: Map<number, DraftComment[]>;
-  onAddReply: (rootId: number, anchor: InlineAnchor | null, raw: string) => void;
+  replyDraftsByParent: Map<string, DraftComment[]>;
+  onAddReply: (rootId: string, anchor: InlineAnchor | null, raw: string) => void;
   activeDraftId?: string | null;
   publishingDraftId?: string | null;
   onFocusDraft?: (localId: string) => void;
