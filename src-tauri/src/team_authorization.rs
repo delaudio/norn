@@ -145,7 +145,7 @@ impl TeamOperation {
     }
 
     const fn supports_repository_scope(self) -> bool {
-        self.requires_repository() || matches!(self, Self::ReadMetrics)
+        self.requires_repository() || matches!(self, Self::ReadMetrics | Self::Unknown)
     }
 
     const fn as_str(self) -> &'static str {
@@ -685,6 +685,22 @@ mod tests {
                 ..
             }
         ));
+
+        let mut scoped_unknown = request(TeamRole::Admin, TeamOperation::TriggerReview);
+        scoped_unknown.operation = unknown_operation;
+        let scoped_sink = MemoryAuditSink::default();
+        let scoped_decision = authorize_team_operation(&scoped_unknown, &scoped_sink)
+            .expect("scoped unknown operation decision");
+        assert!(matches!(
+            scoped_decision,
+            TeamAuthorizationDecision::Denied {
+                reason: TeamAuthorizationDeniedReason::UnknownOperation,
+                ..
+            }
+        ));
+        let scoped_events = scoped_sink.events.borrow();
+        assert_eq!(scoped_events.len(), 1);
+        assert!(scoped_events[0].repository.is_some());
 
         let mut service_request = request(TeamRole::ServiceAccount, TeamOperation::TriggerReview);
         service_request.actor.role = TeamRole::Unknown;
