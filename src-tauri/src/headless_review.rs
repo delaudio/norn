@@ -223,12 +223,7 @@ pub fn run(request: HeadlessReviewRequest) -> Result<HeadlessReviewExecution, He
         .and_then(|review| review.findings.as_ref())
         .and_then(|findings| findings.min_severity)
         .map(severity_from_repo);
-    let selected_profile = config_result
-        .config
-        .as_ref()
-        .and_then(|config| config.review.as_ref())
-        .and_then(|review| review.profile.clone())
-        .or_else(|| config_result.selected_profile.clone());
+    let selected_profile = config_result.selected_profile.clone();
 
     if resolved.diff.trim().is_empty() {
         if request.run_analyzers {

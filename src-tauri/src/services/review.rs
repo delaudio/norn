@@ -935,6 +935,15 @@ fn review_analyzer_specs(
     }
 }
 
+fn resolved_policy_requires_analyzers(config: Option<&repo_config::RepoReviewConfig>) -> bool {
+    config.is_some_and(|config| {
+        config
+            .analyzers
+            .values()
+            .any(|analyzer| analyzer.enabled && analyzer.required)
+    })
+}
+
 fn run_analyzer_command(
     repo_path: &Path,
     spec: &AnalyzerSpec,
@@ -4630,6 +4639,7 @@ fn run_inline_review_pipeline(
             .map_err(|error| ReviewPipelineFailure::internal(error.to_string()))?
             {
                 policy_sources = resolved.sources;
+                review_profile = resolved.selected_profile;
                 resolved_policy_config = Some(resolved.config);
             }
         }
@@ -4660,13 +4670,8 @@ fn run_inline_review_pipeline(
             }
         }
     }
-    if let Some(profile) = resolved_policy_config
-        .as_ref()
-        .and_then(|config| config.review.as_ref())
-        .and_then(|review| review.profile.clone())
-    {
-        review_profile = Some(profile);
-    }
+    let skip_analyzers =
+        skip_analyzers && !resolved_policy_requires_analyzers(resolved_policy_config.as_ref());
 
     if turn_kind == AiReviewTurnKind::Initial && !skip_analyzers {
         if let Some(repo_path) = repo_path.as_deref() {
@@ -6074,9 +6079,9 @@ mod tests {
         extract_review_findings, format_claude_stream_log_line, get_ai_review_run_state_native,
         human_duration, materialize_review_run, normalize_codex_effort, normalize_codex_model,
         parse_claude_fix_result, parse_claude_structured_json, parse_claude_text_result,
-        parse_review_resources, resolve_gui_skip_analyzers, review_analyzer_specs,
-        review_findings_from_output, review_profile_for_thread, trim_evidence_output,
-        user_installed_cli_command, validate_isolated_provider_cli,
+        parse_review_resources, resolve_gui_skip_analyzers, resolved_policy_requires_analyzers,
+        review_analyzer_specs, review_findings_from_output, review_profile_for_thread,
+        trim_evidence_output, user_installed_cli_command, validate_isolated_provider_cli,
         validate_organization_policy_repo_path, AiReviewDraftCommentResult, AiReviewRunStatus,
         AiReviewRunStore, AiReviewStoreData, AiReviewTurnKind, ProviderExecutionContext,
         ReviewEvidenceArtifact, ReviewEvidenceKind, ReviewEvidenceSource, ReviewFindingCategory,
@@ -6137,6 +6142,26 @@ mod tests {
         let specs = review_analyzer_specs(repo.path(), Some(&config), None)
             .expect("resolved analyzer selection");
         assert!(specs.is_empty());
+    }
+
+    #[test]
+    fn resolved_policy_detects_required_analyzers() {
+        let config = crate::repo_config::RepoReviewConfig {
+            version: "0.1".to_string(),
+            analyzers: std::collections::BTreeMap::from([(
+                "organization-security".to_string(),
+                crate::repo_config::AnalyzerConfig {
+                    enabled: true,
+                    required: true,
+                    command: Some("security-check".to_string()),
+                    ..crate::repo_config::AnalyzerConfig::default()
+                },
+            )]),
+            ..crate::repo_config::RepoReviewConfig::default()
+        };
+
+        assert!(resolved_policy_requires_analyzers(Some(&config)));
+        assert!(!resolved_policy_requires_analyzers(None));
     }
 
     #[test]

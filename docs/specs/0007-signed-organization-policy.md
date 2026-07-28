@@ -35,6 +35,9 @@ The verifier accepts only a key explicitly trusted for the configured source.
 Unsigned, expired, oversized, identity-mismatched, or incorrectly signed
 bundles are rejected before any layer is applied. Credential-shaped fields are
 also rejected before caching, using the same rule as repository configuration.
+Signed layers apply an additional recursive check that rejects credential-like
+extension keys, including prefixed token, password, secret, credential, and
+username fields.
 Versions are capped at `9007199254740991`, preserving exact JSON/TypeScript
 integer representation in review metadata.
 
@@ -129,6 +132,9 @@ returns the same organization-aware config used by execution. The shared
 pipeline verifies again at execution time, adds resolved rules and paths to the
 model prompt, selects requested analyzers from the resolved config, and stores
 the selected profile and source versions on the review run.
+Normal desktop and TUI review continues to skip analyzer execution because
+evidence is expected upstream. An explicitly enabled and `required` analyzer
+in resolved organization policy is the exception and must run successfully.
 The resolved-policy appendix contains runtime constraints but omits
 `review.prompt`, whose replacement or extension text is already materialized
 in the review prompt. Execution-time resolution checks the submitted payload;

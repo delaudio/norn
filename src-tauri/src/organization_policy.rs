@@ -936,6 +936,8 @@ fn verify_bundle(
     reject_organization_version_override(&envelope.bundle.enforced)?;
     reject_repository_policy_indirection(&envelope.bundle.defaults)?;
     reject_repository_policy_indirection(&envelope.bundle.enforced)?;
+    reject_signed_layer_secrets(&envelope.bundle.defaults, "$.defaults")?;
+    reject_signed_layer_secrets(&envelope.bundle.enforced, "$.enforced")?;
     validate_organization_layer_schema(&envelope.bundle.defaults, "defaults")?;
     validate_organization_layer_schema(&envelope.bundle.enforced, "enforced")?;
     let digest = hex::encode(Sha256::digest(&canonical));
@@ -999,6 +1001,49 @@ fn reject_repository_policy_indirection(
         "Signed organization policy cannot reference repository-controlled policy {}. Embed rules directly in the signed bundle.",
         forbidden.join(" or ")
     )))
+}
+
+fn reject_signed_layer_secrets(
+    value: &Value,
+    path: &str,
+) -> Result<(), OrganizationPolicyResolutionError> {
+    match value {
+        Value::Object(object) => {
+            for (key, child) in object {
+                let child_path = format!("{path}.{key}");
+                let normalized = key
+                    .chars()
+                    .filter(|character| character.is_ascii_alphanumeric())
+                    .collect::<String>()
+                    .to_ascii_lowercase();
+                if [
+                    "credential",
+                    "credentials",
+                    "token",
+                    "password",
+                    "secret",
+                    "username",
+                ]
+                .into_iter()
+                .any(|suffix| normalized.ends_with(suffix))
+                {
+                    return Err(OrganizationPolicyResolutionError::InvalidBundle(
+                        format!(
+                            "Signed organization policy field `{child_path}` looks like a credential. Store secrets in the keychain or environment instead."
+                        ),
+                    ));
+                }
+                reject_signed_layer_secrets(child, &child_path)?;
+            }
+        }
+        Value::Array(items) => {
+            for (index, child) in items.iter().enumerate() {
+                reject_signed_layer_secrets(child, &format!("{path}[{index}]"))?;
+            }
+        }
+        _ => {}
+    }
+    Ok(())
 }
 
 fn validate_organization_layer_schema(
@@ -1677,7 +1722,39 @@ mod tests {
         assert!(matches!(
             error,
             OrganizationPolicyResolutionError::InvalidBundle(message)
-                if message.contains("$.policy.apiToken")
+                if message.contains("$.defaults.policy.apiToken")
+        ));
+    }
+
+    #[test]
+    fn credential_shaped_extension_fields_are_rejected_before_caching() {
+        let error = resolve_organization_policy(
+            &config(
+                OrganizationPolicyRequirement::Mandatory,
+                OrganizationPolicyUnavailableBehavior::FailClosed,
+            ),
+            &StaticSource(Ok(signed_bundle(
+                2,
+                json!({
+                    "analyzers": {
+                        "custom": {
+                            "enabled": false,
+                            "config": {"x-api-token": "do-not-cache"}
+                        }
+                    }
+                }),
+                json!({}),
+            ))),
+            &MemoryCache::default(),
+            None,
+            input(),
+        )
+        .expect_err("credential extension field");
+
+        assert!(matches!(
+            error,
+            OrganizationPolicyResolutionError::InvalidBundle(message)
+                if message.contains("x-api-token")
         ));
     }
 
