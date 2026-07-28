@@ -11,7 +11,7 @@ If status files and git disagree, git is authoritative; correct this file.
 - **Branch:** `agent/tui-image-diff`
 - **Active item:** GitHub issue #127 and `.docflow/plan/todo/0005-terminal-image-diffs.md`
 - **Blockers:** none; use the available SSH key for signed commits.
-- **Uncommitted work:** implement bounded terminal image diff rendering.
+- **Uncommitted work:** verify and review bounded terminal image diff rendering.
 
 ## Last shipped
 

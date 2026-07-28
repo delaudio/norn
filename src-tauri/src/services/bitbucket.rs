@@ -1,6 +1,7 @@
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::json;
+use std::io::Read;
 use std::path::Path;
 use std::sync::OnceLock;
 
@@ -23,6 +24,7 @@ use crate::review_event::PullRequestReviewEventProvider;
 use crate::review_storage::{self, ClosedPrMetric};
 
 const BASE: &str = "https://api.bitbucket.org/2.0";
+pub const MAX_PR_IMAGE_PREVIEW_BYTES: usize = 8 * 1024 * 1024;
 const BITBUCKET_PUBLICATION_COMMENT_FIELDS: &str = concat!(
     "next,values.id,values.deleted,values.user.account_id,values.content.raw,values.inline.path,",
     "values.inline.to,values.inline.from,values.inline.start_to,values.inline.start_from"
@@ -127,6 +129,13 @@ impl GithubClient {
             .get(url)
             .bearer_auth(&self.token)
             .header(reqwest::header::ACCEPT, "application/vnd.github.v3.diff")
+    }
+
+    fn get_raw(&self, url: &str) -> reqwest::blocking::RequestBuilder {
+        self.http
+            .get(url)
+            .bearer_auth(&self.token)
+            .header(reqwest::header::ACCEPT, "application/vnd.github.raw+json")
     }
 
     fn post(&self, url: &str) -> reqwest::blocking::RequestBuilder {
@@ -710,16 +719,6 @@ struct GhFile {
 }
 
 #[derive(Deserialize)]
-struct GhContentFile {
-    #[serde(default)]
-    content: String,
-    #[serde(default)]
-    encoding: String,
-    #[serde(default)]
-    size: usize,
-}
-
-#[derive(Deserialize)]
 struct GhReviewComment {
     #[serde(deserialize_with = "deserialize_comment_id")]
     id: String,
@@ -852,13 +851,13 @@ pub struct DiffstatEntry {
     new_path: Option<String>,
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PrFilePreview {
-    path: String,
-    mime_type: String,
-    data_url: String,
-    size: usize,
+    pub path: String,
+    pub mime_type: String,
+    pub data_url: String,
+    pub size: usize,
 }
 
 #[derive(Serialize)]
@@ -1370,6 +1369,38 @@ fn preview_from_bytes(path: String, mime_type: &str, bytes: Vec<u8>) -> PrFilePr
     }
 }
 
+fn read_bounded_preview(
+    reader: impl Read,
+    reported_size: Option<u64>,
+    limit: usize,
+) -> Result<Vec<u8>, String> {
+    if reported_size.is_some_and(|size| size > limit as u64) {
+        return Err(format!(
+            "Image preview exceeds the {limit}-byte limit (reported {} bytes).",
+            reported_size.unwrap_or_default()
+        ));
+    }
+    let mut bytes = Vec::with_capacity(
+        reported_size
+            .and_then(|size| usize::try_from(size).ok())
+            .unwrap_or_default()
+            .min(limit),
+    );
+    reader
+        .take(limit as u64 + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|error| format!("Could not read image preview: {error}"))?;
+    if bytes.len() > limit {
+        return Err(format!("Image preview exceeds the {limit}-byte limit."));
+    }
+    Ok(bytes)
+}
+
+fn bounded_preview_response(response: reqwest::blocking::Response) -> Result<Vec<u8>, String> {
+    let reported_size = response.content_length();
+    read_bounded_preview(response, reported_size, MAX_PR_IMAGE_PREVIEW_BYTES)
+}
+
 fn fetch_bitbucket_file_preview(
     client: &BitbucketClient,
     workspace: &str,
@@ -1385,10 +1416,7 @@ fn fetch_bitbucket_file_preview(
         encode_path_segment(branch),
         encode_path(path)
     );
-    let bytes = send_checked(client.get(&url))?
-        .bytes()
-        .map_err(|e| e.to_string())?
-        .to_vec();
+    let bytes = bounded_preview_response(send_checked(client.get(&url))?)?;
     Ok(preview_from_bytes(path.to_string(), mime_type, bytes))
 }
 
@@ -1407,21 +1435,8 @@ fn fetch_github_file_preview(
         encode_path(path),
         encode_path_segment(branch)
     );
-    let content: GhContentFile = github_get_json(client.get(&url))?;
-    if !content.encoding.eq_ignore_ascii_case("base64") {
-        return Err("GitHub returned an unsupported file encoding.".to_string());
-    }
-    let encoded: String = content
-        .content
-        .chars()
-        .filter(|ch| !ch.is_whitespace())
-        .collect();
-    Ok(PrFilePreview {
-        path: path.to_string(),
-        mime_type: mime_type.to_string(),
-        data_url: format!("data:{mime_type};base64,{encoded}"),
-        size: content.size,
-    })
+    let bytes = bounded_preview_response(github_send_checked(client.get_raw(&url))?)?;
+    Ok(preview_from_bytes(path.to_string(), mime_type, bytes))
 }
 
 fn fetch_github_pull_requests_page(
@@ -2132,29 +2147,39 @@ pub async fn get_pr_file_preview(
     path: String,
     side: String,
 ) -> Result<PrFilePreview, String> {
-    run(move || match provider_for(provider, &workspace, &repo) {
+    run(move || get_pr_file_preview_native(provider, &workspace, &repo, id, &path, &side)).await
+}
+
+pub fn get_pr_file_preview_native(
+    provider: Option<ReviewProvider>,
+    workspace: &str,
+    repo: &str,
+    id: u32,
+    path: &str,
+    side: &str,
+) -> Result<PrFilePreview, String> {
+    match provider_for(provider, workspace, repo) {
         ReviewProvider::Bitbucket => {
             let client = BitbucketClient::from_stored()?;
-            let pr = fetch_pull_request_detail(&client, &workspace, &repo, id)?;
+            let pr = fetch_pull_request_detail(&client, workspace, repo, id)?;
             let reference = if side == "old" {
                 pr.destination_commit_hash.unwrap_or(pr.destination_branch)
             } else {
                 pr.source_commit_hash.unwrap_or(pr.source_branch)
             };
-            fetch_bitbucket_file_preview(&client, &workspace, &repo, &reference, &path)
+            fetch_bitbucket_file_preview(&client, workspace, repo, &reference, path)
         }
         ReviewProvider::Github => {
             let client = GithubClient::from_stored()?;
-            let pr = fetch_github_pull_request_detail(&client, &workspace, &repo, id)?;
+            let pr = fetch_github_pull_request_detail(&client, workspace, repo, id)?;
             let reference = if side == "old" {
                 pr.destination_commit_hash.unwrap_or(pr.destination_branch)
             } else {
                 pr.source_commit_hash.unwrap_or(pr.source_branch)
             };
-            fetch_github_file_preview(&client, &workspace, &repo, &reference, &path)
+            fetch_github_file_preview(&client, workspace, repo, &reference, path)
         }
-    })
-    .await
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -3197,6 +3222,24 @@ mod tests {
     use std::sync::atomic::{AtomicU64, Ordering};
 
     static TEMP_REPO_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+    #[test]
+    fn image_preview_reader_enforces_the_byte_limit() {
+        let exact = vec![1_u8; 8];
+        assert_eq!(
+            read_bounded_preview(std::io::Cursor::new(exact.clone()), Some(8), 8)
+                .expect("exact limit"),
+            exact
+        );
+
+        let error = read_bounded_preview(std::io::Cursor::new(vec![1_u8; 9]), None, 8)
+            .expect_err("oversized stream");
+        assert!(error.contains("8-byte limit"));
+
+        let error = read_bounded_preview(std::io::Cursor::new(Vec::new()), Some(9), 8)
+            .expect_err("oversized content length");
+        assert!(error.contains("reported 9 bytes"));
+    }
 
     fn publication_payload(side: FindingAnchorSide) -> ProviderInlineCommentPayload {
         ProviderInlineCommentPayload {

@@ -1,3 +1,4 @@
+mod image_diff;
 mod render;
 mod terminal;
 
@@ -14,8 +15,8 @@ use crossterm::event::{self, Event, KeyCode, MouseButton, MouseEvent, MouseEvent
 use crate::config::{self, AiProvider, AppConfig, RepoRef};
 use crate::local_repo;
 use crate::services::bitbucket::{
-    create_general_comment_native, get_pr_diff_native, get_pull_request_native,
-    get_stable_pull_request_review_snapshot_native, list_comments_native,
+    create_general_comment_native, get_pr_diff_native, get_pr_file_preview_native,
+    get_pull_request_native, get_stable_pull_request_review_snapshot_native, list_comments_native,
     list_pull_requests_native, validate_repo_review_config_native, ListPrOptions, PrComment,
     PullRequestDetail, PullRequestSummary,
 };
@@ -24,14 +25,15 @@ use crate::services::review::{
     AiReviewRunState, AiReviewRunStatus, AiReviewRunStore,
 };
 
-const TUI_SKIP_AI_REVIEW_ANALYZERS: bool = true;
+use image_diff::{image_candidate_from_patch, ImageDiffState, TerminalImageSupport};
 use render::{
-    detail_view_target, diff_content_width_for_area, mouse_target, render,
-    selected_diff_file_patch, DetailView, DiffViewMode, DraftComment, FocusPane, MouseTarget,
-    PrListFilter, TuiState,
+    detail_view_target, diff_content_width_for_area, diff_image_area_for_area, mouse_target,
+    render, selected_diff_file_patch, DetailView, DiffViewMode, DraftComment, FocusPane,
+    MouseTarget, PrListFilter, TuiState,
 };
 use terminal::TerminalGuard;
 
+const TUI_SKIP_AI_REVIEW_ANALYZERS: bool = true;
 const TICK_RATE: Duration = Duration::from_millis(250);
 const DEFAULT_REVIEW_PROMPT: &str = include_str!("../../../src/lib/defaultReviewPrompt.md");
 
@@ -55,6 +57,7 @@ pub fn run_from_env() -> Result<(), String> {
     }
     app.load_selected_repo();
     let mut terminal = TerminalGuard::enter().map_err(|error| error.to_string())?;
+    app.image_support = TerminalImageSupport::detect();
 
     loop {
         app.refresh_ai_review_state();
@@ -147,6 +150,8 @@ struct TuiApp {
     selected_diff_file: usize,
     diff_view_mode: DiffViewMode,
     rendered_diff: Option<RenderedDiffCache>,
+    image_diff: Option<ImageDiffState>,
+    image_support: TerminalImageSupport,
     error: Option<String>,
     status: String,
     should_quit: bool,
@@ -204,6 +209,8 @@ impl TuiApp {
             selected_diff_file: 0,
             diff_view_mode: DiffViewMode::Unified,
             rendered_diff: None,
+            image_diff: None,
+            image_support: TerminalImageSupport::metadata_only(),
             error: None,
             status: "Ready".to_string(),
             should_quit: false,
@@ -226,6 +233,7 @@ impl TuiApp {
             KeyCode::Char('f') => self.cycle_pr_filter(),
             KeyCode::Char('g') => self.open_diff_view(),
             KeyCode::Char('u') => self.toggle_diff_view_mode(),
+            KeyCode::Char('i') => self.toggle_image_side(),
             KeyCode::Char('v') => self.toggle_detail_view(),
             KeyCode::Char('y') => self.copy_ai_review_output(),
             KeyCode::Char('r') => self.refresh_active_view(),
@@ -387,6 +395,7 @@ impl TuiApp {
         if self.selected_diff_file != previous {
             self.diff_scroll = 0;
             self.rendered_diff = None;
+            self.image_diff = None;
             self.status = "Selected next diff file".to_string();
         }
     }
@@ -397,6 +406,7 @@ impl TuiApp {
         if self.selected_diff_file != previous {
             self.diff_scroll = 0;
             self.rendered_diff = None;
+            self.image_diff = None;
             self.status = "Selected previous diff file".to_string();
         }
     }
@@ -409,6 +419,7 @@ impl TuiApp {
         self.selected_diff_file = index;
         self.diff_scroll = 0;
         self.rendered_diff = None;
+        self.image_diff = None;
         self.status = "Selected diff file".to_string();
     }
 
@@ -563,6 +574,7 @@ impl TuiApp {
                 .ok();
                 self.selected_diff_file = 0;
                 self.rendered_diff = None;
+                self.image_diff = None;
                 self.detail = Some(detail);
                 self.drafts.clear();
                 self.composer = None;
@@ -571,6 +583,7 @@ impl TuiApp {
                 self.refresh_ai_review_output();
                 self.detail_view = target_view;
                 self.reset_detail_scrolls();
+                self.refresh_selected_image_diff();
                 self.status = format!("Loaded PR #{pr_id}");
             }
             Err(error) => {
@@ -583,6 +596,7 @@ impl TuiApp {
                 self.ai_review_state = None;
                 self.ai_review_output = None;
                 self.rendered_diff = None;
+                self.image_diff = None;
                 self.detail_view = target_view;
                 self.reset_detail_scrolls();
                 self.error = Some(error);
@@ -795,6 +809,7 @@ impl TuiApp {
         self.diff_scroll = 0;
         self.selected_diff_file = 0;
         self.rendered_diff = None;
+        self.image_diff = None;
     }
 
     fn toggle_diff_view_mode(&mut self) {
@@ -804,8 +819,70 @@ impl TuiApp {
         self.status = format!("Diff view: {}", self.diff_view_mode.label());
     }
 
+    fn toggle_image_side(&mut self) {
+        let Some(image) = self.image_diff.as_mut() else {
+            self.status = "Selected diff is not a supported image".to_string();
+            return;
+        };
+        if image.toggle_side() {
+            self.diff_scroll = 0;
+            self.status = format!("Image version: {}", image.selected_side.label());
+        } else {
+            self.status = format!(
+                "Only the {} image version is available",
+                image.selected_side.label()
+            );
+        }
+    }
+
+    fn refresh_selected_image_diff(&mut self) {
+        if self
+            .image_diff
+            .as_ref()
+            .is_some_and(|image| image.selected_file == self.selected_diff_file)
+        {
+            return;
+        }
+        let Some(patch) = selected_diff_file_patch(self.diff.as_deref(), self.selected_diff_file)
+        else {
+            self.image_diff = None;
+            return;
+        };
+        let Some(candidate) = image_candidate_from_patch(&patch) else {
+            self.image_diff = None;
+            return;
+        };
+        let Some((provider, workspace, repo, pr_id)) = self.selected_review_target() else {
+            self.image_diff = None;
+            return;
+        };
+        self.image_diff = Some(ImageDiffState::load(
+            self.selected_diff_file,
+            candidate,
+            |side, path| {
+                get_pr_file_preview_native(
+                    Some(provider),
+                    &workspace,
+                    &repo,
+                    pr_id,
+                    path,
+                    side.provider_value(),
+                )
+            },
+        ));
+    }
+
     fn prepare_rendered_diff(&mut self, area: ratatui::layout::Rect) {
         if self.detail_view != DetailView::Diff {
+            return;
+        }
+        self.refresh_selected_image_diff();
+        if let Some(image) = self.image_diff.as_mut() {
+            self.rendered_diff = None;
+            let image_area = diff_image_area_for_area(area, self.detail.is_some());
+            if let Err(error) = image.prepare_protocol(&self.image_support, image_area) {
+                self.error = Some(error);
+            }
             return;
         }
         let width = diff_content_width_for_area(area);
@@ -1143,6 +1220,8 @@ impl TuiApp {
                     None
                 }
             }),
+            image_diff: self.image_diff.as_ref(),
+            image_protocol: self.image_support.label(),
             error: self.error.as_deref(),
             status: self.status.as_str(),
         }

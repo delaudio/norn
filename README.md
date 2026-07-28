@@ -235,6 +235,13 @@ Use `lac --workspace` to open the configured repository picker instead. If the c
 not inside a Git repository, has no remote, or uses an unsupported remote host, `lac` exits with a
 message explaining the problem and the `--workspace` fallback.
 
+The TUI detects PNG, JPEG, GIF, and WebP changes and queries the active terminal after entering the
+alternate screen. Kitty, Sixel, and iTerm2 protocols render the selected image inside the diff pane.
+Press `i` on a modified image to switch between its base and changed versions. Other terminals, or
+images that cannot be decoded, keep a metadata/error view instead of emitting graphics escapes.
+Provider image reads are limited to 8 MiB, with decoding limited to 8192 pixels per side and 40
+megapixels. Animated formats show their first decoded frame.
+
 For terminal-only usage, provider credentials can come from the OS keychain, ordinary environment
 variables, or environment-variable references in `~/.config/lachesi/config.toml`:
 

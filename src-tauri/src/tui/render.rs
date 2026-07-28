@@ -7,7 +7,9 @@ use ratatui::{
         Block, Borders, List, ListItem, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState,
     },
 };
+use ratatui_image::Image as TerminalImage;
 
+use super::image_diff::{ImageDiffState, ImageVersionState};
 use crate::config::{RepoRef, ReviewProvider};
 use crate::services::bitbucket::{PrComment, PullRequestDetail, PullRequestSummary};
 use crate::services::review::{AiReviewRunState, AiReviewRunStatus};
@@ -36,6 +38,8 @@ pub struct TuiState<'a> {
     pub selected_diff_file: usize,
     pub diff_view_mode: DiffViewMode,
     pub rendered_diff_output: Option<&'a str>,
+    pub image_diff: Option<&'a ImageDiffState>,
+    pub image_protocol: &'a str,
     pub error: Option<&'a str>,
     pub status: &'a str,
 }
@@ -272,6 +276,16 @@ pub fn diff_content_width_for_area(area: Rect) -> usize {
     content_width(diff_area)
 }
 
+pub fn diff_image_area_for_area(area: Rect, has_detail: bool) -> Rect {
+    let [_, body, _] = *vertical_areas().split(area) else {
+        return Rect::new(0, 0, 1, 1);
+    };
+    let [_, diff_area] = *diff_page_areas().split(body) else {
+        return Rect::new(0, 0, 1, 1);
+    };
+    image_render_areas(diff_area, has_detail).1
+}
+
 fn rect_contains(area: Rect, x: u16, y: u16) -> bool {
     x >= area.x
         && x < area.x.saturating_add(area.width)
@@ -477,6 +491,13 @@ fn render_diff_file(
     state: TuiState<'_>,
     files: &[DiffFileSection<'_>],
 ) {
+    if let Some(image) = state
+        .image_diff
+        .filter(|image| image.selected_file == state.selected_diff_file)
+    {
+        render_image_diff_file(frame, area, state, image);
+        return;
+    }
     let mut lines = Vec::new();
     if let Some(detail) = state.detail {
         lines.push(Line::from(vec![
@@ -539,6 +560,147 @@ fn render_diff_file(
         .block(panel_block("Diff *", true));
     frame.render_widget(diff, area);
     render_scrollbar(frame, area, content_len, scroll);
+}
+
+fn render_image_diff_file(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    state: TuiState<'_>,
+    image: &ImageDiffState,
+) {
+    let block = panel_block("Diff *", true);
+    frame.render_widget(block, area);
+    let (metadata_area, image_area) = image_render_areas(area, state.detail.is_some());
+    let mut lines = Vec::new();
+    if let Some(detail) = state.detail {
+        lines.push(Line::from(vec![
+            Span::styled(
+                format!("#{} ", detail.id),
+                info_style().add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                detail.title.clone(),
+                text_style().add_modifier(Modifier::BOLD),
+            ),
+        ]));
+        lines.push(Line::from(vec![
+            Span::styled(detail.source_branch.clone(), branch_style()),
+            Span::styled(" -> ", muted_style()),
+            Span::styled(detail.destination_branch.clone(), branch_style()),
+        ]));
+    }
+
+    if let Some(version) = image.selected() {
+        lines.push(Line::from(vec![
+            Span::styled(
+                format!("[{}] ", image.candidate.kind.label().to_uppercase()),
+                accent_style().add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                version.path().to_string(),
+                text_style().add_modifier(Modifier::BOLD),
+            ),
+        ]));
+        match version {
+            ImageVersionState::Ready(version) => {
+                lines.push(Line::from(vec![
+                    Span::styled(format!("{} image", version.side.label()), info_style()),
+                    Span::styled(" | ", muted_style()),
+                    Span::styled(version.format, text_style()),
+                    Span::styled(" | ", muted_style()),
+                    Span::styled(
+                        format!("{}x{}", version.width, version.height),
+                        text_style(),
+                    ),
+                    Span::styled(" | ", muted_style()),
+                    Span::styled(format_bytes(version.byte_size), text_style()),
+                    Span::styled(" | ", muted_style()),
+                    Span::styled(
+                        if version.protocol.is_some() {
+                            state.image_protocol.to_string()
+                        } else {
+                            "metadata fallback".to_string()
+                        },
+                        muted_style(),
+                    ),
+                ]));
+                if image.candidate.old_path.is_some() && image.candidate.new_path.is_some() {
+                    lines.push(Line::from(Span::styled(
+                        "Press i to switch base/changed.",
+                        muted_style(),
+                    )));
+                } else if let Some(error) = version.protocol_error.as_ref() {
+                    lines.push(Line::from(Span::styled(error.clone(), error_style())));
+                }
+            }
+            ImageVersionState::Failed(version) => {
+                lines.push(Line::from(vec![
+                    Span::styled(
+                        format!("{} image | metadata unavailable", version.side.label()),
+                        muted_style(),
+                    ),
+                    Span::styled(" | ", muted_style()),
+                    Span::styled(state.image_protocol.to_string(), muted_style()),
+                ]));
+                lines.push(Line::from(Span::styled(
+                    version.error.clone(),
+                    error_style(),
+                )));
+            }
+        }
+    }
+    frame.render_widget(Paragraph::new(lines).style(panel_style()), metadata_area);
+
+    match image.selected() {
+        Some(ImageVersionState::Ready(version)) => {
+            if let Some(protocol) = version.protocol.as_ref() {
+                frame.render_widget(TerminalImage::new(protocol), image_area);
+            } else {
+                let fallback = version.protocol_error.as_deref().unwrap_or(
+                    "This terminal has no supported inline image protocol. Metadata remains available.",
+                );
+                frame.render_widget(Paragraph::new(fallback).style(muted_style()), image_area);
+            }
+        }
+        Some(ImageVersionState::Failed(_)) => {
+            frame.render_widget(
+                Paragraph::new("Image preview unavailable.").style(muted_style()),
+                image_area,
+            );
+        }
+        None => {}
+    }
+}
+
+fn image_render_areas(area: Rect, has_detail: bool) -> (Rect, Rect) {
+    let inner = Rect::new(
+        area.x.saturating_add(1),
+        area.y.saturating_add(1),
+        area.width.saturating_sub(2),
+        area.height.saturating_sub(2),
+    );
+    let metadata_height = if has_detail { 5 } else { 3 };
+    let [metadata, image] = *Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(metadata_height.min(inner.height)),
+            Constraint::Min(1),
+        ])
+        .split(inner)
+    else {
+        return (inner, inner);
+    };
+    (metadata, image)
+}
+
+fn format_bytes(size: usize) -> String {
+    if size < 1024 {
+        format!("{size} B")
+    } else if size < 1024 * 1024 {
+        format!("{:.1} KiB", size as f64 / 1024.0)
+    } else {
+        format!("{:.1} MiB", size as f64 / (1024.0 * 1024.0))
+    }
 }
 
 fn render_pull_requests(frame: &mut Frame<'_>, area: Rect, state: TuiState<'_>) {
@@ -1327,6 +1489,10 @@ fn parse_diff_files(diff: Option<&str>) -> Vec<DiffFileSection<'_>> {
             file.old_path = normalize_diff_path(path);
         } else if let Some(path) = line.strip_prefix("+++ ") {
             file.new_path = normalize_diff_path(path);
+        } else if line.starts_with("new file mode ") {
+            file.old_path = "/dev/null";
+        } else if line.starts_with("deleted file mode ") {
+            file.new_path = "/dev/null";
         } else if line.starts_with('+') {
             file.additions += 1;
         } else if line.starts_with('-') {
@@ -1693,6 +1859,8 @@ mod tests {
                         selected_diff_file: 0,
                         diff_view_mode: DiffViewMode::Unified,
                         rendered_diff_output: None,
+                        image_diff: None,
+                        image_protocol: "unsupported",
                         error: None,
                         status: "Ready",
                     },
@@ -1757,6 +1925,8 @@ mod tests {
                         selected_diff_file: 0,
                         diff_view_mode: DiffViewMode::Unified,
                         rendered_diff_output: None,
+                        image_diff: None,
+                        image_protocol: "unsupported",
                         error: None,
                         status: "Ready",
                     },
@@ -1849,6 +2019,8 @@ mod tests {
                         selected_diff_file: 0,
                         diff_view_mode: DiffViewMode::Unified,
                         rendered_diff_output: None,
+                        image_diff: None,
+                        image_protocol: "unsupported",
                         error: None,
                         status: "Ready",
                     },
@@ -1922,6 +2094,8 @@ mod tests {
                         selected_diff_file: 0,
                         diff_view_mode: DiffViewMode::Unified,
                         rendered_diff_output: None,
+                        image_diff: None,
+                        image_protocol: "unsupported",
                         error: None,
                         status: "Loaded",
                     },
@@ -1969,6 +2143,8 @@ mod tests {
                         selected_diff_file: 0,
                         diff_view_mode: DiffViewMode::Unified,
                         rendered_diff_output: None,
+                        image_diff: None,
+                        image_protocol: "unsupported",
                         error: None,
                         status: "Composing",
                     },
@@ -2049,6 +2225,8 @@ mod tests {
             selected_diff_file: 0,
             diff_view_mode: DiffViewMode::Unified,
             rendered_diff_output: None,
+            image_diff: None,
+            image_protocol: "unsupported",
             error: None,
             status: "Ready",
         };
@@ -2088,6 +2266,8 @@ mod tests {
             selected_diff_file: 0,
             diff_view_mode: DiffViewMode::Unified,
             rendered_diff_output: None,
+            image_diff: None,
+            image_protocol: "unsupported",
             error: None,
             status: "Ready",
         };
@@ -2153,6 +2333,8 @@ mod tests {
                         selected_diff_file: 0,
                         diff_view_mode: DiffViewMode::Unified,
                         rendered_diff_output: None,
+                        image_diff: None,
+                        image_protocol: "unsupported",
                         error: None,
                         status: "Loaded",
                     },
@@ -2216,6 +2398,8 @@ mod tests {
                         selected_diff_file: 0,
                         diff_view_mode: DiffViewMode::Unified,
                         rendered_diff_output: None,
+                        image_diff: None,
+                        image_protocol: "unsupported",
                         error: None,
                         status: "Loaded",
                     },
@@ -2280,6 +2464,8 @@ mod tests {
                         selected_diff_file: 0,
                         diff_view_mode: DiffViewMode::Split,
                         rendered_diff_output: None,
+                        image_diff: None,
+                        image_protocol: "unsupported",
                         error: None,
                         status: "Loaded",
                     },
@@ -2345,6 +2531,8 @@ mod tests {
                         rendered_diff_output: Some(
                             "\u{1b}[31m-old\u{1b}[0m\n\u{1b}[32m+new\u{1b}[0m\n",
                         ),
+                        image_diff: None,
+                        image_protocol: "unsupported",
                         error: None,
                         status: "Loaded",
                     },
@@ -2416,6 +2604,8 @@ mod tests {
                         selected_diff_file: 0,
                         diff_view_mode: DiffViewMode::Unified,
                         rendered_diff_output: None,
+                        image_diff: None,
+                        image_protocol: "unsupported",
                         error: None,
                         status: "Loaded",
                     },
@@ -2477,6 +2667,8 @@ mod tests {
                         selected_diff_file: 0,
                         diff_view_mode: DiffViewMode::Unified,
                         rendered_diff_output: None,
+                        image_diff: None,
+                        image_protocol: "unsupported",
                         error: None,
                         status: "Loaded",
                     },
@@ -2541,6 +2733,8 @@ mod tests {
                         selected_diff_file: 0,
                         diff_view_mode: DiffViewMode::Unified,
                         rendered_diff_output: None,
+                        image_diff: None,
+                        image_protocol: "unsupported",
                         error: None,
                         status: "Loaded",
                     },
@@ -2550,5 +2744,74 @@ mod tests {
 
         let text = buffer_text(&terminal);
         assert!(text.contains("Review output line 18"));
+    }
+
+    #[test]
+    fn renders_image_metadata_fallback_without_a_terminal_protocol() {
+        use crate::tui::image_diff::{
+            FailedImageVersion, ImageChangeKind, ImageDiffCandidate, ImageSide,
+        };
+
+        let backend = TestBackend::new(120, 24);
+        let mut terminal = Terminal::new(backend).expect("terminal");
+        let diff = "diff --git a/public/new.png b/public/new.png\nnew file mode 100644\nBinary files /dev/null and b/public/new.png differ\n";
+        let image = ImageDiffState {
+            selected_file: 0,
+            candidate: ImageDiffCandidate {
+                kind: ImageChangeKind::Added,
+                old_path: None,
+                new_path: Some("public/new.png".to_string()),
+            },
+            selected_side: ImageSide::New,
+            old: None,
+            new: Some(ImageVersionState::Failed(FailedImageVersion {
+                path: "public/new.png".to_string(),
+                side: ImageSide::New,
+                error: "Could not decode image: corrupt PNG".to_string(),
+            })),
+        };
+
+        terminal
+            .draw(|frame| {
+                render(
+                    frame,
+                    TuiState {
+                        repos: &[],
+                        selected_repo: 0,
+                        focus: FocusPane::Diff,
+                        pull_requests: &[],
+                        pr_filter: PrListFilter::Open,
+                        selected_pr: 0,
+                        detail: None,
+                        comments: &[],
+                        ai_reviewed_pr_ids: &[],
+                        ai_review_running_pr_ids: &[],
+                        diff: Some(diff),
+                        drafts: &[],
+                        composer: None,
+                        ai_review: None,
+                        ai_review_output: None,
+                        detail_view: DetailView::Diff,
+                        detail_scroll: 0,
+                        ai_review_scroll: 0,
+                        diff_scroll: 0,
+                        selected_diff_file: 0,
+                        diff_view_mode: DiffViewMode::Unified,
+                        rendered_diff_output: None,
+                        image_diff: Some(&image),
+                        image_protocol: "unsupported",
+                        error: None,
+                        status: "Loaded",
+                    },
+                );
+            })
+            .expect("draw");
+
+        let text = buffer_text(&terminal);
+        assert!(text.contains("[A] public/new.png"));
+        assert!(text.contains("[ADDED] public/new.png"));
+        assert!(text.contains("metadata unavailable"));
+        assert!(text.contains("corrupt PNG"));
+        assert!(text.contains("Image preview unavailable."));
     }
 }
