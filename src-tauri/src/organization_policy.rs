@@ -597,6 +597,11 @@ fn finalize_resolved_organization_policy(
     resolved.loaded_policy_packs = finalized.loaded_policy_packs;
     resolved.warnings.extend(finalized.warnings);
     resolved.config = reapply_enforced_layer(finalized_config, resolved.enforced_layer.as_ref())?;
+    apply_signed_profile_analyzer_requirements(
+        &mut resolved.config,
+        resolved.enforced_layer.as_ref(),
+        resolved.selected_profile.as_deref(),
+    )?;
     resolved.required_analyzers =
         enforced_required_analyzer_ids(&resolved.config, resolved.enforced_layer.as_ref());
     Ok(())
@@ -639,6 +644,76 @@ fn enforced_required_analyzer_ids(
         })
         .cloned()
         .collect()
+}
+
+fn apply_signed_profile_analyzer_requirements(
+    config: &mut RepoReviewConfig,
+    enforced: Option<&Value>,
+    selected_profile: Option<&str>,
+) -> Result<(), OrganizationPolicyResolutionError> {
+    let Some((profile_id, enforced)) = selected_profile.zip(enforced.and_then(Value::as_object))
+    else {
+        return Ok(());
+    };
+    let Some(profile_value) = enforced
+        .get("profiles")
+        .and_then(Value::as_object)
+        .and_then(|profiles| profiles.get(profile_id))
+    else {
+        return Ok(());
+    };
+    let profile =
+        serde_json::from_value::<crate::repo_config::ReviewProfileConfig>(profile_value.clone())
+            .map_err(|error| {
+                OrganizationPolicyResolutionError::InvalidLayer(format!(
+                    "Invalid signed enforced profile `{profile_id}`: {error}"
+                ))
+            })?;
+    let enforced_analyzers = enforced.get("analyzers").and_then(Value::as_object);
+    for (id, requirement) in profile.analyzers {
+        match requirement {
+            crate::repo_config::ProfileAnalyzerRequirement::Required => {
+                let Some(analyzer_value) =
+                    enforced_analyzers.and_then(|analyzers| analyzers.get(&id))
+                else {
+                    return Err(OrganizationPolicyResolutionError::InvalidLayer(format!(
+                        "Signed enforced profile `{profile_id}` requires analyzer `{id}`, but its executable definition is not in the signed enforced layer."
+                    )));
+                };
+                let analyzer = serde_json::from_value::<crate::repo_config::AnalyzerConfig>(
+                    analyzer_value.clone(),
+                )
+                .map_err(|error| {
+                    OrganizationPolicyResolutionError::InvalidLayer(format!(
+                        "Invalid signed enforced analyzer `{id}`: {error}"
+                    ))
+                })?;
+                if !analyzer
+                    .command
+                    .as_deref()
+                    .is_some_and(|command| !command.trim().is_empty())
+                {
+                    return Err(OrganizationPolicyResolutionError::InvalidLayer(format!(
+                        "Signed enforced profile `{profile_id}` requires analyzer `{id}`, but its signed executable definition has no command."
+                    )));
+                }
+                let resolved_analyzer = config.analyzers.get_mut(&id).ok_or_else(|| {
+                    OrganizationPolicyResolutionError::InvalidLayer(format!(
+                        "Signed enforced analyzer `{id}` is missing after policy resolution."
+                    ))
+                })?;
+                resolved_analyzer.enabled = true;
+                resolved_analyzer.required = true;
+            }
+            crate::repo_config::ProfileAnalyzerRequirement::Disabled => {
+                if let Some(analyzer) = config.analyzers.get_mut(&id) {
+                    analyzer.enabled = false;
+                }
+            }
+            crate::repo_config::ProfileAnalyzerRequirement::Optional => {}
+        }
+    }
+    Ok(())
 }
 
 fn replace_enforced_owned_definitions(
@@ -1796,7 +1871,7 @@ profiles:
                 "analyzers": {
                     "security": {
                         "enabled": true,
-                        "required": true,
+                        "required": false,
                         "command": "organization-check"
                     }
                 }
@@ -1822,6 +1897,60 @@ profiles:
             resolved.config.policy.as_ref().map(|policy| &policy.packs),
             Some(&vec![pack_dir.to_string_lossy().to_string()])
         );
+    }
+
+    #[test]
+    fn enforced_profile_rejects_analyzer_defined_only_in_signed_defaults() {
+        let repo = tempfile::tempdir().expect("repo temp dir");
+        let mut resolved = ResolvedOrganizationPolicy {
+            config: RepoReviewConfig {
+                version: "0.1".to_string(),
+                review: Some(crate::repo_config::ReviewConfig {
+                    profile: Some("strict".to_string()),
+                    ..crate::repo_config::ReviewConfig::default()
+                }),
+                profiles: BTreeMap::from([(
+                    "strict".to_string(),
+                    crate::repo_config::ReviewProfileConfig {
+                        analyzers: BTreeMap::from([(
+                            "security".to_string(),
+                            crate::repo_config::ProfileAnalyzerRequirement::Required,
+                        )]),
+                        ..crate::repo_config::ReviewProfileConfig::default()
+                    },
+                )]),
+                analyzers: BTreeMap::from([(
+                    "security".to_string(),
+                    crate::repo_config::AnalyzerConfig {
+                        enabled: true,
+                        command: Some("defaults-check".to_string()),
+                        ..crate::repo_config::AnalyzerConfig::default()
+                    },
+                )]),
+                ..RepoReviewConfig::default()
+            },
+            sources: Vec::new(),
+            required_analyzers: Vec::new(),
+            selected_profile: None,
+            loaded_policy_packs: Vec::new(),
+            warnings: Vec::new(),
+            enforced_layer: Some(json!({
+                "review": {"profile": "strict"},
+                "profiles": {
+                    "strict": {
+                        "analyzers": {"security": "required"}
+                    }
+                }
+            })),
+            pending_cache_bundle: None,
+        };
+
+        let error = finalize_resolved_organization_policy(repo.path(), &mut resolved, None)
+            .expect_err("unsigned executable definition");
+
+        assert!(error
+            .to_string()
+            .contains("executable definition is not in the signed enforced layer"));
     }
 
     #[test]
