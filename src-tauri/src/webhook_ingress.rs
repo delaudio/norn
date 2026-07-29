@@ -10,6 +10,7 @@ use serde::Deserialize;
 use sha2::Sha256;
 use time::{format_description::well_known::Rfc3339, OffsetDateTime};
 
+use crate::operational_telemetry::OperationalTelemetry;
 use crate::review_event::{
     PullRequestClosedOutcome, PullRequestEventActor, PullRequestReviewEvent,
     PullRequestReviewEventKind, PullRequestReviewEventProvider,
@@ -190,6 +191,7 @@ impl WebhookEventSink for InMemoryWebhookEventSink {
 pub struct WebhookIngress<S, C> {
     sink: S,
     commit_resolver: C,
+    telemetry: Option<OperationalTelemetry>,
 }
 
 impl<S, C> WebhookIngress<S, C>
@@ -201,7 +203,13 @@ where
         Self {
             sink,
             commit_resolver,
+            telemetry: None,
         }
+    }
+
+    pub fn with_telemetry(mut self, telemetry: OperationalTelemetry) -> Self {
+        self.telemetry = Some(telemetry);
+        self
     }
 
     pub fn handle(
@@ -286,6 +294,9 @@ where
         };
         if event.validate().is_err() {
             return rejected(WebhookIngressRejection::InvalidPayload);
+        }
+        if let Some(telemetry) = &self.telemetry {
+            telemetry.record_received(event.provider);
         }
         match self.sink.accept(&event) {
             Ok(WebhookEventAcceptance::Accepted) => {
@@ -844,6 +855,29 @@ mod tests {
         assert_eq!(github.draft, bitbucket.draft);
         assert_eq!(github.actor.id, "7");
         assert_eq!(bitbucket.actor.id, "user-7");
+    }
+
+    #[test]
+    fn accepted_webhook_records_a_redacted_received_event() {
+        let telemetry = OperationalTelemetry::default();
+        let body = github_body("opened");
+        let signature = signature(&body);
+        let headers = github_headers(&signature);
+        let outcome = ingress().with_telemetry(telemetry.clone()).handle(
+            PullRequestReviewEventProvider::Github,
+            "tenant-acme",
+            SECRET,
+            WebhookHttpRequest {
+                method: "POST",
+                headers: &headers,
+                body: &body,
+            },
+        );
+        assert!(matches!(outcome, WebhookIngressOutcome::Accepted(_)));
+        let metrics = telemetry.prometheus();
+        assert!(metrics.contains("lachesi_review_events_received_total"));
+        assert!(!metrics.contains("tenant-acme"));
+        assert!(!metrics.contains("payments"));
     }
 
     #[test]

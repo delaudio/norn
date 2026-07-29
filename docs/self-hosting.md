@@ -12,6 +12,7 @@ Build and start the service with a named Docker volume:
 docker compose -f compose.self-hosted.yaml up --build -d
 curl --fail http://127.0.0.1:8080/healthz
 curl --fail http://127.0.0.1:8080/readyz
+curl --fail http://127.0.0.1:8080/metrics
 ```
 
 The startup boundary creates the configured data directory with owner-only
@@ -38,6 +39,22 @@ The service listens on TCP port `8080` by default. `GET /healthz` reports that
 the process is alive; `GET /readyz` is available only after the persistent
 store has initialized successfully. Put provider ingress behind an authenticated
 reverse proxy and expose only the routes required by your deployment.
+
+## Operational metrics
+
+`GET /metrics` exposes Prometheus text metrics for received events, queued and
+completed jobs, failures, scheduled retries, dead-letter jobs, publications,
+queue wait, review duration, and publication duration. Labels are bounded to
+provider, outcome, and the fixed `repository` scope level. Repository names,
+tenant ids, delivery ids, prompts, findings, and model responses are never
+metric labels or metric values.
+
+Each accepted review also receives an opaque correlation id retained in a
+bounded in-process trace map keyed by durable job id. Operators can use that
+id across ingress, job execution, and publication adapters without adding it
+as an unbounded metrics label. Scrape `/metrics` only through an authenticated
+operations network boundary; it is intentionally machine-readable rather than
+a public status page.
 
 The Compose healthcheck runs `lachesi service healthcheck`, which requests the
 loopback `/readyz` endpoint with bounded socket timeouts. It therefore verifies

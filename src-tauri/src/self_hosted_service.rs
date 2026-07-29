@@ -12,6 +12,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
+use crate::operational_telemetry::OperationalTelemetry;
 use crate::review_event::{
     PullRequestEventActor, PullRequestReviewEvent, PullRequestReviewEventKind,
     PullRequestReviewEventProvider, PullRequestReviewEventSchemaVersion, PullRequestRevision,
@@ -135,6 +136,7 @@ fn run_server(stdout: &mut dyn Write, stderr: &mut dyn Write) -> i32 {
         config.bind_addr
     );
     let available_connection_slots = Arc::new(AtomicUsize::new(HTTP_WORKER_COUNT));
+    let telemetry = OperationalTelemetry::default();
     for stream in listener.incoming() {
         match stream {
             Ok(stream) => {
@@ -146,8 +148,9 @@ fn run_server(stdout: &mut dyn Write, stderr: &mut dyn Write) -> i32 {
                     continue;
                 }
                 let available_connection_slots = Arc::clone(&available_connection_slots);
+                let telemetry = telemetry.clone();
                 std::thread::spawn(move || {
-                    let _ = respond(stream);
+                    let _ = respond(stream, &telemetry);
                     available_connection_slots.fetch_add(1, Ordering::Release);
                 });
             }
@@ -236,7 +239,7 @@ fn healthcheck_ip(bind_ip: IpAddr) -> IpAddr {
     }
 }
 
-fn respond(mut stream: TcpStream) -> Result<(), String> {
+fn respond(mut stream: TcpStream, telemetry: &OperationalTelemetry) -> Result<(), String> {
     stream
         .set_read_timeout(Some(HTTP_CONNECTION_READ_TIMEOUT))
         .map_err(|error| error.to_string())?;
@@ -270,9 +273,16 @@ fn respond(mut stream: TcpStream) -> Result<(), String> {
     let (status, body) = match path {
         Some("/healthz") => (200, "{\"status\":\"ok\"}"),
         Some("/readyz") => (200, "{\"status\":\"ready\"}"),
+        Some("/metrics") => return write_metrics_response(&mut stream, &telemetry.prometheus()),
         _ => (404, "{\"status\":\"not_found\"}"),
     };
     write_response(&mut stream, status, body)
+}
+
+fn write_metrics_response(stream: &mut TcpStream, body: &str) -> Result<(), String> {
+    write!(stream, "HTTP/1.1 200 OK\r\nContent-Type: text/plain; version=0.0.4\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len())
+        .map_err(|error| error.to_string())?;
+    stream.flush().map_err(|error| error.to_string())
 }
 
 fn write_response(stream: &mut TcpStream, status: u16, body: &str) -> Result<(), String> {
@@ -294,11 +304,14 @@ fn run_smoke(stdout: &mut dyn Write, stderr: &mut dyn Write) -> i32 {
     if let Err(code) = prepare_from_env(stderr) {
         return code;
     }
+    let telemetry = OperationalTelemetry::default();
     let coordinator = match ReviewJobCoordinator::new(
         SqliteReviewJobStore,
         OfflineSmokeExecutor,
         ReviewConcurrencyLimits::default(),
-    ) {
+    )
+    .map(|coordinator| coordinator.with_telemetry(telemetry))
+    {
         Ok(coordinator) => coordinator,
         Err(error) => {
             let _ = writeln!(stderr, "Smoke setup failed: {error}");
@@ -486,7 +499,7 @@ mod tests {
         let address = listener.local_addr().expect("address");
         let worker = std::thread::spawn(move || {
             let (stream, _) = listener.accept().expect("accept");
-            respond(stream).expect("respond");
+            respond(stream, &OperationalTelemetry::default()).expect("respond");
         });
         let mut stream = TcpStream::connect(address).expect("connect");
         stream
@@ -500,12 +513,40 @@ mod tests {
     }
 
     #[test]
+    fn metrics_endpoint_is_machine_readable_and_redacted() {
+        let telemetry = OperationalTelemetry::default();
+        telemetry.record_queued(
+            PullRequestReviewEventProvider::Github,
+            "delivery-with-secret-material",
+            "job-42",
+        );
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+        let address = listener.local_addr().expect("address");
+        let worker = std::thread::spawn(move || {
+            let (stream, _) = listener.accept().expect("accept");
+            respond(stream, &telemetry).expect("respond");
+        });
+        let mut stream = TcpStream::connect(address).expect("connect");
+        stream
+            .write_all(b"GET /metrics HTTP/1.1\r\nHost: localhost\r\n\r\n")
+            .expect("write");
+        let mut response = String::new();
+        stream.read_to_string(&mut response).expect("read");
+        worker.join().expect("join");
+        assert!(response.starts_with("HTTP/1.1 200"));
+        assert!(response.contains("Content-Type: text/plain; version=0.0.4"));
+        assert!(response.contains("lachesi_review_jobs_total"));
+        assert!(!response.contains("delivery-with-secret-material"));
+        assert!(!response.contains("job-42"));
+    }
+
+    #[test]
     fn oversized_request_line_is_rejected_with_a_fixed_read_cap() {
         let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
         let address = listener.local_addr().expect("address");
         let worker = std::thread::spawn(move || {
             let (stream, _) = listener.accept().expect("accept");
-            respond(stream).expect("respond");
+            respond(stream, &OperationalTelemetry::default()).expect("respond");
         });
         let mut stream = TcpStream::connect(address).expect("connect");
         let request = format!(
@@ -525,7 +566,7 @@ mod tests {
         let address = listener.local_addr().expect("address");
         let worker = std::thread::spawn(move || {
             let (stream, _) = listener.accept().expect("accept");
-            respond(stream).expect("respond");
+            respond(stream, &OperationalTelemetry::default()).expect("respond");
         });
         let mut stream = TcpStream::connect(address).expect("connect");
         stream

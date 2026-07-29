@@ -11,6 +11,7 @@ mod headless_review;
 pub mod incremental_review;
 mod launch;
 mod local_repo;
+pub mod operational_telemetry;
 pub mod organization_policy;
 pub mod repo_config;
 pub mod review_evaluation;

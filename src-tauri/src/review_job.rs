@@ -1,10 +1,11 @@
 //! Durable coordination contract for provider-triggered headless review jobs.
 
 use std::sync::mpsc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 
+use crate::operational_telemetry::OperationalTelemetry;
 use crate::review_event::{
     PullRequestReviewEvent, PullRequestReviewEventKind, PullRequestReviewEventProvider,
     PullRequestRevision,
@@ -289,6 +290,7 @@ pub struct ReviewJobCoordinator<S, E> {
     executor: E,
     limits: ReviewConcurrencyLimits,
     lease_heartbeat_interval: Duration,
+    telemetry: OperationalTelemetry,
 }
 
 impl<S, E> ReviewJobCoordinator<S, E>
@@ -302,7 +304,17 @@ where
             executor,
             limits: limits.validate()?,
             lease_heartbeat_interval: DEFAULT_LEASE_HEARTBEAT_INTERVAL,
+            telemetry: OperationalTelemetry::default(),
         })
+    }
+
+    pub fn with_telemetry(mut self, telemetry: OperationalTelemetry) -> Self {
+        self.telemetry = telemetry;
+        self
+    }
+
+    pub fn telemetry(&self) -> OperationalTelemetry {
+        self.telemetry.clone()
     }
 
     #[cfg(test)]
@@ -316,6 +328,7 @@ where
         event: &PullRequestReviewEvent,
     ) -> Result<ReviewJobEnqueueOutcome, String> {
         event.validate().map_err(|error| error.to_string())?;
+        self.telemetry.record_received(event.provider);
         if event.kind == PullRequestReviewEventKind::Closed {
             return Ok(ReviewJobEnqueueOutcome::Ignored {
                 reason: ReviewJobIgnoredReason::Closed,
@@ -330,7 +343,12 @@ where
                 cancelled_queued_jobs: self.store.suppress(event, ReviewJobIgnoredReason::Draft)?,
             });
         }
-        self.store.enqueue(event)
+        let outcome = self.store.enqueue(event)?;
+        if let ReviewJobEnqueueOutcome::Queued(job) = &outcome {
+            self.telemetry
+                .record_queued(event.provider, &event.delivery_id, &job.request.id);
+        }
+        Ok(outcome)
     }
 
     pub fn run_next(&self) -> Result<Option<ReviewJobRecord>, String> {
@@ -343,6 +361,7 @@ where
         let heartbeat_interval = self.lease_heartbeat_interval;
         let heartbeat_job_id = job.request.id.clone();
         let heartbeat_attempt_count = job.attempt_count;
+        let execution_started = Instant::now();
         let execution = std::thread::scope(|scope| {
             scope.spawn(move || loop {
                 match stop_rx.recv_timeout(heartbeat_interval) {
@@ -366,7 +385,30 @@ where
             .store
             .finish(&job.request.id, job.attempt_count, &execution)
         {
-            Ok(finished) => Ok(Some(finished)),
+            Ok(finished) => {
+                let queue_wait = queue_wait_duration(&job);
+                let review_duration = execution_started.elapsed();
+                match finished.status {
+                    ReviewJobStatus::Completed => self.telemetry.record_completed(
+                        job.request.provider,
+                        queue_wait,
+                        review_duration,
+                    ),
+                    ReviewJobStatus::Queued
+                    | ReviewJobStatus::DeadLetter
+                    | ReviewJobStatus::Failed => {
+                        self.telemetry.record_failure(
+                            job.request.provider,
+                            queue_wait,
+                            review_duration,
+                            finished.status == ReviewJobStatus::Queued,
+                            finished.status == ReviewJobStatus::DeadLetter,
+                        );
+                    }
+                    ReviewJobStatus::Running | ReviewJobStatus::Cancelled => {}
+                }
+                Ok(Some(finished))
+            }
             Err(finish_error) => match renewal_error {
                 Some(renewal_error) => Err(format!(
                     "Failed to finish shared review job after lease renewal error: \
@@ -386,6 +428,18 @@ where
     }
 }
 
+fn queue_wait_duration(job: &ReviewJobRecord) -> Duration {
+    let created = job.created_at.parse::<u64>().ok();
+    let started = job
+        .started_at
+        .as_deref()
+        .and_then(|value| value.parse::<u64>().ok());
+    match (created, started) {
+        (Some(created), Some(started)) => Duration::from_millis(started.saturating_sub(created)),
+        _ => Duration::ZERO,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::Mutex;
@@ -402,6 +456,7 @@ mod tests {
         calls: Mutex<Vec<&'static str>>,
         claimed: Mutex<Option<ReviewJobRecord>>,
         fail_renewal: bool,
+        finish_dead_letter: bool,
     }
 
     impl ReviewJobStore for RecordingStore {
@@ -434,9 +489,14 @@ mod tests {
             execution: &ReviewJobExecution,
         ) -> Result<ReviewJobRecord, String> {
             self.calls.lock().expect("calls").push("finish");
-            assert!(matches!(execution, ReviewJobExecution::Completed { .. }));
             let mut record = job();
-            record.status = ReviewJobStatus::Completed;
+            if self.finish_dead_letter {
+                assert!(matches!(execution, ReviewJobExecution::Failed { .. }));
+                record.status = ReviewJobStatus::DeadLetter;
+            } else {
+                assert!(matches!(execution, ReviewJobExecution::Completed { .. }));
+                record.status = ReviewJobStatus::Completed;
+            }
             Ok(record)
         }
 
@@ -477,6 +537,18 @@ mod tests {
             std::thread::sleep(Duration::from_millis(20));
             ReviewJobExecution::Completed {
                 run_id: "run-slow".to_string(),
+            }
+        }
+    }
+
+    #[derive(Debug, Clone, Copy)]
+    struct FailedExecutor;
+
+    impl ReviewJobExecutor for FailedExecutor {
+        fn execute(&self, _: &ReviewJobRequest) -> ReviewJobExecution {
+            ReviewJobExecution::Failed {
+                run_id: Some("run-failed".to_string()),
+                error_code: "invalid_policy".to_string(),
             }
         }
     }
@@ -626,6 +698,33 @@ mod tests {
             coordinator.store.calls.lock().expect("calls").as_slice(),
             ["claim", "finish"]
         );
+    }
+
+    #[test]
+    fn synthetic_failed_job_records_failure_timing_and_dead_letter_metrics() {
+        let telemetry = OperationalTelemetry::default();
+        let store = RecordingStore {
+            claimed: Mutex::new(Some(job())),
+            finish_dead_letter: true,
+            ..RecordingStore::default()
+        };
+        let coordinator =
+            ReviewJobCoordinator::new(store, FailedExecutor, ReviewConcurrencyLimits::default())
+                .expect("coordinator")
+                .with_telemetry(telemetry.clone());
+
+        let finished = coordinator
+            .run_next()
+            .expect("run synthetic failed job")
+            .expect("finished job");
+        assert_eq!(finished.status, ReviewJobStatus::DeadLetter);
+        let metrics = telemetry.prometheus();
+        assert!(
+            metrics.contains("lachesi_review_jobs_total{provider=\"github\",outcome=\"failed\"")
+        );
+        assert!(metrics.contains("lachesi_review_dead_letter_jobs_total"));
+        assert!(metrics.contains("lachesi_review_queue_wait_ms_count"));
+        assert!(metrics.contains("lachesi_review_duration_ms_count"));
     }
 
     #[test]
