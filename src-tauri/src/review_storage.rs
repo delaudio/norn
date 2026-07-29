@@ -14,6 +14,9 @@ use crate::administrative_audit::{
     validate_identifier as validate_audit_identifier, AdministrativeAuditAppendResult,
     AdministrativeAuditEvent,
 };
+use crate::bitbucket_oauth_onboarding::{
+    BitbucketAuthorizationStatus, BitbucketEnrollment, BitbucketRepository, BitbucketWorkspace,
+};
 use crate::finding_publication::{
     FindingPublicationLease, FindingPublicationRequest, FindingPublicationReservation,
     ProviderCommentIdentity, ProviderPublicationTarget,
@@ -847,7 +850,117 @@ fn migrate(conn: &mut Connection) -> Result<(), String> {
         .map_err(|error| error.to_string())?;
     migration.commit().map_err(|error| error.to_string())?;
 
+    let migration = conn
+        .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+        .map_err(|error| error.to_string())?;
+    migration.execute_batch(r#"
+        CREATE TABLE IF NOT EXISTS bitbucket_oauth_workspaces (
+          tenant_id TEXT PRIMARY KEY,
+          workspace_uuid TEXT NOT NULL,
+          workspace_slug TEXT NOT NULL,
+          status TEXT NOT NULL CHECK (status IN ('active', 'revoked', 'workspace_access_removed')),
+          updated_at_ms INTEGER NOT NULL CHECK (updated_at_ms >= 0)
+        );
+        CREATE TABLE IF NOT EXISTS bitbucket_oauth_repository_enrollments (
+          tenant_id TEXT NOT NULL,
+          repository_uuid TEXT NOT NULL,
+          name TEXT NOT NULL,
+          status TEXT NOT NULL CHECK (status IN ('active', 'removed')),
+          updated_at_ms INTEGER NOT NULL CHECK (updated_at_ms >= 0),
+          PRIMARY KEY (tenant_id, repository_uuid),
+          FOREIGN KEY (tenant_id) REFERENCES bitbucket_oauth_workspaces(tenant_id) ON DELETE RESTRICT
+        );
+        CREATE INDEX IF NOT EXISTS idx_bitbucket_oauth_repository_enrollments_active
+          ON bitbucket_oauth_repository_enrollments(tenant_id, status, repository_uuid);
+    "#).map_err(|error| error.to_string())?;
+    migration
+        .execute(
+            "INSERT OR IGNORE INTO schema_migrations(version) VALUES (10)",
+            [],
+        )
+        .map_err(|error| error.to_string())?;
+    migration.commit().map_err(|error| error.to_string())?;
+
     Ok(())
+}
+
+pub(crate) fn save_bitbucket_oauth_enrollment(
+    enrollment: &BitbucketEnrollment,
+) -> Result<(), String> {
+    validate_audit_identifier("tenantId", &enrollment.tenant_id)
+        .map_err(|error| error.to_string())?;
+    if enrollment.workspace.uuid.trim().is_empty() || enrollment.workspace.slug.trim().is_empty() {
+        return Err("Bitbucket workspace identifiers must be present".to_string());
+    }
+    let timestamp = now_ms().parse::<i64>().unwrap_or(0);
+    let mut conn = open()?;
+    let transaction = conn
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .map_err(|error| error.to_string())?;
+    transaction.execute(r#"
+        INSERT INTO bitbucket_oauth_workspaces (tenant_id, workspace_uuid, workspace_slug, status, updated_at_ms)
+        VALUES (?1, ?2, ?3, ?4, ?5)
+        ON CONFLICT(tenant_id) DO UPDATE SET workspace_uuid = excluded.workspace_uuid,
+          workspace_slug = excluded.workspace_slug, status = excluded.status, updated_at_ms = excluded.updated_at_ms
+    "#, params![enrollment.tenant_id, enrollment.workspace.uuid, enrollment.workspace.slug, bitbucket_oauth_status_name(enrollment.status), timestamp])
+        .map_err(|error| error.to_string())?;
+    transaction.execute("UPDATE bitbucket_oauth_repository_enrollments SET status = 'removed', updated_at_ms = ?2 WHERE tenant_id = ?1 AND status = 'active'", params![enrollment.tenant_id, timestamp])
+        .map_err(|error| error.to_string())?;
+    for repository in &enrollment.repositories {
+        if repository.uuid.trim().is_empty() || repository.name.trim().is_empty() {
+            return Err("Bitbucket repository identifiers must be present".to_string());
+        }
+        transaction.execute(r#"
+            INSERT INTO bitbucket_oauth_repository_enrollments (tenant_id, repository_uuid, name, status, updated_at_ms)
+            VALUES (?1, ?2, ?3, 'active', ?4)
+            ON CONFLICT(tenant_id, repository_uuid) DO UPDATE SET name = excluded.name, status = 'active', updated_at_ms = excluded.updated_at_ms
+        "#, params![enrollment.tenant_id, repository.uuid, repository.name, timestamp]).map_err(|error| error.to_string())?;
+    }
+    transaction.commit().map_err(|error| error.to_string())
+}
+
+pub(crate) fn load_bitbucket_oauth_enrollment(
+    tenant_id: &str,
+) -> Result<Option<BitbucketEnrollment>, String> {
+    validate_audit_identifier("tenantId", tenant_id).map_err(|error| error.to_string())?;
+    let conn = open()?;
+    let workspace = conn.query_row("SELECT workspace_uuid, workspace_slug, status FROM bitbucket_oauth_workspaces WHERE tenant_id = ?1", params![tenant_id], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?))).optional().map_err(|error| error.to_string())?;
+    let Some((uuid, slug, status)) = workspace else {
+        return Ok(None);
+    };
+    let mut statement = conn.prepare("SELECT repository_uuid, name FROM bitbucket_oauth_repository_enrollments WHERE tenant_id = ?1 AND status = 'active' ORDER BY repository_uuid").map_err(|error| error.to_string())?;
+    let repositories = statement
+        .query_map(params![tenant_id], |row| {
+            Ok(BitbucketRepository {
+                uuid: row.get(0)?,
+                name: row.get(1)?,
+            })
+        })
+        .map_err(|error| error.to_string())?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(|error| error.to_string())?;
+    Ok(Some(BitbucketEnrollment {
+        tenant_id: tenant_id.to_string(),
+        workspace: BitbucketWorkspace { uuid, slug },
+        repositories,
+        status: bitbucket_oauth_status(&status)?,
+    }))
+}
+
+fn bitbucket_oauth_status_name(status: BitbucketAuthorizationStatus) -> &'static str {
+    match status {
+        BitbucketAuthorizationStatus::Active => "active",
+        BitbucketAuthorizationStatus::Revoked => "revoked",
+        BitbucketAuthorizationStatus::WorkspaceAccessRemoved => "workspace_access_removed",
+    }
+}
+fn bitbucket_oauth_status(status: &str) -> Result<BitbucketAuthorizationStatus, String> {
+    match status {
+        "active" => Ok(BitbucketAuthorizationStatus::Active),
+        "revoked" => Ok(BitbucketAuthorizationStatus::Revoked),
+        "workspace_access_removed" => Ok(BitbucketAuthorizationStatus::WorkspaceAccessRemoved),
+        _ => Err("Stored Bitbucket OAuth enrollment has an invalid status".to_string()),
+    }
 }
 
 pub(crate) fn save_github_app_enrollment(enrollment: &GithubAppEnrollment) -> Result<(), String> {
@@ -4924,7 +5037,7 @@ mod tests {
                 .expect("query migrations")
                 .collect::<rusqlite::Result<_>>()
                 .expect("read migration versions");
-            assert_eq!(versions, vec![1, 2, 3, 4, 5, 6, 7, 8, 9]);
+            assert_eq!(versions, vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
         });
     }
 
