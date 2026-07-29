@@ -1,0 +1,5 @@
+diff --git a/src/auth.ts b/src/auth.ts
+@@ -6,0 +7,3 @@
++const destination = request.query.next;
++return Response.redirect(destination);
++

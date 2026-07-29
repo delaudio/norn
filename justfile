@@ -54,6 +54,10 @@ test:
 test-tauri:
     pnpm run test:tauri
 
+# Offline review-quality corpus gate.
+evaluate:
+    pnpm run evaluate
+
 # Archgate ADR compliance check.
 check:
     archgate check

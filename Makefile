@@ -4,11 +4,11 @@
 # package.json / cargo / tauri commands so package.json stays authoritative.
 
 .DEFAULT_GOAL := help
-.PHONY: help dev tauri-dev tui tui-build tui-install build typecheck lint test test-tauri check bundle-windows
+.PHONY: help dev tauri-dev tui tui-build tui-install build typecheck lint test test-tauri evaluate check bundle-windows
 
 # List available recipes (runs by default).
 help:
-	@echo "Lachesi recipes: dev tauri-dev tui tui-build tui-install build typecheck lint test test-tauri check bundle-windows"
+	@echo "Lachesi recipes: dev tauri-dev tui tui-build tui-install build typecheck lint test test-tauri evaluate check bundle-windows"
 
 # Start the Vite dev server (browser mock IPC).
 dev:
@@ -50,6 +50,10 @@ test:
 # Rust IPC smoke / parity test lane (ARCH-005).
 test-tauri:
 	pnpm run test:tauri
+
+# Offline review-quality corpus gate.
+evaluate:
+	pnpm run evaluate
 
 # Archgate ADR compliance check.
 check:

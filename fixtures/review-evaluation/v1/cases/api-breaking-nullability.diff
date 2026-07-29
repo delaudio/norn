@@ -1,0 +1,5 @@
+diff --git a/src/api.ts b/src/api.ts
+@@ -3,0 +4,3 @@
++export type User = {
++  email: string;
++};

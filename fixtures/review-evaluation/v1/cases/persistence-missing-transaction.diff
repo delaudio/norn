@@ -1,0 +1,5 @@
+diff --git a/src/store.rs b/src/store.rs
+@@ -17,0 +18,3 @@
++insert_order(order)?;
++insert_order_lines(lines)?;
++Ok(())
