@@ -3343,7 +3343,11 @@ fn build_codex_text_command(
     command
         .args(["exec", "--sandbox", "read-only", "--output-last-message"])
         .arg(&output_path)
-        .env("LACHESI_REVIEW_CHILD", "1");
+        .env("LACHESI_REVIEW_CHILD", "1")
+        // The review payload is the complete instruction boundary. Loading
+        // repository or user rules can re-enable the Lachesi review skill in
+        // the child and recursively invoke this command.
+        .args(["--ignore-user-config", "--ignore-rules"]);
     if let Some(model) = codex_model.and_then(normalize_codex_model) {
         command.args(["--model", &model]);
     }
@@ -3351,12 +3355,7 @@ fn build_codex_text_command(
         command.args(["-c", &format!("model_reasoning_effort={effort}")]);
     }
     if !repository_access {
-        command.args([
-            "--skip-git-repo-check",
-            "--ephemeral",
-            "--ignore-user-config",
-            "--ignore-rules",
-        ]);
+        command.args(["--skip-git-repo-check", "--ephemeral"]);
     }
     command.arg("-").stdin(Stdio::from(prompt_file));
     if repository_access {
@@ -6451,7 +6450,8 @@ mod tests {
             .any(|pair| pair == ["--allowedTools", "Read,Glob,Grep"]));
         assert_eq!(codex.get_current_dir(), Some(repo_dir.path()));
         assert!(!codex_args.iter().any(|arg| arg == "--skip-git-repo-check"));
-        assert!(!codex_args.iter().any(|arg| arg == "--ignore-user-config"));
+        assert!(codex_args.iter().any(|arg| arg == "--ignore-user-config"));
+        assert!(codex_args.iter().any(|arg| arg == "--ignore-rules"));
     }
 
     #[test]
