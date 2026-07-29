@@ -11,7 +11,7 @@ If status files and git disagree, git is authoritative; correct this file.
 - **Branch:** `agent/bitbucket-oauth-onboarding`
 - **Active item:** GitHub issue #107 and `.docflow/plan/todo/0004-shared-review-service-program.md`
 - **Blockers:** none; use the available SSH key for signed commits.
-- **Uncommitted work:** Bitbucket OAuth onboarding contracts, identifier-only enrollment storage, and administrator documentation are ready for their signed integration commit.
+- **Uncommitted work:** docflow worklog update for the signed Bitbucket OAuth onboarding commit.
 
 ## Last shipped
 
