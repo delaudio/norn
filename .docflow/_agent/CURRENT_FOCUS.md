@@ -8,15 +8,15 @@ If status files and git disagree, git is authoritative; correct this file.
 
 ## Active state
 
-- **Branch:** `agent/retention-deletion`
-- **Active item:** GitHub issue #109 and `.docflow/plan/todo/0004-shared-review-service-program.md`
+- **Branch:** `agent/operational-telemetry`
+- **Active item:** GitHub issue #110 and `.docflow/plan/todo/0004-shared-review-service-program.md`
 - **Blockers:** none; use the available SSH key for signed commits.
-- **Uncommitted work:** durable retry and dead-letter implementation pending signed commit.
+- **Uncommitted work:** operational telemetry implementation pending signed commit.
 
 ## Last shipped
 
-`136e87c` - ship encrypted credential broker through PR #139.
+`f4911f3` - ship durable review job retry through PR #140.
 
 ## Next item
 
-Merge GitHub issue #109, then continue the shared review service program.
+Merge GitHub issue #110, then continue the shared review service program.
