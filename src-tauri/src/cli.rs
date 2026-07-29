@@ -1425,7 +1425,7 @@ profiles:
         assert!(stdout.is_empty());
         assert!(String::from_utf8(stderr)
             .expect("usage")
-            .contains("lachesi service <run|smoke|healthcheck>"));
+            .contains("lachesi service <run|smoke|healthcheck|backup|restore>"));
     }
 
     #[test]

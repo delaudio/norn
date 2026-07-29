@@ -82,6 +82,8 @@ pub fn run(args: &[String], stdout: &mut dyn Write, stderr: &mut dyn Write) -> i
         [command] if command == "run" => run_server(stdout, stderr),
         [command] if command == "smoke" => run_smoke(stdout, stderr),
         [command] if command == "healthcheck" => run_healthcheck(stdout, stderr),
+        [command, path] if command == "backup" => run_backup(path, stdout, stderr),
+        [command, path] if command == "restore" => run_restore(path, stdout, stderr),
         [command] if command == "--help" || command == "-h" => {
             let _ = writeln!(stdout, "{}", usage());
             0
@@ -90,7 +92,7 @@ pub fn run(args: &[String], stdout: &mut dyn Write, stderr: &mut dyn Write) -> i
             let _ = writeln!(
                 stderr,
                 "{}\n\n{}",
-                "Usage: lachesi service <run|smoke|healthcheck>",
+                "Usage: lachesi service <run|smoke|healthcheck|backup|restore>",
                 usage()
             );
             2
@@ -99,7 +101,75 @@ pub fn run(args: &[String], stdout: &mut dyn Write, stderr: &mut dyn Write) -> i
 }
 
 pub fn usage() -> &'static str {
-    "Usage:\n  lachesi service run\n  lachesi service smoke\n  lachesi service healthcheck\n\nEnvironment:\n  LACHESI_SERVICE_DATA_DIR  Absolute persistent data-volume path (required)\n  LACHESI_SERVICE_BIND_ADDR HTTP bind address (default: 0.0.0.0:8080)"
+    "Usage:\n  lachesi service run\n  lachesi service smoke\n  lachesi service healthcheck\n  lachesi service backup <absolute-directory>\n  lachesi service restore <absolute-directory>\n\nEnvironment:\n  LACHESI_SERVICE_DATA_DIR  Absolute persistent data-volume path (required)\n  LACHESI_SERVICE_BIND_ADDR HTTP bind address (default: 0.0.0.0:8080)"
+}
+
+fn backup_path(value: &str) -> Result<PathBuf, String> {
+    let path = PathBuf::from(value);
+    if !path.is_absolute() {
+        return Err("Backup paths must be absolute".to_string());
+    }
+    Ok(path)
+}
+
+fn run_backup(path: &str, stdout: &mut dyn Write, stderr: &mut dyn Write) -> i32 {
+    let path = match backup_path(path) {
+        Ok(path) => path,
+        Err(error) => {
+            let _ = writeln!(stderr, "Backup configuration is invalid: {error}");
+            return 2;
+        }
+    };
+    if prepare_from_env(stderr).is_err() {
+        return 7;
+    }
+    match crate::self_hosted_backup::create(&path) {
+        Ok(()) => {
+            let _ = writeln!(stdout, "Backup created at {}.", path.display());
+            0
+        }
+        Err(error) => {
+            let _ = writeln!(stderr, "Backup failed: {error}");
+            7
+        }
+    }
+}
+
+fn run_restore(path: &str, stdout: &mut dyn Write, stderr: &mut dyn Write) -> i32 {
+    let path = match backup_path(path) {
+        Ok(path) => path,
+        Err(error) => {
+            let _ = writeln!(stderr, "Restore configuration is invalid: {error}");
+            return 2;
+        }
+    };
+    let config = match ServiceConfig::from_env() {
+        Ok(config) => config,
+        Err(error) => {
+            let _ = writeln!(stderr, "Restore configuration is invalid: {error}");
+            return 2;
+        }
+    };
+    match crate::self_hosted_backup::restore(&path, &config.data_dir) {
+        Ok(()) => match config.prepare() {
+            Ok(()) => {
+                let _ = writeln!(
+                    stdout,
+                    "Backup restored into {}.",
+                    config.data_dir.display()
+                );
+                0
+            }
+            Err(error) => {
+                let _ = writeln!(stderr, "Restored data is not ready: {error}");
+                7
+            }
+        },
+        Err(error) => {
+            let _ = writeln!(stderr, "Restore failed: {error}");
+            7
+        }
+    }
 }
 
 fn prepare_from_env(stderr: &mut dyn Write) -> Result<ServiceConfig, i32> {
