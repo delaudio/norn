@@ -1,4 +1,5 @@
 pub mod administrative_audit;
+pub mod bitbucket_oauth_onboarding;
 pub mod cli;
 mod commands;
 mod config;
