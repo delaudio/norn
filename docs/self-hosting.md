@@ -96,3 +96,34 @@ For an upgrade:
 The service does not delete persistent state during normal restart. Retention,
 credential revocation, repository deletion, and tenant deletion remain policy
 and control-plane responsibilities of the shared-review implementation.
+
+## Backup and restore
+
+Create a backup while the service is running with an absolute, new destination
+directory:
+
+```sh
+lachesi service backup /secure-backups/lachesi-2026-07-29
+```
+
+The backup is a consistent SQLite snapshot plus a manifest and SHA-256 digest.
+It contains the durable database state: cursors, jobs, findings, feedback,
+audit events, policy and organization configuration, and credential metadata
+including encrypted credential ciphertext. It deliberately excludes repository
+source code and prompt bodies; do not add those artifacts to this backup format
+without an explicit retention and access-control decision.
+
+Restore only into a new empty data directory, before starting a serving
+instance:
+
+```sh
+LACHESI_SERVICE_DATA_DIR=/var/lib/lachesi-restored \
+  lachesi service restore /secure-backups/lachesi-2026-07-29
+```
+
+Restore rejects non-empty destinations, malformed manifests, checksum changes,
+corrupt SQLite databases, and backups from a newer schema. Credential ciphertext
+is restored as ciphertext only: it remains unusable until the deployment is
+configured with the same external master key or the appropriate rotated key
+material. Keep backup artifacts encrypted and access-controlled by your backup
+platform.

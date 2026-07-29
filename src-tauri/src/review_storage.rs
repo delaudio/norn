@@ -45,7 +45,8 @@ use crate::team_credentials::{
 };
 
 const APP_DIR: &str = "lachesi";
-const DB_FILE: &str = "lachesi.sqlite3";
+pub(crate) const DB_FILE: &str = "lachesi.sqlite3";
+const LATEST_SCHEMA_VERSION: i64 = 12;
 const LEGACY_REVIEWS_DIR: &str = "reviews";
 const MAX_ADMINISTRATIVE_AUDIT_TIMESTAMP_MS: i64 = 4_102_444_800_000;
 const SHARED_REVIEW_JOB_LEASE_MS: i64 = 15 * 60 * 1000;
@@ -301,6 +302,39 @@ pub fn legacy_review_path(workspace: &str, repo: &str, id: u32) -> Result<PathBu
 
 fn db_path() -> Result<PathBuf, String> {
     Ok(local_data_dir()?.join(DB_FILE))
+}
+
+pub(crate) fn create_consistent_database_backup(destination: &Path) -> Result<(), String> {
+    if destination.exists() {
+        return Err("Backup database destination already exists".to_string());
+    }
+    let source = open()?;
+    let escaped = destination.to_string_lossy().replace('\'', "''");
+    source
+        .execute_batch(&format!("VACUUM INTO '{escaped}'"))
+        .map_err(|error| format!("Failed to create consistent SQLite backup: {error}"))
+}
+
+pub(crate) fn verify_database_backup(path: &Path) -> Result<(), String> {
+    let connection = Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+        .map_err(|error| format!("Failed to open backup database: {error}"))?;
+    let integrity: String = connection
+        .query_row("PRAGMA integrity_check", [], |row| row.get(0))
+        .map_err(|error| format!("Failed to verify backup integrity: {error}"))?;
+    if integrity != "ok" {
+        return Err("Backup database integrity check failed".to_string());
+    }
+    let version: i64 = connection
+        .query_row(
+            "SELECT COALESCE(MAX(version), 0) FROM schema_migrations",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(|error| format!("Backup database has no compatible schema metadata: {error}"))?;
+    if version > LATEST_SCHEMA_VERSION {
+        return Err("Backup database schema is newer than this deployment".to_string());
+    }
+    Ok(())
 }
 
 fn review_key(workspace: &str, repo: &str, id: u32) -> String {

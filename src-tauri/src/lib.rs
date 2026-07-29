@@ -21,6 +21,7 @@ pub mod review_job;
 pub mod review_metrics;
 pub mod review_retry;
 mod review_storage;
+pub mod self_hosted_backup;
 pub mod self_hosted_service;
 mod services;
 pub mod team_authorization;
