@@ -63,6 +63,7 @@ pub enum ReviewJobStatus {
     Running,
     Completed,
     Failed,
+    DeadLetter,
     Cancelled,
 }
 
@@ -73,6 +74,7 @@ impl ReviewJobStatus {
             Self::Running => "running",
             Self::Completed => "completed",
             Self::Failed => "failed",
+            Self::DeadLetter => "dead_letter",
             Self::Cancelled => "cancelled",
         }
     }
@@ -83,6 +85,7 @@ impl ReviewJobStatus {
             "running" => Ok(Self::Running),
             "completed" => Ok(Self::Completed),
             "failed" => Ok(Self::Failed),
+            "dead_letter" => Ok(Self::DeadLetter),
             "cancelled" => Ok(Self::Cancelled),
             _ => Err(format!("Unknown shared review job status: {value}")),
         }
@@ -115,6 +118,8 @@ pub struct ReviewJobRecord {
     pub lease_expires_at: Option<String>,
     pub run_id: Option<String>,
     pub error_code: Option<String>,
+    pub next_attempt_at: Option<String>,
+    pub terminal_reason: Option<String>,
     pub created_at: String,
     pub started_at: Option<String>,
     pub finished_at: Option<String>,
@@ -211,6 +216,13 @@ pub trait ReviewJobStore {
         expected_attempt_count: u32,
     ) -> Result<ReviewJobRecord, String>;
 
+    /// The caller must supply an operator identity obtained from its authorization boundary.
+    fn retry_dead_letter(
+        &self,
+        job_id: &str,
+        authorized_operator_id: &str,
+    ) -> Result<ReviewJobRecord, String>;
+
     fn get(&self, job_id: &str) -> Result<Option<ReviewJobRecord>, String>;
 }
 
@@ -256,6 +268,14 @@ impl ReviewJobStore for SqliteReviewJobStore {
         expected_attempt_count: u32,
     ) -> Result<ReviewJobRecord, String> {
         review_storage::renew_shared_review_job_lease(job_id, expected_attempt_count)
+    }
+
+    fn retry_dead_letter(
+        &self,
+        job_id: &str,
+        authorized_operator_id: &str,
+    ) -> Result<ReviewJobRecord, String> {
+        review_storage::retry_dead_letter_shared_review_job(job_id, authorized_operator_id)
     }
 
     fn get(&self, job_id: &str) -> Result<Option<ReviewJobRecord>, String> {
@@ -356,6 +376,14 @@ where
             },
         }
     }
+
+    pub fn retry_dead_letter(
+        &self,
+        job_id: &str,
+        authorized_operator_id: &str,
+    ) -> Result<ReviewJobRecord, String> {
+        self.store.retry_dead_letter(job_id, authorized_operator_id)
+    }
 }
 
 #[cfg(test)]
@@ -419,6 +447,10 @@ mod tests {
             } else {
                 Ok(job())
             }
+        }
+
+        fn retry_dead_letter(&self, _: &str, _: &str) -> Result<ReviewJobRecord, String> {
+            Ok(job())
         }
 
         fn get(&self, _: &str) -> Result<Option<ReviewJobRecord>, String> {
@@ -509,6 +541,8 @@ mod tests {
             lease_expires_at: Some("2000".to_string()),
             run_id: None,
             error_code: None,
+            next_attempt_at: None,
+            terminal_reason: None,
             created_at: "1000".to_string(),
             started_at: Some("1001".to_string()),
             finished_at: None,
