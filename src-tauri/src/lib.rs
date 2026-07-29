@@ -5,6 +5,7 @@ mod config;
 mod credentials;
 pub mod finding_publication;
 pub mod finding_reconciliation;
+pub mod github_app_onboarding;
 mod headless_review;
 pub mod incremental_review;
 mod launch;

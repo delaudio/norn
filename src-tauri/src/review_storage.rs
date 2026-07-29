@@ -18,6 +18,9 @@ use crate::finding_publication::{
     FindingPublicationLease, FindingPublicationRequest, FindingPublicationReservation,
     ProviderCommentIdentity, ProviderPublicationTarget,
 };
+use crate::github_app_onboarding::{
+    GithubAppEnrollment, GithubAppInstallationStatus, GithubAppRepository,
+};
 use crate::review_event::PullRequestReviewEventProvider;
 use crate::review_feedback::{
     derive_finding_feedback_state, ReviewFindingFeedbackAction, ReviewFindingFeedbackEvent,
@@ -805,7 +808,165 @@ fn migrate(conn: &mut Connection) -> Result<(), String> {
         .map_err(|error| error.to_string())?;
     migration.commit().map_err(|error| error.to_string())?;
 
+    let migration = conn
+        .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+        .map_err(|error| error.to_string())?;
+    migration
+        .execute_batch(
+            r#"
+            CREATE TABLE IF NOT EXISTS github_app_installations (
+              tenant_id TEXT PRIMARY KEY,
+              installation_id INTEGER NOT NULL CHECK (installation_id > 0),
+              organization_login TEXT NOT NULL,
+              status TEXT NOT NULL CHECK (status IN ('active', 'suspended', 'uninstalled')),
+              updated_at_ms INTEGER NOT NULL CHECK (updated_at_ms >= 0)
+            );
+
+            CREATE TABLE IF NOT EXISTS github_app_repository_enrollments (
+              tenant_id TEXT NOT NULL,
+              repository_id INTEGER NOT NULL CHECK (repository_id > 0),
+              owner TEXT NOT NULL,
+              name TEXT NOT NULL,
+              status TEXT NOT NULL CHECK (status IN ('active', 'removed')),
+              updated_at_ms INTEGER NOT NULL CHECK (updated_at_ms >= 0),
+              PRIMARY KEY (tenant_id, repository_id),
+              FOREIGN KEY (tenant_id) REFERENCES github_app_installations(tenant_id)
+                ON DELETE RESTRICT
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_github_app_repository_enrollments_active
+              ON github_app_repository_enrollments(tenant_id, status, repository_id);
+            "#,
+        )
+        .map_err(|error| error.to_string())?;
+    migration
+        .execute(
+            "INSERT OR IGNORE INTO schema_migrations(version) VALUES (9)",
+            [],
+        )
+        .map_err(|error| error.to_string())?;
+    migration.commit().map_err(|error| error.to_string())?;
+
     Ok(())
+}
+
+pub(crate) fn save_github_app_enrollment(enrollment: &GithubAppEnrollment) -> Result<(), String> {
+    validate_audit_identifier("tenantId", &enrollment.tenant_id)
+        .map_err(|error| error.to_string())?;
+    if enrollment.installation_id == 0 || enrollment.organization_login.trim().is_empty() {
+        return Err("GitHub App installation identifiers must be present".to_string());
+    }
+    let timestamp = now_ms().parse::<i64>().unwrap_or(0);
+    let mut conn = open()?;
+    let transaction = conn
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .map_err(|error| error.to_string())?;
+    transaction
+        .execute(
+            r#"
+        INSERT INTO github_app_installations (
+          tenant_id, installation_id, organization_login, status, updated_at_ms
+        ) VALUES (?1, ?2, ?3, ?4, ?5)
+        ON CONFLICT(tenant_id) DO UPDATE SET
+          installation_id = excluded.installation_id,
+          organization_login = excluded.organization_login,
+          status = excluded.status,
+          updated_at_ms = excluded.updated_at_ms
+        "#,
+            params![
+                enrollment.tenant_id,
+                enrollment.installation_id as i64,
+                enrollment.organization_login,
+                github_app_status_name(enrollment.status),
+                timestamp,
+            ],
+        )
+        .map_err(|error| error.to_string())?;
+    transaction.execute(
+        "UPDATE github_app_repository_enrollments SET status = 'removed', updated_at_ms = ?2 WHERE tenant_id = ?1 AND status = 'active'",
+        params![enrollment.tenant_id, timestamp],
+    ).map_err(|error| error.to_string())?;
+    for repository in &enrollment.repositories {
+        if repository.id == 0
+            || repository.owner.trim().is_empty()
+            || repository.name.trim().is_empty()
+        {
+            return Err("GitHub repository identifiers must be present".to_string());
+        }
+        transaction
+            .execute(
+                r#"
+            INSERT INTO github_app_repository_enrollments (
+              tenant_id, repository_id, owner, name, status, updated_at_ms
+            ) VALUES (?1, ?2, ?3, ?4, 'active', ?5)
+            ON CONFLICT(tenant_id, repository_id) DO UPDATE SET
+              owner = excluded.owner, name = excluded.name, status = 'active',
+              updated_at_ms = excluded.updated_at_ms
+            "#,
+                params![
+                    enrollment.tenant_id,
+                    repository.id as i64,
+                    repository.owner,
+                    repository.name,
+                    timestamp
+                ],
+            )
+            .map_err(|error| error.to_string())?;
+    }
+    transaction.commit().map_err(|error| error.to_string())
+}
+
+pub(crate) fn load_github_app_enrollment(
+    tenant_id: &str,
+) -> Result<Option<GithubAppEnrollment>, String> {
+    validate_audit_identifier("tenantId", tenant_id).map_err(|error| error.to_string())?;
+    let conn = open()?;
+    let installation = conn.query_row(
+        "SELECT installation_id, organization_login, status FROM github_app_installations WHERE tenant_id = ?1",
+        params![tenant_id],
+        |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?)),
+    ).optional().map_err(|error| error.to_string())?;
+    let Some((installation_id, organization_login, status)) = installation else {
+        return Ok(None);
+    };
+    let mut statement = conn.prepare(
+        "SELECT repository_id, owner, name FROM github_app_repository_enrollments WHERE tenant_id = ?1 AND status = 'active' ORDER BY repository_id",
+    ).map_err(|error| error.to_string())?;
+    let repositories = statement
+        .query_map(params![tenant_id], |row| {
+            Ok(GithubAppRepository {
+                id: row.get::<_, i64>(0)? as u64,
+                owner: row.get(1)?,
+                name: row.get(2)?,
+            })
+        })
+        .map_err(|error| error.to_string())?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(|error| error.to_string())?;
+    Ok(Some(GithubAppEnrollment {
+        tenant_id: tenant_id.to_string(),
+        installation_id: installation_id as u64,
+        organization_login,
+        status: github_app_status(&status)?,
+        repositories,
+    }))
+}
+
+fn github_app_status_name(status: GithubAppInstallationStatus) -> &'static str {
+    match status {
+        GithubAppInstallationStatus::Active => "active",
+        GithubAppInstallationStatus::Suspended => "suspended",
+        GithubAppInstallationStatus::Uninstalled => "uninstalled",
+    }
+}
+
+fn github_app_status(status: &str) -> Result<GithubAppInstallationStatus, String> {
+    match status {
+        "active" => Ok(GithubAppInstallationStatus::Active),
+        "suspended" => Ok(GithubAppInstallationStatus::Suspended),
+        "uninstalled" => Ok(GithubAppInstallationStatus::Uninstalled),
+        _ => Err("Stored GitHub App installation has an invalid status".to_string()),
+    }
 }
 
 fn now_ms() -> String {
@@ -4763,7 +4924,7 @@ mod tests {
                 .expect("query migrations")
                 .collect::<rusqlite::Result<_>>()
                 .expect("read migration versions");
-            assert_eq!(versions, vec![1, 2, 3, 4, 5, 6, 7, 8]);
+            assert_eq!(versions, vec![1, 2, 3, 4, 5, 6, 7, 8, 9]);
         });
     }
 
@@ -5926,6 +6087,52 @@ mod tests {
                     },
                 ]
             );
+        });
+    }
+
+    #[test]
+    fn persists_github_app_identifiers_and_retains_removed_repository_record() {
+        with_test_data_dir("github-app-enrollment", |_| {
+            let enrollment = GithubAppEnrollment {
+                tenant_id: "tenant-acme".to_string(),
+                installation_id: 7,
+                organization_login: "acme".to_string(),
+                status: GithubAppInstallationStatus::Active,
+                repositories: vec![
+                    GithubAppRepository {
+                        id: 11,
+                        owner: "acme".to_string(),
+                        name: "api".to_string(),
+                    },
+                    GithubAppRepository {
+                        id: 12,
+                        owner: "acme".to_string(),
+                        name: "web".to_string(),
+                    },
+                ],
+            };
+            save_github_app_enrollment(&enrollment).expect("save enrollment");
+
+            let mut revised = enrollment.clone();
+            revised
+                .repositories
+                .retain(|repository| repository.id == 12);
+            save_github_app_enrollment(&revised).expect("remove repository");
+
+            let loaded = load_github_app_enrollment("tenant-acme")
+                .expect("load enrollment")
+                .expect("stored enrollment");
+            assert_eq!(loaded.installation_id, 7);
+            assert_eq!(loaded.repositories, revised.repositories);
+            let conn = open().expect("open database");
+            let status = conn
+                .query_row(
+                    "SELECT status FROM github_app_repository_enrollments WHERE tenant_id = ?1 AND repository_id = ?2",
+                    params!["tenant-acme", 11_i64],
+                    |row| row.get::<_, String>(0),
+                )
+                .expect("removed enrollment record");
+            assert_eq!(status, "removed");
         });
     }
 }

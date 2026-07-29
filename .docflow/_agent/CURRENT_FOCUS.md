@@ -8,15 +8,15 @@ If status files and git disagree, git is authoritative; correct this file.
 
 ## Active state
 
-- **Branch:** `agent/review-quality-evaluation-corpus`
-- **Active item:** GitHub issue #105 and `.docflow/plan/todo/0004-shared-review-service-program.md`
+- **Branch:** `agent/github-app-onboarding`
+- **Active item:** GitHub issue #106 and `.docflow/plan/todo/0004-shared-review-service-program.md`
 - **Blockers:** none; use the available SSH key for signed commits.
-- **Uncommitted work:** the versioned review-quality evaluation corpus and offline regression runner are implemented and ready for their signed integration commit.
+- **Uncommitted work:** GitHub App onboarding contracts, SQLite enrollment persistence, lifecycle revocation controls, and administrator documentation are ready for their signed integration commit.
 
 ## Last shipped
 
-`3248132` - ship self-hosted review runtime through PR #135.
+`3c8e705` - ship the review-quality evaluation corpus through PR #136.
 
 ## Next item
 
-Merge GitHub issue #105, then continue the shared review service program.
+Merge GitHub issue #106, then continue the shared review service program.
