@@ -230,6 +230,22 @@ impl TeamActor {
             role: TeamRole::Admin,
         }
     }
+
+    pub fn id(&self) -> &str {
+        &self.id
+    }
+
+    pub fn organization_id(&self) -> &str {
+        &self.organization_id
+    }
+
+    pub fn team_ids(&self) -> &[String] {
+        &self.team_ids
+    }
+
+    pub const fn role(&self) -> TeamRole {
+        self.role
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
