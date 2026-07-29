@@ -35,6 +35,9 @@ The long-term direction is a local/open-source review engine: desktop first, but
 contracts that can power a future CLI, CI usage, policy checks, private policy packs, and public
 documentation.
 
+For the optional self-hosted shared-review process, see
+[`docs/self-hosting.md`](docs/self-hosting.md).
+
 ## Why
 
 Web review UIs can feel cramped and noisy for repeated, high-context review work. More importantly,

@@ -150,7 +150,7 @@ fn review_needs_headless_storage(args: &[String]) -> bool {
 fn is_cli_command(args: &[String]) -> bool {
     matches!(
         args.first().map(String::as_str),
-        Some("config" | "metrics" | "review" | "--help" | "-h")
+        Some("config" | "metrics" | "review" | "service" | "--help" | "-h")
     )
 }
 
@@ -190,6 +190,7 @@ fn run_args(args: &[String], stdout: &mut dyn Write, stderr: &mut dyn Write) -> 
                 2
             }
         },
+        Some("service") => crate::self_hosted_service::run(&args[1..], stdout, stderr),
         _ => match parse_config_validate_args(args) {
             Ok(args) => run_config_validate(args, stdout, stderr),
             Err(error) => {
@@ -1304,6 +1305,23 @@ profiles:
             .expect("parse analyzer opt-in");
 
         assert!(args.run_analyzers);
+    }
+
+    #[test]
+    fn service_command_routes_to_the_self_hosted_runtime() {
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+        let code = run_args(
+            &["service".to_string(), "invalid".to_string()],
+            &mut stdout,
+            &mut stderr,
+        );
+
+        assert_eq!(code, 2);
+        assert!(stdout.is_empty());
+        assert!(String::from_utf8(stderr)
+            .expect("usage")
+            .contains("lachesi service <run|smoke|healthcheck>"));
     }
 
     #[test]

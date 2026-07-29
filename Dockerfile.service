@@ -1,0 +1,23 @@
+FROM rust:1.89-bookworm AS build
+
+WORKDIR /build/src-tauri
+COPY src-tauri/Cargo.toml src-tauri/Cargo.lock ./
+COPY src-tauri/src ./src
+COPY src-tauri/build.rs ./build.rs
+COPY src-tauri/tauri.conf.json ./tauri.conf.json
+RUN cargo build --locked --release --bin lachesi
+
+FROM debian:bookworm-slim
+
+RUN groupadd --gid 10001 lachesi \
+    && useradd --uid 10001 --gid lachesi --create-home --home-dir /var/lib/lachesi lachesi
+
+COPY --from=build /build/src-tauri/target/release/lachesi /usr/local/bin/lachesi
+
+USER lachesi
+ENV LACHESI_SERVICE_DATA_DIR=/var/lib/lachesi
+ENV LACHESI_SERVICE_BIND_ADDR=0.0.0.0:8080
+VOLUME ["/var/lib/lachesi"]
+EXPOSE 8080
+
+ENTRYPOINT ["lachesi", "service", "run"]
