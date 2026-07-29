@@ -31,11 +31,14 @@ pub mod tui;
 pub mod webhook_ingress;
 
 pub use review_storage::{
-    append_administrative_audit_event, get_finding_feedback_state, get_review_cursor,
-    purge_administrative_audit_events_before, record_finding_feedback, record_review_completion,
-    review_effectiveness_metrics, set_team_audit_collection_enabled, team_audit_collection_enabled,
-    write_administrative_audit_jsonl, ReviewCursor, ReviewCursorIdentity, ReviewCursorState,
-    ReviewRunCompletion, ReviewRunOutcome,
+    append_administrative_audit_event, apply_repository_retention, delete_disconnected_repository,
+    get_finding_feedback_state, get_review_cursor, purge_administrative_audit_events_before,
+    record_finding_feedback, record_review_completion, review_effectiveness_metrics,
+    set_team_audit_collection_enabled, team_audit_collection_enabled,
+    write_administrative_audit_jsonl, RetentionCount, RetentionMode, RetentionReport,
+    RetentionScope, ReviewCursor, ReviewCursorIdentity, ReviewCursorState, ReviewRunCompletion,
+    ReviewRunOutcome, AUDIT_METADATA_RETENTION_DAYS, FINDING_ACTIVITY_RETENTION_DAYS,
+    REVIEW_CONTENT_RETENTION_DAYS, REVIEW_JOB_RETENTION_DAYS,
 };
 pub use services::bitbucket::{publish_review_finding_native, reconcile_review_findings_native};
 

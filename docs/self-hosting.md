@@ -127,3 +127,21 @@ is restored as ciphertext only: it remains unusable until the deployment is
 configured with the same external master key or the appropriate rotated key
 material. Keep backup artifacts encrypted and access-controlled by your backup
 platform.
+
+## Retention and repository deletion
+
+The service exposes a repository-scoped retention API with `dryRun` and
+`execute` modes. The default organization policy is: source-derived review
+content, including stored prompts and responses, for 30 days; completed job
+records for 90 days; finding feedback, publication state, and pull-request
+state for 365 days; and administrative audit metadata for seven years.
+Aggregate metrics are retained indefinitely only in non-identifying form.
+Repository deletion removes the source-derived classes immediately but keeps
+aggregate metrics and separately governed audit metadata.
+
+Each retention operation reports counts for `review_content`, `review_jobs`,
+`finding_feedback`, `finding_publications`, and `pull_request_state`, plus the
+explicitly retained aggregate-metrics and audit-metadata classes. Dry runs,
+successful executions, and failed executions are durably recorded. Execute
+mode is one SQLite transaction: an error rolls back every repository-content
+deletion, allowing a safe retry without a partial result.

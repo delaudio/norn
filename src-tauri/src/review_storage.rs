@@ -46,11 +46,49 @@ use crate::team_credentials::{
 
 const APP_DIR: &str = "lachesi";
 pub(crate) const DB_FILE: &str = "lachesi.sqlite3";
-const LATEST_SCHEMA_VERSION: i64 = 12;
+const LATEST_SCHEMA_VERSION: i64 = 13;
 const LEGACY_REVIEWS_DIR: &str = "reviews";
 const MAX_ADMINISTRATIVE_AUDIT_TIMESTAMP_MS: i64 = 4_102_444_800_000;
 const SHARED_REVIEW_JOB_LEASE_MS: i64 = 15 * 60 * 1000;
 const FINDING_PUBLICATION_LEASE_MS: i64 = 5 * 60 * 1000;
+
+/// Defaults used by the scheduled organization retention policy. Callers pass
+/// the resulting cutoff to `apply_repository_retention` for a scoped run.
+pub const REVIEW_CONTENT_RETENTION_DAYS: u64 = 30;
+pub const REVIEW_JOB_RETENTION_DAYS: u64 = 90;
+pub const FINDING_ACTIVITY_RETENTION_DAYS: u64 = 365;
+pub const AUDIT_METADATA_RETENTION_DAYS: u64 = 2_555;
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RetentionScope {
+    pub tenant_id: String,
+    pub workspace: String,
+    pub repository: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum RetentionMode {
+    DryRun,
+    Execute,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RetentionCount {
+    pub data_class: String,
+    pub count: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RetentionReport {
+    pub mode: RetentionMode,
+    pub scope: RetentionScope,
+    pub occurred_before_ms: u64,
+    pub counts: Vec<RetentionCount>,
+}
 
 #[cfg(test)]
 pub(crate) static TEST_DATA_DIR_ENV_LOCK: Mutex<()> = Mutex::new(());
@@ -952,6 +990,29 @@ fn migrate(conn: &mut Connection) -> Result<(), String> {
     migrate_shared_review_jobs_for_retries(&conn)?;
     conn.execute(
         "INSERT OR IGNORE INTO schema_migrations(version) VALUES (12)",
+        [],
+    )
+    .map_err(|error| error.to_string())?;
+
+    conn.execute_batch(
+        r#"
+        CREATE TABLE IF NOT EXISTS retention_operation_log (
+          operation_id TEXT PRIMARY KEY,
+          tenant_id TEXT NOT NULL,
+          workspace TEXT NOT NULL,
+          repo TEXT NOT NULL,
+          mode TEXT NOT NULL CHECK (mode IN ('dry_run', 'execute')),
+          outcome TEXT NOT NULL CHECK (outcome IN ('succeeded', 'failed')),
+          occurred_at_ms INTEGER NOT NULL CHECK (occurred_at_ms >= 0),
+          report_json TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_retention_operation_log_scope
+          ON retention_operation_log(tenant_id, workspace, repo, occurred_at_ms);
+        "#,
+    )
+    .map_err(|error| error.to_string())?;
+    conn.execute(
+        "INSERT OR IGNORE INTO schema_migrations(version) VALUES (13)",
         [],
     )
     .map_err(|error| error.to_string())?;
@@ -3875,6 +3936,188 @@ pub fn cleanup_stale_reviews(keep_keys: &[String]) -> Result<(), String> {
     Ok(())
 }
 
+/// Applies retention only to repository-scoped source-derived data. Aggregate
+/// metrics and audit metadata intentionally remain outside this deletion path.
+pub fn apply_repository_retention(
+    scope: &RetentionScope,
+    occurred_before_ms: u64,
+    mode: RetentionMode,
+) -> Result<RetentionReport, String> {
+    validate_retention_scope(scope)?;
+    match apply_repository_retention_inner(scope, occurred_before_ms, mode) {
+        Ok(report) => Ok(report),
+        Err(error) => {
+            record_retention_failure(scope, occurred_before_ms, mode, &error)?;
+            Err(error)
+        }
+    }
+}
+
+fn apply_repository_retention_inner(
+    scope: &RetentionScope,
+    occurred_before_ms: u64,
+    mode: RetentionMode,
+) -> Result<RetentionReport, String> {
+    let cutoff = i64::try_from(occurred_before_ms).unwrap_or(i64::MAX);
+    let mut conn = open()?;
+    let transaction = conn
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .map_err(|error| error.to_string())?;
+    let classes = [
+        (
+            "review_content",
+            "ai_review_stores",
+            "CAST(updated_at AS INTEGER) < ?4",
+        ),
+        (
+            "review_jobs",
+            "shared_review_jobs",
+            "finished_at_ms IS NOT NULL AND finished_at_ms < ?4",
+        ),
+        (
+            "finding_feedback",
+            "review_finding_feedback_events",
+            "CAST(occurred_at AS INTEGER) < ?4",
+        ),
+        (
+            "finding_publications",
+            "shared_finding_publications",
+            "updated_at_ms < ?4",
+        ),
+        (
+            "pull_request_state",
+            "shared_review_pull_request_state",
+            "updated_at_ms < ?4",
+        ),
+    ];
+    let mut counts = Vec::with_capacity(classes.len() + 2);
+    for &(data_class, table, age_clause) in &classes {
+        let sql = format!(
+            "SELECT COUNT(*) FROM {table} WHERE tenant_id = ?1 AND workspace = ?2 AND repo = ?3 AND {age_clause}"
+        );
+        let count: i64 = transaction
+            .query_row(
+                &sql,
+                params![scope.tenant_id, scope.workspace, scope.repository, cutoff],
+                |row| row.get(0),
+            )
+            .map_err(|error| error.to_string())?;
+        counts.push(RetentionCount {
+            data_class: data_class.to_string(),
+            count: u64::try_from(count).unwrap_or(0),
+        });
+    }
+    // Aggregate metrics and immutable audit metadata are non-identifying or
+    // separately governed, so this repository deletion path never removes them.
+    counts.push(RetentionCount {
+        data_class: "aggregate_metrics_retained".to_string(),
+        count: 0,
+    });
+    counts.push(RetentionCount {
+        data_class: "audit_metadata_retained".to_string(),
+        count: 0,
+    });
+    let report = RetentionReport {
+        mode,
+        scope: scope.clone(),
+        occurred_before_ms,
+        counts,
+    };
+    if mode == RetentionMode::Execute {
+        for &(_, table, age_clause) in &classes {
+            let sql = format!(
+                "DELETE FROM {table} WHERE tenant_id = ?1 AND workspace = ?2 AND repo = ?3 AND {age_clause}"
+            );
+            transaction
+                .execute(
+                    &sql,
+                    params![scope.tenant_id, scope.workspace, scope.repository, cutoff],
+                )
+                .map_err(|error| error.to_string())?;
+        }
+    }
+    let report_json = serde_json::to_string(&report).map_err(|error| error.to_string())?;
+    let operation_id =
+        retention_operation_id(scope, mode, occurred_before_ms, "succeeded", now_ms_i64());
+    transaction
+        .execute(
+            "INSERT INTO retention_operation_log (operation_id, tenant_id, workspace, repo, mode, outcome, occurred_at_ms, report_json) VALUES (?1, ?2, ?3, ?4, ?5, 'succeeded', ?6, ?7)",
+            params![operation_id, scope.tenant_id, scope.workspace, scope.repository, retention_mode_name(mode), now_ms_i64(), report_json],
+        )
+        .map_err(|error| error.to_string())?;
+    transaction.commit().map_err(|error| error.to_string())?;
+    Ok(report)
+}
+
+fn record_retention_failure(
+    scope: &RetentionScope,
+    occurred_before_ms: u64,
+    mode: RetentionMode,
+    error: &str,
+) -> Result<(), String> {
+    let occurred_at_ms = now_ms_i64();
+    let report_json = serde_json::json!({
+        "mode": mode,
+        "scope": scope,
+        "occurredBeforeMs": occurred_before_ms,
+        "counts": [],
+        "error": error,
+    })
+    .to_string();
+    open()?
+        .execute(
+            "INSERT INTO retention_operation_log (operation_id, tenant_id, workspace, repo, mode, outcome, occurred_at_ms, report_json) VALUES (?1, ?2, ?3, ?4, ?5, 'failed', ?6, ?7)",
+            params![
+                retention_operation_id(scope, mode, occurred_before_ms, "failed", occurred_at_ms),
+                scope.tenant_id,
+                scope.workspace,
+                scope.repository,
+                retention_mode_name(mode),
+                occurred_at_ms,
+                report_json,
+            ],
+        )
+        .map_err(|database_error| database_error.to_string())?;
+    Ok(())
+}
+
+/// Removes all deletable repository content after disconnect while retaining
+/// aggregate metrics and audit metadata according to their independent policy.
+pub fn delete_disconnected_repository(scope: &RetentionScope) -> Result<RetentionReport, String> {
+    apply_repository_retention(scope, u64::MAX, RetentionMode::Execute)
+}
+
+fn validate_retention_scope(scope: &RetentionScope) -> Result<(), String> {
+    validate_audit_identifier("tenantId", &scope.tenant_id).map_err(|error| error.to_string())?;
+    validate_audit_identifier("workspace", &scope.workspace).map_err(|error| error.to_string())?;
+    validate_audit_identifier("repository", &scope.repository).map_err(|error| error.to_string())
+}
+
+fn retention_mode_name(mode: RetentionMode) -> &'static str {
+    match mode {
+        RetentionMode::DryRun => "dry_run",
+        RetentionMode::Execute => "execute",
+    }
+}
+
+fn retention_operation_id(
+    scope: &RetentionScope,
+    mode: RetentionMode,
+    cutoff: u64,
+    outcome: &str,
+    occurred_at_ms: i64,
+) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(scope.tenant_id.as_bytes());
+    hasher.update(scope.workspace.as_bytes());
+    hasher.update(scope.repository.as_bytes());
+    hasher.update(retention_mode_name(mode).as_bytes());
+    hasher.update(cutoff.to_be_bytes());
+    hasher.update(outcome.as_bytes());
+    hasher.update(occurred_at_ms.to_be_bytes());
+    format!("retention:{}", hex::encode(hasher.finalize()))
+}
+
 pub fn create_review_job(
     workspace: &str,
     repo: &str,
@@ -5451,7 +5694,7 @@ mod tests {
                 .expect("query migrations")
                 .collect::<rusqlite::Result<_>>()
                 .expect("read migration versions");
-            assert_eq!(versions, vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
+            assert_eq!(versions, vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]);
         });
     }
 
@@ -5556,6 +5799,64 @@ mod tests {
                 )
                 .expect("query repaired table");
             assert!(table_exists);
+        });
+    }
+
+    #[test]
+    fn repository_retention_reports_dry_run_and_removes_only_expired_content() {
+        with_test_data_dir("repository-retention", |dir| {
+            save_review_json("acme", "payments", 42, r#"{"reviewRuns":[]}"#)
+                .expect("store review content");
+            let conn = Connection::open(dir.join(DB_FILE)).expect("open database");
+            conn.execute(
+                "UPDATE ai_review_stores SET updated_at = '1000' WHERE tenant_id = 'local'",
+                [],
+            )
+            .expect("age content");
+            conn.execute(
+                "INSERT INTO closed_pr_metrics (metric_key, workspace, repo, pr_id, title, author_display_name, author_account_id, state, source_branch, destination_branch, created_on, updated_on, additions, deletions, files_changed, diffstat_cached, has_ai_review, impact, total_findings, high_or_critical_findings, severity_counts_json, category_counts_json, synced_at) VALUES ('acme_payments_42', 'acme', 'payments', 42, 'title', 'author', NULL, 'merged', 'feature', 'main', '1', '1', 0, 0, 0, 0, 0, 'low', 0, 0, '[]', '[]', '1000')",
+                [],
+            )
+            .expect("store aggregate metric");
+            let scope = RetentionScope {
+                tenant_id: "local".to_string(),
+                workspace: "acme".to_string(),
+                repository: "payments".to_string(),
+            };
+            let dry_run =
+                apply_repository_retention(&scope, 2_000, RetentionMode::DryRun).expect("dry run");
+            assert_eq!(
+                dry_run.counts[0],
+                RetentionCount {
+                    data_class: "review_content".to_string(),
+                    count: 1
+                }
+            );
+            assert!(load_review_json("acme", "payments", 42)
+                .expect("review remains")
+                .is_some());
+            apply_repository_retention(&scope, 2_000, RetentionMode::DryRun)
+                .expect("repeat dry run");
+            let executed = delete_disconnected_repository(&scope).expect("execute retention");
+            assert_eq!(executed.mode, RetentionMode::Execute);
+            assert!(load_review_json("acme", "payments", 42)
+                .expect("review deleted")
+                .is_none());
+            let metrics: i64 = conn
+                .query_row("SELECT COUNT(*) FROM closed_pr_metrics", [], |row| {
+                    row.get(0)
+                })
+                .expect("metrics");
+            assert_eq!(
+                metrics, 1,
+                "aggregate metrics remain non-identifying retention data"
+            );
+            let operations: i64 = conn
+                .query_row("SELECT COUNT(*) FROM retention_operation_log", [], |row| {
+                    row.get(0)
+                })
+                .expect("operation log");
+            assert_eq!(operations, 3, "each retention attempt is audit recorded");
         });
     }
 
