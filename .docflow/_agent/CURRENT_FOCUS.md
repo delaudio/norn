@@ -8,15 +8,15 @@ If status files and git disagree, git is authoritative; correct this file.
 
 ## Active state
 
-- **Branch:** `agent/tenant-isolation-conformance`
-- **Active item:** GitHub issue #113 and `.docflow/plan/todo/0004-shared-review-service-program.md`
+- **Branch:** `agent/managed-service-slos`
+- **Active item:** GitHub issue #114 and `.docflow/plan/todo/0004-shared-review-service-program.md`
 - **Blockers:** none; use the available SSH key for signed commits.
-- **Uncommitted work:** cross-organization tenant-isolation conformance fixture pending signed commit.
+- **Uncommitted work:** managed-service pilot operating model and SLO documentation pending signed commit.
 
 ## Last shipped
 
-`91b38d5` - ship repository retention controls through PR #143.
+`6196602` - ship tenant isolation conformance through PR #144.
 
 ## Next item
 
-Merge GitHub issue #113, then continue the shared review service program.
+Merge GitHub issue #114, then audit the remaining planned issues.
