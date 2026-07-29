@@ -38,6 +38,9 @@ documentation.
 For the optional self-hosted shared-review process, see
 [`docs/self-hosting.md`](docs/self-hosting.md).
 
+For the versioned offline review-quality corpus and regression gate, see
+[`docs/review-evaluation.md`](docs/review-evaluation.md).
+
 ## Why
 
 Web review UIs can feel cramped and noisy for repeated, high-context review work. More importantly,

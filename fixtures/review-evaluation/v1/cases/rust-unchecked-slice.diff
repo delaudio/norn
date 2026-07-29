@@ -1,0 +1,5 @@
+diff --git a/src/parser.rs b/src/parser.rs
+@@ -12,0 +13,3 @@
++let marker = input[0];
++let payload = &input[1..];
++parse(marker, payload)

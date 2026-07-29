@@ -1,0 +1,5 @@
+diff --git a/src/checkout.ts b/src/checkout.ts
+@@ -10,0 +11,3 @@
++await charge(card, total);
++if (coupon) await charge(card, discountedTotal);
++return receipt;

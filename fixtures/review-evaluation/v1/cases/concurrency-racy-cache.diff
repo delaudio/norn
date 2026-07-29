@@ -1,0 +1,5 @@
+diff --git a/src/cache.rs b/src/cache.rs
+@@ -9,0 +10,3 @@
++if CACHE.get(key).is_none() {
++    CACHE.insert(key.to_string(), load(key));
++}

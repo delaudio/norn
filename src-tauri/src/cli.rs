@@ -6,6 +6,7 @@ use serde::Serialize;
 use crate::config::{AiProvider, ReviewProvider};
 use crate::headless_review::{self, HeadlessReviewRequest, ReviewScope};
 use crate::repo_config::{self, LoadedPolicyPack, RepoConfigValidationMessage};
+use crate::review_evaluation;
 use crate::review_event::PullRequestReviewEventProvider;
 use crate::review_metrics::{
     ReviewEffectivenessFilter, ReviewEffectivenessReport, ReviewEffectivenessSummary,
@@ -56,6 +57,13 @@ struct ConfigValidateArgs {
 struct MetricsArgs {
     filter: ReviewEffectivenessFilter,
     format: OutputFormat,
+    output: Option<PathBuf>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct EvaluateArgs {
+    corpus: PathBuf,
+    baseline: PathBuf,
     output: Option<PathBuf>,
 }
 
@@ -150,7 +158,7 @@ fn review_needs_headless_storage(args: &[String]) -> bool {
 fn is_cli_command(args: &[String]) -> bool {
     matches!(
         args.first().map(String::as_str),
-        Some("config" | "metrics" | "review" | "service" | "--help" | "-h")
+        Some("config" | "evaluate" | "metrics" | "review" | "service" | "--help" | "-h")
     )
 }
 
@@ -173,6 +181,15 @@ fn run_args(args: &[String], stdout: &mut dyn Write, stderr: &mut dyn Write) -> 
         let _ = writeln!(stdout, "{}", metrics_usage());
         return 0;
     }
+    if args.first().map(String::as_str) == Some("evaluate")
+        && args
+            .iter()
+            .skip(1)
+            .any(|arg| arg == "--help" || arg == "-h")
+    {
+        let _ = writeln!(stdout, "{}", evaluate_usage());
+        return 0;
+    }
     if args.iter().any(|arg| arg == "--help" || arg == "-h") {
         let _ = writeln!(stdout, "{}", usage());
         return 0;
@@ -190,6 +207,13 @@ fn run_args(args: &[String], stdout: &mut dyn Write, stderr: &mut dyn Write) -> 
                 2
             }
         },
+        Some("evaluate") => match parse_evaluate_args(args) {
+            Ok(args) => run_evaluate(args, stdout, stderr),
+            Err(error) => {
+                let _ = writeln!(stderr, "{error}\n\n{}", evaluate_usage());
+                2
+            }
+        },
         Some("service") => crate::self_hosted_service::run(&args[1..], stdout, stderr),
         _ => match parse_config_validate_args(args) {
             Ok(args) => run_config_validate(args, stdout, stderr),
@@ -198,6 +222,62 @@ fn run_args(args: &[String], stdout: &mut dyn Write, stderr: &mut dyn Write) -> 
                 2
             }
         },
+    }
+}
+
+fn parse_evaluate_args(args: &[String]) -> Result<EvaluateArgs, String> {
+    if args.first().map(String::as_str) != Some("evaluate") {
+        return Err("Expected `lachesi evaluate`.".to_string());
+    }
+    let mut parsed = EvaluateArgs {
+        corpus: PathBuf::from("fixtures/review-evaluation/v1/corpus.json"),
+        baseline: PathBuf::from("fixtures/review-evaluation/v1/baseline.json"),
+        output: None,
+    };
+    let mut index = 1;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--corpus" => parsed.corpus = PathBuf::from(next_value(args, &mut index)?),
+            "--baseline" => parsed.baseline = PathBuf::from(next_value(args, &mut index)?),
+            "--output" => parsed.output = Some(PathBuf::from(next_value(args, &mut index)?)),
+            unknown => return Err(format!("Unknown evaluate option `{unknown}`.")),
+        }
+        index += 1;
+    }
+    Ok(parsed)
+}
+
+fn run_evaluate(args: EvaluateArgs, stdout: &mut dyn Write, stderr: &mut dyn Write) -> i32 {
+    let result = match review_evaluation::load_and_evaluate(&args.corpus, &args.baseline) {
+        Ok(result) => result,
+        Err(error) => {
+            let _ = writeln!(stderr, "Evaluation failed: {error}");
+            return 2;
+        }
+    };
+    let rendered = match serde_json::to_string_pretty(&result) {
+        Ok(rendered) => format!("{rendered}\n"),
+        Err(error) => {
+            let _ = writeln!(stderr, "Evaluation failed to serialize: {error}");
+            return 7;
+        }
+    };
+    if let Some(path) = args.output {
+        if let Err(error) = std::fs::write(&path, &rendered) {
+            let _ = writeln!(
+                stderr,
+                "Evaluation failed to write {}: {error}",
+                path.display()
+            );
+            return 7;
+        }
+    } else {
+        let _ = write!(stdout, "{rendered}");
+    }
+    if result.regressions.is_empty() {
+        0
+    } else {
+        1
     }
 }
 
@@ -861,11 +941,20 @@ The completion-time window is start-inclusive and end-exclusive.
 The default tenant is `local`."
 }
 
+fn evaluate_usage() -> &'static str {
+    "Usage:
+  lachesi evaluate [--corpus <path>] [--baseline <path>] [--output <path>]
+
+Runs the versioned offline review-quality corpus and emits JSON.
+The command exits 1 when a configured baseline regression is detected."
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        create_headless_data_dir, format_metrics_human, parse_metrics_args, parse_review_args,
-        review_needs_headless_storage, run_args, OutputFormat, ReviewOutputFormat,
+        create_headless_data_dir, format_metrics_human, parse_evaluate_args, parse_metrics_args,
+        parse_review_args, review_needs_headless_storage, run_args, OutputFormat,
+        ReviewOutputFormat,
     };
     use crate::config::AiProvider;
     use crate::headless_review::ReviewScope;
@@ -1305,6 +1394,21 @@ profiles:
             .expect("parse analyzer opt-in");
 
         assert!(args.run_analyzers);
+    }
+
+    #[test]
+    fn evaluate_defaults_to_the_versioned_corpus_and_baseline() {
+        let args = parse_evaluate_args(&["evaluate".to_string()]).expect("parse evaluate");
+
+        assert_eq!(
+            args.corpus,
+            PathBuf::from("fixtures/review-evaluation/v1/corpus.json")
+        );
+        assert_eq!(
+            args.baseline,
+            PathBuf::from("fixtures/review-evaluation/v1/baseline.json")
+        );
+        assert!(args.output.is_none());
     }
 
     #[test]

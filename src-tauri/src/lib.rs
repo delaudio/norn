@@ -11,6 +11,7 @@ mod launch;
 mod local_repo;
 pub mod organization_policy;
 pub mod repo_config;
+pub mod review_evaluation;
 pub mod review_event;
 pub mod review_feedback;
 pub mod review_job;
