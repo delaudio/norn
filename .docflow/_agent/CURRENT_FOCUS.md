@@ -11,7 +11,7 @@ If status files and git disagree, git is authoritative; correct this file.
 - **Branch:** `agent/credential-broker`
 - **Active item:** GitHub issue #108 and `.docflow/plan/todo/0004-shared-review-service-program.md`
 - **Blockers:** none; use the available SSH key for signed commits.
-- **Uncommitted work:** encrypted credential broker, versioned SQLite storage, and operational documentation are ready for their signed integration commit.
+- **Uncommitted work:** docflow worklog update for the signed credential broker commit.
 
 ## Last shipped
 
