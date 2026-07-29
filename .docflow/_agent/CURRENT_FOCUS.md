@@ -11,7 +11,7 @@ If status files and git disagree, git is authoritative; correct this file.
 - **Branch:** `agent/github-app-onboarding`
 - **Active item:** GitHub issue #106 and `.docflow/plan/todo/0004-shared-review-service-program.md`
 - **Blockers:** none; use the available SSH key for signed commits.
-- **Uncommitted work:** GitHub App onboarding contracts, SQLite enrollment persistence, lifecycle revocation controls, and administrator documentation are ready for their signed integration commit.
+- **Uncommitted work:** docflow worklog update for the signed GitHub App onboarding commit.
 
 ## Last shipped
 
