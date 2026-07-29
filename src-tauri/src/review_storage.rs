@@ -40,6 +40,9 @@ use crate::review_metrics::{
     ReviewEffectivenessRun, ReviewEffectivenessRunStatus, ReviewMetricCategory,
     ReviewMetricSeverity,
 };
+use crate::team_credentials::{
+    CredentialError, CredentialReference, CredentialStatus, EncryptedCredentialRecord,
+};
 
 const APP_DIR: &str = "lachesi";
 const DB_FILE: &str = "lachesi.sqlite3";
@@ -881,7 +884,106 @@ fn migrate(conn: &mut Connection) -> Result<(), String> {
         .map_err(|error| error.to_string())?;
     migration.commit().map_err(|error| error.to_string())?;
 
+    let migration = conn
+        .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+        .map_err(|error| error.to_string())?;
+    migration.execute_batch(r#"
+        CREATE TABLE IF NOT EXISTS team_credential_references (
+          tenant_id TEXT NOT NULL,
+          credential_id TEXT NOT NULL,
+          provider TEXT NOT NULL,
+          current_version INTEGER NOT NULL CHECK (current_version > 0),
+          status TEXT NOT NULL CHECK (status IN ('active', 'revoked')),
+          updated_at_ms INTEGER NOT NULL CHECK (updated_at_ms >= 0),
+          PRIMARY KEY (tenant_id, credential_id)
+        );
+        CREATE TABLE IF NOT EXISTS team_credential_versions (
+          tenant_id TEXT NOT NULL,
+          credential_id TEXT NOT NULL,
+          version INTEGER NOT NULL CHECK (version > 0),
+          nonce BLOB NOT NULL,
+          ciphertext BLOB NOT NULL,
+          created_at_ms INTEGER NOT NULL CHECK (created_at_ms >= 0),
+          PRIMARY KEY (tenant_id, credential_id, version),
+          FOREIGN KEY (tenant_id, credential_id) REFERENCES team_credential_references(tenant_id, credential_id) ON DELETE RESTRICT
+        );
+    "#).map_err(|error| error.to_string())?;
+    migration
+        .execute(
+            "INSERT OR IGNORE INTO schema_migrations(version) VALUES (11)",
+            [],
+        )
+        .map_err(|error| error.to_string())?;
+    migration.commit().map_err(|error| error.to_string())?;
+
     Ok(())
+}
+
+pub(crate) fn put_team_credential(
+    record: &EncryptedCredentialRecord,
+) -> Result<(), CredentialError> {
+    record.reference.validate()?;
+    if record.version == 0 || record.nonce.is_empty() || record.ciphertext.is_empty() {
+        return Err(CredentialError::Storage(
+            "invalid encrypted credential record".to_string(),
+        ));
+    }
+    let timestamp = now_ms().parse::<i64>().unwrap_or(0);
+    let mut conn = open().map_err(CredentialError::Storage)?;
+    let transaction = conn
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .map_err(|error| CredentialError::Storage(error.to_string()))?;
+    transaction.execute(r#"
+        INSERT INTO team_credential_references (tenant_id, credential_id, provider, current_version, status, updated_at_ms)
+        VALUES (?1, ?2, ?3, ?4, 'active', ?5)
+        ON CONFLICT(tenant_id, credential_id) DO UPDATE SET provider = excluded.provider,
+          current_version = excluded.current_version, status = 'active', updated_at_ms = excluded.updated_at_ms
+    "#, params![record.reference.tenant_id, record.reference.id, record.reference.provider, record.version as i64, timestamp]).map_err(|error| CredentialError::Storage(error.to_string()))?;
+    transaction.execute(r#"
+        INSERT INTO team_credential_versions (tenant_id, credential_id, version, nonce, ciphertext, created_at_ms)
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+    "#, params![record.reference.tenant_id, record.reference.id, record.version as i64, record.nonce, record.ciphertext, timestamp]).map_err(|error| CredentialError::Storage(error.to_string()))?;
+    transaction
+        .commit()
+        .map_err(|error| CredentialError::Storage(error.to_string()))
+}
+
+pub(crate) fn current_team_credential(
+    reference: &CredentialReference,
+) -> Result<Option<EncryptedCredentialRecord>, CredentialError> {
+    reference.validate()?;
+    let conn = open().map_err(CredentialError::Storage)?;
+    conn.query_row(r#"
+        SELECT r.provider, r.current_version, r.status, v.nonce, v.ciphertext
+        FROM team_credential_references r
+        JOIN team_credential_versions v ON v.tenant_id = r.tenant_id AND v.credential_id = r.credential_id AND v.version = r.current_version
+        WHERE r.tenant_id = ?1 AND r.credential_id = ?2
+    "#, params![reference.tenant_id, reference.id], |row| {
+        let status: String = row.get(2)?;
+        Ok(EncryptedCredentialRecord { reference: CredentialReference { tenant_id: reference.tenant_id.clone(), id: reference.id.clone(), provider: row.get(0)? }, version: row.get::<_, i64>(1)? as u64, status: credential_status(&status).map_err(|_| rusqlite::Error::InvalidQuery)?, nonce: row.get(3)?, ciphertext: row.get(4)? })
+    }).optional().map_err(|error| CredentialError::Storage(error.to_string()))
+}
+
+pub(crate) fn revoke_team_credential(
+    reference: &CredentialReference,
+) -> Result<(), CredentialError> {
+    reference.validate()?;
+    let conn = open().map_err(CredentialError::Storage)?;
+    let updated = conn.execute("UPDATE team_credential_references SET status = 'revoked', updated_at_ms = ?3 WHERE tenant_id = ?1 AND credential_id = ?2", params![reference.tenant_id, reference.id, now_ms().parse::<i64>().unwrap_or(0)]).map_err(|error| CredentialError::Storage(error.to_string()))?;
+    if updated == 0 {
+        return Err(CredentialError::NotFound);
+    }
+    Ok(())
+}
+
+fn credential_status(value: &str) -> Result<CredentialStatus, CredentialError> {
+    match value {
+        "active" => Ok(CredentialStatus::Active),
+        "revoked" => Ok(CredentialStatus::Revoked),
+        _ => Err(CredentialError::Storage(
+            "invalid credential status".to_string(),
+        )),
+    }
 }
 
 pub(crate) fn save_bitbucket_oauth_enrollment(
@@ -5037,7 +5139,7 @@ mod tests {
                 .expect("query migrations")
                 .collect::<rusqlite::Result<_>>()
                 .expect("read migration versions");
-            assert_eq!(versions, vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+            assert_eq!(versions, vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
         });
     }
 
@@ -6246,6 +6348,45 @@ mod tests {
                 )
                 .expect("removed enrollment record");
             assert_eq!(status, "removed");
+        });
+    }
+
+    #[test]
+    fn persists_only_encrypted_credential_versions_and_revocation() {
+        with_test_data_dir("team-credentials", |_| {
+            let reference = CredentialReference {
+                tenant_id: "tenant-acme".to_string(),
+                id: "bitbucket-installation".to_string(),
+                provider: "bitbucket".to_string(),
+            };
+            put_team_credential(&EncryptedCredentialRecord {
+                reference: reference.clone(),
+                version: 1,
+                status: CredentialStatus::Active,
+                nonce: vec![1; 12],
+                ciphertext: vec![9, 8, 7],
+            })
+            .expect("store version one");
+            put_team_credential(&EncryptedCredentialRecord {
+                reference: reference.clone(),
+                version: 2,
+                status: CredentialStatus::Active,
+                nonce: vec![2; 12],
+                ciphertext: vec![6, 5, 4],
+            })
+            .expect("store version two");
+            revoke_team_credential(&reference).expect("revoke");
+            let current = current_team_credential(&reference)
+                .expect("load")
+                .expect("record");
+            assert_eq!(current.version, 2);
+            assert_eq!(current.status, CredentialStatus::Revoked);
+            let conn = open().expect("open database");
+            let versions = conn.query_row(
+                "SELECT COUNT(*) FROM team_credential_versions WHERE tenant_id = ?1 AND credential_id = ?2",
+                params!["tenant-acme", "bitbucket-installation"], |row| row.get::<_, i64>(0),
+            ).expect("version count");
+            assert_eq!(versions, 2);
         });
     }
 }
