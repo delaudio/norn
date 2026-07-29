@@ -5425,6 +5425,50 @@ mod tests {
     }
 
     #[test]
+    fn tenant_isolation_conformance_fixture_keeps_shared_identifiers_separate() {
+        with_test_data_dir("tenant-isolation-conformance", |dir| {
+            initialize_database().expect("initialize conformance database");
+            let conn = Connection::open(dir.join(DB_FILE)).expect("open conformance database");
+            // Use deliberately identical provider, repository, pull request, and external
+            // identifiers. Tenant identity must be the only value that separates records.
+            for tenant_id in ["tenant-acme", "tenant-other"] {
+                conn.execute(
+                    "INSERT INTO shared_review_jobs (id, tenant_id, provider, delivery_id, workspace, repo, pr_id, trigger, base_ref_name, base_sha, head_ref_name, head_sha, scope_kind, previous_head_sha, status, created_at_ms) VALUES (?1, ?2, 'github', 'delivery-shared', 'acme', 'payments', 42, 'opened', 'main', ?3, 'feature', ?4, 'full_branch', NULL, 'completed', 1000)",
+                    params![format!("job-{tenant_id}"), tenant_id, "a".repeat(40), "b".repeat(40)],
+                ).expect("insert tenant job");
+                conn.execute(
+                    "INSERT INTO shared_finding_publications (marker, tenant_id, provider, workspace, repo, pr_id, base_sha, head_sha, finding_fingerprint, status, comment_id, created_at_ms, updated_at_ms) VALUES (?1, ?2, 'github', 'acme', 'payments', 42, ?3, ?4, 'finding-shared', 'published', 'comment-shared', 1000, 1000)",
+                    params![format!("marker-{tenant_id}"), tenant_id, "a".repeat(40), "b".repeat(40)],
+                ).expect("insert tenant publication");
+                conn.execute(
+                    "INSERT INTO team_credential_references (tenant_id, credential_id, provider, current_version, status, updated_at_ms) VALUES (?1, 'credential-shared', 'github', 1, 'active', 1000)",
+                    params![tenant_id],
+                ).expect("insert tenant credential");
+            }
+            for table in [
+                "shared_review_jobs",
+                "shared_finding_publications",
+                "team_credential_references",
+            ] {
+                let count: i64 = conn
+                    .query_row(
+                        &format!("SELECT COUNT(*) FROM {table} WHERE tenant_id = ?1"),
+                        params!["tenant-acme"],
+                        |row| row.get(0),
+                    )
+                    .expect("query tenant scope");
+                assert_eq!(count, 1, "{table} must not expose the other tenant");
+            }
+            let other_job: String = conn.query_row(
+                "SELECT id FROM shared_review_jobs WHERE tenant_id = ?1 AND delivery_id = 'delivery-shared'",
+                params!["tenant-other"],
+                |row| row.get(0),
+            ).expect("other tenant job remains distinct");
+            assert_eq!(other_job, "job-tenant-other");
+        });
+    }
+
+    #[test]
     fn review_effectiveness_reads_tenant_scoped_runs_and_feedback() {
         with_test_data_dir("review-effectiveness", |_| {
             let store_json = |run_id: &str, created_at: i64, finished_at: i64| {
