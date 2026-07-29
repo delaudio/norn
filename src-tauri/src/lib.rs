@@ -18,6 +18,7 @@ pub mod review_event;
 pub mod review_feedback;
 pub mod review_job;
 pub mod review_metrics;
+pub mod review_retry;
 mod review_storage;
 pub mod self_hosted_service;
 mod services;

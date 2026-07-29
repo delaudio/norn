@@ -50,7 +50,6 @@ const LEGACY_REVIEWS_DIR: &str = "reviews";
 const MAX_ADMINISTRATIVE_AUDIT_TIMESTAMP_MS: i64 = 4_102_444_800_000;
 const SHARED_REVIEW_JOB_LEASE_MS: i64 = 15 * 60 * 1000;
 const FINDING_PUBLICATION_LEASE_MS: i64 = 5 * 60 * 1000;
-const MAX_SHARED_REVIEW_JOB_ATTEMPTS: u32 = 3;
 
 #[cfg(test)]
 pub(crate) static TEST_DATA_DIR_ENV_LOCK: Mutex<()> = Mutex::new(());
@@ -916,7 +915,121 @@ fn migrate(conn: &mut Connection) -> Result<(), String> {
         .map_err(|error| error.to_string())?;
     migration.commit().map_err(|error| error.to_string())?;
 
+    migrate_shared_review_jobs_for_retries(&conn)?;
+    conn.execute(
+        "INSERT OR IGNORE INTO schema_migrations(version) VALUES (12)",
+        [],
+    )
+    .map_err(|error| error.to_string())?;
+
     Ok(())
+}
+
+fn migrate_shared_review_jobs_for_retries(conn: &Connection) -> Result<(), String> {
+    let table_sql: String = conn
+        .query_row(
+            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'shared_review_jobs'",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(|error| error.to_string())?;
+    if table_sql.contains("'dead_letter'") {
+        ensure_shared_review_job_history_table(conn)?;
+        return Ok(());
+    }
+
+    let columns = conn
+        .prepare("PRAGMA table_info(shared_review_jobs)")
+        .and_then(|mut statement| {
+            statement
+                .query_map([], |row| row.get::<_, String>(1))?
+                .collect::<rusqlite::Result<Vec<_>>>()
+        })
+        .map_err(|error| error.to_string())?;
+    let has_column = |name: &str| columns.iter().any(|column| column == name);
+    let next_attempt = if has_column("next_attempt_at_ms") {
+        "next_attempt_at_ms"
+    } else {
+        "NULL"
+    };
+    let terminal_reason = if has_column("terminal_reason") {
+        "terminal_reason"
+    } else {
+        "NULL"
+    };
+
+    conn.execute_batch("ALTER TABLE shared_review_jobs RENAME TO shared_review_jobs_before_retry;")
+        .map_err(|error| error.to_string())?;
+    conn.execute_batch(
+        r#"
+        CREATE TABLE shared_review_jobs (
+          id TEXT PRIMARY KEY,
+          tenant_id TEXT NOT NULL,
+          provider TEXT NOT NULL CHECK (provider IN ('github', 'bitbucket')),
+          delivery_id TEXT NOT NULL,
+          workspace TEXT NOT NULL,
+          repo TEXT NOT NULL,
+          pr_id INTEGER NOT NULL CHECK (pr_id > 0),
+          trigger TEXT NOT NULL CHECK (trigger IN ('opened', 'reopened', 'synchronized', 'ready_for_review')),
+          base_ref_name TEXT NOT NULL,
+          base_sha TEXT NOT NULL,
+          head_ref_name TEXT NOT NULL,
+          head_sha TEXT NOT NULL,
+          scope_kind TEXT NOT NULL CHECK (scope_kind IN ('full_branch', 'incremental')),
+          previous_head_sha TEXT,
+          status TEXT NOT NULL CHECK (status IN ('queued', 'running', 'completed', 'failed', 'dead_letter', 'cancelled')),
+          run_id TEXT,
+          error_code TEXT,
+          attempt_count INTEGER NOT NULL DEFAULT 0 CHECK (attempt_count >= 0),
+          lease_expires_at_ms INTEGER CHECK (lease_expires_at_ms >= 0),
+          created_at_ms INTEGER NOT NULL CHECK (created_at_ms >= 0),
+          started_at_ms INTEGER CHECK (started_at_ms >= 0),
+          finished_at_ms INTEGER CHECK (finished_at_ms >= 0),
+          next_attempt_at_ms INTEGER CHECK (next_attempt_at_ms >= 0),
+          terminal_reason TEXT,
+          UNIQUE (tenant_id, provider, delivery_id),
+          CHECK ((scope_kind = 'full_branch' AND previous_head_sha IS NULL) OR (scope_kind = 'incremental' AND previous_head_sha IS NOT NULL))
+        );
+        "#,
+    )
+    .map_err(|error| error.to_string())?;
+    let copy_sql = format!(
+        "INSERT INTO shared_review_jobs (id, tenant_id, provider, delivery_id, workspace, repo, pr_id, trigger, base_ref_name, base_sha, head_ref_name, head_sha, scope_kind, previous_head_sha, status, run_id, error_code, attempt_count, lease_expires_at_ms, created_at_ms, started_at_ms, finished_at_ms, next_attempt_at_ms, terminal_reason) SELECT id, tenant_id, provider, delivery_id, workspace, repo, pr_id, trigger, base_ref_name, base_sha, head_ref_name, head_sha, scope_kind, previous_head_sha, status, run_id, error_code, attempt_count, lease_expires_at_ms, created_at_ms, started_at_ms, finished_at_ms, {next_attempt}, {terminal_reason} FROM shared_review_jobs_before_retry"
+    );
+    conn.execute(&copy_sql, [])
+        .map_err(|error| error.to_string())?;
+    conn.execute_batch(
+        r#"
+        DROP TABLE shared_review_jobs_before_retry;
+        CREATE INDEX idx_shared_review_jobs_queue ON shared_review_jobs(status, created_at_ms, id);
+        CREATE INDEX idx_shared_review_jobs_repository ON shared_review_jobs(tenant_id, provider, workspace, repo, status, created_at_ms);
+        CREATE INDEX idx_shared_review_jobs_pull_request ON shared_review_jobs(tenant_id, provider, workspace, repo, pr_id, status, created_at_ms);
+        CREATE UNIQUE INDEX idx_shared_review_jobs_active_head ON shared_review_jobs(tenant_id, provider, workspace, repo, pr_id, base_sha, head_sha) WHERE status IN ('queued', 'running', 'completed', 'failed', 'dead_letter');
+        CREATE INDEX idx_shared_review_jobs_retry ON shared_review_jobs(status, next_attempt_at_ms, created_at_ms);
+        "#,
+    )
+    .map_err(|error| error.to_string())?;
+    ensure_shared_review_job_history_table(conn)?;
+    Ok(())
+}
+
+fn ensure_shared_review_job_history_table(conn: &Connection) -> Result<(), String> {
+    conn.execute_batch(
+        r#"
+        CREATE TABLE IF NOT EXISTS shared_review_job_attempt_history (
+          job_id TEXT NOT NULL,
+          sequence INTEGER NOT NULL CHECK (sequence > 0),
+          kind TEXT NOT NULL CHECK (kind IN ('attempt_failed', 'dead_lettered', 'manual_retry')),
+          error_code TEXT,
+          terminal_reason TEXT,
+          operator_id TEXT,
+          occurred_at_ms INTEGER NOT NULL CHECK (occurred_at_ms >= 0),
+          PRIMARY KEY (job_id, sequence),
+          FOREIGN KEY (job_id) REFERENCES shared_review_jobs(id) ON DELETE RESTRICT
+        );
+        "#,
+    )
+    .map_err(|error| error.to_string())
 }
 
 pub(crate) fn put_team_credential(
@@ -2110,7 +2223,7 @@ const SHARED_REVIEW_JOB_SELECT: &str = r#"
       base_ref_name, base_sha, head_ref_name, head_sha, scope_kind,
       previous_head_sha, status, run_id, error_code,
       attempt_count, lease_expires_at_ms,
-      created_at_ms, started_at_ms, finished_at_ms
+      created_at_ms, started_at_ms, finished_at_ms, next_attempt_at_ms, terminal_reason
     FROM shared_review_jobs
 "#;
 
@@ -2325,38 +2438,55 @@ pub(crate) fn claim_next_shared_review_job(
         .transaction_with_behavior(TransactionBehavior::Immediate)
         .map_err(|error| error.to_string())?;
     let now = now_ms_i64();
-    transaction
-        .execute(
-            r#"
-            UPDATE shared_review_jobs
-            SET status = 'failed',
-                error_code = 'worker_lease_exhausted',
-                lease_expires_at_ms = NULL,
-                finished_at_ms = ?1
-            WHERE status = 'running'
-              AND lease_expires_at_ms IS NOT NULL
-              AND lease_expires_at_ms <= ?1
-              AND attempt_count >= ?2
-            "#,
-            params![now, i64::from(MAX_SHARED_REVIEW_JOB_ATTEMPTS)],
-        )
-        .map_err(|error| error.to_string())?;
-    transaction
-        .execute(
-            r#"
-            UPDATE shared_review_jobs
-            SET status = 'queued',
-                error_code = 'worker_lease_expired',
-                started_at_ms = NULL,
-                lease_expires_at_ms = NULL
-            WHERE status = 'running'
-              AND lease_expires_at_ms IS NOT NULL
-              AND lease_expires_at_ms <= ?1
-              AND attempt_count < ?2
-            "#,
-            params![now, i64::from(MAX_SHARED_REVIEW_JOB_ATTEMPTS)],
-        )
-        .map_err(|error| error.to_string())?;
+    let expired_ids = {
+        let mut statement = transaction
+            .prepare(
+                "SELECT id FROM shared_review_jobs WHERE status = 'running' AND lease_expires_at_ms IS NOT NULL AND lease_expires_at_ms <= ?1",
+            )
+            .map_err(|error| error.to_string())?;
+        let ids = statement
+            .query_map(params![now], |row| row.get::<_, String>(0))
+            .map_err(|error| error.to_string())?
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(|error| error.to_string())?;
+        ids
+    };
+    for job_id in expired_ids {
+        let job = get_shared_review_job_from(&transaction, &job_id)?
+            .ok_or_else(|| "Expired shared review job disappeared".to_string())?;
+        match crate::review_retry::retry_decision(
+            now as u64,
+            job.attempt_count,
+            crate::review_retry::classify_error("worker_lease_expired"),
+            stable_retry_seed(&job.request.id),
+        ) {
+            crate::review_retry::RetryDecision::RetryAt(next_attempt_at) => {
+                transaction
+                    .execute(
+                        "UPDATE shared_review_jobs SET status = 'queued', error_code = 'worker_lease_expired', started_at_ms = NULL, lease_expires_at_ms = NULL, next_attempt_at_ms = ?1, terminal_reason = NULL WHERE id = ?2 AND status = 'running'",
+                        params![next_attempt_at as i64, job_id],
+                    )
+                    .map_err(|error| error.to_string())?;
+            }
+            crate::review_retry::RetryDecision::DeadLetter => {
+                transaction
+                    .execute(
+                        "UPDATE shared_review_jobs SET status = 'dead_letter', error_code = 'worker_lease_exhausted', lease_expires_at_ms = NULL, finished_at_ms = ?1, next_attempt_at_ms = NULL, terminal_reason = 'worker_lease_exhausted' WHERE id = ?2 AND status = 'running'",
+                        params![now, job_id],
+                    )
+                    .map_err(|error| error.to_string())?;
+                append_shared_review_job_history(
+                    &transaction,
+                    &job_id,
+                    "dead_lettered",
+                    Some("worker_lease_exhausted"),
+                    Some("worker_lease_exhausted"),
+                    None,
+                    now,
+                )?;
+            }
+        }
+    }
     let queued_ids = {
         let mut statement = transaction
             .prepare(
@@ -2364,12 +2494,13 @@ pub(crate) fn claim_next_shared_review_job(
                 SELECT id
                 FROM shared_review_jobs
                 WHERE status = 'queued'
+                  AND (next_attempt_at_ms IS NULL OR next_attempt_at_ms <= ?1)
                 ORDER BY created_at_ms, id
                 "#,
             )
             .map_err(|error| error.to_string())?;
         let queued_ids = statement
-            .query_map([], |row| row.get::<_, String>(0))
+            .query_map(params![now], |row| row.get::<_, String>(0))
             .map_err(|error| error.to_string())?
             .collect::<rusqlite::Result<Vec<_>>>()
             .map_err(|error| error.to_string())?;
@@ -2395,7 +2526,9 @@ pub(crate) fn claim_next_shared_review_job(
                     attempt_count = attempt_count + 1,
                     error_code = NULL,
                     started_at_ms = ?1,
-                    lease_expires_at_ms = ?2
+                    lease_expires_at_ms = ?2,
+                    next_attempt_at_ms = NULL,
+                    terminal_reason = NULL
                 WHERE id = ?3 AND status = 'queued'
                 "#,
                 params![now, now.saturating_add(SHARED_REVIEW_JOB_LEASE_MS), job_id],
@@ -2431,6 +2564,7 @@ pub(crate) fn finish_shared_review_job(
         current.status,
         SharedReviewJobStatus::Completed
             | SharedReviewJobStatus::Failed
+            | SharedReviewJobStatus::DeadLetter
             | SharedReviewJobStatus::Cancelled
     ) {
         let matching_terminal_state = current.status == requested_status
@@ -2464,17 +2598,47 @@ pub(crate) fn finish_shared_review_job(
     if lease_expires_at <= finished_at {
         return Err("Shared review job lease expired before completion".to_string());
     }
-    let (target_status, error_code) = if requested_status == SharedReviewJobStatus::Completed {
+    let (target_status, error_code, next_attempt_at, terminal_reason) = if requested_status
+        == SharedReviewJobStatus::Completed
+    {
         if advance_shared_review_cursor_if_current(&transaction, &current, run_id, finished_at)? {
-            (SharedReviewJobStatus::Completed, requested_error_code)
+            (
+                SharedReviewJobStatus::Completed,
+                requested_error_code,
+                None,
+                None,
+            )
         } else {
             (
                 SharedReviewJobStatus::Cancelled,
                 Some("stale_pull_request_state"),
+                None,
+                Some("stale_pull_request_state"),
             )
         }
+    } else if requested_status == SharedReviewJobStatus::Failed {
+        let error_code = requested_error_code.unwrap_or("worker_failed");
+        match crate::review_retry::retry_decision(
+            finished_at as u64,
+            current.attempt_count,
+            crate::review_retry::classify_error(error_code),
+            stable_retry_seed(&current.request.id),
+        ) {
+            crate::review_retry::RetryDecision::RetryAt(next_attempt_at) => (
+                SharedReviewJobStatus::Queued,
+                Some(error_code),
+                Some(next_attempt_at as i64),
+                None,
+            ),
+            crate::review_retry::RetryDecision::DeadLetter => (
+                SharedReviewJobStatus::DeadLetter,
+                Some(error_code),
+                None,
+                Some("retry_exhausted_or_permanent"),
+            ),
+        }
     } else {
-        (requested_status, requested_error_code)
+        (requested_status, requested_error_code, None, None)
     };
     let changed = transaction
         .execute(
@@ -2484,17 +2648,21 @@ pub(crate) fn finish_shared_review_job(
                 run_id = ?2,
                 error_code = ?3,
                 lease_expires_at_ms = NULL,
-                finished_at_ms = ?4
-            WHERE id = ?5
+                finished_at_ms = ?4,
+                next_attempt_at_ms = ?5,
+                terminal_reason = ?6
+            WHERE id = ?7
               AND status = 'running'
-              AND attempt_count = ?6
-              AND lease_expires_at_ms > ?7
+              AND attempt_count = ?8
+              AND lease_expires_at_ms > ?9
             "#,
             params![
                 target_status.as_str(),
                 run_id,
                 error_code,
                 finished_at,
+                next_attempt_at,
+                terminal_reason,
                 job_id,
                 i64::from(expected_attempt_count),
                 finished_at,
@@ -2504,10 +2672,116 @@ pub(crate) fn finish_shared_review_job(
     if changed != 1 {
         return Err("Shared review job lease changed before completion".to_string());
     }
+    if requested_status == SharedReviewJobStatus::Failed {
+        append_shared_review_job_history(
+            &transaction,
+            job_id,
+            if target_status == SharedReviewJobStatus::DeadLetter {
+                "dead_lettered"
+            } else {
+                "attempt_failed"
+            },
+            error_code,
+            terminal_reason,
+            None,
+            finished_at,
+        )?;
+    }
     let finished = get_shared_review_job_from(&transaction, job_id)?
         .ok_or_else(|| "Failed to reload finished shared review job".to_string())?;
     transaction.commit().map_err(|error| error.to_string())?;
     Ok(finished)
+}
+
+pub(crate) fn retry_dead_letter_shared_review_job(
+    job_id: &str,
+    operator_id: &str,
+) -> Result<ReviewJobRecord, String> {
+    if job_id.trim().is_empty() {
+        return Err("`jobId` must not be empty".to_string());
+    }
+    validate_shared_metadata("operatorId", operator_id, 512)?;
+    let mut conn = open()?;
+    let transaction = conn
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .map_err(|error| error.to_string())?;
+    let current = get_shared_review_job_from(&transaction, job_id)?
+        .ok_or_else(|| format!("Unknown shared review job: {job_id}"))?;
+    if current.status != SharedReviewJobStatus::DeadLetter {
+        return Err("Only a dead-letter shared review job can be retried manually".to_string());
+    }
+    let now = now_ms_i64();
+    let changed = transaction
+        .execute(
+            r#"
+            UPDATE shared_review_jobs
+            SET status = 'queued',
+                run_id = NULL,
+                error_code = NULL,
+                attempt_count = 0,
+                lease_expires_at_ms = NULL,
+                started_at_ms = NULL,
+                finished_at_ms = NULL,
+                next_attempt_at_ms = NULL,
+                terminal_reason = NULL
+            WHERE id = ?1 AND status = 'dead_letter'
+            "#,
+            params![job_id],
+        )
+        .map_err(|error| error.to_string())?;
+    if changed != 1 {
+        return Err("Shared review job changed before manual retry".to_string());
+    }
+    append_shared_review_job_history(
+        &transaction,
+        job_id,
+        "manual_retry",
+        current.error_code.as_deref(),
+        current.terminal_reason.as_deref(),
+        Some(operator_id),
+        now,
+    )?;
+    let retried = get_shared_review_job_from(&transaction, job_id)?
+        .ok_or_else(|| "Failed to reload manually retried shared review job".to_string())?;
+    transaction.commit().map_err(|error| error.to_string())?;
+    Ok(retried)
+}
+
+fn append_shared_review_job_history(
+    conn: &Connection,
+    job_id: &str,
+    kind: &str,
+    error_code: Option<&str>,
+    terminal_reason: Option<&str>,
+    operator_id: Option<&str>,
+    occurred_at_ms: i64,
+) -> Result<(), String> {
+    conn.execute(
+        r#"
+        INSERT INTO shared_review_job_attempt_history (
+          job_id, sequence, kind, error_code, terminal_reason, operator_id, occurred_at_ms
+        )
+        SELECT ?1, COALESCE(MAX(sequence) + 1, 1), ?2, ?3, ?4, ?5, ?6
+        FROM shared_review_job_attempt_history
+        WHERE job_id = ?1
+        "#,
+        params![
+            job_id,
+            kind,
+            error_code,
+            terminal_reason,
+            operator_id,
+            occurred_at_ms,
+        ],
+    )
+    .map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+fn stable_retry_seed(value: &str) -> u64 {
+    value.bytes().fold(0_u64, |seed, byte| {
+        seed.wrapping_mul(131).wrapping_add(u64::from(byte))
+    })
 }
 
 pub(crate) fn renew_shared_review_job_lease(
@@ -2594,7 +2868,7 @@ fn shared_review_job_by_head_from(
               AND pr_id = ?5
               AND base_sha = ?6
               AND head_sha = ?7
-              AND status IN ('queued', 'running', 'completed', 'failed')
+              AND status IN ('queued', 'running', 'completed', 'failed', 'dead_letter')
             "#,
             params![
                 event.tenant_id,
@@ -2690,6 +2964,10 @@ fn row_to_shared_review_job(row: &rusqlite::Row<'_>) -> rusqlite::Result<ReviewJ
         finished_at: row
             .get::<_, Option<i64>>(21)?
             .map(|value| value.to_string()),
+        next_attempt_at: row
+            .get::<_, Option<i64>>(22)?
+            .map(|value| value.to_string()),
+        terminal_reason: row.get(23)?,
     })
 }
 
@@ -5139,7 +5417,7 @@ mod tests {
                 .expect("query migrations")
                 .collect::<rusqlite::Result<_>>()
                 .expect("read migration versions");
-            assert_eq!(versions, vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
+            assert_eq!(versions, vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
         });
     }
 
@@ -5406,7 +5684,8 @@ mod tests {
                 },
             )
             .expect("fail incremental review");
-            assert_eq!(failed.status, SharedReviewJobStatus::Failed);
+            assert_eq!(failed.status, SharedReviewJobStatus::Queued);
+            assert!(failed.next_attempt_at.is_some());
             assert_eq!(
                 get_review_cursor(&cursor_identity()).expect("cursor after failure"),
                 ReviewCursorState::Reviewed(ReviewCursor {
@@ -5430,6 +5709,65 @@ mod tests {
                 .expect("enqueue after failed review"),
             );
             assert_eq!(third.request.scope.previous_head_sha(), Some(FIRST_SHA));
+        });
+    }
+
+    #[test]
+    fn permanent_failures_are_dead_lettered_and_authorized_manual_retry_keeps_history() {
+        const HEAD_SHA: &str = "1111111111111111111111111111111111111111";
+        with_test_data_dir("shared-review-dead-letter", |dir| {
+            let queued = queued_shared_job(
+                enqueue_shared_review_job(&shared_event(
+                    "tenant-acme",
+                    "acme",
+                    "payments",
+                    42,
+                    HEAD_SHA,
+                    "delivery-dead-letter",
+                ))
+                .expect("enqueue review"),
+            );
+            let running = claim_next_shared_review_job(ReviewConcurrencyLimits::default())
+                .expect("claim review")
+                .expect("running review");
+            let dead_letter = finish_shared_review_job(
+                &running.request.id,
+                running.attempt_count,
+                &ReviewJobExecution::Failed {
+                    run_id: Some("run-invalid-policy".to_string()),
+                    error_code: "invalid_policy".to_string(),
+                },
+            )
+            .expect("dead-letter permanent failure");
+            assert_eq!(dead_letter.status, SharedReviewJobStatus::DeadLetter);
+            assert_eq!(
+                dead_letter.terminal_reason.as_deref(),
+                Some("retry_exhausted_or_permanent")
+            );
+
+            let retried = retry_dead_letter_shared_review_job(&queued.request.id, "operator-42")
+                .expect("authorized manual retry");
+            assert_eq!(retried.status, SharedReviewJobStatus::Queued);
+            assert_eq!(retried.attempt_count, 0);
+            assert!(retried.terminal_reason.is_none());
+
+            let conn = Connection::open(dir.join(DB_FILE)).expect("open review database");
+            let history: Vec<(String, Option<String>)> = conn
+                .prepare(
+                    "SELECT kind, operator_id FROM shared_review_job_attempt_history WHERE job_id = ?1 ORDER BY sequence",
+                )
+                .expect("prepare history query")
+                .query_map(params![queued.request.id], |row| Ok((row.get(0)?, row.get(1)?)))
+                .expect("query history")
+                .collect::<rusqlite::Result<_>>()
+                .expect("read history");
+            assert_eq!(
+                history,
+                vec![
+                    ("dead_lettered".to_string(), None),
+                    ("manual_retry".to_string(), Some("operator-42".to_string())),
+                ]
+            );
         });
     }
 
@@ -6012,8 +6350,20 @@ mod tests {
             )
             .is_err());
 
+            assert!(
+                claim_next_shared_review_job(ReviewConcurrencyLimits::default())
+                    .expect("schedule retry after expired lease")
+                    .is_none()
+            );
+            let conn =
+                Connection::open(dir.join(DB_FILE)).expect("open review job database directly");
+            conn.execute(
+                "UPDATE shared_review_jobs SET next_attempt_at_ms = 0 WHERE id = ?1",
+                params![first_attempt.request.id],
+            )
+            .expect("advance fake retry clock");
             let second_attempt = claim_next_shared_review_job(ReviewConcurrencyLimits::default())
-                .expect("reclaim expired job")
+                .expect("claim scheduled retry")
                 .expect("second attempt");
             assert_eq!(second_attempt.request.id, first_attempt.request.id);
             assert_eq!(second_attempt.attempt_count, 2);
@@ -6065,7 +6415,7 @@ mod tests {
                 .expect("enqueue recoverable job"),
             );
 
-            for expected_attempt in 1..=MAX_SHARED_REVIEW_JOB_ATTEMPTS {
+            for expected_attempt in 1..=crate::review_retry::MAX_ATTEMPTS {
                 let running = claim_next_shared_review_job(ReviewConcurrencyLimits::default())
                     .expect("claim recoverable job")
                     .expect("running attempt");
@@ -6077,6 +6427,21 @@ mod tests {
                     params![running.request.id],
                 )
                 .expect("expire running attempt");
+                drop(conn);
+                if expected_attempt < crate::review_retry::MAX_ATTEMPTS {
+                    assert!(
+                        claim_next_shared_review_job(ReviewConcurrencyLimits::default())
+                            .expect("schedule retry after expired lease")
+                            .is_none()
+                    );
+                    let conn =
+                        Connection::open(dir.join(DB_FILE)).expect("open review database directly");
+                    conn.execute(
+                        "UPDATE shared_review_jobs SET next_attempt_at_ms = 0 WHERE id = ?1",
+                        params![running.request.id],
+                    )
+                    .expect("advance fake retry clock");
+                }
             }
 
             assert!(
@@ -6087,12 +6452,12 @@ mod tests {
             let exhausted = get_shared_review_job(&queued.request.id)
                 .expect("load exhausted job")
                 .expect("exhausted job");
-            assert_eq!(exhausted.status, SharedReviewJobStatus::Failed);
+            assert_eq!(exhausted.status, SharedReviewJobStatus::DeadLetter);
             assert_eq!(
                 exhausted.error_code.as_deref(),
                 Some("worker_lease_exhausted")
             );
-            assert_eq!(exhausted.attempt_count, MAX_SHARED_REVIEW_JOB_ATTEMPTS);
+            assert_eq!(exhausted.attempt_count, crate::review_retry::MAX_ATTEMPTS);
         });
     }
 
