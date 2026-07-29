@@ -22,6 +22,7 @@ mod review_storage;
 pub mod self_hosted_service;
 mod services;
 pub mod team_authorization;
+pub mod team_credentials;
 pub mod team_oidc;
 pub mod tui;
 pub mod webhook_ingress;

@@ -8,15 +8,15 @@ If status files and git disagree, git is authoritative; correct this file.
 
 ## Active state
 
-- **Branch:** `agent/bitbucket-oauth-onboarding`
-- **Active item:** GitHub issue #107 and `.docflow/plan/todo/0004-shared-review-service-program.md`
+- **Branch:** `agent/credential-broker`
+- **Active item:** GitHub issue #108 and `.docflow/plan/todo/0004-shared-review-service-program.md`
 - **Blockers:** none; use the available SSH key for signed commits.
-- **Uncommitted work:** docflow worklog update for the signed Bitbucket OAuth onboarding commit.
+- **Uncommitted work:** encrypted credential broker, versioned SQLite storage, and operational documentation are ready for their signed integration commit.
 
 ## Last shipped
 
-`6484b3b` - ship GitHub App onboarding through PR #137.
+`ee85a9e` - ship Bitbucket OAuth onboarding through PR #138.
 
 ## Next item
 
-Merge GitHub issue #107, then continue the shared review service program.
+Merge GitHub issue #108, then continue the shared review service program.
