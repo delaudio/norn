@@ -16,6 +16,7 @@ pub mod review_feedback;
 pub mod review_job;
 pub mod review_metrics;
 mod review_storage;
+pub mod self_hosted_service;
 mod services;
 pub mod team_authorization;
 pub mod team_oidc;

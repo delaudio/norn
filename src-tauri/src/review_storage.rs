@@ -3,6 +3,9 @@ use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
+#[cfg(test)]
+use std::sync::Mutex;
+
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -39,6 +42,9 @@ const MAX_ADMINISTRATIVE_AUDIT_TIMESTAMP_MS: i64 = 4_102_444_800_000;
 const SHARED_REVIEW_JOB_LEASE_MS: i64 = 15 * 60 * 1000;
 const FINDING_PUBLICATION_LEASE_MS: i64 = 5 * 60 * 1000;
 const MAX_SHARED_REVIEW_JOB_ATTEMPTS: u32 = 3;
+
+#[cfg(test)]
+pub(crate) static TEST_DATA_DIR_ENV_LOCK: Mutex<()> = Mutex::new(());
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct StoredOrganizationPolicyBundle {
@@ -301,6 +307,15 @@ fn open() -> Result<Connection, String> {
         .map_err(|e| e.to_string())?;
     migrate(&mut conn)?;
     Ok(conn)
+}
+
+/// Opens the durable store and applies every known migration before serving traffic.
+///
+/// The self-hosted runtime calls this during startup so readiness cannot report
+/// success against an uninitialized or incompatible persistent volume.
+pub(crate) fn initialize_database() -> Result<(), String> {
+    let _connection = open()?;
+    Ok(())
 }
 
 fn migrate(conn: &mut Connection) -> Result<(), String> {
@@ -3714,7 +3729,6 @@ fn _assert_path_send_sync(_: &Path) {}
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Mutex;
 
     use crate::administrative_audit::{
         AdministrativeAuditAction, AdministrativeAuditActor, AdministrativeAuditActorKind,
@@ -3732,8 +3746,6 @@ mod tests {
 
     use super::*;
 
-    static ENV_LOCK: Mutex<()> = Mutex::new(());
-
     fn test_dir(name: &str) -> PathBuf {
         let nanos = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -3743,7 +3755,7 @@ mod tests {
     }
 
     fn with_test_data_dir<T>(name: &str, f: impl FnOnce(&Path) -> T) -> T {
-        let _guard = ENV_LOCK.lock().expect("test env lock");
+        let _guard = TEST_DATA_DIR_ENV_LOCK.lock().expect("test env lock");
         let dir = test_dir(name);
         std::env::set_var("LACHESI_DATA_DIR", &dir);
         let result = f(&dir);
@@ -3977,7 +3989,7 @@ mod tests {
 
     #[test]
     fn dedicated_review_data_dir_is_created() {
-        let _guard = ENV_LOCK.lock().expect("test env lock");
+        let _guard = TEST_DATA_DIR_ENV_LOCK.lock().expect("test env lock");
         let dir = test_dir("dedicated-review-data");
         std::env::set_var("LACHESI_REVIEW_DATA_DIR", &dir);
 
