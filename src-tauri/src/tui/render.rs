@@ -8,8 +8,10 @@ use ratatui::{
     },
 };
 use ratatui_image::Image as TerminalImage;
+use unicode_segmentation::UnicodeSegmentation;
 
 use super::image_diff::{ImageDiffState, ImageVersionState};
+use super::loading::LoadState;
 use crate::config::{RepoRef, ReviewProvider};
 use crate::services::bitbucket::{PrComment, PullRequestDetail, PullRequestSummary};
 use crate::services::review::{AiReviewRunState, AiReviewRunStatus};
@@ -40,8 +42,36 @@ pub struct TuiState<'a> {
     pub rendered_diff_output: Option<&'a str>,
     pub image_diff: Option<&'a ImageDiffState>,
     pub image_protocol: &'a str,
+    pub loading: LoadingView<'a>,
     pub error: Option<&'a str>,
     pub status: &'a str,
+}
+
+#[derive(Clone, Copy)]
+pub struct LoadingView<'a> {
+    pub repo: &'a LoadState,
+    pub pull_requests: &'a LoadState,
+    pub detail: &'a LoadState,
+    pub comments: &'a LoadState,
+    pub diff: &'a LoadState,
+    pub ai_review: &'a LoadState,
+    pub tick: usize,
+}
+
+#[cfg(test)]
+impl LoadingView<'static> {
+    fn idle() -> Self {
+        static IDLE: LoadState = LoadState::Idle;
+        Self {
+            repo: &IDLE,
+            pull_requests: &IDLE,
+            detail: &IDLE,
+            comments: &IDLE,
+            diff: &IDLE,
+            ai_review: &IDLE,
+            tick: 0,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -349,7 +379,17 @@ fn render_left_panel(frame: &mut Frame<'_>, area: Rect, state: TuiState<'_>) {
 }
 
 fn render_repos(frame: &mut Frame<'_>, area: Rect, state: TuiState<'_>) {
-    let items = if state.repos.is_empty() {
+    let items = if state.repos.is_empty() && state.loading.repo.is_loading() {
+        vec![ListItem::new(loading_line(
+            "Resolving repository",
+            state.loading.tick,
+        ))]
+    } else if let Some(error) = state.loading.repo.error() {
+        vec![ListItem::new(Line::from(vec![
+            Span::styled("Error: ", error_style()),
+            Span::styled(error.to_string(), muted_style()),
+        ]))]
+    } else if state.repos.is_empty() {
         vec![ListItem::new("No repositories configured")]
     } else {
         state
@@ -387,9 +427,10 @@ fn render_repos(frame: &mut Frame<'_>, area: Rect, state: TuiState<'_>) {
     } else {
         "Repositories"
     };
-    let list = List::new(items)
-        .style(panel_style())
-        .block(panel_block(title, state.focus == FocusPane::Repositories));
+    let list = List::new(items).style(panel_style()).block(panel_block(
+        loading_title(title, state.loading.repo),
+        state.focus == FocusPane::Repositories,
+    ));
     frame.render_widget(list, area);
 }
 
@@ -452,6 +493,11 @@ fn render_diff_file_list(
             .skip(offset)
             .map(|(index, file)| {
                 let selected = index == selected_file.min(files.len().saturating_sub(1));
+                let change_count = format!(" +{}/-{}", file.additions, file.deletions);
+                let content_width = usize::from(area.width.saturating_sub(2));
+                let path_width = content_width
+                    .saturating_sub(2 + file.status_label().len() + 1 + change_count.len());
+                let display_path = compact_path(file.display_path(), path_width);
                 ListItem::new(Line::from(vec![
                     Span::styled(
                         if selected { "> " } else { "  " },
@@ -464,17 +510,14 @@ fn render_diff_file_list(
                     Span::styled(file.status_label(), file.status_style()),
                     Span::styled(" ", muted_style()),
                     Span::styled(
-                        file.display_path(),
+                        display_path,
                         if selected {
                             text_style().add_modifier(Modifier::BOLD)
                         } else {
                             text_style()
                         },
                     ),
-                    Span::styled(
-                        format!(" +{}/-{}", file.additions, file.deletions),
-                        muted_style(),
-                    ),
+                    Span::styled(change_count, muted_style()),
                 ]))
             })
             .collect()
@@ -499,6 +542,17 @@ fn render_diff_file(
         return;
     }
     let mut lines = Vec::new();
+    if state.loading.diff.is_loading() {
+        lines.push(loading_line("Loading diff", state.loading.tick));
+        lines.push(Line::from(""));
+    }
+    if let Some(error) = state.loading.diff.error() {
+        lines.push(Line::from(vec![
+            Span::styled("Diff failed: ", error_style()),
+            Span::styled(error.to_string(), muted_style()),
+        ]));
+        lines.push(Line::from(""));
+    }
     if let Some(detail) = state.detail {
         lines.push(Line::from(vec![
             Span::styled(
@@ -556,8 +610,15 @@ fn render_diff_file(
     let scroll = clamped_scroll(content_len, area.height, state.diff_scroll);
     let diff = Paragraph::new(lines)
         .scroll((scroll as u16, 0))
-        .style(panel_style())
-        .block(panel_block("Diff *", true));
+        .style(if state.loading.diff.is_loading() && state.diff.is_some() {
+            panel_style().add_modifier(Modifier::DIM)
+        } else {
+            panel_style()
+        })
+        .block(panel_block(
+            loading_title("Diff *", state.loading.diff),
+            true,
+        ));
     frame.render_widget(diff, area);
     render_scrollbar(frame, area, content_len, scroll);
 }
@@ -704,7 +765,18 @@ fn format_bytes(size: usize) -> String {
 }
 
 fn render_pull_requests(frame: &mut Frame<'_>, area: Rect, state: TuiState<'_>) {
-    let items = if state.pull_requests.is_empty() {
+    let loading = state.loading.pull_requests.is_loading();
+    let items = if state.pull_requests.is_empty() && loading {
+        vec![ListItem::new(loading_line(
+            "Loading pull requests",
+            state.loading.tick,
+        ))]
+    } else if let Some(error) = state.loading.pull_requests.error() {
+        vec![ListItem::new(Line::from(vec![
+            Span::styled("Could not load PRs: ", error_style()),
+            Span::styled(error.to_string(), muted_style()),
+        ]))]
+    } else if state.pull_requests.is_empty() {
         vec![ListItem::new(format!(
             "No {} pull requests loaded",
             state.pr_filter.label()
@@ -746,6 +818,11 @@ fn render_pull_requests(frame: &mut Frame<'_>, area: Rect, state: TuiState<'_>) 
                     Span::styled("  by ", muted_style()),
                     Span::styled(author_label(pr.author_display_name.as_str()), text_style()),
                 ]))
+                .style(if loading {
+                    Style::default().add_modifier(Modifier::DIM)
+                } else {
+                    Style::default()
+                })
             })
             .collect()
     };
@@ -754,9 +831,10 @@ fn render_pull_requests(frame: &mut Frame<'_>, area: Rect, state: TuiState<'_>) 
     } else {
         "Pull requests"
     };
-    let list = List::new(items)
-        .style(panel_style())
-        .block(panel_block(title, state.focus == FocusPane::PullRequests));
+    let list = List::new(items).style(panel_style()).block(panel_block(
+        loading_title(title, state.loading.pull_requests),
+        state.focus == FocusPane::PullRequests,
+    ));
     frame.render_widget(list, area);
 }
 
@@ -774,6 +852,26 @@ fn render_detail(frame: &mut Frame<'_>, area: Rect, state: TuiState<'_>) {
 
 fn render_pull_request_detail(frame: &mut Frame<'_>, area: Rect, state: TuiState<'_>) {
     let mut lines = Vec::new();
+    let loading = state.loading.detail.is_loading() || state.loading.pull_requests.is_loading();
+
+    if loading {
+        lines.push(loading_line("Loading pull request", state.loading.tick));
+        lines.push(Line::from(""));
+    }
+    if let Some(error) = state.loading.detail.error() {
+        lines.push(Line::from(vec![
+            Span::styled("Detail failed: ", error_style()),
+            Span::styled(error.to_string(), muted_style()),
+        ]));
+        lines.push(Line::from(""));
+    }
+    if let Some(error) = state.loading.comments.error() {
+        lines.push(Line::from(vec![
+            Span::styled("Comments failed: ", error_style()),
+            Span::styled(error.to_string(), muted_style()),
+        ]));
+        lines.push(Line::from(""));
+    }
 
     if let Some(error) = state.error {
         lines.push(Line::from(vec![
@@ -802,7 +900,14 @@ fn render_pull_request_detail(frame: &mut Frame<'_>, area: Rect, state: TuiState
                 Span::styled(" | ", muted_style()),
                 Span::styled(detail.state.as_str(), status_style(detail.state.as_str())),
                 Span::styled(" | ", muted_style()),
-                Span::styled(format!("{} comments", state.comments.len()), text_style()),
+                Span::styled(
+                    if state.loading.comments.is_loading() {
+                        format!("{} comments (updating)", state.comments.len())
+                    } else {
+                        format!("{} comments", state.comments.len())
+                    },
+                    text_style(),
+                ),
             ]));
             lines.push(Line::from(vec![
                 Span::styled("Author: ", muted_style()),
@@ -867,9 +972,17 @@ fn render_pull_request_detail(frame: &mut Frame<'_>, area: Rect, state: TuiState
     };
     let detail = Paragraph::new(lines)
         .scroll((scroll as u16, 0))
-        .style(panel_style())
+        .style(if loading && state.detail.is_some() {
+            panel_style().add_modifier(Modifier::DIM)
+        } else {
+            panel_style()
+        })
         .block(panel_block(
-            title,
+            if loading {
+                format!("{title} ↻")
+            } else {
+                title.to_string()
+            },
             state.detail_view == DetailView::PullRequest,
         ));
     frame.render_widget(detail, area);
@@ -878,6 +991,17 @@ fn render_pull_request_detail(frame: &mut Frame<'_>, area: Rect, state: TuiState
 
 fn render_ai_review_detail(frame: &mut Frame<'_>, area: Rect, state: TuiState<'_>) {
     let mut lines = Vec::new();
+    if state.loading.ai_review.is_loading() {
+        lines.push(loading_line("Loading review state", state.loading.tick));
+        lines.push(Line::from(""));
+    }
+    if let Some(error) = state.loading.ai_review.error() {
+        lines.push(Line::from(vec![
+            Span::styled("Review state failed: ", error_style()),
+            Span::styled(error.to_string(), muted_style()),
+        ]));
+        lines.push(Line::from(""));
+    }
     if let Some(ai_review) = state.ai_review {
         lines.push(Line::from(vec![
             Span::styled("Status: ", muted_style()),
@@ -916,9 +1040,15 @@ fn render_ai_review_detail(frame: &mut Frame<'_>, area: Rect, state: TuiState<'_
     };
     let detail = Paragraph::new(lines)
         .scroll((scroll as u16, 0))
-        .style(panel_style())
+        .style(
+            if state.loading.ai_review.is_loading() && state.ai_review.is_some() {
+                panel_style().add_modifier(Modifier::DIM)
+            } else {
+                panel_style()
+            },
+        )
         .block(panel_block(
-            title,
+            loading_title(title, state.loading.ai_review),
             state.detail_view == DetailView::AiReview,
         ));
     frame.render_widget(detail, area);
@@ -927,6 +1057,17 @@ fn render_ai_review_detail(frame: &mut Frame<'_>, area: Rect, state: TuiState<'_
 
 fn render_diff_detail(frame: &mut Frame<'_>, area: Rect, state: TuiState<'_>) {
     let mut lines = Vec::new();
+    if state.loading.diff.is_loading() {
+        lines.push(loading_line("Loading diff", state.loading.tick));
+        lines.push(Line::from(""));
+    }
+    if let Some(error) = state.loading.diff.error() {
+        lines.push(Line::from(vec![
+            Span::styled("Diff failed: ", error_style()),
+            Span::styled(error.to_string(), muted_style()),
+        ]));
+        lines.push(Line::from(""));
+    }
     if let Some(detail) = state.detail {
         lines.push(Line::from(vec![
             Span::styled(
@@ -962,8 +1103,15 @@ fn render_diff_detail(frame: &mut Frame<'_>, area: Rect, state: TuiState<'_>) {
     };
     let detail = Paragraph::new(lines)
         .scroll((scroll as u16, 0))
-        .style(panel_style())
-        .block(panel_block(title, state.detail_view == DetailView::Diff));
+        .style(if state.loading.diff.is_loading() && state.diff.is_some() {
+            panel_style().add_modifier(Modifier::DIM)
+        } else {
+            panel_style()
+        })
+        .block(panel_block(
+            loading_title(title, state.loading.diff),
+            state.detail_view == DetailView::Diff,
+        ));
     frame.render_widget(detail, area);
     render_scrollbar(frame, area, content_len, scroll);
 }
@@ -1538,6 +1686,68 @@ fn diff_file_list_offset(file_count: usize, area_height: u16, selected_file: usi
     }
 }
 
+fn compact_path(path: &str, max_width: usize) -> String {
+    if max_width == 0 {
+        return String::new();
+    }
+    if Span::raw(path).width() <= max_width {
+        return path.to_string();
+    }
+
+    let components = path
+        .split('/')
+        .filter(|component| !component.is_empty())
+        .collect::<Vec<_>>();
+    let Some(filename) = components.last().copied() else {
+        return truncate_start(path, max_width);
+    };
+    let filename_width = Span::raw(filename).width();
+    if filename_width > max_width {
+        return truncate_start(filename, max_width);
+    }
+    if filename_width == max_width {
+        return filename.to_string();
+    }
+
+    let mut suffix = filename.to_string();
+    for component in components[..components.len().saturating_sub(1)]
+        .iter()
+        .rev()
+    {
+        let candidate = format!("…/{component}/{suffix}");
+        if Span::raw(candidate.as_str()).width() > max_width {
+            break;
+        }
+        suffix = format!("{component}/{suffix}");
+    }
+
+    let compact = format!("…/{suffix}");
+    if Span::raw(compact.as_str()).width() <= max_width {
+        compact
+    } else {
+        truncate_start(path, max_width)
+    }
+}
+
+fn truncate_start(value: &str, max_width: usize) -> String {
+    if max_width == 0 {
+        return String::new();
+    }
+    if Span::raw(value).width() <= max_width {
+        return value.to_string();
+    }
+
+    let mut suffix = String::new();
+    for grapheme in value.graphemes(true).rev() {
+        let candidate = format!("…{grapheme}{suffix}");
+        if Span::raw(candidate.as_str()).width() > max_width {
+            break;
+        }
+        suffix.insert_str(0, grapheme);
+    }
+    format!("…{suffix}")
+}
+
 fn style_diff_line(line: &str) -> Vec<Span<'static>> {
     if line.starts_with('+') && !line.starts_with("+++") {
         return vec![Span::styled(line.to_string(), success_style())];
@@ -1712,14 +1922,30 @@ fn style_review_line(line: &str) -> Vec<Span<'static>> {
     vec![Span::styled(line.to_string(), text_style())]
 }
 
-fn panel_block(title: &'static str, active: bool) -> Block<'static> {
+fn loading_title(title: &str, state: &LoadState) -> String {
+    if state.is_loading() {
+        format!("{title} ↻")
+    } else {
+        title.to_string()
+    }
+}
+
+fn loading_line(label: &str, tick: usize) -> Line<'static> {
+    const FRAMES: [&str; 8] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧"];
+    Line::from(vec![
+        Span::styled(FRAMES[tick % FRAMES.len()], accent_style()),
+        Span::styled(format!(" {label}..."), muted_style()),
+    ])
+}
+
+fn panel_block(title: impl Into<Line<'static>>, active: bool) -> Block<'static> {
     let title_style = if active {
         accent_style().add_modifier(Modifier::BOLD)
     } else {
         muted_style()
     };
     Block::default()
-        .title(Line::from(Span::styled(title, title_style)))
+        .title(title.into().style(title_style))
         .borders(Borders::ALL)
         .border_style(if active {
             accent_style()
@@ -1861,6 +2087,7 @@ mod tests {
                         rendered_diff_output: None,
                         image_diff: None,
                         image_protocol: "unsupported",
+                        loading: LoadingView::idle(),
                         error: None,
                         status: "Ready",
                     },
@@ -1927,6 +2154,7 @@ mod tests {
                         rendered_diff_output: None,
                         image_diff: None,
                         image_protocol: "unsupported",
+                        loading: LoadingView::idle(),
                         error: None,
                         status: "Ready",
                     },
@@ -2021,6 +2249,7 @@ mod tests {
                         rendered_diff_output: None,
                         image_diff: None,
                         image_protocol: "unsupported",
+                        loading: LoadingView::idle(),
                         error: None,
                         status: "Ready",
                     },
@@ -2096,6 +2325,7 @@ mod tests {
                         rendered_diff_output: None,
                         image_diff: None,
                         image_protocol: "unsupported",
+                        loading: LoadingView::idle(),
                         error: None,
                         status: "Loaded",
                     },
@@ -2145,6 +2375,7 @@ mod tests {
                         rendered_diff_output: None,
                         image_diff: None,
                         image_protocol: "unsupported",
+                        loading: LoadingView::idle(),
                         error: None,
                         status: "Composing",
                     },
@@ -2227,6 +2458,7 @@ mod tests {
             rendered_diff_output: None,
             image_diff: None,
             image_protocol: "unsupported",
+            loading: LoadingView::idle(),
             error: None,
             status: "Ready",
         };
@@ -2268,6 +2500,7 @@ mod tests {
             rendered_diff_output: None,
             image_diff: None,
             image_protocol: "unsupported",
+            loading: LoadingView::idle(),
             error: None,
             status: "Ready",
         };
@@ -2284,6 +2517,52 @@ mod tests {
             mouse_target(Rect::new(0, 0, 100, 24), 26, 19, state),
             Some(MouseTarget::PrFilter(PrListFilter::Merged))
         );
+    }
+
+    #[test]
+    fn compact_path_preserves_the_filename_and_nearest_directories() {
+        let path = "apps/procurement-frontend/src/app/dashboard/suppliers/SupplierDetail.tsx";
+
+        let compact = compact_path(path, 37);
+
+        assert!(compact.starts_with("…/"));
+        assert!(compact.ends_with("suppliers/SupplierDetail.tsx"));
+        assert!(Span::raw(compact.as_str()).width() <= 37);
+    }
+
+    #[test]
+    fn compact_path_truncates_a_filename_from_the_start_when_needed() {
+        let compact = compact_path("screenshots/SupplierDetailV2--Panoramica.png", 20);
+
+        assert!(compact.starts_with('…'));
+        assert!(compact.ends_with("Panoramica.png"));
+        assert!(Span::raw(compact.as_str()).width() <= 20);
+    }
+
+    #[test]
+    fn compact_path_preserves_a_filename_that_exactly_fits() {
+        let filename = "Supplier.tsx";
+
+        assert_eq!(
+            compact_path(
+                "dashboard/suppliers/Supplier.tsx",
+                Span::raw(filename).width()
+            ),
+            filename
+        );
+    }
+
+    #[test]
+    fn compact_path_does_not_split_unicode_graphemes() {
+        let compact = compact_path("screenshots/👩‍💻-supplier-review.png", 17);
+
+        assert!(!compact.contains('\u{200d}') || compact.contains("👩‍💻"));
+        assert!(Span::raw(compact.as_str()).width() <= 17);
+    }
+
+    #[test]
+    fn compact_path_leaves_short_paths_unchanged() {
+        assert_eq!(compact_path("src/App.tsx", 20), "src/App.tsx");
     }
 
     #[test]
@@ -2335,6 +2614,7 @@ mod tests {
                         rendered_diff_output: None,
                         image_diff: None,
                         image_protocol: "unsupported",
+                        loading: LoadingView::idle(),
                         error: None,
                         status: "Loaded",
                     },
@@ -2400,6 +2680,7 @@ mod tests {
                         rendered_diff_output: None,
                         image_diff: None,
                         image_protocol: "unsupported",
+                        loading: LoadingView::idle(),
                         error: None,
                         status: "Loaded",
                     },
@@ -2466,6 +2747,7 @@ mod tests {
                         rendered_diff_output: None,
                         image_diff: None,
                         image_protocol: "unsupported",
+                        loading: LoadingView::idle(),
                         error: None,
                         status: "Loaded",
                     },
@@ -2533,6 +2815,7 @@ mod tests {
                         ),
                         image_diff: None,
                         image_protocol: "unsupported",
+                        loading: LoadingView::idle(),
                         error: None,
                         status: "Loaded",
                     },
@@ -2606,6 +2889,7 @@ mod tests {
                         rendered_diff_output: None,
                         image_diff: None,
                         image_protocol: "unsupported",
+                        loading: LoadingView::idle(),
                         error: None,
                         status: "Loaded",
                     },
@@ -2669,6 +2953,7 @@ mod tests {
                         rendered_diff_output: None,
                         image_diff: None,
                         image_protocol: "unsupported",
+                        loading: LoadingView::idle(),
                         error: None,
                         status: "Loaded",
                     },
@@ -2735,6 +3020,7 @@ mod tests {
                         rendered_diff_output: None,
                         image_diff: None,
                         image_protocol: "unsupported",
+                        loading: LoadingView::idle(),
                         error: None,
                         status: "Loaded",
                     },
@@ -2800,6 +3086,7 @@ mod tests {
                         rendered_diff_output: None,
                         image_diff: Some(&image),
                         image_protocol: "unsupported",
+                        loading: LoadingView::idle(),
                         error: None,
                         status: "Loaded",
                     },

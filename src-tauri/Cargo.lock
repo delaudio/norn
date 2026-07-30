@@ -2434,6 +2434,7 @@ dependencies = [
  "tempfile",
  "time",
  "toml 0.8.2",
+ "unicode-segmentation",
 ]
 
 [[package]]

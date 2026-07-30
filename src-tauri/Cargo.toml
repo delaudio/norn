@@ -45,6 +45,7 @@ ctrlc = "3"
 tempfile = "3"
 libc = "0.2"
 time = { version = "0.3", features = ["parsing"] }
+unicode-segmentation = "1"
 
 [dev-dependencies]
 tauri = { version = "2", features = ["test"] }
