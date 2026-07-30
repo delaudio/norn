@@ -15,7 +15,7 @@ If status files and git disagree, git is authoritative; correct this file.
 
 ## Last shipped
 
-`37a6c37` - fence progressive PR loading to the current repository and target.
+`3bdf90f` - preserve comments and review markers across progressive loads.
 
 ## Next item
 
