@@ -1,4 +1,5 @@
 mod image_diff;
+mod loading;
 mod render;
 mod terminal;
 
@@ -13,23 +14,21 @@ use std::{
 use crossterm::event::{self, Event, KeyCode, MouseButton, MouseEvent, MouseEventKind};
 
 use crate::config::{self, AiProvider, AppConfig, RepoRef};
-use crate::local_repo;
 use crate::services::bitbucket::{
-    create_general_comment_native, get_pr_diff_native, get_pr_file_preview_native,
-    get_pull_request_native, get_stable_pull_request_review_snapshot_native, list_comments_native,
-    list_pull_requests_native, validate_repo_review_config_native, ListPrOptions, PrComment,
+    create_general_comment_native, get_pr_file_preview_native,
+    get_stable_pull_request_review_snapshot_native, validate_repo_review_config_native, PrComment,
     PullRequestDetail, PullRequestSummary,
 };
 use crate::services::review::{
-    get_ai_review_run_state_native, load_ai_review_store_native, start_inline_review_native,
-    AiReviewRunState, AiReviewRunStatus, AiReviewRunStore,
+    start_inline_review_native, AiReviewRunState, AiReviewRunStatus, AiReviewRunStore,
 };
 
 use image_diff::{image_candidate_from_patch, ImageDiffState, TerminalImageSupport};
+use loading::{LoadEvent, LoadState, Loader};
 use render::{
     detail_view_target, diff_content_width_for_area, diff_image_area_for_area, mouse_target,
     render, selected_diff_file_patch, DetailView, DiffViewMode, DraftComment, FocusPane,
-    MouseTarget, PrListFilter, TuiState,
+    LoadingView, MouseTarget, PrListFilter, TuiState,
 };
 use terminal::TerminalGuard;
 
@@ -40,32 +39,40 @@ const DEFAULT_REVIEW_PROMPT: &str = include_str!("../../../src/lib/defaultReview
 pub fn run_from_env() -> Result<(), String> {
     let launch_mode = launch_mode_from_args(std::env::args().skip(1))?;
     let mut config = config::load();
-    let focus_prs = match launch_mode {
+    let resolve_current_repo = match launch_mode {
         TuiLaunchMode::Help => {
             println!("{}", tui_usage());
             return Ok(());
         }
         TuiLaunchMode::CurrentRepo => {
-            config.repos = vec![local_repo::resolve_current_repo()?];
+            config.repos.clear();
             true
         }
         TuiLaunchMode::Workspace => false,
     };
     let mut app = TuiApp::from_config(config);
-    if focus_prs {
+    if resolve_current_repo {
         app.focus = FocusPane::PullRequests;
     }
-    app.load_selected_repo();
     let mut terminal = TerminalGuard::enter().map_err(|error| error.to_string())?;
-    app.image_support = TerminalImageSupport::detect();
+    if resolve_current_repo {
+        app.resolve_current_repo();
+    } else {
+        app.load_selected_repo();
+    }
+    let mut detect_image_support = true;
 
     loop {
-        app.refresh_ai_review_state();
+        app.advance_loading();
         let area = terminal.area().map_err(|error| error.to_string())?;
         app.prepare_rendered_diff(area);
         terminal
             .draw(|frame| render(frame, app.view_state()))
             .map_err(|error| error.to_string())?;
+        if detect_image_support {
+            app.image_support = TerminalImageSupport::detect();
+            detect_image_support = false;
+        }
 
         if app.should_quit || terminal.interrupted() {
             break;
@@ -152,6 +159,19 @@ struct TuiApp {
     rendered_diff: Option<RenderedDiffCache>,
     image_diff: Option<ImageDiffState>,
     image_support: TerminalImageSupport,
+    loader: Loader,
+    next_request_id: u64,
+    repo_request_id: u64,
+    pr_request_id: u64,
+    ai_request_id: u64,
+    repo_load: LoadState,
+    pr_list_load: LoadState,
+    detail_load: LoadState,
+    comments_load: LoadState,
+    diff_load: LoadState,
+    ai_review_load: LoadState,
+    spinner_tick: usize,
+    ai_poll_tick: usize,
     error: Option<String>,
     status: String,
     should_quit: bool,
@@ -211,9 +231,239 @@ impl TuiApp {
             rendered_diff: None,
             image_diff: None,
             image_support: TerminalImageSupport::metadata_only(),
+            loader: Loader::new(),
+            next_request_id: 1,
+            repo_request_id: 0,
+            pr_request_id: 0,
+            ai_request_id: 0,
+            repo_load: LoadState::Idle,
+            pr_list_load: LoadState::Idle,
+            detail_load: LoadState::Idle,
+            comments_load: LoadState::Idle,
+            diff_load: LoadState::Idle,
+            ai_review_load: LoadState::Idle,
+            spinner_tick: 0,
+            ai_poll_tick: 0,
             error: None,
             status: "Ready".to_string(),
             should_quit: false,
+        }
+    }
+
+    fn next_request(&mut self) -> u64 {
+        let request_id = self.next_request_id;
+        self.next_request_id = self.next_request_id.wrapping_add(1).max(1);
+        request_id
+    }
+
+    fn resolve_current_repo(&mut self) {
+        let request_id = self.next_request();
+        self.repo_request_id = request_id;
+        self.repo_load = LoadState::Loading;
+        self.status = "Resolving repository...".to_string();
+        self.loader.resolve_current_repo(request_id);
+    }
+
+    fn advance_loading(&mut self) {
+        self.spinner_tick = self.spinner_tick.wrapping_add(1);
+        while let Some(event) = self.loader.try_recv() {
+            self.apply_load_event(event);
+        }
+        self.ai_poll_tick = self.ai_poll_tick.wrapping_add(1);
+        if self.ai_poll_tick.is_multiple_of(4)
+            && !self.ai_review_load.is_loading()
+            && matches!(
+                self.ai_review_state.as_ref().map(|state| state.status),
+                Some(AiReviewRunStatus::Running)
+            )
+        {
+            if let Some((workspace, repo, pr_id)) = self.active_ai_target.clone() {
+                let request_id = self.next_request();
+                self.ai_request_id = request_id;
+                self.ai_review_load = LoadState::Loading;
+                self.loader.ai_review(
+                    request_id,
+                    workspace,
+                    repo,
+                    pr_id,
+                    self.ai_review_store.clone(),
+                );
+            }
+        }
+    }
+
+    fn apply_load_event(&mut self, event: LoadEvent) {
+        match event {
+            LoadEvent::CurrentRepo { request_id, result } if request_id == self.repo_request_id => {
+                match result {
+                    Ok(repo) => {
+                        self.repos = vec![repo];
+                        self.selected_repo = 0;
+                        self.repo_load = LoadState::Ready;
+                        self.load_selected_repo();
+                    }
+                    Err(error) => {
+                        self.repo_load = LoadState::Failed(error.clone());
+                        self.status = "Failed to resolve repository".to_string();
+                    }
+                }
+            }
+            LoadEvent::PullRequests { request_id, result }
+                if request_id == self.repo_request_id =>
+            {
+                match result {
+                    Ok(pull_requests) => {
+                        self.pull_requests = pull_requests
+                            .into_iter()
+                            .filter(|pr| self.pr_filter.includes(pr))
+                            .collect();
+                        self.selected_pr = 0;
+                        self.detail = None;
+                        self.comments.clear();
+                        self.diff = None;
+                        self.drafts.clear();
+                        self.composer = None;
+                        self.active_ai_target = None;
+                        self.ai_review_state = None;
+                        self.ai_review_output = None;
+                        self.detail_view = DetailView::PullRequest;
+                        self.reset_detail_scrolls();
+                        self.reset_diff_state();
+                        self.pr_list_load = LoadState::Ready;
+                        self.error = None;
+                        self.status = format!(
+                            "Loaded {} {} PRs",
+                            self.pull_requests.len(),
+                            self.pr_filter.label()
+                        );
+                        if let Some(repo) = self.repos.get(self.selected_repo) {
+                            self.loader.review_markers(
+                                request_id,
+                                repo.workspace.clone(),
+                                repo.repo.clone(),
+                                self.pull_requests.iter().map(|pr| pr.id).collect(),
+                                self.ai_review_store.clone(),
+                            );
+                        }
+                        if !self.pull_requests.is_empty() {
+                            self.load_selected_pr();
+                        } else {
+                            self.detail_load = LoadState::Idle;
+                            self.comments_load = LoadState::Idle;
+                            self.diff_load = LoadState::Idle;
+                            self.ai_review_load = LoadState::Idle;
+                        }
+                    }
+                    Err(error) => {
+                        self.pr_list_load = LoadState::Failed(error.clone());
+                        self.status = "Failed to load PRs".to_string();
+                    }
+                }
+            }
+            LoadEvent::Detail { request_id, result } if request_id == self.pr_request_id => {
+                match result {
+                    Ok(detail) => {
+                        self.detail = Some(detail);
+                        self.detail_load = LoadState::Ready;
+                        self.drafts.clear();
+                        self.composer = None;
+                    }
+                    Err(error) => {
+                        self.detail_load = LoadState::Failed(error.clone());
+                    }
+                }
+                self.finish_pr_load_status();
+            }
+            LoadEvent::Comments { request_id, result } if request_id == self.pr_request_id => {
+                match result {
+                    Ok(comments) => {
+                        self.comments = comments;
+                        self.comments_load = LoadState::Ready;
+                    }
+                    Err(error) => {
+                        self.comments_load = LoadState::Failed(error.clone());
+                    }
+                }
+                self.finish_pr_load_status();
+            }
+            LoadEvent::Diff { request_id, result } if request_id == self.pr_request_id => {
+                match result {
+                    Ok(diff) => {
+                        self.diff = Some(diff);
+                        self.diff_load = LoadState::Ready;
+                        self.reset_diff_state();
+                    }
+                    Err(error) => {
+                        self.diff_load = LoadState::Failed(error.clone());
+                    }
+                }
+                self.finish_pr_load_status();
+            }
+            LoadEvent::AiReview {
+                request_id,
+                pr_id,
+                state,
+                output,
+            } if request_id == self.ai_request_id => {
+                self.ai_review_state = state;
+                match output {
+                    Ok(output) => {
+                        self.ai_review_output = output;
+                        self.ai_review_load = LoadState::Ready;
+                    }
+                    Err(error) => {
+                        self.ai_review_load = LoadState::Failed(error.clone());
+                    }
+                }
+                self.update_ai_review_markers(pr_id);
+                self.finish_pr_load_status();
+            }
+            LoadEvent::ReviewMarkers {
+                request_id,
+                reviewed,
+                running,
+            } if request_id == self.repo_request_id => {
+                self.ai_reviewed_pr_ids = reviewed;
+                self.ai_review_running_pr_ids = running;
+            }
+            _ => {}
+        }
+    }
+
+    fn update_ai_review_markers(&mut self, pr_id: u32) {
+        match self.ai_review_state.as_ref().map(|state| state.status) {
+            Some(AiReviewRunStatus::Running) => self.mark_ai_review_running(pr_id),
+            Some(AiReviewRunStatus::Succeeded) => {
+                self.unmark_ai_review_running(pr_id);
+                self.mark_ai_reviewed(pr_id);
+            }
+            Some(AiReviewRunStatus::Failed | AiReviewRunStatus::Cancelled) => {
+                self.unmark_ai_review_running(pr_id);
+            }
+            _ => {}
+        }
+    }
+
+    fn finish_pr_load_status(&mut self) {
+        if [
+            &self.detail_load,
+            &self.comments_load,
+            &self.diff_load,
+            &self.ai_review_load,
+        ]
+        .iter()
+        .any(|state| state.is_loading())
+        {
+            return;
+        }
+        if let Some((_, _, pr_id)) = self.active_ai_target.as_ref() {
+            self.status = match self.ai_review_state.as_ref() {
+                Some(state) if state.status == AiReviewRunStatus::Running => format!(
+                    "AI review running: {}",
+                    state.logs.last().map(String::as_str).unwrap_or("started")
+                ),
+                _ => format!("Loaded PR #{pr_id}"),
+            };
         }
     }
 
@@ -438,89 +688,42 @@ impl TuiApp {
     }
 
     fn load_selected_repo(&mut self) {
-        let Some(repo) = self.repos.get(self.selected_repo) else {
-            self.pull_requests.clear();
-            self.detail = None;
-            self.comments.clear();
-            self.ai_reviewed_pr_ids.clear();
-            self.ai_review_running_pr_ids.clear();
-            self.diff = None;
-            self.drafts.clear();
-            self.composer = None;
-            self.reset_diff_state();
+        let Some(repo) = self.repos.get(self.selected_repo).cloned() else {
+            self.pr_list_load = LoadState::Idle;
             self.status = "No repositories configured".to_string();
             return;
         };
+        self.pr_request_id = 0;
+        self.ai_request_id = 0;
+        self.detail = None;
+        self.comments.clear();
+        self.diff = None;
+        self.active_ai_target = None;
+        self.ai_review_state = None;
+        self.ai_review_output = None;
+        self.drafts.clear();
+        self.composer = None;
+        self.detail_view = DetailView::PullRequest;
+        self.reset_detail_scrolls();
+        self.reset_diff_state();
         let provider = repo.provider;
         let workspace = repo.workspace.clone();
         let repo_name = repo.repo.clone();
+        let request_id = self.next_request();
+        self.repo_request_id = request_id;
+        self.pr_list_load = LoadState::Loading;
         self.status = format!(
             "Loading {} PRs for {workspace}/{repo_name}...",
             self.pr_filter.label()
         );
         self.error = None;
-        let opts = ListPrOptions {
-            state: Some(self.pr_filter.provider_state().to_string()),
-            page: Some(1),
-            pagelen: Some(50),
-            query: None,
-            updated_after: None,
-        };
-        match list_pull_requests_native(
-            Some(provider),
-            workspace.as_str(),
-            repo_name.as_str(),
-            &opts,
-        ) {
-            Ok(page) => {
-                self.pull_requests = page
-                    .values
-                    .into_iter()
-                    .filter(|pr| self.pr_filter.includes(pr))
-                    .collect();
-                self.selected_pr = 0;
-                self.detail = None;
-                self.comments.clear();
-                self.diff = None;
-                self.drafts.clear();
-                self.composer = None;
-                self.active_ai_target = None;
-                self.ai_review_state = None;
-                self.ai_review_output = None;
-                self.rendered_diff = None;
-                self.detail_view = DetailView::PullRequest;
-                self.reset_detail_scrolls();
-                self.reset_diff_state();
-                self.ai_review_running_pr_ids.clear();
-                self.refresh_ai_review_markers(workspace.as_str(), repo_name.as_str());
-                self.status = format!(
-                    "Loaded {} {} PRs",
-                    self.pull_requests.len(),
-                    self.pr_filter.label()
-                );
-                if !self.pull_requests.is_empty() {
-                    self.load_selected_pr();
-                }
-            }
-            Err(error) => {
-                self.pull_requests.clear();
-                self.detail = None;
-                self.comments.clear();
-                self.ai_reviewed_pr_ids.clear();
-                self.ai_review_running_pr_ids.clear();
-                self.diff = None;
-                self.drafts.clear();
-                self.composer = None;
-                self.active_ai_target = None;
-                self.ai_review_state = None;
-                self.ai_review_output = None;
-                self.detail_view = DetailView::PullRequest;
-                self.reset_detail_scrolls();
-                self.reset_diff_state();
-                self.error = Some(error);
-                self.status = "Failed to load PRs".to_string();
-            }
-        }
+        self.loader.pull_requests(
+            request_id,
+            provider,
+            workspace,
+            repo_name,
+            self.pr_filter.provider_state().to_string(),
+        );
     }
 
     fn load_selected_pr(&mut self) {
@@ -543,70 +746,51 @@ impl TuiApp {
         let workspace = repo.workspace.clone();
         let repo_name = repo.repo.clone();
         let pr_id = pr.id;
+        let target_changed =
+            self.active_ai_target.as_ref() != Some(&(workspace.clone(), repo_name.clone(), pr_id));
+        if target_changed {
+            self.detail = None;
+            self.comments.clear();
+            self.diff = None;
+            self.ai_review_state = None;
+            self.ai_review_output = None;
+            self.reset_diff_state();
+        }
+        let request_id = self.next_request();
+        let ai_request_id = self.next_request();
+        self.pr_request_id = request_id;
+        self.ai_request_id = ai_request_id;
+        self.detail_load = LoadState::Loading;
+        self.comments_load = LoadState::Loading;
+        self.diff_load = LoadState::Loading;
+        self.ai_review_load = LoadState::Loading;
         self.status = format!("Loading PR #{pr_id}...");
         self.error = None;
-        match get_pull_request_native(
-            Some(provider),
-            workspace.as_str(),
-            repo_name.as_str(),
+        self.drafts.clear();
+        self.composer = None;
+        self.active_ai_target = Some((workspace.clone(), repo_name.clone(), pr_id));
+        self.detail_view = target_view;
+        self.reset_detail_scrolls();
+        self.loader.pull_request_resources(
+            request_id,
+            ai_request_id,
+            provider,
+            workspace,
+            repo_name,
             pr_id,
-        ) {
-            Ok(detail) => {
-                self.comments = list_comments_native(
-                    Some(provider),
-                    workspace.as_str(),
-                    repo_name.as_str(),
-                    pr_id,
-                )
-                .unwrap_or_else(|error| {
-                    self.error = Some(format!("Comments failed: {error}"));
-                    Vec::new()
-                });
-                self.diff = get_pr_diff_native(
-                    Some(provider),
-                    workspace.as_str(),
-                    repo_name.as_str(),
-                    pr_id,
-                )
-                .map_err(|error| {
-                    self.error = Some(format!("Diff failed: {error}"));
-                })
-                .ok();
-                self.selected_diff_file = 0;
-                self.rendered_diff = None;
-                self.image_diff = None;
-                self.detail = Some(detail);
-                self.drafts.clear();
-                self.composer = None;
-                self.active_ai_target = Some((workspace.clone(), repo_name.clone(), pr_id));
-                self.refresh_ai_review_state();
-                self.refresh_ai_review_output();
-                self.detail_view = target_view;
-                self.reset_detail_scrolls();
-                self.status = format!("Loaded PR #{pr_id}");
-            }
-            Err(error) => {
-                self.detail = None;
-                self.comments.clear();
-                self.diff = None;
-                self.drafts.clear();
-                self.composer = None;
-                self.active_ai_target = None;
-                self.ai_review_state = None;
-                self.ai_review_output = None;
-                self.rendered_diff = None;
-                self.image_diff = None;
-                self.detail_view = target_view;
-                self.reset_detail_scrolls();
-                self.error = Some(error);
-                self.status = "Failed to load PR detail".to_string();
-            }
-        }
+            self.ai_review_store.clone(),
+        );
     }
 
     fn start_comment_composer(&mut self) {
-        if self.selected_pull_request_id().is_none() {
-            self.status = "Select a pull request before drafting a comment".to_string();
+        if !matches!(self.pr_list_load, LoadState::Ready)
+            || !matches!(self.detail_load, LoadState::Ready)
+        {
+            self.status = "Wait for the selected pull request to load".to_string();
+            return;
+        }
+        if self.selected_review_target().is_none() {
+            self.status = "Load the selected pull request before drafting a comment".to_string();
             return;
         }
         self.composer = Some(String::new());
@@ -716,9 +900,11 @@ impl TuiApp {
             None,
         ) {
             Ok(state) => {
+                self.ai_request_id = self.next_request();
                 self.active_ai_target = Some((workspace, repo, pr_id));
                 self.ai_review_state = Some(state);
                 self.ai_review_output = None;
+                self.ai_review_load = LoadState::Ready;
                 self.mark_ai_review_running(pr_id);
                 self.detail_view = DetailView::AiReview;
                 self.ai_review_scroll = 0;
@@ -739,7 +925,18 @@ impl TuiApp {
             DetailView::Diff => DetailView::PullRequest,
         };
         if self.detail_view == DetailView::AiReview {
-            self.refresh_ai_review_output();
+            if let Some((workspace, repo, pr_id)) = self.active_ai_target.clone() {
+                let request_id = self.next_request();
+                self.ai_request_id = request_id;
+                self.ai_review_load = LoadState::Loading;
+                self.loader.ai_review(
+                    request_id,
+                    workspace,
+                    repo,
+                    pr_id,
+                    self.ai_review_store.clone(),
+                );
+            }
             self.status = "Showing AI review output".to_string();
         } else if self.detail_view == DetailView::Diff {
             self.load_selected_pr_for_view(DetailView::Diff);
@@ -797,8 +994,8 @@ impl TuiApp {
     }
 
     fn refresh_active_view(&mut self) {
-        if self.detail_view == DetailView::Diff {
-            self.load_selected_pr_for_view(DetailView::Diff);
+        if self.selected_pull_request_id().is_some() {
+            self.load_selected_pr_for_view(self.detail_view);
         } else {
             self.load_selected_repo();
         }
@@ -922,7 +1119,6 @@ impl TuiApp {
     }
 
     fn copy_ai_review_output(&mut self) {
-        self.refresh_ai_review_output();
         self.copy_loaded_ai_review_output_with(|output| {
             terminal::copy_to_clipboard(output).map_err(|error| error.to_string())
         });
@@ -932,6 +1128,10 @@ impl TuiApp {
         &mut self,
         copier: impl FnOnce(&str) -> Result<(), String>,
     ) {
+        if !matches!(self.ai_review_load, LoadState::Ready) {
+            self.status = "Wait for the selected AI review to load".to_string();
+            return;
+        }
         let Some(output) = self
             .ai_review_output
             .as_deref()
@@ -996,107 +1196,6 @@ impl TuiApp {
         })
     }
 
-    fn refresh_ai_review_state(&mut self) {
-        self.refresh_running_ai_review_markers();
-        let Some((workspace, repo, pr_id)) = self.active_ai_target.as_ref() else {
-            return;
-        };
-        let active_pr_id = *pr_id;
-        self.ai_review_state =
-            get_ai_review_run_state_native(&self.ai_review_store, workspace, repo, active_pr_id);
-        let current = self
-            .ai_review_state
-            .as_ref()
-            .map(|state| (state.status, state.logs.last().cloned()));
-        if let Some((status, latest_log)) = current {
-            self.status = match status {
-                AiReviewRunStatus::Running => {
-                    self.mark_ai_review_running(active_pr_id);
-                    format!(
-                        "AI review running: {}",
-                        latest_log.as_deref().unwrap_or("started")
-                    )
-                }
-                AiReviewRunStatus::Succeeded => "AI review completed".to_string(),
-                AiReviewRunStatus::Failed => "AI review failed".to_string(),
-                AiReviewRunStatus::Cancelled => "AI review cancelled".to_string(),
-                AiReviewRunStatus::Idle => self.status.clone(),
-            };
-        }
-        if matches!(
-            self.ai_review_state.as_ref().map(|state| state.status),
-            Some(AiReviewRunStatus::Succeeded)
-        ) {
-            self.unmark_ai_review_running(active_pr_id);
-            self.mark_ai_reviewed(active_pr_id);
-            self.refresh_ai_review_output();
-        } else if matches!(
-            self.ai_review_state.as_ref().map(|state| state.status),
-            Some(AiReviewRunStatus::Failed | AiReviewRunStatus::Cancelled)
-        ) {
-            self.unmark_ai_review_running(active_pr_id);
-        }
-    }
-
-    fn refresh_running_ai_review_markers(&mut self) {
-        let Some(repo) = self.repos.get(self.selected_repo) else {
-            self.ai_review_running_pr_ids.clear();
-            return;
-        };
-        let workspace = repo.workspace.clone();
-        let repo_name = repo.repo.clone();
-        let pr_ids = self
-            .pull_requests
-            .iter()
-            .map(|pr| pr.id)
-            .collect::<Vec<_>>();
-        let mut running = Vec::new();
-        let mut finished = Vec::new();
-        for pr_id in pr_ids {
-            let Some(state) = get_ai_review_run_state_native(
-                &self.ai_review_store,
-                &workspace,
-                &repo_name,
-                pr_id,
-            ) else {
-                continue;
-            };
-            match state.status {
-                AiReviewRunStatus::Running => running.push(pr_id),
-                AiReviewRunStatus::Succeeded => finished.push(pr_id),
-                AiReviewRunStatus::Failed
-                | AiReviewRunStatus::Cancelled
-                | AiReviewRunStatus::Idle => {}
-            }
-        }
-        self.ai_review_running_pr_ids = running;
-        for pr_id in finished {
-            self.mark_ai_reviewed(pr_id);
-        }
-    }
-
-    fn refresh_ai_review_markers(&mut self, workspace: &str, repo: &str) {
-        let mut reviewed = Vec::new();
-        let mut running = Vec::new();
-        for pr in &self.pull_requests {
-            if matches!(
-                get_ai_review_run_state_native(&self.ai_review_store, workspace, repo, pr.id)
-                    .map(|state| state.status),
-                Some(AiReviewRunStatus::Running)
-            ) {
-                running.push(pr.id);
-            }
-            if matches!(
-                load_ai_review_store_native(workspace, repo, pr.id),
-                Ok(Some(store)) if !store.review_runs.is_empty()
-            ) {
-                reviewed.push(pr.id);
-            }
-        }
-        self.ai_reviewed_pr_ids = reviewed;
-        self.ai_review_running_pr_ids = running;
-    }
-
     fn mark_ai_reviewed(&mut self, pr_id: u32) {
         if !self.ai_reviewed_pr_ids.contains(&pr_id) {
             self.ai_reviewed_pr_ids.push(pr_id);
@@ -1111,27 +1210,6 @@ impl TuiApp {
 
     fn unmark_ai_review_running(&mut self, pr_id: u32) {
         self.ai_review_running_pr_ids.retain(|id| *id != pr_id);
-    }
-
-    fn refresh_ai_review_output(&mut self) {
-        let Some((workspace, repo, pr_id)) = self.active_ai_target.as_ref() else {
-            return;
-        };
-        match load_ai_review_store_native(workspace, repo, *pr_id) {
-            Ok(Some(store)) => {
-                self.ai_review_output = store
-                    .review_runs
-                    .iter()
-                    .rev()
-                    .find_map(|run| run.summary_markdown.clone());
-            }
-            Ok(None) => {
-                self.ai_review_output = None;
-            }
-            Err(error) => {
-                self.error = Some(format!("AI review output failed: {error}"));
-            }
-        }
     }
 
     fn publish_drafts_with(
@@ -1173,8 +1251,16 @@ impl TuiApp {
     fn selected_review_target(
         &self,
     ) -> Option<(crate::config::ReviewProvider, String, String, u32)> {
+        if !matches!(self.pr_list_load, LoadState::Ready)
+            || !matches!(self.detail_load, LoadState::Ready)
+        {
+            return None;
+        }
         let repo = self.repos.get(self.selected_repo)?;
         let pr_id = self.selected_pull_request_id()?;
+        if self.detail.as_ref().map(|detail| detail.id) != Some(pr_id) {
+            return None;
+        }
         Some((
             repo.provider,
             repo.workspace.clone(),
@@ -1221,6 +1307,15 @@ impl TuiApp {
             }),
             image_diff: self.image_diff.as_ref(),
             image_protocol: self.image_support.label(),
+            loading: LoadingView {
+                repo: &self.repo_load,
+                pull_requests: &self.pr_list_load,
+                detail: &self.detail_load,
+                comments: &self.comments_load,
+                diff: &self.diff_load,
+                ai_review: &self.ai_review_load,
+                tick: self.spinner_tick,
+            },
             error: self.error.as_deref(),
             status: self.status.as_str(),
         }
@@ -1317,6 +1412,7 @@ fn diff_file_count(diff: Option<&str>) -> usize {
 mod tests {
     use super::*;
     use crate::config::ReviewProvider;
+    use ratatui::{backend::TestBackend, Terminal};
     use std::fs;
     use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -1388,6 +1484,116 @@ mod tests {
     fn tui_launch_rejects_unknown_options() {
         let error = launch_mode_from_args(["--repo"]).unwrap_err();
         assert!(error.contains("Unknown option"));
+    }
+
+    #[test]
+    fn initial_repository_resolution_renders_before_the_worker_finishes() {
+        let mut app = TuiApp::from_repos(Vec::new());
+        app.repo_load = LoadState::Loading;
+        app.status = "Resolving repository...".to_string();
+        let backend = TestBackend::new(100, 24);
+        let mut terminal = Terminal::new(backend).expect("terminal");
+
+        terminal
+            .draw(|frame| render(frame, app.view_state()))
+            .expect("draw loading frame");
+
+        let text = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect::<String>();
+        assert!(text.contains("Resolving repository"));
+        assert!(text.contains("q quit"));
+    }
+
+    #[test]
+    fn stale_repository_results_cannot_replace_the_current_selection() {
+        let mut app = TuiApp::from_repos(vec![repo("current", "repo")]);
+        app.repo_request_id = 2;
+        app.pull_requests = vec![pr(7, "Current")];
+
+        app.apply_load_event(LoadEvent::PullRequests {
+            request_id: 1,
+            result: Ok(vec![pr(99, "Stale")]),
+        });
+
+        assert_eq!(app.pull_requests.len(), 1);
+        assert_eq!(app.pull_requests[0].id, 7);
+    }
+
+    #[test]
+    fn independent_resource_failures_keep_successful_pr_data_visible() {
+        let mut app = TuiApp::from_repos(vec![repo("lachesi-hq", "lachesi")]);
+        app.pull_requests = vec![pr(7, "Progressive loading")];
+        app.pr_request_id = 12;
+        app.detail_load = LoadState::Loading;
+        app.comments_load = LoadState::Loading;
+        app.diff_load = LoadState::Loading;
+        app.ai_review_load = LoadState::Ready;
+
+        app.apply_load_event(LoadEvent::Detail {
+            request_id: 12,
+            result: Ok(detail(7, "Progressive loading")),
+        });
+        app.apply_load_event(LoadEvent::Diff {
+            request_id: 12,
+            result: Err("provider timeout".to_string()),
+        });
+
+        assert_eq!(app.detail.as_ref().map(|detail| detail.id), Some(7));
+        assert!(matches!(app.detail_load, LoadState::Ready));
+        assert!(matches!(app.diff_load, LoadState::Failed(_)));
+        assert!(app.comments_load.is_loading());
+    }
+
+    #[test]
+    fn stale_ai_review_results_cannot_replace_a_newer_run() {
+        let mut app = TuiApp::from_repos(vec![repo("lachesi-hq", "lachesi")]);
+        app.ai_request_id = 2;
+        app.ai_review_state = Some(AiReviewRunState {
+            status: AiReviewRunStatus::Running,
+            ..AiReviewRunState::default()
+        });
+
+        app.apply_load_event(LoadEvent::AiReview {
+            request_id: 1,
+            pr_id: 7,
+            state: Some(AiReviewRunState {
+                status: AiReviewRunStatus::Succeeded,
+                ..AiReviewRunState::default()
+            }),
+            output: Ok(Some("stale".to_string())),
+        });
+
+        assert_eq!(
+            app.ai_review_state.as_ref().map(|state| state.status),
+            Some(AiReviewRunStatus::Running)
+        );
+        assert!(app.ai_review_output.is_none());
+    }
+
+    #[test]
+    fn ai_review_results_update_markers_for_the_event_target() {
+        let mut app = TuiApp::from_repos(vec![repo("lachesi-hq", "lachesi")]);
+        app.pull_requests = vec![pr(7, "Reviewed"), pr(8, "Highlighted")];
+        app.selected_pr = 1;
+        app.ai_request_id = 3;
+
+        app.apply_load_event(LoadEvent::AiReview {
+            request_id: 3,
+            pr_id: 7,
+            state: Some(AiReviewRunState {
+                status: AiReviewRunStatus::Succeeded,
+                ..AiReviewRunState::default()
+            }),
+            output: Ok(Some("review".to_string())),
+        });
+
+        assert_eq!(app.ai_reviewed_pr_ids, vec![7]);
+        assert!(!app.ai_reviewed_pr_ids.contains(&8));
     }
 
     #[test]
@@ -1517,6 +1723,7 @@ mod tests {
     fn copies_loaded_ai_review_output_without_visible_wrapping() {
         let mut app = TuiApp::from_repos(vec![repo("lachesi-hq", "lachesi")]);
         app.ai_review_output = Some("full markdown\nwith second line".to_string());
+        app.ai_review_load = LoadState::Ready;
         let mut copied = String::new();
 
         app.copy_loaded_ai_review_output_with(|output| {
@@ -1532,11 +1739,28 @@ mod tests {
     #[test]
     fn copy_review_reports_missing_output() {
         let mut app = TuiApp::from_repos(vec![repo("lachesi-hq", "lachesi")]);
+        app.ai_review_load = LoadState::Ready;
 
         app.copy_loaded_ai_review_output_with(|_| Err("should not copy".to_string()));
 
         assert_eq!(app.status, "No AI review output to copy");
         assert!(app.error.is_none());
+    }
+
+    #[test]
+    fn copy_review_rejects_output_from_the_previous_pr_while_loading() {
+        let mut app = TuiApp::from_repos(vec![repo("lachesi-hq", "lachesi")]);
+        app.ai_review_output = Some("previous review".to_string());
+        app.ai_review_load = LoadState::Loading;
+        let mut copied = false;
+
+        app.copy_loaded_ai_review_output_with(|_| {
+            copied = true;
+            Ok(())
+        });
+
+        assert!(!copied);
+        assert_eq!(app.status, "Wait for the selected AI review to load");
     }
 
     #[test]
@@ -1585,6 +1809,9 @@ mod tests {
             updated_on: String::new(),
             reviewers: Vec::new(),
         });
+        app.pr_list_load = LoadState::Ready;
+        app.detail_load = LoadState::Ready;
+        app.detail = Some(detail(7, "Draftable"));
 
         app.handle_key(KeyCode::Char('c'));
         app.handle_key(KeyCode::Char('n'));
