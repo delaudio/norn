@@ -15,7 +15,7 @@ If status files and git disagree, git is authoritative; correct this file.
 
 ## Last shipped
 
-`1bfea2b` - add non-blocking TUI startup and progressive panel loading.
+`72cf541` - preserve filenames when compacting long TUI diff paths.
 
 ## Next item
 
