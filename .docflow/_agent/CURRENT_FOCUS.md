@@ -15,7 +15,7 @@ If status files and git disagree, git is authoritative; correct this file.
 
 ## Last shipped
 
-`72cf541` - preserve filenames when compacting long TUI diff paths.
+`37a6c37` - fence progressive PR loading to the current repository and target.
 
 ## Next item
 
