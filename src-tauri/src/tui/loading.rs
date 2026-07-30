@@ -69,6 +69,7 @@ pub(super) enum LoadEvent {
     },
     ReviewMarkers {
         request_id: u64,
+        marker_generation: u64,
         reviewed: Vec<u32>,
         running: Vec<u32>,
     },
@@ -211,6 +212,7 @@ impl Loader {
         repo: String,
         pr_ids: Vec<u32>,
         store: AiReviewRunStore,
+        marker_generation: u64,
     ) {
         let sender = self.sender.clone();
         thread::spawn(move || {
@@ -233,6 +235,7 @@ impl Loader {
             }
             let _ = sender.send(LoadEvent::ReviewMarkers {
                 request_id,
+                marker_generation,
                 reviewed,
                 running,
             });

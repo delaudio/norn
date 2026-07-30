@@ -4,7 +4,7 @@ mod render;
 mod terminal;
 
 use std::{
-    collections::hash_map::DefaultHasher,
+    collections::{hash_map::DefaultHasher, HashMap},
     hash::{Hash, Hasher},
     io::Write,
     process::{Command, Stdio},
@@ -164,6 +164,8 @@ struct TuiApp {
     repo_request_id: u64,
     pr_request_id: u64,
     ai_request_id: u64,
+    marker_generation: u64,
+    marker_mutations: HashMap<u32, u64>,
     repo_load: LoadState,
     pr_list_load: LoadState,
     detail_load: LoadState,
@@ -236,6 +238,8 @@ impl TuiApp {
             repo_request_id: 0,
             pr_request_id: 0,
             ai_request_id: 0,
+            marker_generation: 0,
+            marker_mutations: HashMap::new(),
             repo_load: LoadState::Idle,
             pr_list_load: LoadState::Idle,
             detail_load: LoadState::Idle,
@@ -343,6 +347,7 @@ impl TuiApp {
                                 repo.repo.clone(),
                                 self.pull_requests.iter().map(|pr| pr.id).collect(),
                                 self.ai_review_store.clone(),
+                                self.marker_generation,
                             );
                         }
                         if !self.pull_requests.is_empty() {
@@ -420,11 +425,11 @@ impl TuiApp {
             }
             LoadEvent::ReviewMarkers {
                 request_id,
+                marker_generation,
                 reviewed,
                 running,
             } if request_id == self.repo_request_id => {
-                self.ai_reviewed_pr_ids = reviewed;
-                self.ai_review_running_pr_ids = running;
+                self.apply_marker_snapshot(marker_generation, reviewed, running);
             }
             _ => {}
         }
@@ -721,6 +726,8 @@ impl TuiApp {
         self.selected_pr = 0;
         self.ai_reviewed_pr_ids.clear();
         self.ai_review_running_pr_ids.clear();
+        self.marker_generation = self.marker_generation.wrapping_add(1);
+        self.marker_mutations.clear();
         self.detail = None;
         self.comments.clear();
         self.diff = None;
@@ -847,6 +854,10 @@ impl TuiApp {
     }
 
     fn publish_drafts(&mut self) {
+        if self.comments_load.is_loading() {
+            self.status = "Wait for comments to load before publishing drafts".to_string();
+            return;
+        }
         let Some((provider, workspace, repo, pr_id)) = self.selected_review_target() else {
             self.status = "Select a pull request before publishing drafts".to_string();
             return;
@@ -1226,17 +1237,65 @@ impl TuiApp {
     fn mark_ai_reviewed(&mut self, pr_id: u32) {
         if !self.ai_reviewed_pr_ids.contains(&pr_id) {
             self.ai_reviewed_pr_ids.push(pr_id);
+            self.record_marker_mutation(pr_id);
         }
     }
 
     fn mark_ai_review_running(&mut self, pr_id: u32) {
         if !self.ai_review_running_pr_ids.contains(&pr_id) {
             self.ai_review_running_pr_ids.push(pr_id);
+            self.record_marker_mutation(pr_id);
         }
     }
 
     fn unmark_ai_review_running(&mut self, pr_id: u32) {
+        let previous_len = self.ai_review_running_pr_ids.len();
         self.ai_review_running_pr_ids.retain(|id| *id != pr_id);
+        if self.ai_review_running_pr_ids.len() != previous_len {
+            self.record_marker_mutation(pr_id);
+        }
+    }
+
+    fn record_marker_mutation(&mut self, pr_id: u32) {
+        self.marker_generation = self.marker_generation.wrapping_add(1);
+        self.marker_mutations.insert(pr_id, self.marker_generation);
+    }
+
+    fn apply_marker_snapshot(
+        &mut self,
+        snapshot_generation: u64,
+        mut reviewed: Vec<u32>,
+        mut running: Vec<u32>,
+    ) {
+        for (&pr_id, &mutation_generation) in &self.marker_mutations {
+            if mutation_generation <= snapshot_generation {
+                continue;
+            }
+            Self::set_marker_membership(
+                &mut reviewed,
+                pr_id,
+                self.ai_reviewed_pr_ids.contains(&pr_id),
+            );
+            Self::set_marker_membership(
+                &mut running,
+                pr_id,
+                self.ai_review_running_pr_ids.contains(&pr_id),
+            );
+        }
+        self.ai_reviewed_pr_ids = reviewed;
+        self.ai_review_running_pr_ids = running;
+        self.marker_mutations
+            .retain(|_, generation| *generation > snapshot_generation);
+    }
+
+    fn set_marker_membership(markers: &mut Vec<u32>, pr_id: u32, present: bool) {
+        if present {
+            if !markers.contains(&pr_id) {
+                markers.push(pr_id);
+            }
+        } else {
+            markers.retain(|id| *id != pr_id);
+        }
     }
 
     fn publish_drafts_with(
@@ -1803,6 +1862,24 @@ mod tests {
     }
 
     #[test]
+    fn stale_marker_snapshots_cannot_erase_newer_local_state() {
+        let mut app = TuiApp::from_repos(vec![repo("lachesi-hq", "lachesi")]);
+        app.repo_request_id = 4;
+        app.marker_generation = 1;
+        app.mark_ai_review_running(7);
+
+        app.apply_load_event(LoadEvent::ReviewMarkers {
+            request_id: 4,
+            marker_generation: 1,
+            reviewed: vec![8],
+            running: Vec::new(),
+        });
+
+        assert_eq!(app.ai_review_running_pr_ids, vec![7]);
+        assert_eq!(app.ai_reviewed_pr_ids, vec![8]);
+    }
+
+    #[test]
     fn tui_ai_review_skips_duplicate_analyzers() {
         assert!(TUI_SKIP_AI_REVIEW_ANALYZERS);
     }
@@ -1911,6 +1988,24 @@ mod tests {
         assert_eq!(app.drafts.len(), 1);
         assert_eq!(app.drafts[0].raw, "note");
         assert!(app.comments.is_empty());
+    }
+
+    #[test]
+    fn publishing_waits_for_the_comment_snapshot() {
+        let mut app = TuiApp::from_repos(Vec::new());
+        app.comments_load = LoadState::Loading;
+        app.drafts.push(DraftComment {
+            id: 1,
+            raw: "pending".to_string(),
+        });
+
+        app.publish_drafts();
+
+        assert_eq!(app.drafts.len(), 1);
+        assert_eq!(
+            app.status,
+            "Wait for comments to load before publishing drafts"
+        );
     }
 
     #[test]
