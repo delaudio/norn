@@ -8,15 +8,15 @@ If status files and git disagree, git is authoritative; correct this file.
 
 ## Active state
 
-- **Branch:** `agent/managed-service-slos`
-- **Active item:** GitHub issue #114 and `.docflow/plan/todo/0004-shared-review-service-program.md`
+- **Branch:** `feat/tui-progressive-loading`
+- **Active item:** Progressive terminal loading under `.docflow/plan/todo/0002-terminal-ui-foundation.md`
 - **Blockers:** none; use the available SSH key for signed commits.
-- **Uncommitted work:** managed-service pilot operating model and SLO documentation pending signed commit.
+- **Uncommitted work:** none; implementation and validation are complete.
 
 ## Last shipped
 
-`6196602` - ship tenant isolation conformance through PR #144.
+`1bfea2b` - add non-blocking TUI startup and progressive panel loading.
 
 ## Next item
 
-Merge GitHub issue #114, then audit the remaining planned issues.
+Integrate progressive TUI loading through the repository PR workflow.
