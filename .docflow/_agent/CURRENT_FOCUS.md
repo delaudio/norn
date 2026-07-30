@@ -8,15 +8,15 @@ If status files and git disagree, git is authoritative; correct this file.
 
 ## Active state
 
-- **Branch:** `feat/tui-progressive-loading`
-- **Active item:** Progressive terminal loading under `.docflow/plan/todo/0002-terminal-ui-foundation.md`
+- **Branch:** `docs/ship-tui-foundation`
+- **Active item:** Terminal UI foundation closeout after PR #146.
 - **Blockers:** none; use the available SSH key for signed commits.
-- **Uncommitted work:** none; implementation and validation are complete.
+- **Branch-local work:** terminal UI foundation closeout only.
 
 ## Last shipped
 
-`3bdf90f` - preserve comments and review markers across progressive loads.
+`fa13281` - ship progressive TUI loading and readable diff paths through PR #146.
 
 ## Next item
 
-Integrate progressive TUI loading through the repository PR workflow.
+Merge the docflow closeout, then resume the lowest-numbered queued item.

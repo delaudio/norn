@@ -1,7 +1,7 @@
 ---
 adr: 0006
 title: Support a terminal UI as a second local review interface
-status: Accepted
+status: Implemented
 date: 2026-07-23
 owner: default-agent
 supersedes:
@@ -27,10 +27,10 @@ share the same native services and product semantics instead of duplicating
 network clients, storing secrets differently, or publishing comments
 immediately.
 
-The implementation should also learn from the local Salieri Tracker reference:
-keep terminal rendering and layout testable, keep terminal raw-mode lifecycle
-small and robust, and suspend the terminal cleanly when launching external
-tools.
+Keep terminal rendering and layout testable, keep terminal raw-mode lifecycle
+small and robust, and restore terminal state on normal exit, interruption, and
+panic. Pull request diffs should remain native to the review workspace instead
+of requiring branch checkout or delegation to a separate git TUI.
 
 ## Capability statement
 
@@ -47,8 +47,8 @@ the desktop app, and preserves Lachesi's staged review workflow.
   diffs using the same provider data and credentials as the desktop app.
 - As a reviewer, I can stage review comments locally and explicitly publish
   them in a batch, matching the desktop review model.
-- As a reviewer, I can drop into an installed terminal git tool for local repo
-  work instead of Lachesi rebuilding a complete git TUI.
+- As a reviewer, I can inspect provider pull request diffs in a native terminal
+  view without checking out the source branch or changing my local worktree.
 - As a maintainer, I can test TUI layout and view state without a real terminal
   session or provider network calls.
 
@@ -67,8 +67,9 @@ the desktop app, and preserves Lachesi's staged review workflow.
    explicit batch publish action.
 6. Terminal rendering and layout have focused tests using a terminal test
    backend or equivalent non-interactive renderer.
-7. Launching external git tooling from the TUI suspends and restores terminal
-   state cleanly and does not require widening shipped Tauri capabilities.
+7. The native diff workflow does not check out pull request branches or widen
+   shipped Tauri capabilities, and the TUI restores terminal state on normal
+   exit, interruption, and panic.
 8. Starting AI review from the TUI skips local evidence analyzers because
    repository validation belongs to the development flow before Lachesi review.
 
@@ -78,7 +79,6 @@ the desktop app, and preserves Lachesi's staged review workflow.
   stable.
 - Replacing the Tauri desktop app or React webview.
 - Rebuilding the full feature set of `lazygit` inside Lachesi.
-- Supporting split diff rendering in the first TUI release.
 - Adding new provider credentials or token stores for the TUI.
 
 ## Open questions
@@ -100,7 +100,7 @@ the desktop app, and preserves Lachesi's staged review workflow.
 - https://github.com/lachesi-hq/lachesi/issues/82
 - https://github.com/lachesi-hq/lachesi/issues/83
 - https://github.com/lachesi-hq/lachesi/issues/84
-- `~/dev/current/salieri-tracker`
+- `../../src-tauri/src/tui/terminal.rs`
 
 ## Revision History
 
@@ -108,6 +108,7 @@ the desktop app, and preserves Lachesi's staged review workflow.
 |------|----------|--------|--------|
 | 2026-07-23 | r1 | default-agent | Accepted the terminal UI as a second local review interface. |
 | 2026-07-24 | r2 | default-agent | Made TUI AI review skip duplicate local analyzers. |
+| 2026-07-30 | r3 | default-agent | Aligned native and split diff workflows with the shipped implementation and marked the terminal UI capability implemented after PR #146. |
 
 ## Approvals
 
@@ -115,3 +116,4 @@ the desktop app, and preserves Lachesi's staged review workflow.
 |------|------|------|-----------|
 | Maintainer | fdg | 2026-07-23 | approved in chat |
 | Maintainer | fdg | 2026-07-24 | approved analyzer skip revision in chat |
+| Maintainer | fdg | 2026-07-30 | approved shipping through PR #146 |
