@@ -31,6 +31,6 @@
 
 - `../../adr/0009-terminal-image-diffs.md`
 - GitHub issue #127
-- `.docflow/plan/todo/0002-terminal-ui-foundation.md`
+- `./2026-07-30-terminal-ui-foundation.md`
 
 Shipped at HEAD `f50e5c88c9bfdcc61a51448bf6d9bb25f946889e` through PR #129.
