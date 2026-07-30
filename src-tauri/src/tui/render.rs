@@ -8,6 +8,7 @@ use ratatui::{
     },
 };
 use ratatui_image::Image as TerminalImage;
+use unicode_segmentation::UnicodeSegmentation;
 
 use super::image_diff::{ImageDiffState, ImageVersionState};
 use super::loading::LoadState;
@@ -492,6 +493,11 @@ fn render_diff_file_list(
             .skip(offset)
             .map(|(index, file)| {
                 let selected = index == selected_file.min(files.len().saturating_sub(1));
+                let change_count = format!(" +{}/-{}", file.additions, file.deletions);
+                let content_width = usize::from(area.width.saturating_sub(2));
+                let path_width = content_width
+                    .saturating_sub(2 + file.status_label().len() + 1 + change_count.len());
+                let display_path = compact_path(file.display_path(), path_width);
                 ListItem::new(Line::from(vec![
                     Span::styled(
                         if selected { "> " } else { "  " },
@@ -504,17 +510,14 @@ fn render_diff_file_list(
                     Span::styled(file.status_label(), file.status_style()),
                     Span::styled(" ", muted_style()),
                     Span::styled(
-                        file.display_path(),
+                        display_path,
                         if selected {
                             text_style().add_modifier(Modifier::BOLD)
                         } else {
                             text_style()
                         },
                     ),
-                    Span::styled(
-                        format!(" +{}/-{}", file.additions, file.deletions),
-                        muted_style(),
-                    ),
+                    Span::styled(change_count, muted_style()),
                 ]))
             })
             .collect()
@@ -1683,6 +1686,68 @@ fn diff_file_list_offset(file_count: usize, area_height: u16, selected_file: usi
     }
 }
 
+fn compact_path(path: &str, max_width: usize) -> String {
+    if max_width == 0 {
+        return String::new();
+    }
+    if Span::raw(path).width() <= max_width {
+        return path.to_string();
+    }
+
+    let components = path
+        .split('/')
+        .filter(|component| !component.is_empty())
+        .collect::<Vec<_>>();
+    let Some(filename) = components.last().copied() else {
+        return truncate_start(path, max_width);
+    };
+    let filename_width = Span::raw(filename).width();
+    if filename_width > max_width {
+        return truncate_start(filename, max_width);
+    }
+    if filename_width == max_width {
+        return filename.to_string();
+    }
+
+    let mut suffix = filename.to_string();
+    for component in components[..components.len().saturating_sub(1)]
+        .iter()
+        .rev()
+    {
+        let candidate = format!("…/{component}/{suffix}");
+        if Span::raw(candidate.as_str()).width() > max_width {
+            break;
+        }
+        suffix = format!("{component}/{suffix}");
+    }
+
+    let compact = format!("…/{suffix}");
+    if Span::raw(compact.as_str()).width() <= max_width {
+        compact
+    } else {
+        truncate_start(path, max_width)
+    }
+}
+
+fn truncate_start(value: &str, max_width: usize) -> String {
+    if max_width == 0 {
+        return String::new();
+    }
+    if Span::raw(value).width() <= max_width {
+        return value.to_string();
+    }
+
+    let mut suffix = String::new();
+    for grapheme in value.graphemes(true).rev() {
+        let candidate = format!("…{grapheme}{suffix}");
+        if Span::raw(candidate.as_str()).width() > max_width {
+            break;
+        }
+        suffix.insert_str(0, grapheme);
+    }
+    format!("…{suffix}")
+}
+
 fn style_diff_line(line: &str) -> Vec<Span<'static>> {
     if line.starts_with('+') && !line.starts_with("+++") {
         return vec![Span::styled(line.to_string(), success_style())];
@@ -2452,6 +2517,52 @@ mod tests {
             mouse_target(Rect::new(0, 0, 100, 24), 26, 19, state),
             Some(MouseTarget::PrFilter(PrListFilter::Merged))
         );
+    }
+
+    #[test]
+    fn compact_path_preserves_the_filename_and_nearest_directories() {
+        let path = "apps/procurement-frontend/src/app/dashboard/suppliers/SupplierDetail.tsx";
+
+        let compact = compact_path(path, 37);
+
+        assert!(compact.starts_with("…/"));
+        assert!(compact.ends_with("suppliers/SupplierDetail.tsx"));
+        assert!(Span::raw(compact.as_str()).width() <= 37);
+    }
+
+    #[test]
+    fn compact_path_truncates_a_filename_from_the_start_when_needed() {
+        let compact = compact_path("screenshots/SupplierDetailV2--Panoramica.png", 20);
+
+        assert!(compact.starts_with('…'));
+        assert!(compact.ends_with("Panoramica.png"));
+        assert!(Span::raw(compact.as_str()).width() <= 20);
+    }
+
+    #[test]
+    fn compact_path_preserves_a_filename_that_exactly_fits() {
+        let filename = "Supplier.tsx";
+
+        assert_eq!(
+            compact_path(
+                "dashboard/suppliers/Supplier.tsx",
+                Span::raw(filename).width()
+            ),
+            filename
+        );
+    }
+
+    #[test]
+    fn compact_path_does_not_split_unicode_graphemes() {
+        let compact = compact_path("screenshots/👩‍💻-supplier-review.png", 17);
+
+        assert!(!compact.contains('\u{200d}') || compact.contains("👩‍💻"));
+        assert!(Span::raw(compact.as_str()).width() <= 17);
+    }
+
+    #[test]
+    fn compact_path_leaves_short_paths_unchanged() {
+        assert_eq!(compact_path("src/App.tsx", 20), "src/App.tsx");
     }
 
     #[test]
