@@ -693,19 +693,7 @@ impl TuiApp {
             self.status = "No repositories configured".to_string();
             return;
         };
-        self.pr_request_id = 0;
-        self.ai_request_id = 0;
-        self.detail = None;
-        self.comments.clear();
-        self.diff = None;
-        self.active_ai_target = None;
-        self.ai_review_state = None;
-        self.ai_review_output = None;
-        self.drafts.clear();
-        self.composer = None;
-        self.detail_view = DetailView::PullRequest;
-        self.reset_detail_scrolls();
-        self.reset_diff_state();
+        self.clear_pr_context_for_repo_load();
         let provider = repo.provider;
         let workspace = repo.workspace.clone();
         let repo_name = repo.repo.clone();
@@ -726,11 +714,39 @@ impl TuiApp {
         );
     }
 
+    fn clear_pr_context_for_repo_load(&mut self) {
+        self.pr_request_id = 0;
+        self.ai_request_id = 0;
+        self.pull_requests.clear();
+        self.selected_pr = 0;
+        self.ai_reviewed_pr_ids.clear();
+        self.ai_review_running_pr_ids.clear();
+        self.detail = None;
+        self.comments.clear();
+        self.diff = None;
+        self.active_ai_target = None;
+        self.ai_review_state = None;
+        self.ai_review_output = None;
+        self.drafts.clear();
+        self.composer = None;
+        self.detail_view = DetailView::PullRequest;
+        self.detail_load = LoadState::Idle;
+        self.comments_load = LoadState::Idle;
+        self.diff_load = LoadState::Idle;
+        self.ai_review_load = LoadState::Idle;
+        self.reset_detail_scrolls();
+        self.reset_diff_state();
+    }
+
     fn load_selected_pr(&mut self) {
         self.load_selected_pr_for_view(DetailView::PullRequest);
     }
 
     fn load_selected_pr_for_view(&mut self, target_view: DetailView) {
+        if !matches!(self.pr_list_load, LoadState::Ready) {
+            self.status = "Wait for the pull request list to load".to_string();
+            return;
+        }
         let Some(repo) = self.repos.get(self.selected_repo) else {
             return;
         };
@@ -746,8 +762,12 @@ impl TuiApp {
         let workspace = repo.workspace.clone();
         let repo_name = repo.repo.clone();
         let pr_id = pr.id;
-        let target_changed =
-            self.active_ai_target.as_ref() != Some(&(workspace.clone(), repo_name.clone(), pr_id));
+        let target = (workspace.clone(), repo_name.clone(), pr_id);
+        if self.pr_load_in_flight_for(&target) {
+            self.status = "The selected pull request is already loading".to_string();
+            return;
+        }
+        let target_changed = self.active_ai_target.as_ref() != Some(&target);
         if target_changed {
             self.detail = None;
             self.comments.clear();
@@ -780,6 +800,13 @@ impl TuiApp {
             pr_id,
             self.ai_review_store.clone(),
         );
+    }
+
+    fn pr_load_in_flight_for(&self, target: &(String, String, u32)) -> bool {
+        self.active_ai_target.as_ref() == Some(target)
+            && [&self.detail_load, &self.comments_load, &self.diff_load]
+                .into_iter()
+                .any(LoadState::is_loading)
     }
 
     fn start_comment_composer(&mut self) {
@@ -1522,6 +1549,67 @@ mod tests {
 
         assert_eq!(app.pull_requests.len(), 1);
         assert_eq!(app.pull_requests[0].id, 7);
+    }
+
+    #[test]
+    fn repository_load_reset_discards_prs_and_markers_from_the_previous_target() {
+        let mut app = TuiApp::from_repos(vec![repo("current", "repo")]);
+        app.pull_requests = vec![pr(7, "Previous")];
+        app.selected_pr = 0;
+        app.ai_reviewed_pr_ids = vec![7];
+        app.ai_review_running_pr_ids = vec![7];
+        app.detail = Some(detail(7, "Previous"));
+        app.detail_load = LoadState::Loading;
+        app.comments_load = LoadState::Loading;
+        app.diff_load = LoadState::Loading;
+
+        app.clear_pr_context_for_repo_load();
+
+        assert!(app.pull_requests.is_empty());
+        assert!(app.ai_reviewed_pr_ids.is_empty());
+        assert!(app.ai_review_running_pr_ids.is_empty());
+        assert!(app.detail.is_none());
+        assert!(matches!(app.detail_load, LoadState::Idle));
+        assert!(matches!(app.comments_load, LoadState::Idle));
+        assert!(matches!(app.diff_load, LoadState::Idle));
+    }
+
+    #[test]
+    fn pr_load_rejects_a_list_that_is_not_ready() {
+        let mut app = TuiApp::from_repos(vec![repo("current", "repo")]);
+        app.pull_requests = vec![pr(7, "Stale")];
+        app.pr_list_load = LoadState::Loading;
+
+        app.load_selected_pr_for_view(DetailView::Diff);
+
+        assert_eq!(app.pr_request_id, 0);
+        assert_eq!(app.status, "Wait for the pull request list to load");
+    }
+
+    #[test]
+    fn pr_load_deduplicates_while_resources_are_in_flight() {
+        let mut app = TuiApp::from_repos(vec![repo("current", "repo")]);
+        app.pull_requests = vec![pr(7, "Loading")];
+        app.pr_list_load = LoadState::Ready;
+        app.detail_load = LoadState::Loading;
+        app.active_ai_target = Some(("current".to_string(), "repo".to_string(), 7));
+
+        app.load_selected_pr_for_view(DetailView::PullRequest);
+
+        assert_eq!(app.pr_request_id, 0);
+        assert_eq!(app.status, "The selected pull request is already loading");
+    }
+
+    #[test]
+    fn pr_load_allows_switching_away_from_an_in_flight_target() {
+        let mut app = TuiApp::from_repos(vec![repo("current", "repo")]);
+        app.pull_requests = vec![pr(7, "Loading"), pr(8, "Next")];
+        app.selected_pr = 1;
+        app.pr_list_load = LoadState::Ready;
+        app.detail_load = LoadState::Loading;
+        app.active_ai_target = Some(("current".to_string(), "repo".to_string(), 7));
+
+        assert!(!app.pr_load_in_flight_for(&("current".to_string(), "repo".to_string(), 8)));
     }
 
     #[test]
