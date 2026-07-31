@@ -8,10 +8,12 @@ If status files and git disagree, git is authoritative; correct this file.
 
 ## Active state
 
-- **Branch:** `docs/ship-tui-foundation`
-- **Active item:** Terminal UI foundation closeout after PR #146.
-- **Blockers:** none; use the available SSH key for signed commits.
-- **Branch-local work:** terminal UI foundation closeout only.
+- **Branch:** `feat/tui-side-by-side-image-diff`
+- **Active item:** side-by-side terminal image-diff capability.
+- **Blockers:** Lachesi and GitHub CLI authentication are required before the
+  mandatory review gate can publish this branch.
+- **Branch-local work:** accepted ADR, queued plan item, TUI renderer, and
+  focused tests are committed locally.
 
 ## Last shipped
 
@@ -19,4 +21,5 @@ If status files and git disagree, git is authoritative; correct this file.
 
 ## Next item
 
-Merge the docflow closeout, then resume the lowest-numbered queued item.
+Authenticate the review/publishing clients, then run the pre-push review and
+open a pull request for the accepted image-comparison plan item.

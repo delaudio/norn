@@ -2,7 +2,7 @@ use std::io::Cursor;
 
 use base64::{engine::general_purpose::STANDARD, Engine};
 use image::{DynamicImage, ImageFormat, ImageReader, Limits};
-use ratatui::layout::Rect;
+use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui_image::{
     picker::{Picker, ProtocolType},
     protocol::Protocol,
@@ -14,6 +14,7 @@ use crate::services::bitbucket::{PrFilePreview, MAX_PR_IMAGE_PREVIEW_BYTES};
 pub const MAX_IMAGE_DIMENSION: u32 = 8192;
 pub const MAX_IMAGE_PIXELS: u64 = 40_000_000;
 const MAX_IMAGE_DECODE_BYTES: u64 = MAX_IMAGE_PIXELS * 4 + 16 * 1024 * 1024;
+const MIN_COMPARISON_WIDTH: u16 = 80;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ImageSide {
@@ -126,6 +127,52 @@ pub struct ImageDiffState {
     pub new: Option<ImageVersionState>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ImageComparisonAreas {
+    pub base_label: Rect,
+    pub base_image: Rect,
+    pub changed_label: Rect,
+    pub changed_image: Rect,
+}
+
+fn comparison_areas(area: Rect) -> Option<ImageComparisonAreas> {
+    if area.width < MIN_COMPARISON_WIDTH || area.height < 2 {
+        return None;
+    }
+    let [base_column, gap, changed_column] = *Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Ratio(1, 2),
+            Constraint::Length(1),
+            Constraint::Ratio(1, 2),
+        ])
+        .split(area)
+    else {
+        return None;
+    };
+    let [base_label, base_image] = *Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(1), Constraint::Min(1)])
+        .split(base_column)
+    else {
+        return None;
+    };
+    let [changed_label, changed_image] = *Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(1), Constraint::Min(1)])
+        .split(changed_column)
+    else {
+        return None;
+    };
+    debug_assert_eq!(gap.width, 1);
+    Some(ImageComparisonAreas {
+        base_label,
+        base_image,
+        changed_label,
+        changed_image,
+    })
+}
+
 impl ImageDiffState {
     pub fn load(
         selected_file: usize,
@@ -157,6 +204,18 @@ impl ImageDiffState {
         }
     }
 
+    pub fn comparison_areas(&self, area: Rect) -> Option<ImageComparisonAreas> {
+        matches!(
+            (&self.old, &self.new),
+            (
+                Some(ImageVersionState::Ready(_)),
+                Some(ImageVersionState::Ready(_))
+            )
+        )
+        .then(|| comparison_areas(area))
+        .flatten()
+    }
+
     fn selected_mut(&mut self) -> Option<&mut ImageVersionState> {
         match self.selected_side {
             ImageSide::Old => self.old.as_mut(),
@@ -185,25 +244,38 @@ impl ImageDiffState {
         let Some(picker) = support.picker() else {
             return Ok(());
         };
+        if let Some(areas) = self.comparison_areas(area) {
+            if let Some(ImageVersionState::Ready(version)) = self.old.as_mut() {
+                prepare_version_protocol(version, picker, areas.base_image);
+            }
+            if let Some(ImageVersionState::Ready(version)) = self.new.as_mut() {
+                prepare_version_protocol(version, picker, areas.changed_image);
+            }
+            return Ok(());
+        }
         let Some(ImageVersionState::Ready(version)) = self.selected_mut() else {
             return Ok(());
         };
-        let protocol_area = Rect::new(0, 0, area.width.max(1), area.height.max(1));
-        if version.protocol_area == Some(protocol_area)
-            && (version.protocol.is_some() || version.protocol_error.is_some())
-        {
-            return Ok(());
-        }
-        version.protocol = None;
-        version.protocol_error = None;
-        version.protocol_area = Some(protocol_area);
-        match picker.new_protocol(version.image.clone(), protocol_area, Resize::Fit(None)) {
-            Ok(protocol) => version.protocol = Some(protocol),
-            Err(error) => {
-                version.protocol_error = Some(format!("Could not prepare terminal image: {error}"));
-            }
-        }
+        prepare_version_protocol(version, picker, area);
         Ok(())
+    }
+}
+
+fn prepare_version_protocol(version: &mut DecodedImageVersion, picker: &Picker, area: Rect) {
+    let protocol_area = Rect::new(0, 0, area.width.max(1), area.height.max(1));
+    if version.protocol_area == Some(protocol_area)
+        && (version.protocol.is_some() || version.protocol_error.is_some())
+    {
+        return;
+    }
+    version.protocol = None;
+    version.protocol_error = None;
+    version.protocol_area = Some(protocol_area);
+    match picker.new_protocol(version.image.clone(), protocol_area, Resize::Fit(None)) {
+        Ok(protocol) => version.protocol = Some(protocol),
+        Err(error) => {
+            version.protocol_error = Some(format!("Could not prepare terminal image: {error}"));
+        }
     }
 }
 
@@ -676,5 +748,45 @@ mod tests {
         assert!(matches!(state.new, Some(ImageVersionState::Ready(_))));
         assert!(state.toggle_side());
         assert_eq!(state.selected_side, ImageSide::Old);
+    }
+
+    #[test]
+    fn modified_images_prepare_both_versions_for_a_wide_comparison() {
+        let candidate = ImageDiffCandidate {
+            kind: ImageChangeKind::Modified,
+            old_path: Some("before.png".to_string()),
+            new_path: Some("after.png".to_string()),
+        };
+        let mut state =
+            ImageDiffState::load(2, candidate, |_side, path| Ok(png_preview(path, 4, 3)));
+        let mut picker = Picker::halfblocks();
+        picker.set_protocol_type(ProtocolType::Kitty);
+        let support = TerminalImageSupport::from_picker(picker);
+        let area = Rect::new(0, 0, 100, 12);
+
+        let areas = state.comparison_areas(area).expect("wide comparison areas");
+        assert_eq!(areas.base_label.width, 49);
+        assert_eq!(areas.changed_label.width, 50);
+        assert_eq!(areas.base_image.height, 11);
+        assert_eq!(areas.changed_image.height, 11);
+        state
+            .prepare_protocol(&support, area)
+            .expect("prepare both Kitty protocols");
+
+        assert!(matches!(
+            state.old,
+            Some(ImageVersionState::Ready(DecodedImageVersion {
+                protocol: Some(_),
+                ..
+            }))
+        ));
+        assert!(matches!(
+            state.new,
+            Some(ImageVersionState::Ready(DecodedImageVersion {
+                protocol: Some(_),
+                ..
+            }))
+        ));
+        assert!(state.comparison_areas(Rect::new(0, 0, 79, 12)).is_none());
     }
 }
