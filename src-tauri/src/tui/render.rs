@@ -651,6 +651,49 @@ fn render_image_diff_file(
         ]));
     }
 
+    if let Some(areas) = image.comparison_areas(image_area) {
+        lines.push(Line::from(vec![
+            Span::styled(
+                format!("[{}] ", image.candidate.kind.label().to_uppercase()),
+                accent_style().add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                "base and changed versions",
+                text_style().add_modifier(Modifier::BOLD),
+            ),
+        ]));
+        if let Some(version) = image.old.as_ref() {
+            lines.push(image_version_metadata(
+                "base",
+                version,
+                state.image_protocol,
+            ));
+        }
+        if let Some(version) = image.new.as_ref() {
+            lines.push(image_version_metadata(
+                "changed",
+                version,
+                state.image_protocol,
+            ));
+        }
+        frame.render_widget(Paragraph::new(lines).style(panel_style()), metadata_area);
+        frame.render_widget(
+            Paragraph::new("BASE").style(info_style().add_modifier(Modifier::BOLD)),
+            areas.base_label,
+        );
+        frame.render_widget(
+            Paragraph::new("CHANGED").style(info_style().add_modifier(Modifier::BOLD)),
+            areas.changed_label,
+        );
+        if let Some(version) = image.old.as_ref() {
+            render_image_version(frame, version, areas.base_image);
+        }
+        if let Some(version) = image.new.as_ref() {
+            render_image_version(frame, version, areas.changed_image);
+        }
+        return;
+    }
+
     if let Some(version) = image.selected() {
         lines.push(Line::from(vec![
             Span::styled(
@@ -712,24 +755,53 @@ fn render_image_diff_file(
     }
     frame.render_widget(Paragraph::new(lines).style(panel_style()), metadata_area);
 
-    match image.selected() {
-        Some(ImageVersionState::Ready(version)) => {
+    if let Some(version) = image.selected() {
+        render_image_version(frame, version, image_area);
+    }
+}
+
+fn image_version_metadata(
+    side: &str,
+    version: &ImageVersionState,
+    protocol: &str,
+) -> Line<'static> {
+    match version {
+        ImageVersionState::Ready(version) => Line::from(format!(
+            "{side}: {} | {}x{} | {} | {}",
+            version.format,
+            version.width,
+            version.height,
+            format_bytes(version.byte_size),
+            if version.protocol.is_some() {
+                protocol.to_string()
+            } else {
+                "metadata fallback".to_string()
+            }
+        )),
+        ImageVersionState::Failed(version) => {
+            Line::from(format!("{side}: metadata unavailable | {}", version.error))
+        }
+    }
+}
+
+fn render_image_version(frame: &mut Frame<'_>, version: &ImageVersionState, area: Rect) {
+    match version {
+        ImageVersionState::Ready(version) => {
             if let Some(protocol) = version.protocol.as_ref() {
-                frame.render_widget(TerminalImage::new(protocol), image_area);
+                frame.render_widget(TerminalImage::new(protocol), area);
             } else {
                 let fallback = version.protocol_error.as_deref().unwrap_or(
                     "This terminal has no supported inline image protocol. Metadata remains available.",
                 );
-                frame.render_widget(Paragraph::new(fallback).style(muted_style()), image_area);
+                frame.render_widget(Paragraph::new(fallback).style(muted_style()), area);
             }
         }
-        Some(ImageVersionState::Failed(_)) => {
+        ImageVersionState::Failed(_) => {
             frame.render_widget(
                 Paragraph::new("Image preview unavailable.").style(muted_style()),
-                image_area,
+                area,
             );
         }
-        None => {}
     }
 }
 
@@ -3100,5 +3172,85 @@ mod tests {
         assert!(text.contains("metadata unavailable"));
         assert!(text.contains("corrupt PNG"));
         assert!(text.contains("Image preview unavailable."));
+    }
+
+    #[test]
+    fn renders_wide_modified_images_with_base_and_changed_columns() {
+        use std::io::Cursor;
+
+        use crate::services::bitbucket::PrFilePreview;
+        use crate::tui::image_diff::{ImageChangeKind, ImageDiffCandidate, ImageSide};
+        use base64::{engine::general_purpose::STANDARD, Engine};
+        use image::{DynamicImage, ImageFormat};
+
+        let backend = TestBackend::new(220, 24);
+        let mut terminal = Terminal::new(backend).expect("terminal");
+        let mut encoded = Cursor::new(Vec::new());
+        DynamicImage::new_rgba8(1, 1)
+            .write_to(&mut encoded, ImageFormat::Png)
+            .expect("encode png");
+        let bytes = encoded.into_inner();
+        let data_url = format!("data:image/png;base64,{}", STANDARD.encode(&bytes));
+        let size = bytes.len();
+        let candidate = ImageDiffCandidate {
+            kind: ImageChangeKind::Modified,
+            old_path: Some("public/before.png".to_string()),
+            new_path: Some("public/after.png".to_string()),
+        };
+        let image = ImageDiffState::load(0, candidate, |_side, path| {
+            Ok(PrFilePreview {
+                path: path.to_string(),
+                mime_type: "image/png".to_string(),
+                data_url: data_url.clone(),
+                size,
+            })
+        });
+        assert!(image
+            .comparison_areas(diff_image_area_for_area(Rect::new(0, 0, 220, 24), false))
+            .is_some());
+
+        terminal
+            .draw(|frame| {
+                render(
+                    frame,
+                    TuiState {
+                        repos: &[],
+                        selected_repo: 0,
+                        focus: FocusPane::Diff,
+                        pull_requests: &[],
+                        pr_filter: PrListFilter::Open,
+                        selected_pr: 0,
+                        detail: None,
+                        comments: &[],
+                        ai_reviewed_pr_ids: &[],
+                        ai_review_running_pr_ids: &[],
+                        diff: Some("Binary files differ"),
+                        drafts: &[],
+                        composer: None,
+                        ai_review: None,
+                        ai_review_output: None,
+                        detail_view: DetailView::Diff,
+                        detail_scroll: 0,
+                        ai_review_scroll: 0,
+                        diff_scroll: 0,
+                        selected_diff_file: 0,
+                        diff_view_mode: DiffViewMode::Unified,
+                        rendered_diff_output: None,
+                        image_diff: Some(&image),
+                        image_protocol: "unsupported",
+                        loading: LoadingView::idle(),
+                        error: None,
+                        status: "Loaded",
+                    },
+                );
+            })
+            .expect("draw");
+
+        let text = buffer_text(&terminal);
+        assert!(text.contains("BASE"));
+        assert!(text.contains("CHANGED"));
+        assert!(text.contains("base: PNG"));
+        assert!(text.contains("changed: PNG"));
+        assert_eq!(image.selected_side, ImageSide::New);
     }
 }
