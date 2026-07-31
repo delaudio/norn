@@ -1,7 +1,7 @@
 ---
 adr: 0010
 title: Compare modified image versions side by side in the terminal UI
-status: Proposed
+status: Accepted
 date: 2026-07-31
 owner: default-agent
 supersedes:
@@ -74,8 +74,10 @@ added or deleted images.
 | Date | Revision | Author | Change |
 |------|----------|--------|--------|
 | 2026-07-31 | r1 | default-agent | Initial draft. |
+| 2026-07-31 | r2 | default-agent | Accepted for TUI-only implementation. |
 
 ## Approvals
 
 | Role | Name | Date | Signature |
 |------|------|------|-----------|
+| Maintainer | fdg | 2026-07-31 | approved through implementation instruction |

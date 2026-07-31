@@ -19,4 +19,4 @@ If status files and git disagree, git is authoritative; correct this file.
 
 ## Next item
 
-Accept the image-comparison decision, then implement and validate the queued item.
+Implement and validate the accepted image-comparison plan item.
