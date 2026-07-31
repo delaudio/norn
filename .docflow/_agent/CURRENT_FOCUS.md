@@ -10,8 +10,10 @@ If status files and git disagree, git is authoritative; correct this file.
 
 - **Branch:** `feat/tui-side-by-side-image-diff`
 - **Active item:** side-by-side terminal image-diff capability.
-- **Blockers:** none.
-- **Branch-local work:** ADR, plan item, TUI renderer, and focused tests only.
+- **Blockers:** Lachesi and GitHub CLI authentication are required before the
+  mandatory review gate can publish this branch.
+- **Branch-local work:** accepted ADR, queued plan item, TUI renderer, and
+  focused tests are committed locally.
 
 ## Last shipped
 
@@ -19,4 +21,5 @@ If status files and git disagree, git is authoritative; correct this file.
 
 ## Next item
 
-Implement and validate the accepted image-comparison plan item.
+Authenticate the review/publishing clients, then run the pre-push review and
+open a pull request for the accepted image-comparison plan item.
