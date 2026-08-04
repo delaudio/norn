@@ -20,7 +20,7 @@ describe("reviewMetricsService", () => {
       fromMs: 1_000,
       toMs: 2_000,
     };
-    vi.mocked(tauriCall).mockResolvedValue({ schemaVersion: "lachesi.review-effectiveness.v1" });
+    vi.mocked(tauriCall).mockResolvedValue({ schemaVersion: "norn.review-effectiveness.v1" });
 
     await getReviewEffectivenessMetrics(filter);
 

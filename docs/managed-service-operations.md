@@ -1,6 +1,6 @@
 # Managed Service Operations
 
-This document defines pilot operating targets for an optional managed Lachesi
+This document defines pilot operating targets for an optional managed Norn
 team service. It is not a contractual SLA and does not change the independent
 desktop, TUI, or headless review paths.
 
@@ -17,13 +17,13 @@ backups, incident coordination, and provider integration health. Customers own
 repository access, provider installation approval, policy selection, and the
 accuracy of organization membership. Self-hosted operators own every runtime,
 backup, upgrade, monitoring, provider credential, and incident-response task;
-Lachesi supplies the documented service artifacts only.
+Norn supplies the documented service artifacts only.
 
 ## Pilot objectives
 
 | Objective | Target | Measurement source and reporting window | Dependency boundary |
 |---|---|---|---|
-| Control-plane availability | 99.5% monthly | Synthetic `/readyz` probes, excluding announced maintenance; monthly report | Lachesi service only |
+| Control-plane availability | 99.5% monthly | Synthetic `/readyz` probes, excluding announced maintenance; monthly report | Norn service only |
 | Webhook acceptance | 99% accepted or explicitly rejected within 60 seconds | Ingress receipt and durable-job timestamps; rolling 7 days | Git provider delivery is measured separately |
 | Review start | 95% of eligible jobs claimed within 10 minutes | Durable job `created_at_ms` to `started_at_ms`; rolling 7 days | Queue/worker capacity; source and AI availability reported separately |
 | Review completion | 95% of claimed jobs terminal within 30 minutes | Durable job lifecycle timestamps; rolling 7 days | AI-provider execution and Git-provider reads separately labelled |
@@ -39,14 +39,14 @@ Severity 1 isolation, credential, or data-loss incident.
 ## Provider dependencies
 
 Git providers and AI providers are external dependencies and are never counted
-as Lachesi control-plane availability. The status page shows them independently:
+as Norn control-plane availability. The status page shows them independently:
 
 - Git-provider degradation: signature verification, webhook delivery, pull
   request metadata, source retrieval, and comment publication may be delayed.
 - AI-provider degradation: accepted jobs remain durable and use the bounded
   retry/dead-letter policy; no result is fabricated or published.
 
-Reports distinguish a Lachesi runtime failure from a provider response,
+Reports distinguish a Norn runtime failure from a provider response,
 authentication, rate-limit, or model-execution failure using the operational
 telemetry counters and durable job error class.
 

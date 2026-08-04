@@ -10,7 +10,7 @@ private repository data, or local machine paths.
 
 ## Secret Handling
 
-Lachesi is a local desktop application. Repository credentials and integration
+Norn is a local desktop application. Repository credentials and integration
 tokens should stay in the operating system keychain or environment variables;
 they must not be committed to repository config, examples, or test fixtures.
 

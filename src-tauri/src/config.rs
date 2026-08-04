@@ -1,9 +1,10 @@
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-const APP_DIR: &str = "lachesi";
+const APP_DIR: &str = "norn";
+const LEGACY_APP_DIR: &str = "lachesi";
 const CONFIG_FILE: &str = "settings.json";
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -139,14 +140,51 @@ fn config_path() -> Result<PathBuf, String> {
     Ok(config_dir()?.join(CONFIG_FILE))
 }
 
+fn legacy_config_path() -> Result<PathBuf, String> {
+    let mut dir =
+        dirs::config_dir().ok_or_else(|| "could not resolve config directory".to_string())?;
+    dir.push(LEGACY_APP_DIR);
+    Ok(dir.join(CONFIG_FILE))
+}
+
+fn resolve_read_path(canonical: &Path, legacy: &Path) -> PathBuf {
+    if canonical.exists() {
+        return canonical.to_path_buf();
+    }
+    if legacy.is_file() {
+        let migration =
+            crate::runtime_identity::migrate_file_atomically(legacy, canonical, |bytes| {
+                serde_json::from_slice::<AppConfig>(bytes)
+                    .map(|_| ())
+                    .map_err(|error| error.to_string())
+            });
+        match migration {
+            Ok(_) if canonical.exists() => return canonical.to_path_buf(),
+            Ok(_) => {}
+            Err(error) => eprintln!(
+                "Norn could not migrate settings to {}: {error}. The legacy settings at {} remain usable.",
+                canonical.display(),
+                legacy.display()
+            ),
+        }
+        return legacy.to_path_buf();
+    }
+    canonical.to_path_buf()
+}
+
+fn load_from_paths(canonical: &Path, legacy: &Path) -> AppConfig {
+    let path = resolve_read_path(canonical, legacy);
+    fs::read_to_string(path)
+        .ok()
+        .and_then(|contents| serde_json::from_str(&contents).ok())
+        .unwrap_or_default()
+}
+
 /// Read config from disk, migrating the legacy single-repo shape if present.
 pub fn load() -> AppConfig {
-    let mut cfg = match config_path() {
-        Ok(path) => match fs::read_to_string(&path) {
-            Ok(contents) => serde_json::from_str(&contents).unwrap_or_default(),
-            Err(_) => AppConfig::default(),
-        },
-        Err(_) => AppConfig::default(),
+    let mut cfg = match (config_path(), legacy_config_path()) {
+        (Ok(canonical), Ok(legacy)) => load_from_paths(&canonical, &legacy),
+        _ => AppConfig::default(),
     };
 
     if cfg.repos.is_empty() {
@@ -176,7 +214,8 @@ pub fn save(cfg: &AppConfig) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{AiProvider, AppConfig, ReviewProvider};
+    use super::{load_from_paths, AiProvider, AppConfig, ReviewProvider};
+    use std::fs;
 
     #[test]
     fn serializes_codex_provider_settings_in_local_config_shape() {
@@ -213,5 +252,48 @@ mod tests {
 
         let parsed: AppConfig = serde_json::from_str(&json).expect("config should deserialize");
         assert_eq!(parsed.automatic_sync_interval_seconds, Some(300));
+    }
+
+    #[test]
+    fn load_migrates_legacy_settings_once_and_preserves_the_source() {
+        let root = tempfile::tempdir().expect("tempdir");
+        let legacy = root.path().join("lachesi/settings.json");
+        let canonical = root.path().join("norn/settings.json");
+        fs::create_dir_all(legacy.parent().expect("legacy parent")).expect("legacy directory");
+        fs::write(
+            &legacy,
+            r#"{"defaultDiffView":"split","theme":"light","repos":[]}"#,
+        )
+        .expect("legacy settings");
+
+        let first = load_from_paths(&canonical, &legacy);
+        let second = load_from_paths(&canonical, &legacy);
+
+        assert_eq!(first.default_diff_view, "split");
+        assert_eq!(second.theme, "light");
+        assert!(legacy.exists());
+        assert!(canonical.exists());
+    }
+
+    #[test]
+    fn canonical_settings_take_precedence_over_legacy_settings() {
+        let root = tempfile::tempdir().expect("tempdir");
+        let legacy = root.path().join("lachesi/settings.json");
+        let canonical = root.path().join("norn/settings.json");
+        fs::create_dir_all(legacy.parent().expect("legacy parent")).expect("legacy directory");
+        fs::create_dir_all(canonical.parent().expect("canonical parent"))
+            .expect("canonical directory");
+        fs::write(
+            &legacy,
+            r#"{"defaultDiffView":"unified","theme":"legacy","repos":[]}"#,
+        )
+        .expect("legacy settings");
+        fs::write(
+            &canonical,
+            r#"{"defaultDiffView":"split","theme":"canonical","repos":[]}"#,
+        )
+        .expect("canonical settings");
+
+        assert_eq!(load_from_paths(&canonical, &legacy).theme, "canonical");
     }
 }

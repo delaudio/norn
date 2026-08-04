@@ -186,7 +186,7 @@ fn launch_terminal(
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis())
         .unwrap_or(0);
-    let script_path = std::env::temp_dir().join(format!("lachesi-review-{ts}.command"));
+    let script_path = std::env::temp_dir().join(format!("norn-review-{ts}.command"));
     fs::write(&script_path, script).map_err(|e| e.to_string())?;
 
     #[cfg(unix)]
@@ -285,7 +285,7 @@ pub async fn launch_claude_review(
             .unwrap_or(0);
         let tmp = std::env::temp_dir();
 
-        let prompt_path = tmp.join(format!("lachesi-review-{ts}.md"));
+        let prompt_path = tmp.join(format!("norn-review-{ts}.md"));
         fs::write(&prompt_path, &payload).map_err(|e| e.to_string())?;
 
         launch_with_review_terminal(

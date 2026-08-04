@@ -10,7 +10,8 @@ use sha2::{Digest, Sha256};
 use crate::review_storage::{self, DB_FILE};
 
 const MANIFEST_FILE: &str = "manifest.json";
-const BACKUP_DATABASE_FILE: &str = "lachesi.sqlite3";
+const BACKUP_DATABASE_FILE: &str = "norn.sqlite3";
+const LEGACY_BACKUP_DATABASE_FILE: &str = "lachesi.sqlite3";
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -54,7 +55,10 @@ pub fn restore(source: &Path, destination_data_dir: &Path) -> Result<(), String>
         return Err("Restore destination must be an empty deployment data directory".to_string());
     }
     let manifest = read_manifest(source)?;
-    if manifest.schema_version != "v1" || manifest.database_file != BACKUP_DATABASE_FILE {
+    if manifest.schema_version != "v1"
+        || ![BACKUP_DATABASE_FILE, LEGACY_BACKUP_DATABASE_FILE]
+            .contains(&manifest.database_file.as_str())
+    {
         return Err("Backup archive format is incompatible".to_string());
     }
     let database = source.join(&manifest.database_file);
@@ -104,8 +108,8 @@ mod tests {
     fn backup_round_trip_restores_durable_cursor_and_rejects_tampering() {
         let _lock = review_storage::TEST_DATA_DIR_ENV_LOCK.lock().expect("lock");
         let source = tempfile::tempdir().expect("source");
-        let previous = std::env::var_os("LACHESI_REVIEW_DATA_DIR");
-        std::env::set_var("LACHESI_REVIEW_DATA_DIR", source.path());
+        let previous = std::env::var_os("NORN_REVIEW_DATA_DIR");
+        std::env::set_var("NORN_REVIEW_DATA_DIR", source.path());
         let identity = ReviewCursorIdentity {
             tenant_id: "tenant-acme".to_string(),
             provider: PullRequestReviewEventProvider::Github,
@@ -130,7 +134,7 @@ mod tests {
         let destination = tempfile::tempdir().expect("destination parent");
         let restore_dir = destination.path().join("data");
         restore(&archive, &restore_dir).expect("restore");
-        std::env::set_var("LACHESI_REVIEW_DATA_DIR", &restore_dir);
+        std::env::set_var("NORN_REVIEW_DATA_DIR", &restore_dir);
         assert!(matches!(
             review_storage::get_review_cursor(&identity).expect("cursor"),
             ReviewCursorState::Reviewed(_)
@@ -139,8 +143,8 @@ mod tests {
         let second = destination.path().join("second");
         assert!(restore(&archive, &second).is_err());
         match previous {
-            Some(value) => std::env::set_var("LACHESI_REVIEW_DATA_DIR", value),
-            None => std::env::remove_var("LACHESI_REVIEW_DATA_DIR"),
+            Some(value) => std::env::set_var("NORN_REVIEW_DATA_DIR", value),
+            None => std::env::remove_var("NORN_REVIEW_DATA_DIR"),
         }
     }
 }

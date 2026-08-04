@@ -32,28 +32,29 @@ that integrations can use to skip nested review enforcement.
 
 ## Capability statement
 
-Lachesi will expose a non-interactive `lachesi review` CLI that reviews local
+Norn exposes a non-interactive `norn review` CLI that reviews local
 working-tree, branch, or provider pull-request changes through shared native
 review services, emits stable human- and machine-readable results, and can be
 orchestrated safely by coding agents and CI.
 
 ## User stories / scenarios
 
-- As a developer using Codex, I can run Lachesi after a task and receive
+- As a developer using Codex, I can run Norn after a task and receive
   structured findings for the changes Codex just made.
 - As a CI maintainer, I can fail a job only when findings meet an explicit
   severity threshold.
 - As a reviewer, I can inspect Markdown output locally without launching the
   desktop app or terminal UI.
 - As an automation author, I can enforce a final review without recursively
-  launching nested Lachesi reviews.
+  launching nested Norn reviews.
 
 ## Acceptance criteria
 
-1. `lachesi review` runs without initializing the Tauri application runtime and
+1. `norn review` runs without initializing the Tauri application runtime and
    supports Markdown and JSON output. It uses ephemeral writable storage by
    default so sandboxed agents do not need access to the desktop database;
-   explicit `LACHESI_DATA_DIR` configuration remains respected.
+   explicit `NORN_DATA_DIR` configuration remains respected, with
+   `LACHESI_DATA_DIR` accepted only as a compatibility fallback.
 2. Local working-tree review includes staged changes, unstaged changes, and
    non-sensitive untracked text files without modifying the repository.
    Potentially sensitive untracked paths are skipped with an explicit warning.
@@ -68,8 +69,9 @@ orchestrated safely by coding agents and CI.
    private temporary storage as its working directory, disables Claude
    repository tools, ignores repository-owned Codex configuration and rules,
    and instructs the reviewer to use only the supplied payload. A
-   `LACHESI_REVIEW_CHILD` environment marker prevents skills or hooks from
-   recursively enforcing another review.
+   `NORN_REVIEW_CHILD` environment marker prevents skills or hooks from
+   recursively enforcing another review; integrations also recognize the
+   legacy `LACHESI_REVIEW_CHILD` marker during the compatibility window.
 6. JSON output uses the existing structured review finding semantics, never
    serializes credential sources or raw evidence payloads, and documents that
    summaries and findings can reflect content from the reviewed diff or model.
@@ -115,6 +117,7 @@ orchestrated safely by coding agents and CI.
 | 2026-07-27 | r5 | default-agent | Scoped the machine-output secrecy guarantee to credential sources and raw evidence. |
 | 2026-07-27 | r6 | default-agent | Isolated headless provider execution from the reviewed checkout. |
 | 2026-07-27 | r7 | default-agent | Marked the headless review capability implemented after PR #115 shipped. |
+| 2026-08-04 | r8 | codex | Adopted the canonical Norn CLI, data environment, and recursion marker names with legacy input compatibility. |
 
 ## Approvals
 
@@ -126,3 +129,4 @@ orchestrated safely by coding agents and CI.
 | Maintainer | fdg | 2026-07-27 | approved autonomous issue remediation in chat |
 | Maintainer | fdg | 2026-07-27 | approved autonomous security remediation in chat |
 | Maintainer | fdg | 2026-07-27 | approved autonomous completion and issue progression in chat |
+| Maintainer | fdg | 2026-08-04 | approved through autonomous Norn issue-completion instruction |

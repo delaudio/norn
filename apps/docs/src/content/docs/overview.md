@@ -1,9 +1,9 @@
 ---
 title: Overview
-description: What Lachesi is and how it fits into a review workflow.
+description: What Norn is and how it fits into a review workflow.
 ---
 
-Lachesi is an open-source, local-first review workspace for pull requests across Bitbucket Cloud and GitHub.
+Norn is an open-source, local-first review workspace for pull requests across Bitbucket Cloud and GitHub.
 
 It keeps the code host as the source of truth, while moving high-context review work into a local desktop workspace. The app is built for reviewers who need to inspect diffs, understand branch state, run AI-assisted reviews, curate findings, and decide what is safe to publish.
 
@@ -20,7 +20,7 @@ It keeps the code host as the source of truth, while moving high-context review 
 
 ## Local-First Model
 
-Lachesi keeps credentials and review state local:
+Norn keeps credentials and review state local:
 
 - provider tokens are stored in the local credentials layer;
 - non-secret settings are stored in the OS config directory;

@@ -21,7 +21,7 @@ and the repository is currently enrolled for the tenant.
 
 1. Start installation with an opaque, URL-safe state value bound to the tenant.
 2. Complete the GitHub installation and fetch the repositories available to it.
-3. Explicitly select one or more repositories. Lachesi configures delivery
+3. Explicitly select one or more repositories. Norn configures delivery
    only for those selected repositories.
 4. Store the tenant id, installation id, organization login, and selected
    repository ids locally. Credentials remain with GitHub and are resolved only

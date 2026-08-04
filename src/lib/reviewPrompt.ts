@@ -1,4 +1,5 @@
 import defaultReviewPrompt from "@/lib/defaultReviewPrompt.md?raw";
+import { type KeyValueStorage, readMigratedStorageValue } from "@/lib/storageMigration";
 import { tauriCall } from "@/lib/tauri";
 import type { RepoReviewConfigLoadResult } from "@/types";
 
@@ -6,22 +7,36 @@ import type { RepoReviewConfigLoadResult } from "@/types";
 export const DEFAULT_REVIEW_PROMPT = defaultReviewPrompt.trim();
 
 function key(repoKey: string): string {
+  return `norn.reviewPrompt.v1.${repoKey}`;
+}
+
+function legacyKey(repoKey: string): string {
   return `lachesi.reviewPrompt.${repoKey}`;
 }
 
 /** The raw stored prompt for a repo (empty string if none set). */
-export function getReviewPrompt(repoKey: string): string {
+export function getReviewPrompt(repoKey: string, storage?: KeyValueStorage | null): string {
   try {
-    return localStorage.getItem(key(repoKey)) ?? "";
+    const activeStorage =
+      storage === undefined ? (typeof localStorage === "undefined" ? null : localStorage) : storage;
+    if (!activeStorage) return "";
+    return readMigratedStorageValue(activeStorage, key(repoKey), legacyKey(repoKey)) ?? "";
   } catch {
     return "";
   }
 }
 
-export function setReviewPrompt(repoKey: string, text: string): void {
+export function setReviewPrompt(
+  repoKey: string,
+  text: string,
+  storage?: KeyValueStorage | null,
+): void {
   try {
-    if (text.trim()) localStorage.setItem(key(repoKey), text);
-    else localStorage.removeItem(key(repoKey));
+    const activeStorage =
+      storage === undefined ? (typeof localStorage === "undefined" ? null : localStorage) : storage;
+    if (!activeStorage) return;
+    if (text.trim()) activeStorage.setItem(key(repoKey), text);
+    else activeStorage.setItem(key(repoKey), "");
   } catch {
     // ignore storage failures
   }

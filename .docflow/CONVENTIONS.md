@@ -2,9 +2,9 @@
 
 ## Project
 
-Project name: Lachesi.
+Project name: Norn.
 
-Lachesi is an open-source, local-first review workspace for pull requests
+Norn is an open-source, local-first review workspace for pull requests
 across Bitbucket Cloud and GitHub.
 
 Artefact root: `.docflow/` - `adr/`, `plan/`, `INDEX.md`, and this file live
@@ -81,11 +81,12 @@ ADR catalogue must never appear in any string the product emits to users: UI
 copy, API response bodies, error messages, customer-visible log lines, public
 documentation, release notes, marketing copy, or support communications.
 
-Lachesi has one product-specific exception: it may document and implement a
-generic `.lachesi.yaml` policy-source type named `adr`, because reviewing
+Norn has one product-specific exception: it may document and implement a
+generic `.norn.yaml` policy-source type named `adr`, because reviewing
 external repositories that keep architecture records is part of the product
-model. That exception does not allow user-facing references to this repository's
-internal catalogue, internal ADR numbers, or internal ADR titles.
+model. The legacy `.lachesi.yaml` name remains a fallback-only compatibility
+input. That exception does not allow user-facing references to this
+repository's internal catalogue, internal ADR numbers, or internal ADR titles.
 
 Allowed references:
 

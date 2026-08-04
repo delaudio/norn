@@ -354,7 +354,7 @@ fn policy_resolution_audit_event(
 #[derive(Debug, Clone, PartialEq)]
 pub struct OrganizationPolicyResolutionInput {
     pub built_in: RepoReviewConfig,
-    /// Parsed JSON object representing repository-owned `.lachesi` policy.
+    /// Parsed JSON object representing repository-owned `.norn` policy.
     pub repository: Option<Value>,
     /// Parsed JSON object representing non-committed local overrides.
     pub local_overrides: Option<Value>,
@@ -374,7 +374,11 @@ pub struct ResolvedOrganizationPolicy {
 }
 
 pub fn organization_policy_is_configured() -> bool {
-    std::env::var_os("LACHESI_ORGANIZATION_POLICY_CONFIG").is_some()
+    crate::runtime_identity::env_var_os(
+        "NORN_ORGANIZATION_POLICY_CONFIG",
+        "LACHESI_ORGANIZATION_POLICY_CONFIG",
+    )
+    .is_some()
 }
 
 pub fn resolve_configured_organization_policy(
@@ -383,13 +387,16 @@ pub fn resolve_configured_organization_policy(
     audit: Option<&dyn OrganizationPolicyAuditSink>,
     now_ms: u64,
 ) -> Result<Option<ResolvedOrganizationPolicy>, OrganizationPolicyResolutionError> {
-    let Some(config_path) = std::env::var_os("LACHESI_ORGANIZATION_POLICY_CONFIG") else {
+    let Some(config_path) = crate::runtime_identity::env_var_os(
+        "NORN_ORGANIZATION_POLICY_CONFIG",
+        "LACHESI_ORGANIZATION_POLICY_CONFIG",
+    ) else {
         return Ok(None);
     };
     let config_path = validate_organization_policy_path(
         repo_path,
         PathBuf::from(config_path).as_path(),
-        "LACHESI_ORGANIZATION_POLICY_CONFIG",
+        "NORN_ORGANIZATION_POLICY_CONFIG",
     )?;
     let contents = fs::read_to_string(&config_path).map_err(|error| {
         OrganizationPolicyResolutionError::InvalidConfiguration(format!(

@@ -1,6 +1,6 @@
 # Review quality evaluation
 
-`lachesi evaluate` evaluates a versioned, sanitized corpus without contacting a
+`norn evaluate` evaluates a versioned, sanitized corpus without contacting a
 provider, an AI model, or a customer repository. It reads checked-in review
 snapshots and expected results, emits JSON, and exits with status `1` if the
 explicit baseline is not met.
@@ -25,7 +25,7 @@ and average duration.
 To write a result artifact for CI or comparison:
 
 ```sh
-lachesi evaluate --output /tmp/review-evaluation.json
+norn evaluate --output /tmp/review-evaluation.json
 ```
 
 Use `--corpus` and `--baseline` to evaluate a proposed new corpus version.

@@ -239,8 +239,8 @@ policy:
       severity: medium
       paths:
         include:
-          - ".lachesi.yaml"
-          - ".lachesi.local.yaml"
+          - ".norn.yaml"
+          - ".norn.local.yaml"
           - "examples/**/*.yaml"
       instruction: >
         Analyzer commands should be deterministic local checks, not networked

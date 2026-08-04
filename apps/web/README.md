@@ -1,6 +1,6 @@
-# Lachesi Web
+# Norn Web
 
-Minimal Astro website for Lachesi.
+Minimal Astro website for Norn.
 
 ## Development
 

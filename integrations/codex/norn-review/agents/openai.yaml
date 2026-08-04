@@ -1,0 +1,7 @@
+interface:
+  display_name: "Norn Review"
+  short_description: "Review code changes with Norn before completion or push"
+  default_prompt: "Use $norn-review to review code changes before completing this task or pushing a branch."
+
+policy:
+  allow_implicit_invocation: true

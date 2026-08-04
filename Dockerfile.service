@@ -1,23 +1,40 @@
-FROM rust:1.89-bookworm AS build
+FROM rust:1.94-bookworm AS build
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        libayatana-appindicator3-dev \
+        librsvg2-dev \
+        libwebkit2gtk-4.1-dev \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /build/src-tauri
 COPY src-tauri/Cargo.toml src-tauri/Cargo.lock ./
 COPY src-tauri/src ./src
 COPY src-tauri/build.rs ./build.rs
 COPY src-tauri/tauri.conf.json ./tauri.conf.json
-RUN cargo build --locked --release --bin lachesi
+COPY src-tauri/icons ./icons
+COPY src/lib/defaultReviewPrompt.md /build/src/lib/defaultReviewPrompt.md
+RUN cargo build --locked --release --bin norn --bin lachesi
 
 FROM debian:bookworm-slim
 
-RUN groupadd --gid 10001 lachesi \
-    && useradd --uid 10001 --gid lachesi --create-home --home-dir /var/lib/lachesi lachesi
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        libayatana-appindicator3-1 \
+        librsvg2-2 \
+        libwebkit2gtk-4.1-0 \
+    && rm -rf /var/lib/apt/lists/* \
+    && groupadd --gid 10001 norn \
+    && useradd --uid 10001 --gid norn --create-home --home-dir /var/lib/norn norn
 
+COPY --from=build /build/src-tauri/target/release/norn /usr/local/bin/norn
 COPY --from=build /build/src-tauri/target/release/lachesi /usr/local/bin/lachesi
 
-USER lachesi
-ENV LACHESI_SERVICE_DATA_DIR=/var/lib/lachesi
-ENV LACHESI_SERVICE_BIND_ADDR=0.0.0.0:8080
-VOLUME ["/var/lib/lachesi"]
+USER norn
+ENV NORN_SERVICE_DATA_DIR=/var/lib/norn
+ENV NORN_SERVICE_BIND_ADDR=0.0.0.0:8080
+VOLUME ["/var/lib/norn"]
 EXPOSE 8080
 
-ENTRYPOINT ["lachesi", "service", "run"]
+ENTRYPOINT ["norn"]
+CMD ["service", "run"]

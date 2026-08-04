@@ -1177,7 +1177,15 @@ struct ParsedReviewResource {
     summary: Option<String>,
 }
 
-const STRUCTURED_REVIEW_SCHEMA_VERSION: &str = "lachesi.review.v1";
+const STRUCTURED_REVIEW_SCHEMA_VERSION: &str = "norn.review.v1";
+const LEGACY_STRUCTURED_REVIEW_SCHEMA_VERSION: &str = "lachesi.review.v1";
+
+fn is_supported_structured_review_schema(schema_version: &str) -> bool {
+    matches!(
+        schema_version,
+        STRUCTURED_REVIEW_SCHEMA_VERSION | LEGACY_STRUCTURED_REVIEW_SCHEMA_VERSION
+    )
+}
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -1298,7 +1306,9 @@ fn strip_structured_review_json_block(markdown: &str) -> String {
         if in_json {
             if trimmed.starts_with("```") {
                 let candidate = block.join("\n");
-                if !candidate.contains(STRUCTURED_REVIEW_SCHEMA_VERSION) {
+                if !candidate.contains(STRUCTURED_REVIEW_SCHEMA_VERSION)
+                    && !candidate.contains(LEGACY_STRUCTURED_REVIEW_SCHEMA_VERSION)
+                {
                     output.append(&mut pending_fence);
                     output.append(&mut block);
                     output.push(line.to_string());
@@ -1678,10 +1688,12 @@ fn parse_structured_review_json_block(
                 let candidate = block.join("\n");
                 block.clear();
                 in_json = false;
-                if candidate.contains(STRUCTURED_REVIEW_SCHEMA_VERSION) {
+                if candidate.contains(STRUCTURED_REVIEW_SCHEMA_VERSION)
+                    || candidate.contains(LEGACY_STRUCTURED_REVIEW_SCHEMA_VERSION)
+                {
                     let parsed: StructuredReviewOutput = serde_json::from_str(&candidate)
                         .map_err(|error| format!("Invalid structured AI review JSON: {error}"))?;
-                    if parsed.schema_version != STRUCTURED_REVIEW_SCHEMA_VERSION {
+                    if !is_supported_structured_review_schema(&parsed.schema_version) {
                         return Err(format!(
                             "Unsupported structured AI review schema version `{}`.",
                             parsed.schema_version
@@ -1702,7 +1714,9 @@ fn parse_structured_review_json_block(
 
     if in_json {
         let candidate = block.join("\n");
-        if candidate.contains(STRUCTURED_REVIEW_SCHEMA_VERSION) {
+        if candidate.contains(STRUCTURED_REVIEW_SCHEMA_VERSION)
+            || candidate.contains(LEGACY_STRUCTURED_REVIEW_SCHEMA_VERSION)
+        {
             return Err(
                 "Invalid structured AI review JSON: missing closing code fence.".to_string(),
             );
@@ -3159,7 +3173,7 @@ fn user_installed_cli_command(program: &str) -> Command {
         command.args([
             "-lc",
             "export PATH=\"$HOME/.local/bin:$HOME/.npm/bin:/opt/homebrew/bin:/usr/local/bin:$PATH\"; exec \"$@\"",
-            "lachesi-user-cli",
+            "norn-user-cli",
             program,
         ]);
         command
@@ -3178,7 +3192,7 @@ fn build_claude_text_command(
     claude_model: Option<&str>,
     claude_effort: Option<&str>,
 ) -> Result<(Command, tempfile::TempDir), String> {
-    let temp_dir = private_provider_temp_dir("lachesi-claude-review-")?;
+    let temp_dir = private_provider_temp_dir("norn-claude-review-")?;
     let tmp_path = temp_dir.path().join("prompt.md");
     fs::write(&tmp_path, payload).map_err(|e| e.to_string())?;
     let prompt_file = fs::File::open(&tmp_path)
@@ -3195,6 +3209,7 @@ fn build_claude_text_command(
             "stream-json",
             "--include-partial-messages",
         ])
+        .env("NORN_REVIEW_CHILD", "1")
         .env("LACHESI_REVIEW_CHILD", "1")
         .stdin(Stdio::from(prompt_file));
     let repository_access =
@@ -3269,9 +3284,10 @@ fn validate_isolated_provider_cli(ai_provider: AiProvider) -> Result<(), String>
         };
     // Exercise the exact isolation option combination. A CLI that rejects this
     // parser contract is unsupported even if each flag appears in its help.
-    let temp_dir = private_provider_temp_dir("lachesi-provider-check-")?;
+    let temp_dir = private_provider_temp_dir("norn-provider-check-")?;
     let output = user_installed_cli_command(program)
         .args(args)
+        .env("NORN_REVIEW_CHILD", "1")
         .env("LACHESI_REVIEW_CHILD", "1")
         .current_dir(temp_dir.path())
         .output()
@@ -3292,7 +3308,7 @@ fn validate_isolated_provider_cli(ai_provider: AiProvider) -> Result<(), String>
         Ok(())
     } else {
         Err(format!(
-            "The installed {label} CLI does not support Lachesi's required headless isolation flags."
+            "The installed {label} CLI does not support Norn's required headless isolation flags."
         ))
     }
 }
@@ -3330,7 +3346,7 @@ fn build_codex_text_command(
     codex_model: Option<&str>,
     codex_effort: Option<&str>,
 ) -> Result<(Command, tempfile::TempDir, PathBuf), String> {
-    let temp_dir = private_provider_temp_dir("lachesi-codex-review-")?;
+    let temp_dir = private_provider_temp_dir("norn-codex-review-")?;
     let tmp_path = temp_dir.path().join("prompt.md");
     let output_path = temp_dir.path().join("output.md");
     fs::write(&tmp_path, payload).map_err(|e| e.to_string())?;
@@ -3343,9 +3359,10 @@ fn build_codex_text_command(
     command
         .args(["exec", "--sandbox", "read-only", "--output-last-message"])
         .arg(&output_path)
+        .env("NORN_REVIEW_CHILD", "1")
         .env("LACHESI_REVIEW_CHILD", "1")
         // The review payload is the complete instruction boundary. Loading
-        // repository or user rules can re-enable the Lachesi review skill in
+        // repository or user rules can re-enable the Norn review skill in
         // the child and recursively invoke this command.
         .args(["--ignore-user-config", "--ignore-rules"]);
     if let Some(model) = codex_model.and_then(normalize_codex_model) {
@@ -3397,7 +3414,7 @@ fn run_claude_fix(
     store: &AiReviewFixStore,
     key: &str,
 ) -> Result<ParsedClaudeFixResponse, String> {
-    let tmp_path = std::env::temp_dir().join(format!("lachesi-ai-fix-{}.md", now_ms()));
+    let tmp_path = std::env::temp_dir().join(format!("norn-ai-fix-{}.md", now_ms()));
     fs::write(&tmp_path, payload).map_err(|e| e.to_string())?;
 
     let schema = r#"{"type":"object","properties":{"status":{"type":"string","enum":["success","failed"]},"summary":{"type":"string"},"commitMessage":{"type":"string"},"tests":{"type":"array","items":{"type":"string"}},"filesTouched":{"type":"array","items":{"type":"string"}},"failureReason":{"type":"string"}},"required":["status","summary","commitMessage","tests","filesTouched"],"additionalProperties":false}"#;
@@ -3433,7 +3450,7 @@ fn run_claude_structured_output<T>(
 where
     T: DeserializeOwned,
 {
-    let tmp_path = std::env::temp_dir().join(format!("lachesi-structured-output-{}.md", now_ms()));
+    let tmp_path = std::env::temp_dir().join(format!("norn-structured-output-{}.md", now_ms()));
     fs::write(&tmp_path, payload).map_err(|e| e.to_string())?;
 
     let shell_cmd = format!(
@@ -3752,7 +3769,7 @@ fn run_fix_pipeline(
 
     let original_status = git_status_lines(&repo_path)?;
     let dirty_at_start = !original_status.is_empty();
-    let stash_marker = format!("lachesi-ai-review-{id}-{}", now_ms());
+    let stash_marker = format!("norn-ai-review-{id}-{}", now_ms());
     let mut stash_ref = None::<String>;
 
     if dirty_at_start {
@@ -4109,7 +4126,7 @@ fn sync_branch_pipeline(
     ));
 
     let original_status = git_status_lines(&repo_path)?;
-    let stash_marker = format!("lachesi-branch-sync-{id}-{}", now_ms());
+    let stash_marker = format!("norn-branch-sync-{id}-{}", now_ms());
     let mut stash_ref = None::<String>;
     if !original_status.is_empty() {
         logs.push(
@@ -4325,7 +4342,7 @@ fn run_conflict_resolution_pipeline(
 
     let original_status = git_status_lines(&repo_path)?;
     let dirty_at_start = !original_status.is_empty();
-    let stash_marker = format!("lachesi-conflict-resolution-{id}-{}", now_ms());
+    let stash_marker = format!("norn-conflict-resolution-{id}-{}", now_ms());
     let mut stash_ref = None::<String>;
 
     if dirty_at_start {
@@ -4748,9 +4765,9 @@ fn run_inline_review_pipeline(
                     );
                     vec![AnalyzerRunResult {
                         spec: AnalyzerSpec {
-                            id: "lachesi-config".to_string(),
-                            title: ".lachesi.yaml".to_string(),
-                            command: "load .lachesi.yaml".to_string(),
+                            id: "norn-config".to_string(),
+                            title: ".norn.yaml".to_string(),
+                            command: "load .norn.yaml".to_string(),
                             timeout_seconds: 0,
                             source: ReviewEvidenceSource::Other,
                             required: true,
@@ -5736,7 +5753,7 @@ pub async fn run_inline_review(
 ) -> Result<SavedReview, String> {
     tauri::async_runtime::spawn_blocking(move || -> Result<SavedReview, String> {
         let ts = now_ms();
-        let tmp_path = std::env::temp_dir().join(format!("lachesi-review-{ts}.md"));
+        let tmp_path = std::env::temp_dir().join(format!("norn-review-{ts}.md"));
         fs::write(&tmp_path, &payload).map_err(|e| e.to_string())?;
 
         let shell_cmd = format!(
@@ -6361,6 +6378,9 @@ mod tests {
         assert!(args.iter().any(|arg| arg == "--ignore-user-config"));
         assert!(args.iter().any(|arg| arg == "--ignore-rules"));
         assert!(command.get_envs().any(|(key, value)| {
+            key == "NORN_REVIEW_CHILD" && value.is_some_and(|value| value.to_string_lossy() == "1")
+        }));
+        assert!(command.get_envs().any(|(key, value)| {
             key == "LACHESI_REVIEW_CHILD"
                 && value.is_some_and(|value| value.to_string_lossy() == "1")
         }));
@@ -6392,6 +6412,9 @@ mod tests {
         assert!(args.windows(2).any(|pair| pair == ["--tools", ""]));
         assert!(args.iter().any(|arg| arg == "--bare"));
         assert!(!args.iter().any(|arg| arg == "--allowedTools"));
+        assert!(command.get_envs().any(|(key, value)| {
+            key == "NORN_REVIEW_CHILD" && value.is_some_and(|value| value.to_string_lossy() == "1")
+        }));
         assert!(command.get_envs().any(|(key, value)| {
             key == "LACHESI_REVIEW_CHILD"
                 && value.is_some_and(|value| value.to_string_lossy() == "1")

@@ -18,7 +18,7 @@ where
 
 fn http() -> Result<reqwest::blocking::Client, String> {
     reqwest::blocking::Client::builder()
-        .user_agent("lachesi")
+        .user_agent("norn")
         .build()
         .map_err(|e| e.to_string())
 }

@@ -1,105 +1,45 @@
 ---
 name: lachesi-review
-description: Review code changes with the local Lachesi headless CLI after implementation work, before completing a coding task, and before every git push. Use for local working-tree, branch, or pull-request review, structured finding triage, and one bounded remediation pass. Do not trigger inside a Lachesi reviewer child process.
+description: Deprecated compatibility alias for the Norn code-review skill. Use only when existing agent instructions still invoke $lachesi-review during the bounded migration window.
 ---
 
-# Lachesi Review
+# Deprecated Lachesi Review Alias
 
-Run Lachesi as an independent, read-only reviewer after the repository's normal
-validation commands pass. Headless review skips repository analyzers by default
-because this workflow has already run the task's validation gate.
+This skill preserves existing `$lachesi-review` invocations during the bounded
+compatibility window. Norn is the canonical identity.
 
-## Pre-Push Requirement
+If `NORN_REVIEW_CHILD=1` or `LACHESI_REVIEW_CHILD=1`, stop immediately: the
+current process is already a reviewer child.
 
-Before every `git push` that publishes code changes, run Lachesi on the exact
-changes about to be pushed.
+Run Norn as an independent, read-only reviewer after the repository's normal
+validation commands pass. Before every push, review the exact changes that
+will be published. Use `--scope working-tree` for uncommitted changes and
+`--scope branch` for committed changes; use `--pr <id>` only when the user
+names a pull request.
 
-- If the changes are uncommitted, review `--scope working-tree` before commit
-  and again after any remediation if the pushed branch will include additional
-  committed changes.
-- If the changes are already committed, review `--scope branch` before pushing.
-- If Lachesi returns in-scope findings at or above the configured threshold, fix
-  them before pushing unless the user explicitly instructs otherwise.
-- If Lachesi fails for setup, provider, or runtime reasons, report the failure
-  and do not push unless the user explicitly approves pushing without the
-  Lachesi gate.
+Prefer `$HOME/.local/bin/norn` when executable, then `norn` from `PATH`. During
+the compatibility window only, fall back to `$HOME/.local/bin/lachesi` and
+then `lachesi`. If none is available, report the setup failure and do not
+substitute an ad hoc review.
 
-## Fast Path
-
-When the user explicitly asks for a Lachesi review, launch Lachesi immediately.
-Do not inspect package scripts, read `.lachesi` policy files, precompute the
-diff, or rerun repository validation. Lachesi resolves the repository, base,
-configuration, policy packs, and diff itself.
-
-Use `$HOME/.local/bin/lachesi` directly when it is executable; otherwise use
-`lachesi`. Do not probe for alternative review binaries.
-
-## Guard
-
-If `LACHESI_REVIEW_CHILD=1`, stop this workflow immediately. The current agent
-is already the reviewer launched by Lachesi.
-
-If neither `$HOME/.local/bin/lachesi` nor `lachesi` is executable, report that
-setup failure instead of substituting an ad hoc review.
-
-## Select The Target
-
-- Use `--pr <id>` when the user names a pull request.
-- For an explicit standalone repository review with no target, use
-  `--scope branch`; let Lachesi resolve the default base.
-- After an implementation task, use `--scope working-tree` for the changes just
-  made. Use `--scope branch` when that task's changes are already committed.
-- Pass `--base <ref>` only when the user or repository instructions name it.
-- When committed and uncommitted task changes coexist, review branch and
-  working tree separately and deduplicate findings by fingerprint.
-
-Do not include unrelated pre-existing user changes in remediation decisions.
-Do not run exploratory `rg`, `ls`, `git diff`, or config reads merely to prepare
-the Lachesi command.
-
-## Execute
-
-For a post-task working-tree review, invoke the executable selected by the
-guard above. Prefer:
+For a committed branch whose validation already passed, run:
 
 ```bash
-"$HOME/.local/bin/lachesi" review --repo-path . --scope working-tree --format json \
+"$HOME/.local/bin/norn" review --repo-path . --scope branch --format json \
   --fail-on-findings
 ```
 
-If `$HOME/.local/bin/lachesi` is not executable, use the same arguments with
-`lachesi` from `PATH`.
+For uncommitted task changes, replace the scope with `working-tree`. Do not
+pass `--run-analyzers` in this post-task workflow. Pass a provider, model,
+profile, effort, base, or PR only when repository guidance or the user selects
+it.
 
-For an explicit standalone branch review where validation has already run,
-replace the scope with `branch`. The task agent owns validation before
-completion; do not rerun it as preparation for Lachesi. If the user asked only
-for review, do not run validation first.
+Exit code `0` means the gate passed. Exit code `1` means configured findings
+were returned: fix high-confidence in-scope findings, rerun affected tests,
+and run one bounded review again. Exit code `2` or greater is a setup,
+configuration, repository, analyzer, provider, or runtime failure; report it
+and do not treat it as a code finding.
 
-Pass an explicit `--profile`, `--ai-provider`, model, effort, base, or PR only
-when repository guidance or the user selects it.
-
-Do not pass `--run-analyzers` in this post-task workflow. That option is for
-explicit standalone review runs where validation has not already executed and
-the user wants Lachesi to run configured analyzers. Analyzer commands are
-trusted local commands and must use non-mutating check modes.
-
-Interpret exit codes as follows:
-
-- `0`: review completed without a configured failing condition.
-- `1`: review completed and returned findings at or above the threshold.
-- `2` or greater: setup, config, repository, analyzer, provider, or runtime
-  failure; report the failure and do not treat it as a code finding. Retry only
-  when the error itself identifies a transient failure; do not begin a new
-  discovery phase.
-
-## Triage And Rerun
-
-Read the structured findings. Fix findings that are high-confidence, in scope,
-and supported by the diff or repository evidence. Do not change code merely to
-satisfy speculative or duplicate findings.
-
-After fixes, rerun affected tests and Lachesi once. Stop after that bounded
-rerun and report any residual findings.
-
-Never publish provider comments, commit, push, or broaden permissions as part
-of this workflow unless the user explicitly requests that separate action.
+Never publish provider comments, commit, push, or broaden permissions merely
+because this review skill was invoked; those actions require the surrounding
+task to authorize them.

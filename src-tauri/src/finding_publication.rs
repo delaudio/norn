@@ -427,13 +427,14 @@ where
         request.validate().map_err(invalid_request)?;
         let target = request.target();
         let marker = finding_marker(request);
-        let lease = match self
+        let legacy_marker = legacy_marker(&marker);
+        let legacy_lease = match self
             .store
-            .reserve(request, &marker)
+            .reserve(request, &legacy_marker)
             .map_err(publication_state_error)?
         {
             FindingPublicationReservation::Published(existing) => {
-                return Ok(request.published_identity(existing.comment_id, marker));
+                return Ok(request.published_identity(existing.comment_id, legacy_marker));
             }
             FindingPublicationReservation::InProgress => {
                 return Err(FindingPublicationError {
@@ -444,8 +445,29 @@ where
             }
             FindingPublicationReservation::Acquired(lease) => lease,
         };
+        let reservation = self.store.reserve(request, &marker);
+        let lease = match reservation {
+            Err(error) => {
+                let _ = self.store.release(&legacy_lease);
+                return Err(publication_state_error(error));
+            }
+            Ok(FindingPublicationReservation::Published(existing)) => {
+                let _ = self.store.release(&legacy_lease);
+                return Ok(request.published_identity(existing.comment_id, marker));
+            }
+            Ok(FindingPublicationReservation::InProgress) => {
+                let _ = self.store.release(&legacy_lease);
+                return Err(FindingPublicationError {
+                    code: FindingPublicationErrorCode::PublicationInProgress,
+                    retryable: true,
+                    message: "This finding is already being published.".to_string(),
+                });
+            }
+            Ok(FindingPublicationReservation::Acquired(lease)) => lease,
+        };
 
-        let result = self.publish_reserved(request, &target, &marker, &lease);
+        let result = self.publish_reserved(request, &target, &marker, &legacy_marker, &lease);
+        let _ = self.store.release(&legacy_lease);
         if result.is_err() {
             let _ = self.store.release(&lease);
         }
@@ -457,22 +479,26 @@ where
         request: &FindingPublicationRequest,
         target: &ProviderPublicationTarget,
         marker: &str,
+        legacy_marker: &str,
         lease: &FindingPublicationLease,
     ) -> Result<PublishedCommentIdentity, FindingPublicationError> {
         let payload = request.provider_payload(marker);
+        let legacy_payload = request.provider_payload(legacy_marker);
         let current_revision = self
             .api
             .current_revision(target)
             .map_err(publication_api_error)?;
         if !request.matches_revision(&current_revision) {
-            if let Some(stale) = self
-                .api
-                .find_comment_by_marker(target, marker)
-                .map_err(publication_api_error)?
-            {
-                self.api
-                    .delete_comment(target, &stale)
-                    .map_err(publication_api_error)?;
+            for candidate in [marker, legacy_marker] {
+                if let Some(stale) = self
+                    .api
+                    .find_comment_by_marker(target, candidate)
+                    .map_err(publication_api_error)?
+                {
+                    self.api
+                        .delete_comment(target, &stale)
+                        .map_err(publication_api_error)?;
+                }
             }
             return Err(FindingPublicationError {
                 code: FindingPublicationErrorCode::OutdatedAnchor,
@@ -486,15 +512,23 @@ where
             .map_err(publication_api_error)?
         {
             existing
+        } else if let Some(existing) = self
+            .api
+            .find_inline_comment(target, legacy_marker, &legacy_payload)
+            .map_err(publication_api_error)?
+        {
+            existing
         } else {
-            if let Some(orphan) = self
-                .api
-                .find_comment_by_marker(target, marker)
-                .map_err(publication_api_error)?
-            {
-                self.api
-                    .delete_comment(target, &orphan)
-                    .map_err(publication_api_error)?;
+            for candidate in [marker, legacy_marker] {
+                if let Some(orphan) = self
+                    .api
+                    .find_comment_by_marker(target, candidate)
+                    .map_err(publication_api_error)?
+                {
+                    self.api
+                        .delete_comment(target, &orphan)
+                        .map_err(publication_api_error)?;
+                }
             }
             self.api
                 .create_inline_comment(target, &payload)
@@ -639,7 +673,11 @@ pub fn finding_marker(request: &FindingPublicationRequest) -> String {
         hasher.update(part.as_bytes());
     }
     let digest = hasher.finalize();
-    format!("<!-- lachesi:finding:{digest:x} -->")
+    format!("<!-- norn:finding:{digest:x} -->")
+}
+
+fn legacy_marker(canonical_marker: &str) -> String {
+    canonical_marker.replacen("<!-- norn:", "<!-- lachesi:", 1)
 }
 
 pub fn finding_lineage_marker(request: &FindingPublicationRequest) -> String {
@@ -677,7 +715,7 @@ pub(crate) fn finding_lineage_marker_for(
         hasher.update(part.as_bytes());
     }
     let digest = hasher.finalize();
-    format!("<!-- lachesi:finding-lineage:{digest:x} -->")
+    format!("<!-- norn:finding-lineage:{digest:x} -->")
 }
 
 pub fn dry_run_publication_identity(
@@ -1110,10 +1148,7 @@ mod tests {
             assert_eq!(state.payloads[0].1.start_line, 12);
             assert_eq!(state.payloads[0].1.end_line, 14);
             assert!(state.payloads[0].1.markdown.contains("```suggestion"));
-            assert!(state.payloads[0]
-                .1
-                .markdown
-                .contains("<!-- lachesi:finding:"));
+            assert!(state.payloads[0].1.markdown.contains("<!-- norn:finding:"));
         }
     }
 
@@ -1128,6 +1163,60 @@ mod tests {
 
         assert_eq!(repeated, first);
         assert_eq!(publisher.api.state.lock().unwrap().payloads.len(), 1);
+    }
+
+    #[test]
+    fn direct_publish_reuses_a_legacy_publication_record() {
+        let api = MockProviderApi::default();
+        let store = MockPublicationStore::default();
+        let request = request(PullRequestReviewEventProvider::Github);
+        let legacy = legacy_marker(&finding_marker(&request));
+        let identity = ProviderCommentIdentity {
+            comment_id: "legacy-comment".to_string(),
+        };
+        store.state.lock().unwrap().insert(
+            legacy.clone(),
+            MockPublicationState::Published(identity.clone()),
+        );
+        let publisher = FindingPublisher::new(api, store);
+
+        let published = publisher
+            .publish(&request)
+            .expect("legacy publication should remain idempotent");
+
+        assert_eq!(published.comment_id, identity.comment_id);
+        assert_eq!(published.finding_marker, legacy);
+        assert!(publisher.api.state.lock().unwrap().payloads.is_empty());
+    }
+
+    #[test]
+    fn direct_publish_backfills_a_legacy_provider_comment_without_duplication() {
+        let api = MockProviderApi::default();
+        let store = MockPublicationStore::default();
+        let request = request(PullRequestReviewEventProvider::Github);
+        let canonical = finding_marker(&request);
+        let legacy = legacy_marker(&canonical);
+        let identity = ProviderCommentIdentity {
+            comment_id: "legacy-comment".to_string(),
+        };
+        api.state
+            .lock()
+            .unwrap()
+            .comments
+            .insert(legacy, identity.clone());
+        let publisher = FindingPublisher::new(api, store);
+
+        let published = publisher
+            .publish(&request)
+            .expect("legacy provider comment should be recovered");
+
+        assert_eq!(published.comment_id, identity.comment_id);
+        assert_eq!(published.finding_marker, canonical);
+        assert!(publisher.api.state.lock().unwrap().payloads.is_empty());
+        assert!(matches!(
+            publisher.store.state.lock().unwrap().get(&canonical),
+            Some(MockPublicationState::Published(stored)) if stored == &identity
+        ));
     }
 
     #[test]
@@ -1366,7 +1455,7 @@ mod tests {
         let marker = finding_marker(&request);
         assert_eq!(marker, finding_marker(&request));
         assert!(!marker.contains("sensitive/source/path"));
-        assert_eq!(marker.len(), "<!-- lachesi:finding: -->".len() + 64);
+        assert_eq!(marker.len(), "<!-- norn:finding: -->".len() + 64);
 
         request.head_sha = "3333333333333333333333333333333333333333".to_string();
         assert_ne!(marker, finding_marker(&request));
@@ -1397,10 +1486,7 @@ mod tests {
         request.finding_fingerprint = "sensitive/source/path:12".to_string();
         let lineage = finding_lineage_marker(&request);
         assert!(!lineage.contains("sensitive/source/path"));
-        assert_eq!(
-            lineage.len(),
-            "<!-- lachesi:finding-lineage: -->".len() + 64
-        );
+        assert_eq!(lineage.len(), "<!-- norn:finding-lineage: -->".len() + 64);
 
         request.head_sha = "3333333333333333333333333333333333333333".to_string();
         request.base_sha = "4444444444444444444444444444444444444444".to_string();
@@ -1419,7 +1505,7 @@ mod tests {
         let markdown = render_finding_markdown(&request, "<!-- marker -->");
 
         assert!(markdown.contains("`````suggestion\nbefore\n````\nafter\n`````"));
-        assert!(markdown.contains("<!-- lachesi:finding-lineage:"));
+        assert!(markdown.contains("<!-- norn:finding-lineage:"));
         assert!(markdown.ends_with("<!-- marker -->"));
     }
 

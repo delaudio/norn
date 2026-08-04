@@ -3,7 +3,7 @@ title: Review Workflow
 description: How review runs, findings, and publication fit together.
 ---
 
-Lachesi separates review generation from publication.
+Norn separates review generation from publication.
 
 ## Review Loop
 
@@ -16,7 +16,7 @@ Lachesi separates review generation from publication.
 
 ## Local Clone Workflows
 
-When a repository has a configured local clone, Lachesi can support:
+When a repository has a configured local clone, Norn can support:
 
 - branch checkout and sync;
 - branch conflict resolution;

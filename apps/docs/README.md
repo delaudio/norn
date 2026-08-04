@@ -1,15 +1,15 @@
-# Lachesi Docs
+# Norn Docs
 
-Astro + Starlight documentation site for Lachesi.
+Astro + Starlight documentation site for Norn.
 
 ## Development
 
 ```sh
-pnpm --filter @lachesi/docs dev
+pnpm --filter @norn/docs dev
 ```
 
 ## Build
 
 ```sh
-pnpm --filter @lachesi/docs build
+pnpm --filter @norn/docs build
 ```

@@ -7,7 +7,8 @@
 ## Purpose
 
 An organization may supply shared policy defaults and enforced constraints
-without replacing repository-owned `.lachesi` configuration. Organization
+without replacing repository-owned `.norn` configuration. Legacy `.lachesi`
+sources remain fallback-only during the compatibility window. Organization
 policy resolution is explicit: repositories with no configured organization
 source continue through the existing local config loader and do not perform a
 network request.
@@ -103,12 +104,13 @@ pack, and final resolved-config validation succeeds.
 ## Local runtime configuration
 
 Desktop, TUI, and headless review opt in through
-`LACHESI_ORGANIZATION_POLICY_CONFIG`, which points to a local JSON file outside
+`NORN_ORGANIZATION_POLICY_CONFIG`, which points to a local JSON file outside
 the repository. This keeps organization trust roots and availability choices
 under administrator control rather than allowing a reviewed commit to select
-them.
+them. The legacy `LACHESI_ORGANIZATION_POLICY_CONFIG` name remains a fallback
+during the compatibility window.
 
-The path must be absolute. Lachesi resolves both the repository and config
+The path must be absolute. Norn resolves both the repository and config
 paths before reading the file and rejects either a direct path or a symlink
 whose target is inside the reviewed repository.
 
@@ -131,7 +133,7 @@ whose target is inside the reviewed repository.
 `bundlePath` is resolved relative to the configuration file unless it is
 absolute. Its resolved target must also remain outside the reviewed
 repository. A temporarily missing bundle is treated as source unavailability,
-so `useVerifiedCache` can still apply; Lachesi validates its nearest existing
+so `useVerifiedCache` can still apply; Norn validates its nearest existing
 ancestor to preserve the repository boundary. The signed file is one
 implementation of the public source port; a managed or self-hosted adapter may
 fetch the same envelope centrally. If the environment variable is absent,
@@ -142,7 +144,7 @@ returns the same organization-aware config used by execution. The shared
 pipeline verifies again at execution time, adds resolved rules and paths to the
 model prompt, selects requested analyzers from the resolved config, and stores
 the selected profile and source versions on the review run.
-An explicit repository `.lachesi.yaml` must first pass its standalone,
+An explicit repository `.norn.yaml` must first pass its standalone,
 versioned configuration contract before it participates as a merge layer;
 organization defaults cannot supply a missing or invalid repository version.
 Headless review returns local configuration or organization-policy resolution
@@ -164,10 +166,10 @@ The resolved-policy appendix contains runtime constraints but omits
 extension text in a separate authoritative instruction section; payload
 substrings never suppress signed instructions.
 
-`.lachesi.local.yaml` is a non-committed override for configured organization
+`.norn.local.yaml` is a non-committed override for configured organization
 resolution. It is accepted only when Git reports it as untracked and covered
 by an ignore rule; tracked, merely unignored, or symbolic-link paths fail
-closed. When no organization source is configured, Lachesi retains the
+closed. When no organization source is configured, Norn retains the
 pre-existing repository loader unchanged and does not load that file.
 
 Desktop and TUI review fail closed when organization policy is configured but

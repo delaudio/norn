@@ -30,12 +30,12 @@ const BITBUCKET_PUBLICATION_COMMENT_FIELDS: &str = concat!(
     "values.inline.to,values.inline.from,values.inline.start_to,values.inline.start_from"
 );
 
-/// When `LACHESI_DRY_RUN` is truthy, comment-creating commands log and return a
+/// When `NORN_DRY_RUN` (or its legacy alias) is truthy, comment-creating commands log and return a
 /// synthetic comment instead of POSTing — lets the full UI flow run against live
 /// read data without writing to a shared repo.
 fn dry_run() -> bool {
-    std::env::var("LACHESI_DRY_RUN")
-        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+    crate::runtime_identity::env_var("NORN_DRY_RUN", "LACHESI_DRY_RUN")
+        .map(|value| value == "1" || value.eq_ignore_ascii_case("true"))
         .unwrap_or(false)
 }
 
@@ -57,7 +57,7 @@ struct GithubClient {
 impl BitbucketClient {
     fn new(creds: Credentials) -> Result<Self, String> {
         let http = reqwest::blocking::Client::builder()
-            .user_agent("lachesi")
+            .user_agent("norn")
             .build()
             .map_err(|e| e.to_string())?;
         Ok(Self {
@@ -69,7 +69,7 @@ impl BitbucketClient {
 
     fn from_stored() -> Result<Self, String> {
         let creds = credentials::load().ok_or_else(|| {
-            "No Bitbucket credentials configured. Open Settings to add them, set BITBUCKET_USERNAME and BITBUCKET_TOKEN, or configure env refs in ~/.config/lachesi/config.toml."
+            "No Bitbucket credentials configured. Open Settings to add them, set BITBUCKET_USERNAME and BITBUCKET_TOKEN, or configure env refs in ~/.config/norn/config.toml."
                 .to_string()
         })?;
         Self::new(creds)
@@ -103,7 +103,7 @@ impl BitbucketClient {
 impl GithubClient {
     fn new(token: String) -> Result<Self, String> {
         let http = reqwest::blocking::Client::builder()
-            .user_agent("lachesi")
+            .user_agent("norn")
             .build()
             .map_err(|e| e.to_string())?;
         Ok(Self { token, http })
@@ -111,7 +111,7 @@ impl GithubClient {
 
     fn from_stored() -> Result<Self, String> {
         let token = credentials::load_github_token().ok_or_else(|| {
-            "No GitHub token configured. Open Settings to add it, set GITHUB_TOKEN, or configure an env ref in ~/.config/lachesi/config.toml."
+            "No GitHub token configured. Open Settings to add it, set GITHUB_TOKEN, or configure an env ref in ~/.config/norn/config.toml."
                 .to_string()
         })?;
         Self::new(token)

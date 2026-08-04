@@ -875,7 +875,7 @@ mod tests {
         );
         assert!(matches!(outcome, WebhookIngressOutcome::Accepted(_)));
         let metrics = telemetry.prometheus();
-        assert!(metrics.contains("lachesi_review_events_received_total"));
+        assert!(metrics.contains("norn_review_events_received_total"));
         assert!(!metrics.contains("tenant-acme"));
         assert!(!metrics.contains("payments"));
     }

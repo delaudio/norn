@@ -6,7 +6,7 @@ changed by this flow.
 
 ## Requested scopes
 
-Lachesi requests only these Bitbucket Cloud scopes:
+Norn requests only these Bitbucket Cloud scopes:
 
 | Scope | Purpose |
 | --- | --- |

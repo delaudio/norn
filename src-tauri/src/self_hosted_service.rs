@@ -36,22 +36,24 @@ pub struct ServiceConfig {
 
 impl ServiceConfig {
     pub fn from_env() -> Result<Self, String> {
-        let data_dir = std::env::var_os("LACHESI_SERVICE_DATA_DIR")
-            .map(PathBuf::from)
-            .ok_or_else(|| {
-                "`LACHESI_SERVICE_DATA_DIR` must name a persistent volume".to_string()
-            })?;
+        let data_dir = crate::runtime_identity::env_var_os(
+            "NORN_SERVICE_DATA_DIR",
+            "LACHESI_SERVICE_DATA_DIR",
+        )
+        .map(PathBuf::from)
+        .ok_or_else(|| "`NORN_SERVICE_DATA_DIR` must name a persistent volume".to_string())?;
         if !data_dir.is_absolute() {
-            return Err("`LACHESI_SERVICE_DATA_DIR` must be an absolute path".to_string());
+            return Err("`NORN_SERVICE_DATA_DIR` must be an absolute path".to_string());
         }
-        let bind_addr = std::env::var("LACHESI_SERVICE_BIND_ADDR")
-            .unwrap_or_else(|_| DEFAULT_BIND_ADDR.to_string())
-            .parse::<SocketAddr>()
-            .map_err(|_| {
-                "`LACHESI_SERVICE_BIND_ADDR` must be an IP address and port".to_string()
-            })?;
+        let bind_addr =
+            crate::runtime_identity::env_var("NORN_SERVICE_BIND_ADDR", "LACHESI_SERVICE_BIND_ADDR")
+                .unwrap_or_else(|| DEFAULT_BIND_ADDR.to_string())
+                .parse::<SocketAddr>()
+                .map_err(|_| {
+                    "`NORN_SERVICE_BIND_ADDR` must be an IP address and port".to_string()
+                })?;
         if bind_addr.port() == 0 {
-            return Err("`LACHESI_SERVICE_BIND_ADDR` must use a non-zero port".to_string());
+            return Err("`NORN_SERVICE_BIND_ADDR` must use a non-zero port".to_string());
         }
         Ok(Self {
             data_dir,
@@ -72,7 +74,7 @@ impl ServiceConfig {
             std::fs::set_permissions(&self.data_dir, std::fs::Permissions::from_mode(0o700))
                 .map_err(|error| format!("Failed to secure service data directory: {error}"))?;
         }
-        std::env::set_var("LACHESI_REVIEW_DATA_DIR", &self.data_dir);
+        std::env::set_var("NORN_REVIEW_DATA_DIR", &self.data_dir);
         review_storage::initialize_database()
     }
 }
@@ -91,8 +93,7 @@ pub fn run(args: &[String], stdout: &mut dyn Write, stderr: &mut dyn Write) -> i
         _ => {
             let _ = writeln!(
                 stderr,
-                "{}\n\n{}",
-                "Usage: lachesi service <run|smoke|healthcheck|backup|restore>",
+                "Usage: norn service <run|smoke|healthcheck|backup|restore>\n\n{}",
                 usage()
             );
             2
@@ -101,7 +102,7 @@ pub fn run(args: &[String], stdout: &mut dyn Write, stderr: &mut dyn Write) -> i
 }
 
 pub fn usage() -> &'static str {
-    "Usage:\n  lachesi service run\n  lachesi service smoke\n  lachesi service healthcheck\n  lachesi service backup <absolute-directory>\n  lachesi service restore <absolute-directory>\n\nEnvironment:\n  LACHESI_SERVICE_DATA_DIR  Absolute persistent data-volume path (required)\n  LACHESI_SERVICE_BIND_ADDR HTTP bind address (default: 0.0.0.0:8080)"
+    "Usage:\n  norn service run\n  norn service smoke\n  norn service healthcheck\n  norn service backup <absolute-directory>\n  norn service restore <absolute-directory>\n\nEnvironment:\n  NORN_SERVICE_DATA_DIR  Absolute persistent data-volume path (required)\n  NORN_SERVICE_BIND_ADDR HTTP bind address (default: 0.0.0.0:8080)\n\nLegacy LACHESI_* environment names remain fallback aliases during migration."
 }
 
 fn backup_path(value: &str) -> Result<PathBuf, String> {
@@ -202,7 +203,7 @@ fn run_server(stdout: &mut dyn Write, stderr: &mut dyn Write) -> i32 {
     };
     let _ = writeln!(
         stdout,
-        "Lachesi self-hosted service listening on {}",
+        "Norn self-hosted service listening on {}",
         config.bind_addr
     );
     let available_connection_slots = Arc::new(AtomicUsize::new(HTTP_WORKER_COUNT));
@@ -458,23 +459,46 @@ mod tests {
     use std::io::Read;
 
     struct ServiceEnvironmentGuard {
-        service_data_dir: Option<OsString>,
-        review_data_dir: Option<OsString>,
+        norn_service_data_dir: Option<OsString>,
+        legacy_service_data_dir: Option<OsString>,
+        norn_review_data_dir: Option<OsString>,
+        legacy_review_data_dir: Option<OsString>,
     }
 
     impl ServiceEnvironmentGuard {
         fn capture() -> Self {
             Self {
-                service_data_dir: std::env::var_os("LACHESI_SERVICE_DATA_DIR"),
-                review_data_dir: std::env::var_os("LACHESI_REVIEW_DATA_DIR"),
+                norn_service_data_dir: std::env::var_os("NORN_SERVICE_DATA_DIR"),
+                legacy_service_data_dir: std::env::var_os("LACHESI_SERVICE_DATA_DIR"),
+                norn_review_data_dir: std::env::var_os("NORN_REVIEW_DATA_DIR"),
+                legacy_review_data_dir: std::env::var_os("LACHESI_REVIEW_DATA_DIR"),
+            }
+        }
+
+        fn clear() {
+            for name in [
+                "NORN_SERVICE_DATA_DIR",
+                "LACHESI_SERVICE_DATA_DIR",
+                "NORN_REVIEW_DATA_DIR",
+                "LACHESI_REVIEW_DATA_DIR",
+            ] {
+                std::env::remove_var(name);
             }
         }
     }
 
     impl Drop for ServiceEnvironmentGuard {
         fn drop(&mut self) {
-            restore_env("LACHESI_SERVICE_DATA_DIR", self.service_data_dir.take());
-            restore_env("LACHESI_REVIEW_DATA_DIR", self.review_data_dir.take());
+            restore_env("NORN_SERVICE_DATA_DIR", self.norn_service_data_dir.take());
+            restore_env(
+                "LACHESI_SERVICE_DATA_DIR",
+                self.legacy_service_data_dir.take(),
+            );
+            restore_env("NORN_REVIEW_DATA_DIR", self.norn_review_data_dir.take());
+            restore_env(
+                "LACHESI_REVIEW_DATA_DIR",
+                self.legacy_review_data_dir.take(),
+            );
         }
     }
 
@@ -491,6 +515,7 @@ mod tests {
             .lock()
             .expect("lock");
         let _environment = ServiceEnvironmentGuard::capture();
+        ServiceEnvironmentGuard::clear();
         std::env::set_var("LACHESI_SERVICE_DATA_DIR", "relative");
         assert!(ServiceConfig::from_env().is_err());
     }
@@ -501,8 +526,9 @@ mod tests {
             .lock()
             .expect("lock");
         let _environment = ServiceEnvironmentGuard::capture();
+        ServiceEnvironmentGuard::clear();
         let directory = tempfile::tempdir().expect("tempdir");
-        std::env::set_var("LACHESI_SERVICE_DATA_DIR", directory.path());
+        std::env::set_var("NORN_SERVICE_DATA_DIR", directory.path());
         let mut out = Vec::new();
         let mut err = Vec::new();
         assert_eq!(
@@ -522,8 +548,9 @@ mod tests {
             .lock()
             .expect("lock");
         let _environment = ServiceEnvironmentGuard::capture();
+        ServiceEnvironmentGuard::clear();
         let directory = tempfile::tempdir().expect("tempdir");
-        std::env::set_var("LACHESI_SERVICE_DATA_DIR", directory.path());
+        std::env::set_var("NORN_SERVICE_DATA_DIR", directory.path());
         let config = ServiceConfig::from_env().expect("config");
         config.prepare().expect("first startup");
         let coordinator = ReviewJobCoordinator::new(
@@ -605,7 +632,7 @@ mod tests {
         worker.join().expect("join");
         assert!(response.starts_with("HTTP/1.1 200"));
         assert!(response.contains("Content-Type: text/plain; version=0.0.4"));
-        assert!(response.contains("lachesi_review_jobs_total"));
+        assert!(response.contains("norn_review_jobs_total"));
         assert!(!response.contains("delivery-with-secret-material"));
         assert!(!response.contains("job-42"));
     }

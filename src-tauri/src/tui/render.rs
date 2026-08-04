@@ -358,7 +358,7 @@ fn pr_filter_at(area: Rect, x: u16, y: u16) -> Option<PrListFilter> {
 
 fn render_header(frame: &mut Frame<'_>, area: Rect) {
     let header = Paragraph::new(Line::from(vec![
-        Span::styled("Lachesi", accent_style().add_modifier(Modifier::BOLD)),
+        Span::styled("Norn", accent_style().add_modifier(Modifier::BOLD)),
         Span::styled(" terminal review workspace", text_style()),
     ]))
     .style(base_style())
@@ -1021,7 +1021,7 @@ fn render_pull_request_detail(frame: &mut Frame<'_>, area: Rect, state: TuiState
                 ]));
             }
             None => {
-                lines.push(Line::from("Configure repos in Lachesi settings."));
+                lines.push(Line::from("Configure repos in Norn settings."));
                 lines.push(Line::from("TUI uses the desktop app settings file."));
             }
         },

@@ -1,15 +1,15 @@
-import { defineConfig } from "astro/config";
 import starlight from "@astrojs/starlight";
+import { defineConfig } from "astro/config";
 
 export default defineConfig({
   site: "https://docs.lachesi.dev",
   integrations: [
     starlight({
-      title: "Lachesi Docs",
+      title: "Norn Docs",
       description: "Local-first pull request review workspace for Bitbucket Cloud and GitHub.",
       logo: {
-        src: "./src/assets/lachesi.svg",
-        alt: "Lachesi",
+        src: "./src/assets/norn.svg",
+        alt: "Norn",
       },
       customCss: ["./src/styles/starlight.css"],
       social: [
@@ -31,7 +31,7 @@ export default defineConfig({
           ],
         },
         {
-          label: "Using Lachesi",
+          label: "Using Norn",
           items: [
             { label: "Providers", slug: "providers" },
             { label: "Configuration", slug: "configuration" },

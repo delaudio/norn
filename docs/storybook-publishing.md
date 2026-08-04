@@ -1,6 +1,6 @@
 # Storybook Publishing On Cloudflare
 
-Lachesi Storybook is prepared for a public static deployment on Cloudflare Pages at:
+Norn Storybook is prepared for a public static deployment on Cloudflare Pages at:
 
 ```txt
 https://design-system.lachesi.dev

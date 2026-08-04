@@ -1,4 +1,4 @@
-# Lachesi task runner (Windows).
+# Norn task runner (Windows).
 # macOS/Linux contributors use the parallel `Makefile`; recipe names are kept in
 # parity across both files per ADR ARCH-007. Recipes delegate to the canonical
 # package.json / cargo / tauri commands so package.json stays authoritative.
@@ -22,6 +22,14 @@ dev:
 tauri-dev:
     pnpm tauri dev
 
+# Build the canonical headless CLI and its deprecated compatibility alias.
+cli-build:
+    pnpm run cli:build
+
+# Install `norn` and the deprecated `lachesi` alias in ~/.local/bin.
+cli-install:
+    pnpm run cli:install
+
 # Start the terminal UI.
 tui:
     pnpm run tui
@@ -30,7 +38,7 @@ tui:
 tui-build:
     pnpm run tui:build
 
-# Build and install the terminal UI as `lac` in ~/.local/bin.
+# Build and install the terminal UI as `norn-tui` in ~/.local/bin.
 tui-install:
     pnpm run tui:install
 
@@ -63,6 +71,6 @@ check:
     archgate check
 
 # Build the Windows distributable: the NSIS setup .exe (ARCH-008).
-# Output: src-tauri/target/release/bundle/nsis/Lachesi_<version>_x64-setup.exe
+# Output: src-tauri/target/release/bundle/nsis/Norn_<version>_x64-setup.exe
 bundle-windows:
     pnpm tauri build --bundles nsis

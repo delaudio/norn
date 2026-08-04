@@ -6,7 +6,7 @@
 
 ## Context
 
-Lachesi already has local app configuration and local review customization:
+Norn already has local app configuration and local review customization:
 
 - non-secret app config is stored as `settings.json` in the OS config dir
 - secrets live outside repo config in the OS keychain, with environment fallback
@@ -16,7 +16,7 @@ Lachesi already has local app configuration and local review customization:
 - per-repo review prompt overrides currently live in browser `localStorage`
 
 That model is still useful. Repo-owned configuration should not replace it.
-Instead, v0.1 introduces `.lachesi.yaml` as the versioned review policy surface
+Instead, v0.1 introduces `.norn.yaml` as the versioned review policy surface
 that travels with the repository.
 
 ## Goals
@@ -39,7 +39,7 @@ that travels with the repository.
 
 ### App config: `settings.json`
 
-Location: OS config dir, managed by Lachesi.
+Location: OS config dir, managed by Norn.
 
 This remains the local, non-secret app configuration file. It owns:
 
@@ -50,7 +50,7 @@ This remains the local, non-secret app configuration file. It owns:
 - Jira site URL used for local link enrichment
 - derived credential-presence flags returned to the UI
 
-### Repo config: `.lachesi.yaml`
+### Repo config: `.norn.yaml`
 
 Location: repository root.
 
@@ -64,27 +64,37 @@ This is the shared, committed review configuration. It owns:
 - publish defaults
 - future CLI/headless defaults that should be shared by the team
 
-### Repo policy folder: `.lachesi/`
+### Repo policy folder: `.norn/`
 
 Location: repository root.
 
-This optional folder is a lighter-weight committed review configuration. Lachesi
-uses it only when `.lachesi.yaml` is absent. It owns:
+This optional folder is a lighter-weight committed review configuration. Norn
+uses it only when `.norn.yaml` is absent. It owns:
 
 - `system-prompt.md`, `review-prompt.md`, `review.md`, or `prompt.md` as a
   repository-owned review prompt replacement, checked in priority order
 - `packs/*/pack.yaml` policy packs loaded as local policy packs
 
-If both `.lachesi.yaml` and `.lachesi/` exist, `.lachesi.yaml` is the explicit
-configuration source and wins.
+If both `.norn.yaml` and `.norn/` exist, configuration loading fails with
+actionable guidance. Norn never chooses or merges multiple repository roots
+implicitly.
 
-### Local repo override: `.lachesi.local.yaml`
+The legacy `.lachesi.yaml` and `.lachesi/` names remain fallback-only during
+the Norn compatibility window. Any canonical repository root coexisting with a
+legacy root is rejected with migration guidance; old and new roots are never
+merged implicitly.
+
+### Local repo override: `.norn.local.yaml`
 
 Location: repository root, ignored by git.
 
 This optional file may override non-secret repo behavior for one machine. It is
 intended for local analyzer paths, temporary include/exclude tuning, or personal
 review-mode preferences. It must never contain credentials.
+
+The legacy `.lachesi.local.yaml` name is read only when `.norn.local.yaml` is
+absent. Coexisting local override names are rejected. Both forms must be
+regular, untracked files covered by a Git ignore rule.
 
 ### Session overrides
 
@@ -94,12 +104,12 @@ unless a later UX explicitly writes them into app config or repo config.
 
 ## Precedence
 
-When resolving review behavior, Lachesi applies configuration in this order:
+When resolving review behavior, Norn applies configuration in this order:
 
 1. built-in app defaults
 2. app-level local `settings.json`
-3. repo-owned `.lachesi.yaml`, or `.lachesi/` when `.lachesi.yaml` is absent
-4. local non-committed `.lachesi.local.yaml`
+3. repo-owned `.norn.yaml`, or `.norn/` when `.norn.yaml` is absent
+4. local non-committed `.norn.local.yaml`
 5. ad hoc prompt/session overrides
 
 Later layers override earlier layers only for fields they define.
@@ -150,7 +160,7 @@ paths:
 
 policy:
   packs:
-    - ./lachesi-policies/agentic-code
+    - ./norn-policies/agentic-code
   sources:
     - type: adr
       path: .docflow/adr
@@ -185,7 +195,7 @@ profiles:
       extend: |
         Pay extra attention to async UI states, generated API contracts, and persisted filters.
     policyPacks:
-      - ./lachesi-policies/react-saas
+      - ./norn-policies/react-saas
     analyzers:
       tsc: required
       tests: optional
@@ -214,10 +224,10 @@ Built-in default: `balanced`.
 Optional named review profile to apply by default for this repository.
 
 The profile id must exist under top-level `profiles`. If omitted and a profile
-named `default` exists, Lachesi applies `default`. A per-run UI or CLI override
+named `default` exists, Norn applies `default`. A per-run UI or CLI override
 can select a different profile for that review.
 
-Missing profile ids produce a warning and Lachesi falls back to the base review
+Missing profile ids produce a warning and Norn falls back to the base review
 config.
 
 ### `profiles`
@@ -234,7 +244,7 @@ profiles:
       extend: |
         Treat large agent-authored refactors as high risk unless tests or local evidence prove behavior preservation.
     policyPacks:
-      - ./.lachesi/packs/agentic-code
+      - ./.norn/packs/agentic-code
     analyzers:
       tsc: required
       tests: optional
@@ -258,8 +268,8 @@ Optional. Replaces the built-in review prompt with a full repository-owned
 prompt. Use this when the repository needs to own the whole system prompt shape,
 including output format instructions.
 
-When Lachesi loads `.lachesi/system-prompt.md`, `.lachesi/review-prompt.md`,
-`.lachesi/review.md`, or `.lachesi/prompt.md`, it maps that file to
+When Norn loads `.norn/system-prompt.md`, `.norn/review-prompt.md`,
+`.norn/review.md`, or `.norn/prompt.md`, it maps that file to
 `review.prompt.replace`.
 
 ### `review.prompt.extend`
@@ -318,12 +328,12 @@ Optional shorthand list of local policy pack directories or manifest files.
 ```yaml
 policy:
   packs:
-    - ./lachesi-policies/react-saas
-    - ./.lachesi/packs/agentic-code
+    - ./norn-policies/react-saas
+    - ./.norn/packs/agentic-code
 ```
 
 Each entry is resolved relative to the repository root unless it is absolute. If
-the entry is a directory, Lachesi looks for `pack.yaml`, `lachesi-pack.yaml`, or
+the entry is a directory, Norn looks for `pack.yaml`, `lachesi-pack.yaml`, or
 `.lachesi-pack.yaml`.
 
 Pack manifests may provide:
@@ -367,7 +377,7 @@ Optional publication defaults.
 - `general`
 - `localOnly`
 
-`requireManualSubmit` must default to `true` in v0.1. Lachesi may stage pending
+`requireManualSubmit` must default to `true` in v0.1. Norn may stage pending
 review comments, but the reviewer keeps final control before publishing.
 
 `allowGeneralComments` controls whether unanchored findings may become general
@@ -386,7 +396,7 @@ The following settings stay in `settings.json` or other local storage:
 - local prompt override
 - collapsed sidebar state and other UI-only preferences
 
-The following settings belong in `.lachesi.yaml`:
+The following settings belong in `.norn.yaml`:
 
 - review depth defaults
 - path filters
@@ -404,8 +414,8 @@ behavior, while app config should control local ergonomics.
 The effective prompt for a review is built in this order:
 
 1. built-in `DEFAULT_REVIEW_PROMPT`, unless replaced by committed
-   `review.prompt.replace` or a `.lachesi/` prompt file
-2. committed `review.prompt.extend` from `.lachesi.yaml` or policy packs
+   `review.prompt.replace` or a `.norn/` prompt file
+2. committed `review.prompt.extend` from `.norn.yaml` or policy packs
 3. local per-repo prompt override from browser storage
 4. explicit session instruction
 
@@ -455,7 +465,7 @@ Rules:
 - fields prefixed with `x-` are explicitly experimental and should be ignored by
   older clients with a warning
 
-This lets teams commit a config that newer Lachesi clients can use while older
+This lets teams commit a config that newer Norn clients can use while older
 clients fail safely when the contract is incompatible.
 
 ## Minimal Example
@@ -533,7 +543,7 @@ publish:
   allowGeneralComments: true
 ```
 
-A developer may add `.lachesi.local.yaml` to temporarily disable a slow analyzer:
+A developer may add `.norn.local.yaml` to temporarily disable a slow analyzer:
 
 ```yaml
 version: 0.1
@@ -549,7 +559,7 @@ That local override is not committed and does not change team policy.
 
 The first implementation slice should:
 
-1. load `.lachesi.yaml` from the selected local repo root when available
+1. load `.norn.yaml` from the selected local repo root when available
 2. validate it into a typed `RepoReviewConfig`
 3. merge it with app config and local/session overrides into an
    `EffectiveReviewConfig`
@@ -557,5 +567,5 @@ The first implementation slice should:
    orchestration
 5. record config warnings in AI review logs
 
-The migration is additive. Existing users without `.lachesi.yaml` should see the
+The migration is additive. Existing users without `.norn.yaml` should see the
 same behavior they see today.

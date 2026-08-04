@@ -1,5 +1,5 @@
 {
-  "schemaVersion": "lachesi.review-evaluation-result.v1",
+  "schemaVersion": "norn.review-evaluation-result.v1",
   "corpusVersion": "2026.1",
   "minimumPrecisionMilli": 1000,
   "maximumMissedExpected": 0,

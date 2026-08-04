@@ -1,7 +1,7 @@
 interface:
-  display_name: "Lachesi Review"
-  short_description: "Review code changes with Lachesi before completion or push"
-  default_prompt: "Use $lachesi-review to review code changes before completing this task or pushing a branch."
+  display_name: "Norn Review (legacy alias)"
+  short_description: "Deprecated compatibility alias for Norn Review"
+  default_prompt: "Use $lachesi-review only as a compatibility alias; follow the canonical Norn review workflow."
 
 policy:
-  allow_implicit_invocation: true
+  allow_implicit_invocation: false

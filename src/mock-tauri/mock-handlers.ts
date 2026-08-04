@@ -1,3 +1,4 @@
+import { readMigratedStorageValue } from "@/lib/storageMigration";
 import type {
   AiReviewDraftCommentSuggestion,
   AiReviewFixState,
@@ -153,7 +154,7 @@ export function App() {
 `,
   "README.md": `# Frontend app
 
-Mock repository fixture for Lachesi browser development.
+Mock repository fixture for Norn browser development.
 
 ## Usage
 
@@ -228,7 +229,8 @@ function mockBlameForPath(path: string): RepositoryBlameLine[] {
 }
 
 /** localStorage-backed store that simulates on-disk review persistence for browser dev mode. */
-const REVIEW_STORE_KEY = "lachesi.mock.reviews";
+const REVIEW_STORE_KEY = "norn.mock.reviews.v1";
+const LEGACY_REVIEW_STORE_KEY = "lachesi.mock.reviews";
 
 function reviewKey(args?: Record<string, unknown>): string {
   return `${args?.workspace}_${args?.repo}_${args?.id}`;
@@ -378,7 +380,25 @@ function loadSavedReviewFromStore(args: Record<string, unknown> | undefined): Sa
 
 function loadReviewStore(): Map<string, AiReviewStore> {
   try {
-    const raw = localStorage.getItem(REVIEW_STORE_KEY);
+    const raw = readMigratedStorageValue(
+      localStorage,
+      REVIEW_STORE_KEY,
+      LEGACY_REVIEW_STORE_KEY,
+      (value) => {
+        const parsed: unknown = JSON.parse(value);
+        if (parsed == null || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+        const valid = Object.values(parsed).every((entry) => {
+          if (entry == null || typeof entry !== "object") return false;
+          const review = entry as Record<string, unknown>;
+          return (
+            (review.activeThreadId == null || typeof review.activeThreadId === "string") &&
+            Array.isArray(review.threads) &&
+            (review.reviewRuns == null || Array.isArray(review.reviewRuns))
+          );
+        });
+        return valid ? JSON.stringify(parsed) : null;
+      },
+    );
     if (raw) {
       const obj = JSON.parse(raw) as Record<string, AiReviewStore>;
       const stored = new Map(Object.entries(obj));
@@ -978,7 +998,7 @@ export const mockHandlers: Record<string, Handler> = {
   load_config: () => mockConfig,
   validate_repo_review_config: (args) => ({
     repoPath: String(args?.repoPath ?? ""),
-    configPath: `${String(args?.repoPath ?? "")}/.lachesi.yaml`,
+    configPath: `${String(args?.repoPath ?? "")}/.norn.yaml`,
     exists: false,
     config: null,
     selectedProfile: null,

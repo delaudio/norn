@@ -24,7 +24,7 @@ Deployments supply public configuration separately from the client secret:
 
 ```text
 issuer_url = "https://id.example.com"
-client_id = "lachesi-team-service"
+client_id = "norn-team-service"
 redirect_url = "https://reviews.example.com/auth/callback"
 group_claim = "groups"
 scopes = ["profile", "groups"]

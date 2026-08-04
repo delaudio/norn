@@ -1,11 +1,18 @@
 import { useCallback, useEffect, useState } from "react";
+import { readMigratedStorageValue } from "@/lib/storageMigration";
 
 type Theme = "light" | "dark";
-const STORAGE_KEY = "lachesi.theme";
+const STORAGE_KEY = "norn.theme.v1";
+const LEGACY_STORAGE_KEY = "lachesi.theme";
 
 function initialTheme(): Theme {
   if (typeof localStorage !== "undefined") {
-    const stored = localStorage.getItem(STORAGE_KEY);
+    const stored = readMigratedStorageValue(
+      localStorage,
+      STORAGE_KEY,
+      LEGACY_STORAGE_KEY,
+      (value) => (value === "light" || value === "dark" ? value : null),
+    );
     if (stored === "light" || stored === "dark") return stored;
   }
   return "dark";
