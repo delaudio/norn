@@ -15,3 +15,4 @@ metadata.
 | 0008 | Run shared reviews as an opt-in tenant-isolated service | Accepted | 2026-07-27 | default-agent | service, trust, multi-tenant, open-core, review |
 | 0009 | Render bounded image diffs in supported terminals | Implemented | 2026-07-28 | default-agent | tui, diff, images, terminal |
 | 0010 | Compare modified image versions side by side in the terminal UI | Accepted | 2026-07-31 | default-agent | tui, diff, images, terminal |
+| 0011 | Adopt Norn names with a bounded Lachesi compatibility window | Accepted | 2026-08-04 | codex | norn, naming, compatibility, migration, distribution |

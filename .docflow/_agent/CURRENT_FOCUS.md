@@ -8,18 +8,18 @@ If status files and git disagree, git is authoritative; correct this file.
 
 ## Active state
 
-- **Branch:** `feat/tui-side-by-side-image-diff`
-- **Active item:** side-by-side terminal image-diff capability.
-- **Blockers:** Lachesi and GitHub CLI authentication are required before the
-  mandatory review gate can publish this branch.
-- **Branch-local work:** accepted ADR, queued plan item, TUI renderer, and
-  focused tests are committed locally.
+- **Branch:** `codex/norn-naming-contract`
+- **Active item:** GitHub issue #173 and `.docflow/plan/todo/0005-norn-naming-and-compatibility.md`.
+- **Blockers:** none for the decision record; external DNS, Homebrew, and
+  signing operations remain separate delivery prerequisites.
+- **Branch-local work:** accepted Norn naming and compatibility contract is
+  ready for the documentation gate and integration.
 
 ## Last shipped
 
-`fa13281` - ship progressive TUI loading and readable diff paths through PR #146.
+`e149569` - compare image diffs side by side in the terminal UI through PR #148.
 
 ## Next item
 
-Authenticate the review/publishing clients, then run the pre-push review and
-open a pull request for the accepted image-comparison plan item.
+Merge the naming contract, then implement the runtime, repository-config, and
+local-data migration slices in dependency order.
