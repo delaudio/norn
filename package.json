@@ -5,6 +5,7 @@
   "type": "module",
   "description": "A GitHub-feeling Bitbucket pull request review desktop app",
   "scripts": {
+    "version:verify": "node scripts/version-verify.mjs",
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",

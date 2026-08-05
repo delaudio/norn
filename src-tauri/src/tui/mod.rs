@@ -42,6 +42,10 @@ pub fn run_from_env() -> Result<(), String> {
     let launch_opts = launch_mode_from_args(std::env::args().skip(1))?;
     let mut config = config::load();
     let resolve_current_repo = match launch_opts.mode {
+        TuiLaunchMode::Version => {
+            println!("norn-tui {}", env!("CARGO_PKG_VERSION"));
+            return Ok(());
+        }
         TuiLaunchMode::Help => {
             println!("{}", tui_usage());
             return Ok(());
@@ -149,6 +153,7 @@ fn run_tui_preflight(resolve_current_repo: bool, cwd: &Path) -> Result<(), Strin
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum TuiLaunchMode {
     Help,
+    Version,
     CurrentRepo,
     Workspace,
 }
@@ -160,7 +165,7 @@ struct TuiLaunchOptions {
 }
 
 fn tui_usage() -> &'static str {
-    "Usage: norn-tui [--current-repo] [--workspace] [--skip-readiness]\n\nBy default, norn-tui opens pull requests for the git repository in the current directory."
+    "Usage: norn-tui [--current-repo] [--workspace] [--skip-readiness] [--version]\n\nBy default, norn-tui opens pull requests for the git repository in the current directory."
 }
 
 fn launch_mode_from_args<I, S>(args: I) -> Result<TuiLaunchOptions, String>
@@ -176,6 +181,9 @@ where
         match arg.as_ref() {
             "--workspace" | "--global" => options.mode = TuiLaunchMode::Workspace,
             "--current-repo" => options.mode = TuiLaunchMode::CurrentRepo,
+            "--version" | "-V" => {
+                options.mode = TuiLaunchMode::Version;
+            }
             "--skip-readiness" => options.skip_readiness = true,
             "-h" | "--help" => {
                 return Ok(TuiLaunchOptions {
@@ -1638,6 +1646,18 @@ mod tests {
         let options = launch_mode_from_args(["--workspace", "--skip-readiness"]).unwrap();
         assert_eq!(options.mode, TuiLaunchMode::Workspace);
         assert!(options.skip_readiness);
+    }
+
+    #[test]
+    fn tui_launch_supports_version_query_flag() {
+        assert_eq!(
+            launch_mode_from_args(["--version"]).unwrap().mode,
+            TuiLaunchMode::Version
+        );
+        assert_eq!(
+            launch_mode_from_args(["-V"]).unwrap().mode,
+            TuiLaunchMode::Version
+        );
     }
 
     #[test]

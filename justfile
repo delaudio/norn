@@ -68,7 +68,12 @@ evaluate:
 
 # Archgate ADR compliance check.
 check:
+    pnpm run version:verify
     archgate check
+
+# Alias for the release version alignment check.
+check-versions:
+    pnpm run version:verify
 
 # Build the Windows distributable: the NSIS setup .exe (ARCH-008).
 # Output: src-tauri/target/release/bundle/nsis/Norn_<version>_x64-setup.exe

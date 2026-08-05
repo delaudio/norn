@@ -255,6 +255,7 @@ Bitbucket, and opens pull requests for that repository:
 ```sh
 cd ~/dev/current/norn
 norn-tui
+norn-tui --version
 ```
 
 Use `norn-tui --workspace` to open the configured repository picker instead. If the current directory is

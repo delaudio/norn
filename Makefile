@@ -65,7 +65,12 @@ evaluate:
 
 # Archgate ADR compliance check.
 check:
+	pnpm run version:verify
 	archgate check
+
+# Alias for the release version alignment check.
+check-versions:
+	pnpm run version:verify
 
 # The Windows NSIS installer must be built on Windows (ARCH-008).
 # This target exists for recipe parity; run `just bundle-windows` on Windows.
