@@ -8,18 +8,16 @@ If status files and git disagree, git is authoritative; correct this file.
 
 ## Active state
 
-- **Branch:** `codex/norn-runtime-migration`
-- **Active items:** GitHub issues #174, #175, and #176, tracked by
-  `.docflow/plan/todo/0006-norn-runtime-identifiers.md` and
-  `.docflow/plan/todo/0007-norn-local-data-migration.md`, and
-  `.docflow/plan/todo/0008-norn-repository-config.md`.
-- **Completed predecessor:** plan item `0005` and GitHub issue #173 shipped as
-  commit `79a90ece` through PR #195.
-- **Blockers:** none for the runtime migration; external DNS, Homebrew, and
-  signing operations remain separate delivery prerequisites.
-- **Branch-local work:** canonical Norn runtime and repository identifiers,
-  bounded legacy aliases, recoverable local-data migration, and safe
-  repository-config migration are in validation.
+- **Branch:** `codex/norn-onboarding-foundation`
+- **Active item:** GitHub issue #186 (`.docflow/plan/todo/0009-norn-onboarding-contract.md`)
+  and ADR `0012-norn-onboarding-contract.md`.
+- **Completed predecessor:** plan items `0006`, `0007`, and `0008` for issues
+  #174, #176, and #175 are shipped via PR #196 (`36353fb`), and recorded in
+  `plan/done` with the same commit.
+- **Blockers:** no code blockers for the contract definition itself. Runtime
+  compatibility behavior is covered by existing migration artifacts.
+- **Branch-local work:** define machine-owned setup, repository-owned init, and
+  read-only readiness surfaces.
 
 ## Last shipped
 
@@ -27,5 +25,5 @@ If status files and git disagree, git is authoritative; correct this file.
 
 ## Next item
 
-Validate, review, and merge the Norn runtime, repository-config, and local-data
-migration slice, then continue with the next open issue.
+Finish issue #186, then implement issue #187 (read-only readiness probe), then
+continue with #188 and #189 in order.

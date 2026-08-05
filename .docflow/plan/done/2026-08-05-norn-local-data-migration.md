@@ -31,3 +31,8 @@ and successful migration never deletes the recoverable source.
 - `../../adr/0011-norn-naming-and-compatibility.md`
 - `../../adr/0003-credentials-keychain.md`
 - GitHub issue #176
+
+---
+
+Shipped as commit `36353fb1dbabff939e2f6b52b56a896ea1f17b65`
+through [PR #196](https://github.com/lachesi-hq/lachesi/pull/196).

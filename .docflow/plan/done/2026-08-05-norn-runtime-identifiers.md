@@ -21,3 +21,8 @@ deprecated legacy binary aliases and preserves Makefile/justfile recipe parity.
 
 - `../../adr/0011-norn-naming-and-compatibility.md`
 - GitHub issue #174
+
+---
+
+Shipped as commit `36353fb1dbabff939e2f6b52b56a896ea1f17b65`
+through [PR #196](https://github.com/lachesi-hq/lachesi/pull/196).
