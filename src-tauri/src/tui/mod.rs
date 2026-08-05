@@ -39,9 +39,9 @@ const TICK_RATE: Duration = Duration::from_millis(250);
 const DEFAULT_REVIEW_PROMPT: &str = include_str!("../../../src/lib/defaultReviewPrompt.md");
 
 pub fn run_from_env() -> Result<(), String> {
-    let launch_mode = launch_mode_from_args(std::env::args().skip(1))?;
+    let launch_opts = launch_mode_from_args(std::env::args().skip(1))?;
     let mut config = config::load();
-    let resolve_current_repo = match launch_mode {
+    let resolve_current_repo = match launch_opts.mode {
         TuiLaunchMode::Help => {
             println!("{}", tui_usage());
             return Ok(());
@@ -52,7 +52,11 @@ pub fn run_from_env() -> Result<(), String> {
         }
         TuiLaunchMode::Workspace => false,
     };
-    run_tui_preflight(resolve_current_repo, Path::new("."))?;
+    if launch_opts.skip_readiness {
+        eprintln!("Skipping readiness preflight by request (--skip-readiness).");
+    } else {
+        run_tui_preflight(resolve_current_repo, Path::new("."))?;
+    }
     let mut app = TuiApp::from_config(config);
     if resolve_current_repo {
         app.focus = FocusPane::PullRequests;
@@ -111,6 +115,7 @@ fn run_tui_preflight(resolve_current_repo: bool, cwd: &Path) -> Result<(), Strin
             eprintln!("    remediation: {}", issue.remediation);
         }
         eprintln!("Run `norn doctor --repo-path .` for full diagnostics.");
+        eprintln!("Use `norn-tui --skip-readiness` only if setup must be deferred.");
         return Err("Readiness preflight failed; complete machine/repository setup before starting the TUI.".to_string());
     }
 
@@ -148,21 +153,36 @@ enum TuiLaunchMode {
     Workspace,
 }
 
-fn tui_usage() -> &'static str {
-    "Usage: norn-tui [--current-repo] [--workspace]\n\nBy default, norn-tui opens pull requests for the git repository in the current directory."
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct TuiLaunchOptions {
+    mode: TuiLaunchMode,
+    skip_readiness: bool,
 }
 
-fn launch_mode_from_args<I, S>(args: I) -> Result<TuiLaunchMode, String>
+fn tui_usage() -> &'static str {
+    "Usage: norn-tui [--current-repo] [--workspace] [--skip-readiness]\n\nBy default, norn-tui opens pull requests for the git repository in the current directory."
+}
+
+fn launch_mode_from_args<I, S>(args: I) -> Result<TuiLaunchOptions, String>
 where
     I: IntoIterator<Item = S>,
     S: AsRef<str>,
 {
-    let mut mode = TuiLaunchMode::CurrentRepo;
+    let mut options = TuiLaunchOptions {
+        mode: TuiLaunchMode::CurrentRepo,
+        skip_readiness: false,
+    };
     for arg in args {
         match arg.as_ref() {
-            "--workspace" | "--global" => mode = TuiLaunchMode::Workspace,
-            "--current-repo" => mode = TuiLaunchMode::CurrentRepo,
-            "-h" | "--help" => return Ok(TuiLaunchMode::Help),
+            "--workspace" | "--global" => options.mode = TuiLaunchMode::Workspace,
+            "--current-repo" => options.mode = TuiLaunchMode::CurrentRepo,
+            "--skip-readiness" => options.skip_readiness = true,
+            "-h" | "--help" => {
+                return Ok(TuiLaunchOptions {
+                    mode: TuiLaunchMode::Help,
+                    skip_readiness: false,
+                })
+            }
             unknown => {
                 return Err(format!(
                     "Unknown option `{unknown}`. Use `norn-tui --workspace` for the configured repository picker."
@@ -170,7 +190,7 @@ where
             }
         }
     }
-    Ok(mode)
+    Ok(options)
 }
 
 struct TuiApp {
@@ -1604,13 +1624,20 @@ mod tests {
     #[test]
     fn tui_launch_defaults_to_current_repository() {
         assert_eq!(
-            launch_mode_from_args(Vec::<String>::new()).unwrap(),
+            launch_mode_from_args(Vec::<String>::new()).unwrap().mode,
             TuiLaunchMode::CurrentRepo
         );
         assert_eq!(
-            launch_mode_from_args(["--workspace"]).unwrap(),
+            launch_mode_from_args(["--workspace"]).unwrap().mode,
             TuiLaunchMode::Workspace
         );
+    }
+
+    #[test]
+    fn tui_launch_supports_skipping_readiness_checks() {
+        let options = launch_mode_from_args(["--workspace", "--skip-readiness"]).unwrap();
+        assert_eq!(options.mode, TuiLaunchMode::Workspace);
+        assert!(options.skip_readiness);
     }
 
     #[test]

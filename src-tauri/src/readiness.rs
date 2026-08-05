@@ -1492,7 +1492,8 @@ mod tests {
 
         assert_eq!(code, 1);
         assert!(stderr.is_empty());
-        let output: serde_json::Value = serde_json::from_slice(&stdout).expect("doctor JSON output");
+        let output: serde_json::Value =
+            serde_json::from_slice(&stdout).expect("doctor JSON output");
         assert_eq!(output["status"], "warn");
     }
 
