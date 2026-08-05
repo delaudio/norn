@@ -1,6 +1,6 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "lachesi-docs",
+  "name": "norn-docs",
   "compatibility_date": "2026-07-05",
   "assets": {
     "directory": "./apps/docs/dist",
