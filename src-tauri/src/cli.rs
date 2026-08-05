@@ -435,6 +435,7 @@ fn parse_init_args(args: &[String]) -> Result<InitArgs, String> {
     let mut yes = false;
     let mut format = OutputFormat::Human;
     let mut explicit_dry_run = false;
+    let mut explicit_mode = None::<InitMode>;
     let mut index = 1;
     while index < args.len() {
         match args[index].as_str() {
@@ -446,10 +447,26 @@ fn parse_init_args(args: &[String]) -> Result<InitArgs, String> {
                 );
             }
             "--guided" => {
+                if explicit_mode == Some(InitMode::Quick) {
+                    return Err(
+                        "`--quick` and `--guided` are mutually exclusive for `norn init`."
+                            .to_string(),
+                    );
+                }
                 mode = InitMode::Guided;
+                explicit_mode = Some(InitMode::Guided);
                 dry_run = true;
             }
-            "--quick" => mode = InitMode::Quick,
+            "--quick" => {
+                if explicit_mode == Some(InitMode::Guided) {
+                    return Err(
+                        "`--quick` and `--guided` are mutually exclusive for `norn init`."
+                            .to_string(),
+                    );
+                }
+                mode = InitMode::Quick;
+                explicit_mode = Some(InitMode::Quick);
+            }
             "--dry-run" => {
                 explicit_dry_run = true;
                 dry_run = true;
@@ -654,7 +671,9 @@ fn run_init(args: InitArgs, stdout: &mut dyn Write, stderr: &mut dyn Write) -> i
                     let _ = writeln!(stdout, "  - {change}");
                 }
             }
-            if output.dry_run {
+            if output.would_apply {
+                let _ = writeln!(stdout, "Migration applied.");
+            } else {
                 let _ = writeln!(stdout, "Run `norn init --yes` to apply.");
             }
         }
@@ -1576,6 +1595,7 @@ mod tests {
     use crate::review_event::PullRequestReviewEventProvider;
     use crate::review_metrics::{aggregate_review_effectiveness, ReviewEffectivenessFilter};
     use crate::services::review::ReviewFindingSeverity;
+    use serde_json::Value;
     use std::fs;
     use std::path::PathBuf;
     use std::sync::atomic::{AtomicU64, Ordering};
@@ -1672,7 +1692,7 @@ mod tests {
     }
 
     #[test]
-    fn init_args_rejects_conflicting_mode_flags() {
+    fn init_args_rejects_conflicting_mode_flags_between_modes() {
         let error = parse_init_args(&[
             "init".to_string(),
             "--yes".to_string(),
@@ -1681,6 +1701,93 @@ mod tests {
         .expect_err("conflict should fail");
 
         assert!(error.contains("`--yes` and `--dry-run`"));
+    }
+
+    #[test]
+    fn init_args_rejects_conflicting_mode_flags() {
+        let error = parse_init_args(&[
+            "init".to_string(),
+            "--guided".to_string(),
+            "--quick".to_string(),
+        ])
+        .expect_err("conflict should fail");
+
+        assert!(error.contains("`--quick` and `--guided`"));
+    }
+
+    #[test]
+    fn init_run_dry_run_does_not_apply_changes() {
+        let repo = temp_repo();
+        fs::write(repo.join(".lachesi.yaml"), "version: 0.1\n").expect("legacy config");
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+        let code = run_args(
+            &[
+                "init".to_string(),
+                "--repo-path".to_string(),
+                repo.to_string_lossy().to_string(),
+                "--dry-run".to_string(),
+                "--json".to_string(),
+            ],
+            &mut stdout,
+            &mut stderr,
+        );
+
+        assert_eq!(code, 0);
+        assert!(repo.join(".lachesi.yaml").exists());
+        assert!(!repo.join(".norn.yaml").exists());
+        assert!(stderr.is_empty());
+
+        let output: Value = serde_json::from_slice(&stdout).expect("json output");
+        assert_eq!(output["dryRun"], true);
+        assert!(output["actions"].as_array().expect("actions").len() > 0);
+        let _ = fs::remove_dir_all(repo);
+    }
+
+    #[test]
+    fn init_run_yes_applies_and_is_idempotent() {
+        let repo = temp_repo();
+        fs::write(repo.join(".lachesi.yaml"), "version: 0.1\n").expect("legacy config");
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+        let code = run_args(
+            &[
+                "init".to_string(),
+                "--repo-path".to_string(),
+                repo.to_string_lossy().to_string(),
+                "--yes".to_string(),
+            ],
+            &mut stdout,
+            &mut stderr,
+        );
+
+        assert_eq!(code, 0);
+        assert!(repo.join(".norn.yaml").exists());
+        assert!(!repo.join(".lachesi.yaml").exists());
+        assert!(stderr.is_empty());
+        assert!(String::from_utf8_lossy(&stdout).contains("Migration applied."));
+
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+        let code = run_args(
+            &[
+                "init".to_string(),
+                "--repo-path".to_string(),
+                repo.to_string_lossy().to_string(),
+                "--yes".to_string(),
+                "--json".to_string(),
+            ],
+            &mut stdout,
+            &mut stderr,
+        );
+
+        assert_eq!(code, 0);
+        let output: Value = serde_json::from_slice(&stdout).expect("json output");
+        assert_eq!(output["dryRun"], false);
+        assert!(output["actions"].as_array().expect("actions").is_empty());
+        assert!(stderr.is_empty());
+
+        let _ = fs::remove_dir_all(repo);
     }
 
     #[test]
@@ -1955,7 +2062,10 @@ token: unsafe
         assert!(output["machineTools"].as_array().is_some());
         assert!(output["machineCredentials"].as_array().is_some());
         assert!(output["setupNotes"].is_array());
-        assert!(!output["machineTools"].as_array().expect("machine tools").is_empty());
+        assert!(!output["machineTools"]
+            .as_array()
+            .expect("machine tools")
+            .is_empty());
     }
 
     #[test]
