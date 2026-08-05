@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Lachesi",
+  "productName": "Norn",
   "version": "0.1.0",
-  "identifier": "app.lachesi.desktop",
+  "identifier": "app.norn.desktop",
   "build": {
     "beforeDevCommand": "pnpm dev",
     "devUrl": "http://localhost:5210",
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "Lachesi",
+        "title": "Norn",
         "width": 1400,
         "height": 900,
         "minWidth": 1024,

@@ -6,8 +6,10 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
-const CORPUS_SCHEMA_VERSION: &str = "lachesi.review-evaluation-corpus.v1";
-const RESULT_SCHEMA_VERSION: &str = "lachesi.review-evaluation-result.v1";
+const CORPUS_SCHEMA_VERSION: &str = "norn.review-evaluation-corpus.v1";
+const LEGACY_CORPUS_SCHEMA_VERSION: &str = "lachesi.review-evaluation-corpus.v1";
+const RESULT_SCHEMA_VERSION: &str = "norn.review-evaluation-result.v1";
+const LEGACY_RESULT_SCHEMA_VERSION: &str = "lachesi.review-evaluation-result.v1";
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -158,7 +160,9 @@ fn read_json<T: for<'de> Deserialize<'de>>(path: &Path) -> Result<T, String> {
 }
 
 fn validate_corpus(corpus: &EvaluationCorpus) -> Result<(), String> {
-    if corpus.schema_version != CORPUS_SCHEMA_VERSION {
+    if ![CORPUS_SCHEMA_VERSION, LEGACY_CORPUS_SCHEMA_VERSION]
+        .contains(&corpus.schema_version.as_str())
+    {
         return Err(format!(
             "Unsupported evaluation corpus schema `{}`",
             corpus.schema_version
@@ -199,7 +203,9 @@ fn validate_baseline(
     baseline: &EvaluationBaseline,
     corpus: &EvaluationCorpus,
 ) -> Result<(), String> {
-    if baseline.schema_version != RESULT_SCHEMA_VERSION {
+    if ![RESULT_SCHEMA_VERSION, LEGACY_RESULT_SCHEMA_VERSION]
+        .contains(&baseline.schema_version.as_str())
+    {
         return Err(format!(
             "Unsupported evaluation baseline schema `{}`",
             baseline.schema_version
@@ -371,6 +377,18 @@ mod tests {
         assert_eq!(result.metrics.missed_expected, 0);
         assert_eq!(result.metrics.precision_milli, 500);
         assert_eq!(result.regressions, vec!["precision_below_baseline"]);
+    }
+
+    #[test]
+    fn accepts_legacy_inputs_but_writes_the_canonical_result_schema() {
+        let mut corpus = corpus();
+        corpus.schema_version = LEGACY_CORPUS_SCHEMA_VERSION.to_string();
+        let mut baseline = baseline();
+        baseline.schema_version = LEGACY_RESULT_SCHEMA_VERSION.to_string();
+
+        let result = evaluate(corpus, baseline).expect("legacy evaluation input");
+
+        assert_eq!(result.schema_version, RESULT_SCHEMA_VERSION);
     }
 
     #[test]

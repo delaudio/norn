@@ -177,7 +177,7 @@ export async function buildAiReviewPayloadForPr({
     reviewProfile,
   );
   if (warnings.length > 0) {
-    console.warn("Lachesi repo config warnings:", warnings);
+    console.warn("Norn repo config warnings:", warnings);
   }
   const finalPr = await tauriCall<PullRequestDetail>("get_pull_request", {
     provider,

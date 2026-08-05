@@ -3,7 +3,7 @@ title: Storybook
 description: Design system documentation and static deployment.
 ---
 
-Lachesi has a Storybook build for design system and component documentation.
+Norn has a Storybook build for design system and component documentation.
 
 ## Local Development
 

@@ -1,4 +1,5 @@
-const PROMPT_DISPLAY_MARKER = "[[lachesi:ai-review-prompt]]";
+const PROMPT_DISPLAY_MARKER = "[[norn:ai-review-prompt]]";
+const LEGACY_PROMPT_DISPLAY_MARKER = "[[lachesi:ai-review-prompt]]";
 
 export interface ParsedReviewPromptDisplay {
   intro: string;
@@ -15,11 +16,14 @@ export function buildReviewPromptDisplayMessage(payload: string): string {
 }
 
 export function parseReviewPromptDisplayMessage(content: string): ParsedReviewPromptDisplay | null {
-  const markerIndex = content.indexOf(PROMPT_DISPLAY_MARKER);
+  const marker = content.includes(PROMPT_DISPLAY_MARKER)
+    ? PROMPT_DISPLAY_MARKER
+    : LEGACY_PROMPT_DISPLAY_MARKER;
+  const markerIndex = content.indexOf(marker);
   if (markerIndex < 0) return null;
 
   const intro = content.slice(0, markerIndex).trim();
-  const prompt = content.slice(markerIndex + PROMPT_DISPLAY_MARKER.length).trim();
+  const prompt = content.slice(markerIndex + marker.length).trim();
   if (!prompt) return null;
 
   return {

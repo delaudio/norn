@@ -1,6 +1,6 @@
 ---
 title: Getting Started
-description: Install dependencies and run Lachesi locally.
+description: Install dependencies and run Norn locally.
 ---
 
 ## Requirements

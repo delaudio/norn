@@ -3,7 +3,7 @@ title: Providers
 description: Configure Bitbucket Cloud and GitHub repositories.
 ---
 
-Lachesi supports Bitbucket Cloud and GitHub as review providers.
+Norn supports Bitbucket Cloud and GitHub as review providers.
 
 ## Bitbucket Cloud
 

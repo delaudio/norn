@@ -44,10 +44,13 @@ use crate::team_credentials::{
     CredentialError, CredentialReference, CredentialStatus, EncryptedCredentialRecord,
 };
 
-const APP_DIR: &str = "lachesi";
-pub(crate) const DB_FILE: &str = "lachesi.sqlite3";
+const APP_DIR: &str = "norn";
+const LEGACY_APP_DIR: &str = "lachesi";
+pub(crate) const DB_FILE: &str = "norn.sqlite3";
+pub(crate) const LEGACY_DB_FILE: &str = "lachesi.sqlite3";
 const LATEST_SCHEMA_VERSION: i64 = 13;
 const LEGACY_REVIEWS_DIR: &str = "reviews";
+const LEGACY_REVIEWS_MIGRATION_MARKER: &str = ".legacy-reviews-imported-v1";
 const MAX_ADMINISTRATIVE_AUDIT_TIMESTAMP_MS: i64 = 4_102_444_800_000;
 const SHARED_REVIEW_JOB_LEASE_MS: i64 = 15 * 60 * 1000;
 const FINDING_PUBLICATION_LEASE_MS: i64 = 5 * 60 * 1000;
@@ -306,26 +309,81 @@ struct StoredReviewFinding {
     category: String,
 }
 
+#[derive(Debug)]
+struct DataDirectoryResolution {
+    canonical: PathBuf,
+    legacy_roots: Vec<PathBuf>,
+}
+
+fn resolve_data_directories() -> Result<DataDirectoryResolution, String> {
+    if let Some(dir) =
+        std::env::var_os("NORN_REVIEW_DATA_DIR").or_else(|| std::env::var_os("NORN_DATA_DIR"))
+    {
+        return Ok(DataDirectoryResolution {
+            canonical: PathBuf::from(dir),
+            legacy_roots: Vec::new(),
+        });
+    }
+    if let Some(dir) =
+        std::env::var_os("LACHESI_REVIEW_DATA_DIR").or_else(|| std::env::var_os("LACHESI_DATA_DIR"))
+    {
+        let dir = PathBuf::from(dir);
+        return Ok(DataDirectoryResolution {
+            canonical: dir.clone(),
+            legacy_roots: vec![dir],
+        });
+    }
+    let base = dirs::data_local_dir()
+        .ok_or_else(|| "Cannot determine local data directory".to_string())?;
+    Ok(DataDirectoryResolution {
+        canonical: base.join(APP_DIR),
+        legacy_roots: vec![base.join(LEGACY_APP_DIR)],
+    })
+}
+
+#[cfg(test)]
 fn local_data_dir() -> Result<PathBuf, String> {
-    if let Some(dir) = std::env::var_os("LACHESI_REVIEW_DATA_DIR") {
-        let dir = PathBuf::from(dir);
-        fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-        return Ok(dir);
-    }
-    if let Some(dir) = std::env::var_os("LACHESI_DATA_DIR") {
-        let dir = PathBuf::from(dir);
-        fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-        return Ok(dir);
-    }
-    let dir = dirs::data_local_dir()
-        .ok_or_else(|| "Cannot determine local data directory".to_string())?
-        .join(APP_DIR);
+    let dir = resolve_data_directories()?.canonical;
     fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     Ok(dir)
 }
 
+fn migrate_legacy_review_files(
+    canonical_root: &Path,
+    legacy_roots: &[PathBuf],
+) -> Result<(), String> {
+    let migration_marker = canonical_root.join(LEGACY_REVIEWS_MIGRATION_MARKER);
+    if migration_marker.is_file() {
+        return Ok(());
+    }
+    let canonical_reviews = canonical_root.join(LEGACY_REVIEWS_DIR);
+    for legacy_root in legacy_roots {
+        let legacy_reviews = legacy_root.join(LEGACY_REVIEWS_DIR);
+        if legacy_reviews == canonical_reviews || !legacy_reviews.is_dir() {
+            continue;
+        }
+        for entry in fs::read_dir(&legacy_reviews).map_err(|error| error.to_string())? {
+            let entry = entry.map_err(|error| error.to_string())?;
+            let source = entry.path();
+            let file_type = entry.file_type().map_err(|error| error.to_string())?;
+            if !file_type.is_file()
+                || source.extension().and_then(|extension| extension.to_str()) != Some("json")
+            {
+                continue;
+            }
+            let destination = canonical_reviews.join(entry.file_name());
+            crate::runtime_identity::migrate_file_atomically(&source, &destination, |_| Ok(()))?;
+        }
+    }
+    fs::write(migration_marker, []).map_err(|error| error.to_string())?;
+    Ok(())
+}
+
 pub fn legacy_reviews_dir() -> Result<PathBuf, String> {
-    let dir = local_data_dir()?.join(LEGACY_REVIEWS_DIR);
+    let resolution = resolve_data_directories()?;
+    fs::create_dir_all(&resolution.canonical).map_err(|error| error.to_string())?;
+    migrate_legacy_review_files(&resolution.canonical, &resolution.legacy_roots)?;
+    let dir = resolution.canonical.join(LEGACY_REVIEWS_DIR);
     fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     Ok(dir)
 }
@@ -339,7 +397,56 @@ pub fn legacy_review_path(workspace: &str, repo: &str, id: u32) -> Result<PathBu
 }
 
 fn db_path() -> Result<PathBuf, String> {
-    Ok(local_data_dir()?.join(DB_FILE))
+    let resolution = resolve_data_directories()?;
+    fs::create_dir_all(&resolution.canonical).map_err(|error| error.to_string())?;
+    let canonical = resolution.canonical.join(DB_FILE);
+    if !canonical.exists() {
+        let mut candidates = vec![resolution.canonical.join(LEGACY_DB_FILE)];
+        for legacy_root in &resolution.legacy_roots {
+            candidates.push(legacy_root.join(DB_FILE));
+            candidates.push(legacy_root.join(LEGACY_DB_FILE));
+        }
+        candidates.dedup();
+        if let Some(source) = candidates.into_iter().find(|path| path.is_file()) {
+            migrate_sqlite_database(&source, &canonical).map_err(|error| {
+                format!(
+                    "Norn could not migrate the review database to {}: {error}. The legacy database at {} remains usable; remove the incomplete Norn database and retry.",
+                    canonical.display(),
+                    source.display()
+                )
+            })?;
+        }
+    }
+    Ok(canonical)
+}
+
+fn migrate_sqlite_database(source: &Path, destination: &Path) -> Result<bool, String> {
+    if destination.exists() || !source.is_file() {
+        return Ok(false);
+    }
+    let parent = destination
+        .parent()
+        .ok_or_else(|| "Canonical database path has no parent directory".to_string())?;
+    fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    let temporary = tempfile::Builder::new()
+        .prefix(".norn-database-migration-")
+        .tempdir_in(parent)
+        .map_err(|error| error.to_string())?;
+    let temporary_path = temporary.path().join("norn.sqlite3");
+
+    let source_connection =
+        Connection::open_with_flags(source, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+            .map_err(|error| error.to_string())?;
+    let escaped = temporary_path.to_string_lossy().replace('\'', "''");
+    if let Err(error) = source_connection.execute_batch(&format!("VACUUM INTO '{escaped}'")) {
+        return Err(error.to_string());
+    }
+    verify_database_backup(&temporary_path)?;
+    match crate::runtime_identity::rename_directory_noclobber(&temporary_path, destination) {
+        Ok(()) => Ok(true),
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => Ok(false),
+        Err(error) => Err(error.to_string()),
+    }
 }
 
 pub(crate) fn create_consistent_database_backup(destination: &Path) -> Result<(), String> {
@@ -4682,15 +4789,15 @@ mod tests {
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_nanos())
             .unwrap_or(0);
-        std::env::temp_dir().join(format!("lachesi-{name}-{nanos}"))
+        std::env::temp_dir().join(format!("norn-{name}-{nanos}"))
     }
 
     fn with_test_data_dir<T>(name: &str, f: impl FnOnce(&Path) -> T) -> T {
         let _guard = TEST_DATA_DIR_ENV_LOCK.lock().expect("test env lock");
         let dir = test_dir(name);
-        std::env::set_var("LACHESI_DATA_DIR", &dir);
+        std::env::set_var("NORN_DATA_DIR", &dir);
         let result = f(&dir);
-        std::env::remove_var("LACHESI_DATA_DIR");
+        std::env::remove_var("NORN_DATA_DIR");
         let _ = fs::remove_dir_all(&dir);
         result
     }
@@ -4922,14 +5029,89 @@ mod tests {
     fn dedicated_review_data_dir_is_created() {
         let _guard = TEST_DATA_DIR_ENV_LOCK.lock().expect("test env lock");
         let dir = test_dir("dedicated-review-data");
-        std::env::set_var("LACHESI_REVIEW_DATA_DIR", &dir);
+        std::env::set_var("NORN_REVIEW_DATA_DIR", &dir);
 
         let resolved = local_data_dir().expect("resolve dedicated review data dir");
 
-        std::env::remove_var("LACHESI_REVIEW_DATA_DIR");
+        std::env::remove_var("NORN_REVIEW_DATA_DIR");
         assert_eq!(resolved, dir);
         assert!(dir.is_dir());
         let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn canonical_review_data_env_takes_precedence_over_legacy_env() {
+        let _guard = TEST_DATA_DIR_ENV_LOCK.lock().expect("test env lock");
+        let canonical = test_dir("canonical-data-env");
+        let legacy = test_dir("legacy-data-env");
+        let previous_canonical = std::env::var_os("NORN_REVIEW_DATA_DIR");
+        let previous_legacy = std::env::var_os("LACHESI_REVIEW_DATA_DIR");
+        std::env::set_var("NORN_REVIEW_DATA_DIR", &canonical);
+        std::env::set_var("LACHESI_REVIEW_DATA_DIR", &legacy);
+
+        let resolved = local_data_dir().expect("resolve canonical review data dir");
+
+        match previous_canonical {
+            Some(value) => std::env::set_var("NORN_REVIEW_DATA_DIR", value),
+            None => std::env::remove_var("NORN_REVIEW_DATA_DIR"),
+        }
+        match previous_legacy {
+            Some(value) => std::env::set_var("LACHESI_REVIEW_DATA_DIR", value),
+            None => std::env::remove_var("LACHESI_REVIEW_DATA_DIR"),
+        }
+        assert_eq!(resolved, canonical);
+        assert!(!legacy.exists());
+        let _ = fs::remove_dir_all(resolved);
+    }
+
+    #[test]
+    fn sqlite_migration_is_consistent_idempotent_and_recoverable() {
+        let root = tempfile::tempdir().expect("tempdir");
+        let source = root.path().join(LEGACY_DB_FILE);
+        let destination = root.path().join(DB_FILE);
+        let connection = Connection::open(&source).expect("legacy database");
+        connection
+            .execute_batch(
+                "CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY);\
+                 INSERT INTO schema_migrations(version) VALUES (13);\
+                 CREATE TABLE migration_fixture (value TEXT NOT NULL);\
+                 INSERT INTO migration_fixture(value) VALUES ('preserved');",
+            )
+            .expect("legacy schema");
+        drop(connection);
+
+        assert!(migrate_sqlite_database(&source, &destination).expect("first migration"));
+        assert!(!migrate_sqlite_database(&source, &destination).expect("second migration"));
+        let migrated = Connection::open(&destination).expect("canonical database");
+        let value: String = migrated
+            .query_row("SELECT value FROM migration_fixture", [], |row| row.get(0))
+            .expect("migrated row");
+
+        assert_eq!(value, "preserved");
+        assert!(source.exists());
+    }
+
+    #[test]
+    fn legacy_review_file_import_runs_once_and_does_not_resurrect_deleted_data() {
+        let root = tempfile::tempdir().expect("tempdir");
+        let canonical = root.path().join("norn");
+        let legacy = root.path().join("lachesi");
+        let file_name = legacy_review_file_name("workspace", "repo", 42);
+        let legacy_reviews = legacy.join(LEGACY_REVIEWS_DIR);
+        fs::create_dir_all(&canonical).expect("canonical root");
+        fs::create_dir_all(&legacy_reviews).expect("legacy reviews");
+        fs::write(legacy_reviews.join(&file_name), br#"{"legacy":true}"#).expect("legacy review");
+
+        migrate_legacy_review_files(&canonical, std::slice::from_ref(&legacy))
+            .expect("initial import");
+        let imported = canonical.join(LEGACY_REVIEWS_DIR).join(&file_name);
+        assert!(imported.is_file());
+        assert!(canonical.join(LEGACY_REVIEWS_MIGRATION_MARKER).is_file());
+
+        fs::remove_file(&imported).expect("delete imported review");
+        migrate_legacy_review_files(&canonical, &[legacy]).expect("subsequent resolution");
+
+        assert!(!imported.exists());
     }
 
     #[test]

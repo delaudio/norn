@@ -24,3 +24,5 @@
 
 - `../../adr/0010-side-by-side-terminal-image-diffs.md`
 - `../../adr/0009-terminal-image-diffs.md`
+
+Shipped as commit `e149569` through PR #148.

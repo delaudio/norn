@@ -311,7 +311,7 @@ export const mockEmptyReviewEffectivenessSummary: ReviewEffectivenessSummary = {
 };
 
 export const mockReviewEffectivenessReport: ReviewEffectivenessReport = {
-  schemaVersion: "lachesi.review-effectiveness.v1",
+  schemaVersion: "norn.review-effectiveness.v1",
   filter: {
     tenantId: "local",
     provider: "bitbucket",

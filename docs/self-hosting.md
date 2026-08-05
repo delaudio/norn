@@ -1,7 +1,7 @@
 # Self-hosting the review service
 
-The optional self-hosted service is a process boundary around Lachesi's public
-shared-review contracts. It does not change desktop, TUI, or `lachesi review`:
+The optional self-hosted service is a process boundary around Norn's public
+shared-review contracts. It does not change desktop, TUI, or `norn review`:
 those remain fully local and do not depend on this process.
 
 ## Start from an empty volume
@@ -16,18 +16,31 @@ curl --fail http://127.0.0.1:8080/metrics
 ```
 
 The startup boundary creates the configured data directory with owner-only
-permissions, opens `/var/lib/lachesi/lachesi.sqlite3`, and applies SQLite
+permissions, opens `/var/lib/norn/norn.sqlite3`, and applies SQLite
 migrations before binding its HTTP port. A successful `/readyz` response means
 configuration, the persistent directory, and migrations are valid. A failed
 startup never opens the port, so orchestration should treat it as unready.
+
+Compose retains the `lachesi-data` volume name as a storage compatibility alias
+so an image upgrade continues to attach the existing volume, but mounts it at
+the canonical `/var/lib/norn` path. The runtime copies `lachesi.sqlite3` to
+`norn.sqlite3`, validates the copy, and retains the legacy database for rollback.
+
+The Compose service key also remains `lachesi` during the bounded compatibility
+window because operators commonly script it directly. This avoids orphaning
+the old container during upgrade; the image entrypoint, executable,
+environment, storage path, healthcheck, and output are canonical Norn.
 
 ## Configuration
 
 | Variable | Required | Default | Purpose |
 | --- | --- | --- | --- |
-| `LACHESI_SERVICE_DATA_DIR` | Yes | none | Absolute path to a persistent, writable volume. |
-| `LACHESI_SERVICE_BIND_ADDR` | No | `0.0.0.0:8080` | HTTP listener address. |
-| `LACHESI_REVIEW_DATA_DIR` | Internal | set from service data dir | Storage location used by the public SQLite store. Do not set it separately for the container. |
+| `NORN_SERVICE_DATA_DIR` | Yes | none | Absolute path to a persistent, writable volume. |
+| `NORN_SERVICE_BIND_ADDR` | No | `0.0.0.0:8080` | HTTP listener address. |
+| `NORN_REVIEW_DATA_DIR` | Internal | set from service data dir | Storage location used by the public SQLite store. Do not set it separately for the container. |
+
+Equivalent `LACHESI_*` names remain fallback aliases during the compatibility
+window; when both forms are present, the `NORN_*` value wins.
 
 The container image contains no provider, model, OIDC, webhook, or database
 credentials. Deploy provider and model credentials through the credential
@@ -56,7 +69,7 @@ as an unbounded metrics label. Scrape `/metrics` only through an authenticated
 operations network boundary; it is intentionally machine-readable rather than
 a public status page.
 
-The Compose healthcheck runs `lachesi service healthcheck`, which requests the
+The Compose healthcheck runs `norn service healthcheck`, which requests the
 loopback `/readyz` endpoint with bounded socket timeouts. It therefore verifies
 both the process and its serving readiness, rather than only checking for a
 database file.
@@ -67,7 +80,7 @@ Run the smoke path against an empty or disposable persistent directory:
 
 ```sh
 docker compose -f compose.self-hosted.yaml run --rm \
-  -e LACHESI_SERVICE_DATA_DIR=/var/lib/lachesi \
+  -e NORN_SERVICE_DATA_DIR=/var/lib/norn \
   lachesi service smoke
 ```
 
@@ -89,7 +102,7 @@ For an upgrade:
 1. Stop the current container after in-flight work has drained.
 2. Back up the persistent volume using your platform's volume snapshot tool.
 3. Start the new image against the same volume.
-4. Wait for `/readyz`, then run `lachesi service smoke` against a disposable
+4. Wait for `/readyz`, then run `norn service smoke` against a disposable
    volume as a deployment check.
 5. Roll back to the backed-up volume if the new process does not become ready.
 
@@ -103,7 +116,7 @@ Create a backup while the service is running with an absolute, new destination
 directory:
 
 ```sh
-lachesi service backup /secure-backups/lachesi-2026-07-29
+norn service backup /secure-backups/norn-2026-07-29
 ```
 
 The backup is a consistent SQLite snapshot plus a manifest and SHA-256 digest.
@@ -117,8 +130,8 @@ Restore only into a new empty data directory, before starting a serving
 instance:
 
 ```sh
-LACHESI_SERVICE_DATA_DIR=/var/lib/lachesi-restored \
-  lachesi service restore /secure-backups/lachesi-2026-07-29
+NORN_SERVICE_DATA_DIR=/var/lib/norn-restored \
+  norn service restore /secure-backups/norn-2026-07-29
 ```
 
 Restore rejects non-empty destinations, malformed manifests, checksum changes,

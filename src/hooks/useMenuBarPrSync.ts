@@ -8,7 +8,7 @@ import {
 import { isTauri } from "@/lib/tauri";
 import type { PullRequestSummary } from "@/types";
 
-const TRAY_ID = "lachesi-main";
+const TRAY_ID = "norn-main";
 const MAX_MENU_PRS = 8;
 const MAX_NOTIFICATIONS_PER_SYNC = 3;
 const MENU_TITLE_LIMIT = 46;
@@ -102,7 +102,7 @@ async function ensureTray() {
     if (existing) {
       trayRef = existing;
       await trayRef.setTitle("");
-      await trayRef.setTooltip("Lachesi");
+      await trayRef.setTooltip("Norn");
       return;
     }
     const icon = await defaultWindowIcon();
@@ -110,7 +110,7 @@ async function ensureTray() {
       id: TRAY_ID,
       icon: icon ?? undefined,
       iconAsTemplate: false,
-      tooltip: "Lachesi",
+      tooltip: "Norn",
       menuOnLeftClick: true,
       action: (event) => {
         if (event.type === "DoubleClick") {
@@ -145,7 +145,7 @@ async function updateTrayMenu(args: UseMenuBarPrSyncArgs, latestPrs: PullRequest
     },
     {
       id: "open",
-      text: "Open Lachesi",
+      text: "Open Norn",
       action: () => {
         void focusMainWindow();
       },
@@ -247,7 +247,7 @@ async function updateTrayMenu(args: UseMenuBarPrSyncArgs, latestPrs: PullRequest
 
   const menu = await Menu.new({ items });
   await trayRef.setTooltip(
-    args.menuBarSyncEnabled ? "Lachesi pull requests" : "Lachesi pull request sync disabled",
+    args.menuBarSyncEnabled ? "Norn pull requests" : "Norn pull request sync disabled",
   );
   await trayRef.setMenu(menu);
 }
@@ -305,7 +305,7 @@ async function notifyPrChanges(prs: PullRequestSummary[]) {
   if (changes.length > MAX_NOTIFICATIONS_PER_SYNC) {
     sendNotification({
       title: "More pull request updates",
-      body: `${changes.length - MAX_NOTIFICATIONS_PER_SYNC} additional update(s) in Lachesi.`,
+      body: `${changes.length - MAX_NOTIFICATIONS_PER_SYNC} additional update(s) in Norn.`,
     });
   }
 }
@@ -343,7 +343,7 @@ export function useMenuBarPrSync({
       },
       latestPrs,
     ).catch((error) => {
-      console.error("Failed to update Lachesi menu bar item:", error);
+      console.error("Failed to update Norn menu bar item:", error);
     });
   }, [
     groups,
@@ -362,12 +362,12 @@ export function useMenuBarPrSync({
     let disposed = false;
     const unlisten = Promise.all([
       import("@tauri-apps/api/event").then(({ listen }) =>
-        listen("lachesi-menu-sync", () => {
+        listen("norn-menu-sync", () => {
           void onSync();
         }),
       ),
       import("@tauri-apps/api/event").then(({ listen }) =>
-        listen<string>("lachesi-menu-open-pr", (event) => {
+        listen<string>("norn-menu-open-pr", (event) => {
           const parsed = parsePrMenuPayload(event.payload);
           const pr =
             parsed &&
@@ -395,7 +395,7 @@ export function useMenuBarPrSync({
   useEffect(() => {
     if (!notificationsEnabled || loading) return;
     void notifyPrChanges(pullRequests).catch((error) => {
-      console.error("Failed to send Lachesi PR notification:", error);
+      console.error("Failed to send Norn PR notification:", error);
     });
   }, [pullRequests, loading, notificationsEnabled]);
 }

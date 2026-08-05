@@ -1,4 +1,4 @@
-// Core domain types for lachesi. Frontend DTOs mirror the Rust command outputs
+// Core domain types for Norn. Frontend DTOs mirror the Rust command outputs
 // (serde `rename_all = "camelCase"`), so the IPC boundary stays type-safe.
 
 export type ReviewProvider = "bitbucket" | "github";
@@ -687,7 +687,7 @@ export interface RepositoryReviewEffectiveness {
 }
 
 export interface ReviewEffectivenessReport {
-  schemaVersion: "lachesi.review-effectiveness.v1";
+  schemaVersion: "norn.review-effectiveness.v1";
   filter: ReviewEffectivenessFilter;
   summary: ReviewEffectivenessSummary;
   repositories: RepositoryReviewEffectiveness[];

@@ -228,7 +228,7 @@ pub fn run(request: HeadlessReviewRequest) -> Result<HeadlessReviewExecution, He
     if resolved.diff.trim().is_empty() {
         validate_empty_diff_analyzers(request.run_analyzers, &required_policy_analyzers)?;
         return Ok(HeadlessReviewExecution {
-            schema_version: "lachesi.headless-review.v1".to_string(),
+            schema_version: "norn.headless-review.v1".to_string(),
             status: "succeeded".to_string(),
             exit_code: 0,
             warnings: resolved.warnings,
@@ -293,7 +293,7 @@ pub fn run(request: HeadlessReviewRequest) -> Result<HeadlessReviewExecution, He
     strip_private_evidence_payloads(&mut review_run);
 
     Ok(HeadlessReviewExecution {
-        schema_version: "lachesi.headless-review.v1".to_string(),
+        schema_version: "norn.headless-review.v1".to_string(),
         status: "succeeded".to_string(),
         exit_code: 0,
         warnings: resolved.warnings,
@@ -380,7 +380,7 @@ fn public_provider_error(message: &str) -> &'static str {
 
 pub fn format_markdown(execution: &HeadlessReviewExecution) -> String {
     let mut output = vec![
-        format!("# Lachesi review: {}", execution.target.repo),
+        format!("# Norn review: {}", execution.target.repo),
         String::new(),
         format!(
             "Target: {} ({} -> {})",
@@ -1087,7 +1087,7 @@ fn append_diff_section_header(diff: &mut String, label: &str) {
     if !diff.is_empty() {
         diff.push('\n');
     }
-    diff.push_str("# Lachesi diff section: ");
+    diff.push_str("# Norn diff section: ");
     diff.push_str(label);
     diff.push('\n');
 }
@@ -1375,7 +1375,7 @@ mod tests {
     fn temp_git_repo() -> std::path::PathBuf {
         let nonce = TEMP_REPO_COUNTER.fetch_add(1, Ordering::Relaxed);
         let repo = std::env::temp_dir().join(format!(
-            "lachesi-headless-review-test-{}-{nonce}",
+            "norn-headless-review-test-{}-{nonce}",
             std::process::id()
         ));
         fs::create_dir_all(&repo).expect("create temp repo");
@@ -1776,9 +1776,9 @@ mod tests {
         let (diff, warnings) = working_tree_diff(&repo).expect("collect working tree diff");
 
         assert!(warnings.is_empty());
-        assert!(diff.contains("# Lachesi diff section: Staged changes (HEAD -> index)"));
-        assert!(diff.contains("# Lachesi diff section: Unstaged changes (index -> working tree)"));
-        assert!(diff.contains("# Lachesi diff section: Untracked files (new files)"));
+        assert!(diff.contains("# Norn diff section: Staged changes (HEAD -> index)"));
+        assert!(diff.contains("# Norn diff section: Unstaged changes (index -> working tree)"));
+        assert!(diff.contains("# Norn diff section: Untracked files (new files)"));
         assert!(diff.contains("+after staged"));
         assert!(diff.contains("+after unstaged"));
         assert!(diff.contains("diff --git a/untracked.txt b/untracked.txt"));
@@ -1813,8 +1813,8 @@ mod tests {
         let (diff, warnings) = working_tree_diff(&repo).expect("collect working tree diff");
 
         assert!(warnings.is_empty());
-        assert!(diff.contains("# Lachesi diff section: Staged changes (HEAD -> index)"));
-        assert!(diff.contains("# Lachesi diff section: Unstaged changes (index -> working tree)"));
+        assert!(diff.contains("# Norn diff section: Staged changes (HEAD -> index)"));
+        assert!(diff.contains("# Norn diff section: Unstaged changes (index -> working tree)"));
         assert_eq!(
             diff.matches("diff --git a/staged.txt b/staged.txt").count(),
             2
@@ -1879,7 +1879,7 @@ mod tests {
     fn working_tree_diff_supports_repositories_without_commits() {
         let nonce = TEMP_REPO_COUNTER.fetch_add(1, Ordering::Relaxed);
         let repo = std::env::temp_dir().join(format!(
-            "lachesi-headless-unborn-test-{}-{nonce}",
+            "norn-headless-unborn-test-{}-{nonce}",
             std::process::id()
         ));
         fs::create_dir_all(&repo).expect("create unborn repo");

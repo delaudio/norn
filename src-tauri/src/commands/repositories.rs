@@ -100,7 +100,7 @@ pub struct RepositoryBlameLine {
 const MAX_REPOSITORY_FILE_BYTES: u64 = 512 * 1024;
 const GIT_BLAME_NO_COMMIT_ERROR: &str = "fatal: no such ref: HEAD";
 const GIT_BLAME_NO_PATH: &str = "fatal: no such path";
-const GIT_SHOW_MESSAGE_MARKER: &str = "\u{1f}LACHESI_COMMIT_MESSAGE_END\u{1f}";
+const GIT_SHOW_MESSAGE_MARKER: &str = "\u{1f}NORN_COMMIT_MESSAGE_END\u{1f}";
 
 fn git_command(repo_path: &Path) -> Command {
     let mut cmd = Command::new("/usr/bin/git");
@@ -677,7 +677,7 @@ fn stash_repo(repo_path: &Path) -> Result<(), String> {
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_secs())
         .unwrap_or_default();
-    let message = format!("lachesi repository view stash {timestamp}");
+    let message = format!("norn repository view stash {timestamp}");
     run_git_checked(
         repo_path,
         &["stash", "push", "--include-untracked", "-m", &message],
@@ -1016,7 +1016,7 @@ mod tests {
         let stashes = run_git_checked(&repo, &["stash", "list"]).expect("git stash list");
 
         assert!(status.is_empty());
-        assert!(stashes.contains("lachesi repository view stash"));
+        assert!(stashes.contains("norn repository view stash"));
         let _ = fs::remove_dir_all(repo);
     }
 

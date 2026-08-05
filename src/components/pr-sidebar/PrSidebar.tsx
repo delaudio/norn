@@ -1,6 +1,7 @@
 import { CaretDown, CaretRight } from "@phosphor-icons/react";
 import { useState } from "react";
 import type { PrGroup } from "@/hooks/usePullRequests";
+import { readMigratedStorageValue } from "@/lib/storageMigration";
 import { type PrListFilter, type PullRequestSummary, type RepoRef, repoKey } from "@/types";
 import { AuthorFilter, type AuthorOption } from "./AuthorFilter";
 import { PrListItem } from "./PrListItem";
@@ -8,11 +9,25 @@ import { PrStateTabs } from "./PrStateTabs";
 import { RepoHeader } from "./RepoHeader";
 import { RepositoryFilter, type RepositoryOption } from "./RepositoryFilter";
 
-const COLLAPSED_KEY = "lachesi.collapsedRepos";
+const COLLAPSED_KEY = "norn.collapsedRepos.v1";
+const LEGACY_COLLAPSED_KEY = "lachesi.collapsedRepos";
+
+function normalizeLegacyCollapsed(raw: string): string | null {
+  const parsed: unknown = JSON.parse(raw);
+  return Array.isArray(parsed) && parsed.every((item) => typeof item === "string")
+    ? JSON.stringify(parsed)
+    : null;
+}
 
 function loadCollapsed(): Set<string> {
   try {
-    return new Set(JSON.parse(localStorage.getItem(COLLAPSED_KEY) ?? "[]") as string[]);
+    const value = readMigratedStorageValue(
+      localStorage,
+      COLLAPSED_KEY,
+      LEGACY_COLLAPSED_KEY,
+      normalizeLegacyCollapsed,
+    );
+    return new Set(JSON.parse(value ?? "[]") as string[]);
   } catch {
     return new Set();
   }

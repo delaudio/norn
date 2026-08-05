@@ -18,7 +18,7 @@ export function ReviewTerminalPicker({
   onChange,
   allowUnset = false,
   unsetLabel = "Ask on first use",
-  unsetDescription = "If unset, Lachesi will ask when you click Review with Claude.",
+  unsetDescription = "If unset, Norn will ask when you click Review with Claude.",
 }: ReviewTerminalPickerProps) {
   const choices = normalizeReviewTerminals(terminals);
 

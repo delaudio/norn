@@ -719,12 +719,10 @@ mod tests {
             .expect("finished job");
         assert_eq!(finished.status, ReviewJobStatus::DeadLetter);
         let metrics = telemetry.prometheus();
-        assert!(
-            metrics.contains("lachesi_review_jobs_total{provider=\"github\",outcome=\"failed\"")
-        );
-        assert!(metrics.contains("lachesi_review_dead_letter_jobs_total"));
-        assert!(metrics.contains("lachesi_review_queue_wait_ms_count"));
-        assert!(metrics.contains("lachesi_review_duration_ms_count"));
+        assert!(metrics.contains("norn_review_jobs_total{provider=\"github\",outcome=\"failed\""));
+        assert!(metrics.contains("norn_review_dead_letter_jobs_total"));
+        assert!(metrics.contains("norn_review_queue_wait_ms_count"));
+        assert!(metrics.contains("norn_review_duration_ms_count"));
     }
 
     #[test]

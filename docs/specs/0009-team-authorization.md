@@ -6,7 +6,7 @@
 
 ## Purpose
 
-Lachesi exposes a provider-neutral identity and authorization boundary for
+Norn exposes a provider-neutral identity and authorization boundary for
 optional team-service operations. Local desktop, terminal, and headless review
 remain independent from any identity provider.
 

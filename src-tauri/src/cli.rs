@@ -54,6 +54,13 @@ struct ConfigValidateArgs {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+struct ConfigMigrateArgs {
+    repo_path: PathBuf,
+    dry_run: bool,
+    format: OutputFormat,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct MetricsArgs {
     filter: ReviewEffectivenessFilter,
     format: OutputFormat,
@@ -87,13 +94,15 @@ struct HeadlessDataDirGuard {
 
 impl HeadlessDataDirGuard {
     fn install() -> Result<Self, String> {
-        if std::env::var_os("LACHESI_REVIEW_DATA_DIR").is_some()
+        if std::env::var_os("NORN_REVIEW_DATA_DIR").is_some()
+            || std::env::var_os("NORN_DATA_DIR").is_some()
+            || std::env::var_os("LACHESI_REVIEW_DATA_DIR").is_some()
             || std::env::var_os("LACHESI_DATA_DIR").is_some()
         {
             return Ok(Self { temp_dir: None });
         }
         let temp_dir = create_headless_data_dir()?;
-        std::env::set_var("LACHESI_REVIEW_DATA_DIR", temp_dir.path());
+        std::env::set_var("NORN_REVIEW_DATA_DIR", temp_dir.path());
         Ok(Self {
             temp_dir: Some(temp_dir),
         })
@@ -102,7 +111,7 @@ impl HeadlessDataDirGuard {
 
 fn create_headless_data_dir() -> Result<tempfile::TempDir, String> {
     let temp_dir = tempfile::Builder::new()
-        .prefix("lachesi-headless-storage-")
+        .prefix("norn-headless-storage-")
         .tempdir()
         .map_err(|error| format!("Failed to create temporary headless storage: {error}"))?;
     #[cfg(unix)]
@@ -119,7 +128,7 @@ fn create_headless_data_dir() -> Result<tempfile::TempDir, String> {
 impl Drop for HeadlessDataDirGuard {
     fn drop(&mut self) {
         if self.temp_dir.is_some() {
-            std::env::remove_var("LACHESI_REVIEW_DATA_DIR");
+            std::env::remove_var("NORN_REVIEW_DATA_DIR");
         }
     }
 }
@@ -158,11 +167,25 @@ fn review_needs_headless_storage(args: &[String]) -> bool {
 fn is_cli_command(args: &[String]) -> bool {
     matches!(
         args.first().map(String::as_str),
-        Some("config" | "evaluate" | "metrics" | "review" | "service" | "--help" | "-h")
+        Some(
+            "config"
+                | "evaluate"
+                | "metrics"
+                | "review"
+                | "service"
+                | "--help"
+                | "-h"
+                | "--version"
+                | "-V"
+        )
     )
 }
 
 fn run_args(args: &[String], stdout: &mut dyn Write, stderr: &mut dyn Write) -> i32 {
+    if matches!(args.first().map(String::as_str), Some("--version" | "-V")) {
+        let _ = writeln!(stdout, "norn {}", env!("CARGO_PKG_VERSION"));
+        return 0;
+    }
     if args.first().map(String::as_str) == Some("review")
         && args
             .iter()
@@ -215,6 +238,15 @@ fn run_args(args: &[String], stdout: &mut dyn Write, stderr: &mut dyn Write) -> 
             }
         },
         Some("service") => crate::self_hosted_service::run(&args[1..], stdout, stderr),
+        Some("config") if args.get(1).map(String::as_str) == Some("migrate") => {
+            match parse_config_migrate_args(args) {
+                Ok(args) => run_config_migrate(args, stdout, stderr),
+                Err(error) => {
+                    let _ = writeln!(stderr, "{error}\n\n{}", usage());
+                    2
+                }
+            }
+        }
         _ => match parse_config_validate_args(args) {
             Ok(args) => run_config_validate(args, stdout, stderr),
             Err(error) => {
@@ -227,7 +259,7 @@ fn run_args(args: &[String], stdout: &mut dyn Write, stderr: &mut dyn Write) -> 
 
 fn parse_evaluate_args(args: &[String]) -> Result<EvaluateArgs, String> {
     if args.first().map(String::as_str) != Some("evaluate") {
-        return Err("Expected `lachesi evaluate`.".to_string());
+        return Err("Expected `norn evaluate`.".to_string());
     }
     let mut parsed = EvaluateArgs {
         corpus: PathBuf::from("fixtures/review-evaluation/v1/corpus.json"),
@@ -293,7 +325,7 @@ fn write_review_parse_failure(
             .any(|pair| pair[0] == "--format" && pair[1] == "json");
     if json_requested {
         let rendered = serde_json::json!({
-            "schemaVersion": "lachesi.headless-review.v1",
+            "schemaVersion": "norn.headless-review.v1",
             "status": "failed",
             "exitCode": 2,
             "error": error,
@@ -326,7 +358,7 @@ fn review_parse_output_path(args: &[String]) -> Option<PathBuf> {
 
 fn parse_review_args(args: &[String]) -> Result<ReviewArgs, String> {
     if args.first().map(String::as_str) != Some("review") {
-        return Err("Expected `lachesi review`.".to_string());
+        return Err("Expected `norn review`.".to_string());
     }
     let mut parsed = ReviewArgs {
         repo_path: None,
@@ -532,7 +564,7 @@ fn write_review_failure(
     }
 
     let rendered = serde_json::json!({
-        "schemaVersion": "lachesi.headless-review.v1",
+        "schemaVersion": "norn.headless-review.v1",
         "status": "failed",
         "exitCode": exit_code,
         "error": error.message,
@@ -556,7 +588,7 @@ fn write_review_failure(
 
 fn parse_metrics_args(args: &[String]) -> Result<MetricsArgs, String> {
     if args.first().map(String::as_str) != Some("metrics") {
-        return Err("Expected `lachesi metrics`.".to_string());
+        return Err("Expected `norn metrics`.".to_string());
     }
     let mut filter = ReviewEffectivenessFilter::default();
     let mut format = OutputFormat::Human;
@@ -653,7 +685,7 @@ fn run_metrics(args: MetricsArgs, stdout: &mut dyn Write, stderr: &mut dyn Write
 fn format_metrics_human(report: &ReviewEffectivenessReport) -> String {
     let mut output = String::new();
     let summary = &report.summary;
-    output.push_str("Lachesi review effectiveness\n");
+    output.push_str("Norn review effectiveness\n");
     output.push_str(&format!("Tenant: {}\n", report.filter.tenant_id));
     if let Some(provider) = report.filter.provider {
         output.push_str(&format!("Provider: {}\n", provider.as_str()));
@@ -755,7 +787,7 @@ fn parse_config_validate_args(args: &[String]) -> Result<ConfigValidateArgs, Str
     if args.first().map(String::as_str) != Some("config")
         || args.get(1).map(String::as_str) != Some("validate")
     {
-        return Err("Expected `lachesi config validate`.".to_string());
+        return Err("Expected `norn config validate`.".to_string());
     }
 
     let mut repo_path = PathBuf::from(".");
@@ -802,6 +834,91 @@ fn parse_config_validate_args(args: &[String]) -> Result<ConfigValidateArgs, Str
         profile,
         format,
     })
+}
+
+fn parse_config_migrate_args(args: &[String]) -> Result<ConfigMigrateArgs, String> {
+    if args.first().map(String::as_str) != Some("config")
+        || args.get(1).map(String::as_str) != Some("migrate")
+    {
+        return Err("Expected `norn config migrate`.".to_string());
+    }
+
+    let mut repo_path = PathBuf::from(".");
+    let mut dry_run = false;
+    let mut format = OutputFormat::Human;
+    let mut index = 2;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--repo-path" => {
+                index += 1;
+                repo_path = PathBuf::from(
+                    args.get(index)
+                        .ok_or_else(|| "`--repo-path` requires a value.".to_string())?,
+                );
+            }
+            "--dry-run" => dry_run = true,
+            "--format" => {
+                index += 1;
+                format = match args.get(index).map(String::as_str) {
+                    Some("human" | "text") => OutputFormat::Human,
+                    Some("json") => OutputFormat::Json,
+                    Some(_) => return Err("`--format` must be `human` or `json`.".to_string()),
+                    None => return Err("`--format` requires a value.".to_string()),
+                };
+            }
+            "--json" => format = OutputFormat::Json,
+            unknown => return Err(format!("Unknown option `{unknown}`.")),
+        }
+        index += 1;
+    }
+
+    Ok(ConfigMigrateArgs {
+        repo_path,
+        dry_run,
+        format,
+    })
+}
+
+fn run_config_migrate(
+    args: ConfigMigrateArgs,
+    stdout: &mut dyn Write,
+    stderr: &mut dyn Write,
+) -> i32 {
+    let result = match repo_config::migrate_repository_config(&args.repo_path, args.dry_run) {
+        Ok(result) => result,
+        Err(error) => {
+            let _ = writeln!(stderr, "{error}");
+            return 1;
+        }
+    };
+    match args.format {
+        OutputFormat::Json => match serde_json::to_string_pretty(&result) {
+            Ok(json) => {
+                let _ = writeln!(stdout, "{json}");
+            }
+            Err(error) => {
+                let _ = writeln!(stderr, "Failed to serialize migration output: {error}");
+                return 1;
+            }
+        },
+        OutputFormat::Human => {
+            let verb = if result.dry_run {
+                "Would migrate"
+            } else {
+                "Migrated"
+            };
+            if result.actions.is_empty() {
+                let _ = writeln!(stdout, "No legacy repository configuration found.");
+            }
+            for action in result.actions {
+                let _ = writeln!(stdout, "{verb} {} -> {}", action.source, action.target);
+                for change in action.content_changes {
+                    let _ = writeln!(stdout, "  - {change}");
+                }
+            }
+        }
+    }
+    0
 }
 
 fn run_config_validate(
@@ -863,14 +980,17 @@ fn run_config_validate(
 
 fn write_human_output(output: &ConfigValidateOutput, out: &mut dyn Write) -> io::Result<()> {
     if output.valid {
-        writeln!(out, "Lachesi config valid")?;
+        writeln!(out, "Norn config valid")?;
     } else {
-        writeln!(out, "Lachesi config invalid")?;
+        writeln!(out, "Norn config invalid")?;
     }
     writeln!(out, "Repo: {}", output.repo_path)?;
     writeln!(out, "Config: {}", output.config_path)?;
     if !output.exists {
-        writeln!(out, "No .lachesi.yaml found; using built-in defaults.")?;
+        writeln!(
+            out,
+            "No .norn.yaml or compatible legacy config found; using built-in defaults."
+        )?;
     }
     if let Some(profile) = output.selected_profile.as_deref() {
         writeln!(out, "Profile: {profile}")?;
@@ -902,7 +1022,7 @@ fn write_human_output(output: &ConfigValidateOutput, out: &mut dyn Write) -> io:
 fn usage() -> &'static str {
     "Usage:
 Review:
-  lachesi review [--repo-path <path>] [--scope working-tree|branch|pr]
+  norn review [--repo-path <path>] [--scope working-tree|branch|pr]
                  [--base <ref>] [--pr <id>] [--workspace <name>] [--repo <slug>]
                  [--provider github|bitbucket] [--profile <name>]
                  [--ai-provider codex|claude] [--model <name>] [--effort <level>]
@@ -910,18 +1030,21 @@ Review:
                  [--fail-on-findings] [--min-severity info|low|medium|high|critical]
                  [--run-analyzers]
 Metrics:
-  lachesi metrics [--tenant <id>] [--provider github|bitbucket]
+  norn metrics [--tenant <id>] [--provider github|bitbucket]
                   [--workspace <name>] [--repo <slug>]
                   [--from <unix-ms>] [--to <unix-ms>]
                   [--format human|json] [--json] [--output <path>]
 Config validation:
-  lachesi config validate [--repo-path <path>] [--profile <name>]
-                          [--format human|json] [--json]"
+  norn config validate [--repo-path <path>] [--profile <name>]
+                          [--format human|json] [--json]
+Config migration:
+  norn config migrate [--repo-path <path>] [--dry-run]
+                         [--format human|json] [--json]"
 }
 
 fn review_usage() -> &'static str {
     "Usage:
-  lachesi review [--repo-path <path>] [--scope working-tree|branch|pr]
+  norn review [--repo-path <path>] [--scope working-tree|branch|pr]
                  [--base <ref>] [--pr <id>] [--workspace <name>] [--repo <slug>]
                  [--provider github|bitbucket] [--profile <name>]
                  [--ai-provider codex|claude] [--model <name>] [--effort <level>]
@@ -932,7 +1055,7 @@ fn review_usage() -> &'static str {
 
 fn metrics_usage() -> &'static str {
     "Usage:
-  lachesi metrics [--tenant <id>] [--provider github|bitbucket]
+  norn metrics [--tenant <id>] [--provider github|bitbucket]
                   [--workspace <name>] [--repo <slug>]
                   [--from <unix-ms>] [--to <unix-ms>]
                   [--format human|json] [--json] [--output <path>]
@@ -943,7 +1066,7 @@ The default tenant is `local`."
 
 fn evaluate_usage() -> &'static str {
     "Usage:
-  lachesi evaluate [--corpus <path>] [--baseline <path>] [--output <path>]
+  norn evaluate [--corpus <path>] [--baseline <path>] [--output <path>]
 
 Runs the versioned offline review-quality corpus and emits JSON.
 The command exits 1 when a configured baseline regression is detected."
@@ -1057,14 +1180,14 @@ mod tests {
         assert_eq!(code, 0);
         assert!(stderr.is_empty());
         let output = String::from_utf8(stdout).expect("metrics help");
-        assert!(output.contains("lachesi metrics"));
+        assert!(output.contains("norn metrics"));
         assert!(output.contains("start-inclusive and end-exclusive"));
     }
 
     #[test]
     fn config_validate_returns_zero_for_valid_config() {
         let repo = temp_repo();
-        fs::write(repo.join(".lachesi.yaml"), "version: 0.1\n").expect("write config");
+        fs::write(repo.join(".norn.yaml"), "version: 0.1\n").expect("write config");
         let mut stdout = Vec::new();
         let mut stderr = Vec::new();
         let code = run_args(
@@ -1082,7 +1205,7 @@ mod tests {
         assert!(stderr.is_empty());
         assert!(String::from_utf8(stdout)
             .expect("stdout")
-            .contains("Lachesi config valid"));
+            .contains("Norn config valid"));
         let _ = fs::remove_dir_all(repo);
     }
 
@@ -1090,7 +1213,7 @@ mod tests {
     fn config_validate_returns_two_for_invalid_config_json() {
         let repo = temp_repo();
         fs::write(
-            repo.join(".lachesi.yaml"),
+            repo.join(".norn.yaml"),
             r#"
 version: 0.1
 token: unsafe
@@ -1144,7 +1267,7 @@ token: unsafe
     fn config_validate_accepts_profile_override() {
         let repo = temp_repo();
         fs::write(
-            repo.join(".lachesi.yaml"),
+            repo.join(".norn.yaml"),
             r#"
 version: 0.1
 profiles:
@@ -1173,6 +1296,43 @@ profiles:
         assert!(String::from_utf8(stdout)
             .expect("stdout")
             .contains("Profile: strict"));
+        let _ = fs::remove_dir_all(repo);
+    }
+
+    #[test]
+    fn config_migrate_dry_run_previews_without_mutating() {
+        let repo = temp_repo();
+        fs::write(
+            repo.join(".lachesi.yaml"),
+            "version: 0.1\npolicy:\n  packs:\n    - .lachesi/packs/team\n",
+        )
+        .expect("legacy config");
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+
+        let code = run_args(
+            &[
+                "config".to_string(),
+                "migrate".to_string(),
+                "--repo-path".to_string(),
+                repo.display().to_string(),
+                "--dry-run".to_string(),
+                "--json".to_string(),
+            ],
+            &mut stdout,
+            &mut stderr,
+        );
+
+        assert_eq!(code, 0);
+        assert!(stderr.is_empty());
+        let output: serde_json::Value = serde_json::from_slice(&stdout).expect("migration JSON");
+        assert_eq!(output["dryRun"], true);
+        assert_eq!(output["actions"][0]["kind"], "file");
+        assert!(output["actions"][0]["contentChanges"]
+            .as_array()
+            .is_some_and(|changes| !changes.is_empty()));
+        assert!(repo.join(".lachesi.yaml").exists());
+        assert!(!repo.join(".norn.yaml").exists());
         let _ = fs::remove_dir_all(repo);
     }
 
@@ -1292,7 +1452,7 @@ profiles:
         assert!(stderr.is_empty());
         let output: serde_json::Value =
             serde_json::from_slice(&stdout).expect("JSON usage failure");
-        assert_eq!(output["schemaVersion"], "lachesi.headless-review.v1");
+        assert_eq!(output["schemaVersion"], "norn.headless-review.v1");
         assert_eq!(output["status"], "failed");
         assert_eq!(output["exitCode"], 2);
         assert!(output["error"]
@@ -1381,11 +1541,26 @@ profiles:
         assert_eq!(code, 0);
         assert!(stderr.is_empty());
         let output = String::from_utf8(stdout).expect("help output");
-        assert!(output.contains("lachesi review"));
+        assert!(output.contains("norn review"));
         assert!(output.contains("--scope working-tree|branch|pr"));
         assert!(output.contains("--run-analyzers"));
         assert!(output.contains("--json"));
         assert!(!output.contains("config validate"));
+    }
+
+    #[test]
+    fn version_uses_the_canonical_binary_name() {
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+
+        let code = run_args(&["--version".to_string()], &mut stdout, &mut stderr);
+
+        assert_eq!(code, 0);
+        assert!(stderr.is_empty());
+        assert_eq!(
+            String::from_utf8(stdout).expect("version output"),
+            format!("norn {}\n", env!("CARGO_PKG_VERSION"))
+        );
     }
 
     #[test]
@@ -1425,7 +1600,7 @@ profiles:
         assert!(stdout.is_empty());
         assert!(String::from_utf8(stderr)
             .expect("usage")
-            .contains("lachesi service <run|smoke|healthcheck|backup|restore>"));
+            .contains("norn service <run|smoke|healthcheck|backup|restore>"));
     }
 
     #[test]
@@ -1447,7 +1622,7 @@ profiles:
         assert_eq!(code, 4);
         let output: serde_json::Value =
             serde_json::from_slice(&stdout).expect("failure should be JSON");
-        assert_eq!(output["schemaVersion"], "lachesi.headless-review.v1");
+        assert_eq!(output["schemaVersion"], "norn.headless-review.v1");
         assert_eq!(output["status"], "failed");
         assert_eq!(output["exitCode"], 4);
         assert!(output["error"]

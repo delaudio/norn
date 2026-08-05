@@ -3,13 +3,13 @@ title: Roadmap
 description: Current product direction.
 ---
 
-The public roadmap is tracked in GitHub issues and the Lachesi roadmap project.
+The public roadmap is tracked in GitHub issues and the Norn roadmap project.
 
 Current direction:
 
-- harden the `.lachesi.yaml` policy engine;
+- harden the `.norn.yaml` policy engine;
 - add policy pack loading and named review profiles;
-- implement a headless `lachesi review` CLI for local and CI usage;
+- continue hardening the headless `norn review` CLI for local and CI usage;
 - improve provider abstraction across Bitbucket, GitHub, AI providers, and publication targets;
 - expand report export, review summaries, and dogfooding guides;
 - publish the website, docs, and design system documentation.

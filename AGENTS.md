@@ -4,7 +4,7 @@ This file provides guidance to coding agents working in this repository.
 
 ## What this repository is
 
-Lachesi is an open-source, local-first review workspace for pull requests
+Norn is an open-source, local-first review workspace for pull requests
 across Bitbucket Cloud and GitHub. It is a Tauri v2 desktop app with a Rust
 backend (`src-tauri/`) and a React 19 + TypeScript + Vite frontend (`src/`).
 Provider access, local evidence, review findings, and publication workflows
@@ -64,9 +64,12 @@ These come from `.docflow/CONVENTIONS.md` and override default behaviour:
   the ADR catalogue must never appear in product strings a user can read: UI
   copy, API responses, customer-visible errors/logs, public docs, release
   notes, marketing copy, or support communications.
-- Product exception: Lachesi may expose and document a generic `.lachesi.yaml`
+- Product exception: Norn may expose and document a generic `.norn.yaml`
   policy-source type named `adr`. Do not expose this repository's internal ADR
   numbers, titles, or catalogue paths through that exception.
+- `.lachesi.yaml`, `.lachesi/`, and `.lachesi.local.yaml` are legacy read-only
+  fallbacks. New examples, instructions, and writes use the canonical Norn
+  equivalents.
 - References are allowed in code comments, commit messages, PR descriptions,
   and internal docs such as `AGENTS.md`, `.docflow/CONVENTIONS.md`,
   `.docflow/INDEX.md`, and `.docflow/plan/`.
@@ -147,9 +150,10 @@ macOS GUI-launched apps have a minimal `PATH` that omits user install
 locations. Without `/bin/zsh -l`, binaries installed by Homebrew, npm, or local
 CLI installers may not be found.
 
-App-generated data lives under `dirs::data_local_dir()` in the `lachesi`
-subdirectory. Secrets must stay in the OS credentials store or local
-environment, never in repo config, examples, screenshots, or fixtures.
+App-generated data lives under `dirs::data_local_dir()` in the `norn`
+subdirectory. The legacy `lachesi` subdirectory is migration input only.
+Secrets must stay in the OS credentials store or local environment, never in
+repo config, examples, screenshots, or fixtures.
 
 CSS custom properties in this project are hex color values, not HSL component
 tuples. Use `fill="var(--primary)"`, not `fill="hsl(var(--primary))"`.

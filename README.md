@@ -1,18 +1,18 @@
-# Lachesi
+# Norn
 
-Lachesi is an open-source, local-first review workspace for pull requests across Bitbucket Cloud
+Norn is an open-source, local-first review workspace for pull requests across Bitbucket Cloud
 and GitHub.
 
 It combines a focused desktop review UI with AI-assisted review runs, structured findings, local
 evidence, closed-PR analytics, and reviewer-controlled publication back to the source provider.
 
-The name comes from Lachesis, the Moira who measures the thread. Lachesi measures the thread of a
-change: the PR metadata, diff, linked context, local repository state, review findings, and the
-comments a human reviewer decides to publish.
+The name comes from the Norns, the figures who shape fate in Norse mythology. Norn follows the
+thread of a change: the PR metadata, diff, linked context, local repository state, review findings,
+and the comments a human reviewer decides to publish.
 
 ## What It Is
 
-Your code host remains the source of truth for pull requests. Lachesi is the local review surface
+Your code host remains the source of truth for pull requests. Norn is the local review surface
 around it.
 
 Today it is a Tauri desktop app that can:
@@ -48,12 +48,12 @@ modern review is no longer just "read a diff and leave comments". A good reviewe
 inspect local branches, run deterministic checks, read linked tickets/docs, ask an AI assistant for a
 second pass, curate the useful findings, and decide what to publish.
 
-Lachesi keeps that workflow local and explicit:
+Norn keeps that workflow local and explicit:
 
 - credentials stay out of the webview;
 - AI output is treated as draft review material, not automatic remote feedback;
 - provider writes require reviewer action;
-- repo-specific rules live near the code through `.lachesi.yaml`;
+- repo-specific rules live near the code through `.norn.yaml`;
 - review output is moving toward a structured schema instead of free-form chat only.
 
 ## Current Product Surface
@@ -103,7 +103,7 @@ Each tracked repository can point to a local clone. That enables:
 
 ### Closed PR Analytics
 
-Lachesi can cache and analyze closed PRs locally. The analytics view supports:
+Norn can cache and analyze closed PRs locally. The analytics view supports:
 
 - 14/30/90 day ranges;
 - repository, author, and text filtering;
@@ -123,11 +123,18 @@ Lachesi can cache and analyze closed PRs locally. The analytics view supports:
 - Non-secret app settings are stored as JSON in the OS config directory.
 - AI review stores and background review jobs are stored in a local SQLite database.
 - Legacy JSON review storage is migrated into SQLite when read.
-- `LACHESI_DRY_RUN=1` can exercise comment flows without posting to the provider.
+- Before the first canonical desktop window opens, Norn atomically copies the
+  legacy WebView profile into the canonical application identifier and retains
+  the old profile for rollback.
+- `NORN_DRY_RUN=1` can exercise comment flows without posting to the provider. The legacy
+  `LACHESI_DRY_RUN` name remains a fallback during the compatibility window.
 
 ## Repo-Owned Review Config
 
-Lachesi can read `.lachesi.yaml` from a configured local repository. The current schema already
+Norn can read `.norn.yaml` from a configured local repository. During the compatibility window it
+also reads `.lachesi.yaml`, `.lachesi/`, and `.lachesi.local.yaml` only when the corresponding Norn
+source is absent. Multiple repository roots, including `.norn.yaml` plus `.norn/`, fail with
+migration guidance instead of silently choosing or merging. The current schema already
 models the direction of the review engine:
 
 ```yaml
@@ -164,7 +171,7 @@ contract for the next review-engine milestones.
 
 ## Architecture
 
-Lachesi is split across a React frontend and a Rust/Tauri backend.
+Norn is split across a React frontend and a Rust/Tauri backend.
 
 - **Frontend:** React 19, TypeScript, Vite, Tailwind v4, shadcn-style primitives, Radix components,
   Phosphor icons, Geist fonts.
@@ -220,26 +227,42 @@ pnpm tauri dev
 
 Runs the desktop app against the Tauri backend.
 
+### Headless CLI
+
+Build and install the canonical `norn` CLI plus the deprecated `lachesi`
+compatibility alias:
+
+```sh
+make cli-build
+make cli-install
+norn --version
+```
+
+The Codex review integration uses this installed `norn` executable.
+
 ### Terminal UI
 
-Build and install the terminal UI as `lac`:
+Build and install the terminal UI as `norn-tui`:
 
 ```sh
 make tui-build
 make tui-install
 ```
 
-Run `lac` from inside a local Git clone. It reads the repository remote, detects GitHub or
+Run `norn-tui` from inside a local Git clone. It reads the repository remote, detects GitHub or
 Bitbucket, and opens pull requests for that repository:
 
 ```sh
-cd ~/dev/current/lachesi
-lac
+cd ~/dev/current/norn
+norn-tui
 ```
 
-Use `lac --workspace` to open the configured repository picker instead. If the current directory is
-not inside a Git repository, has no remote, or uses an unsupported remote host, `lac` exits with a
+Use `norn-tui --workspace` to open the configured repository picker instead. If the current directory is
+not inside a Git repository, has no remote, or uses an unsupported remote host, `norn-tui` exits with a
 message explaining the problem and the `--workspace` fallback.
+
+The legacy `lac` command remains a deprecated compatibility alias for the documented migration
+window.
 
 The TUI detects PNG, JPEG, GIF, and WebP changes and queries the active terminal after entering the
 alternate screen. Kitty, Sixel, and iTerm2 protocols render the selected image inside the diff pane.
@@ -249,7 +272,7 @@ Provider image reads are limited to 8 MiB, with decoding limited to 8192 pixels 
 megapixels. Animated formats show their first decoded frame.
 
 For terminal-only usage, provider credentials can come from the OS keychain, ordinary environment
-variables, or environment-variable references in `~/.config/lachesi/config.toml`:
+variables, or environment-variable references in `~/.config/norn/config.toml`:
 
 ```toml
 [credentials.github]
@@ -291,12 +314,12 @@ Static Assets config.
 
 ### macOS arm64 builds
 
-macOS arm64 app bundles are not signed. If macOS reports that `Lachesi.app` is damaged and cannot
+macOS arm64 app bundles are not signed. If macOS reports that `Norn.app` is damaged and cannot
 be opened, clear the quarantine attributes and apply an ad-hoc local signature to the built app:
 
 ```sh
-xattr -rc "Lachesi.app"
-sudo codesign --force --deep --sign - "Lachesi.app"
+xattr -rc "Norn.app"
+sudo codesign --force --deep --sign - "Norn.app"
 ```
 
 Run those commands against the copied app bundle, for example the app in `/Applications` or the
@@ -345,19 +368,19 @@ committed. See `SECURITY.md`.
 
 ## Roadmap
 
-The public roadmap is tracked in GitHub issues and the Lachesi roadmap project. The current direction
+The public roadmap is tracked in GitHub issues and the Norn roadmap project. The current direction
 is:
 
-- harden the `.lachesi.yaml` policy engine and local evidence pipeline;
+- harden the `.norn.yaml` policy engine and local evidence pipeline;
 - add policy pack loading and named review profiles;
-- implement a headless `lachesi review` CLI for local and CI usage;
+- continue hardening the headless `norn review` CLI for local and CI usage;
 - improve provider abstraction across Bitbucket, GitHub, AI providers, and publication targets;
 - expand report export, review summaries, and dogfooding guides;
 - publish the website and design system documentation.
 
 ## Project Status
 
-Lachesi is early and moving quickly. The desktop review workflow is usable, but the structured
+Norn is early and moving quickly. The desktop review workflow is usable, but the structured
 review engine is still being hardened. Expect API/schema changes while the project converges on the
 v0.1 contracts described in `docs/specs`.
 
@@ -371,4 +394,4 @@ config, examples, screenshots, or fixtures.
 
 ## License
 
-Lachesi is released under the license in `LICENSE`.
+Norn is released under the license in `LICENSE`.

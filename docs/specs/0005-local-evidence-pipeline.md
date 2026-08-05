@@ -6,7 +6,7 @@
 
 ## Context
 
-Lachesi already runs review and fix workflows against a local clone. The app has
+Norn already runs review and fix workflows against a local clone. The app has
 repo path resolution, branch state, PR diff state, Jira context, review logs,
 and a normalized `ReviewRun.evidence` field.
 
@@ -65,7 +65,7 @@ analyzers:
     timeoutSeconds: 300
 ```
 
-When a repo omits an analyzer, Lachesi should not auto-run it in v0.1. A future
+When a repo omits an analyzer, Norn should not auto-run it in v0.1. A future
 version may offer suggestions, but execution should stay explicit.
 
 ## Invocation Contract
@@ -209,7 +209,7 @@ Behavior:
 - `timedOut`: process exceeded timeout and was terminated
 - `cancelled`: user cancelled the review run
 - `skipped`: disabled, missing command, or no matching changed files
-- `error`: Lachesi could not start or manage the process
+- `error`: Norn could not start or manage the process
 
 Timeouts and errors should not automatically fail the whole review. They become
 evidence and warnings unless the repo config later marks an analyzer as required.

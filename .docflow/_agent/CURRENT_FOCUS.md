@@ -8,12 +8,18 @@ If status files and git disagree, git is authoritative; correct this file.
 
 ## Active state
 
-- **Branch:** `codex/norn-naming-contract`
-- **Active item:** GitHub issue #173 and `.docflow/plan/todo/0005-norn-naming-and-compatibility.md`.
-- **Blockers:** none for the decision record; external DNS, Homebrew, and
+- **Branch:** `codex/norn-runtime-migration`
+- **Active items:** GitHub issues #174, #175, and #176, tracked by
+  `.docflow/plan/todo/0006-norn-runtime-identifiers.md` and
+  `.docflow/plan/todo/0007-norn-local-data-migration.md`, and
+  `.docflow/plan/todo/0008-norn-repository-config.md`.
+- **Completed predecessor:** plan item `0005` and GitHub issue #173 shipped as
+  commit `79a90ece` through PR #195.
+- **Blockers:** none for the runtime migration; external DNS, Homebrew, and
   signing operations remain separate delivery prerequisites.
-- **Branch-local work:** accepted Norn naming and compatibility contract is
-  ready for the documentation gate and integration.
+- **Branch-local work:** canonical Norn runtime and repository identifiers,
+  bounded legacy aliases, recoverable local-data migration, and safe
+  repository-config migration are in validation.
 
 ## Last shipped
 
@@ -21,5 +27,5 @@ If status files and git disagree, git is authoritative; correct this file.
 
 ## Next item
 
-Merge the naming contract, then implement the runtime, repository-config, and
-local-data migration slices in dependency order.
+Validate, review, and merge the Norn runtime, repository-config, and local-data
+migration slice, then continue with the next open issue.

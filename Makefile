@@ -1,14 +1,14 @@
-# Lachesi task runner (macOS/Linux).
+# Norn task runner (macOS/Linux).
 # Windows contributors use the parallel `justfile`; recipe names are kept in
 # parity across both files per ADR ARCH-007. Recipes delegate to the canonical
 # package.json / cargo / tauri commands so package.json stays authoritative.
 
 .DEFAULT_GOAL := help
-.PHONY: help dev tauri-dev tui tui-build tui-install build typecheck lint test test-tauri evaluate check bundle-windows
+.PHONY: help dev tauri-dev cli-build cli-install tui tui-build tui-install build typecheck lint test test-tauri evaluate check bundle-windows
 
 # List available recipes (runs by default).
 help:
-	@echo "Lachesi recipes: dev tauri-dev tui tui-build tui-install build typecheck lint test test-tauri evaluate check bundle-windows"
+	@echo "Norn recipes: dev tauri-dev cli-build cli-install tui tui-build tui-install build typecheck lint test test-tauri evaluate check bundle-windows"
 
 # Start the Vite dev server (browser mock IPC).
 dev:
@@ -19,6 +19,14 @@ dev:
 tauri-dev:
 	pnpm tauri dev
 
+# Build the canonical headless CLI and its deprecated compatibility alias.
+cli-build:
+	pnpm run cli:build
+
+# Install `norn` and the deprecated `lachesi` alias in ~/.local/bin.
+cli-install:
+	pnpm run cli:install
+
 # Start the terminal UI.
 tui:
 	pnpm run tui
@@ -27,7 +35,7 @@ tui:
 tui-build:
 	pnpm run tui:build
 
-# Build and install the terminal UI as `lac` in ~/.local/bin.
+# Build and install the terminal UI as `norn-tui` in ~/.local/bin.
 tui-install:
 	pnpm run tui:install
 

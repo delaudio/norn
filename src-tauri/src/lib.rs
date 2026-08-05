@@ -21,6 +21,7 @@ pub mod review_job;
 pub mod review_metrics;
 pub mod review_retry;
 mod review_storage;
+mod runtime_identity;
 pub mod self_hosted_backup;
 pub mod self_hosted_service;
 mod services;
@@ -49,12 +50,12 @@ use tauri::{
     Emitter, Manager,
 };
 
-const TRAY_ID: &str = "lachesi-main";
+const TRAY_ID: &str = "norn-main";
 
 fn setup_menu_bar(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
-    let status = MenuItem::with_id(app, "status", "● Starting Lachesi...", false, None::<&str>)?;
+    let status = MenuItem::with_id(app, "status", "● Starting Norn...", false, None::<&str>)?;
     let separator_top = PredefinedMenuItem::separator(app)?;
-    let open = MenuItem::with_id(app, "open", "Open Lachesi", true, None::<&str>)?;
+    let open = MenuItem::with_id(app, "open", "Open Norn", true, None::<&str>)?;
     let sync = MenuItem::with_id(app, "sync", "↻ Sync pull requests", true, None::<&str>)?;
     let separator_pull_requests = PredefinedMenuItem::separator(app)?;
     let loading = MenuItem::with_id(
@@ -79,11 +80,11 @@ fn setup_menu_bar(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     let mut tray = TrayIconBuilder::with_id(TRAY_ID)
         .menu(&menu)
         .show_menu_on_left_click(true)
-        .tooltip("Lachesi")
+        .tooltip("Norn")
         .icon_as_template(false)
         .on_menu_event(|app, event| match event.id.as_ref() {
             "open" => {
-                let _ = app.emit("lachesi-menu-open", ());
+                let _ = app.emit("norn-menu-open", ());
                 if let Some(window) = app.get_webview_window("main") {
                     let _ = window.unminimize();
                     let _ = window.show();
@@ -91,10 +92,10 @@ fn setup_menu_bar(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
             "sync" => {
-                let _ = app.emit("lachesi-menu-sync", ());
+                let _ = app.emit("norn-menu-sync", ());
             }
             id if id.starts_with("pr-") => {
-                let _ = app.emit("lachesi-menu-open-pr", id.trim_start_matches("pr-"));
+                let _ = app.emit("norn-menu-open-pr", id.trim_start_matches("pr-"));
             }
             _ => {}
         })
@@ -106,7 +107,7 @@ fn setup_menu_bar(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
             } = event
             {
                 let app = tray.app_handle();
-                let _ = app.emit("lachesi-menu-open", ());
+                let _ = app.emit("norn-menu-open", ());
             }
         });
     if let Some(icon) = icon {
@@ -118,6 +119,9 @@ fn setup_menu_bar(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    if let Err(error) = runtime_identity::migrate_webview_storage() {
+        eprintln!("{error}");
+    }
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
@@ -266,7 +270,7 @@ mod tauri_ipc_smoke {
         assert_eq!(response["repoPath"], repo_dir.to_string_lossy().as_ref());
         assert_eq!(
             response["configPath"],
-            repo_dir.join(".lachesi.yaml").to_string_lossy().as_ref()
+            repo_dir.join(".norn.yaml").to_string_lossy().as_ref()
         );
         assert_eq!(response["exists"], false);
         assert_eq!(response["config"], serde_json::Value::Null);

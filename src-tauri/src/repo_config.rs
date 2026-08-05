@@ -1,5 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -7,7 +8,12 @@ use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value as JsonValue;
 use serde_yaml::Value;
 
-const CONFIG_FILE: &str = ".lachesi.yaml";
+const CONFIG_FILE: &str = ".norn.yaml";
+const LEGACY_CONFIG_FILE: &str = ".lachesi.yaml";
+const CONFIG_DIR: &str = ".norn";
+const LEGACY_CONFIG_DIR: &str = ".lachesi";
+const LOCAL_CONFIG_FILE: &str = ".norn.local.yaml";
+const LEGACY_LOCAL_CONFIG_FILE: &str = ".lachesi.local.yaml";
 const SUPPORTED_VERSION: &str = "0.1";
 
 #[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq)]
@@ -281,6 +287,23 @@ pub struct RepoReviewConfigLoadResult {
     pub errors: Vec<RepoConfigValidationMessage>,
 }
 
+#[derive(Serialize, Debug, Clone, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct RepoConfigMigrationAction {
+    pub source: String,
+    pub target: String,
+    pub kind: String,
+    pub content_changes: Vec<String>,
+}
+
+#[derive(Serialize, Debug, Clone, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct RepoConfigMigrationResult {
+    pub repo_path: String,
+    pub dry_run: bool,
+    pub actions: Vec<RepoConfigMigrationAction>,
+}
+
 #[derive(Deserialize, Debug, Clone, Default, PartialEq)]
 #[serde(rename_all = "camelCase")]
 struct PolicyPackConfig {
@@ -327,11 +350,8 @@ pub fn load_from_repo_path_with_profile(
         ));
     }
 
-    let config_path = repo_path.join(CONFIG_FILE);
-    if !config_path.exists() {
-        if let Some(result) = load_from_lachesi_dir(repo_path, profile_override)? {
-            return Ok(result);
-        }
+    let Some(source) = discover_repo_config_source(repo_path)? else {
+        let config_path = repo_path.join(CONFIG_FILE);
         return Ok(RepoReviewConfigLoadResult {
             repo_path: repo_path.display().to_string(),
             config_path: config_path.display().to_string(),
@@ -342,39 +362,100 @@ pub fn load_from_repo_path_with_profile(
             warnings: Vec::new(),
             errors: Vec::new(),
         });
+    };
+
+    if is_config_dir_source(&source) {
+        return load_from_config_dir(repo_path, &source, profile_override)?.ok_or_else(|| {
+            format!(
+                "Repository config directory disappeared: {}",
+                source.display()
+            )
+        });
     }
 
-    let contents = fs::read_to_string(&config_path)
-        .map_err(|e| format!("Failed to read {}: {e}", config_path.display()))?;
+    let contents = fs::read_to_string(&source)
+        .map_err(|e| format!("Failed to read {}: {e}", source.display()))?;
     Ok(load_from_str(
         repo_path,
-        &config_path,
+        &source,
         &contents,
         profile_override,
     ))
 }
 
-fn load_from_lachesi_dir(
+fn is_config_dir_source(path: &Path) -> bool {
+    matches!(
+        path.file_name().and_then(|name| name.to_str()),
+        Some(CONFIG_DIR) | Some(LEGACY_CONFIG_DIR)
+    )
+}
+
+fn discover_repo_config_source(repo_path: &Path) -> Result<Option<PathBuf>, String> {
+    let canonical_file = repo_path.join(CONFIG_FILE);
+    let canonical_dir = repo_path.join(CONFIG_DIR);
+    let legacy_file = repo_path.join(LEGACY_CONFIG_FILE);
+    let legacy_dir = repo_path.join(LEGACY_CONFIG_DIR);
+    if canonical_file.exists() && canonical_dir.exists() {
+        return Err(format!(
+            "Norn found both canonical repository config roots {} and {}. Keep exactly one; Norn will not choose between them implicitly.",
+            canonical_file.display(),
+            canonical_dir.display()
+        ));
+    }
+    if legacy_file.exists() && legacy_dir.exists() {
+        return Err(format!(
+            "Norn found both legacy repository config roots {} and {}. Migrate or remove one before loading config; Norn will not choose between them implicitly.",
+            legacy_file.display(),
+            legacy_dir.display()
+        ));
+    }
+    let canonical = canonical_file
+        .exists()
+        .then_some(canonical_file)
+        .or_else(|| canonical_dir.exists().then_some(canonical_dir));
+    let legacy = legacy_file
+        .exists()
+        .then_some(legacy_file)
+        .or_else(|| legacy_dir.exists().then_some(legacy_dir));
+
+    match (canonical, legacy) {
+        (Some(canonical), Some(legacy)) => Err(format!(
+            "Norn found both canonical repository config {} and legacy config {}. Migrate or remove the legacy source; Norn will not merge them implicitly.",
+            canonical.display(),
+            legacy.display()
+        )),
+        (Some(path), None) | (None, Some(path)) => Ok(Some(path)),
+        (None, None) => Ok(None),
+    }
+}
+
+fn load_from_config_dir(
     repo_path: &Path,
+    config_dir: &Path,
     profile_override: Option<&str>,
 ) -> Result<Option<RepoReviewConfigLoadResult>, String> {
-    let Some(config) = synthesize_lachesi_dir_config(repo_path)? else {
+    let Some(config) = synthesize_config_dir(repo_path, config_dir)? else {
         return Ok(None);
     };
-    let lachesi_dir = repo_path.join(".lachesi");
-    let contents = serde_yaml::to_string(&config)
-        .map_err(|error| format!("Failed to synthesize .lachesi config: {error}"))?;
+    let contents = serde_yaml::to_string(&config).map_err(|error| {
+        format!(
+            "Failed to synthesize {} config: {error}",
+            config_dir.display()
+        )
+    })?;
     Ok(Some(load_from_str(
         repo_path,
-        &lachesi_dir,
+        config_dir,
         &contents,
         profile_override,
     )))
 }
 
-fn synthesize_lachesi_dir_config(repo_path: &Path) -> Result<Option<RepoReviewConfig>, String> {
-    let lachesi_dir = repo_path.join(".lachesi");
-    if !lachesi_dir.is_dir() {
+fn synthesize_config_dir(
+    repo_path: &Path,
+    config_dir: &Path,
+) -> Result<Option<RepoReviewConfig>, String> {
+    if !config_dir.is_dir() {
         return Ok(None);
     }
 
@@ -382,7 +463,7 @@ fn synthesize_lachesi_dir_config(repo_path: &Path) -> Result<Option<RepoReviewCo
         version: SUPPORTED_VERSION.to_string(),
         ..RepoReviewConfig::default()
     };
-    if let Some(prompt) = load_lachesi_dir_prompt(&lachesi_dir)? {
+    if let Some(prompt) = load_config_dir_prompt(config_dir)? {
         config.review = Some(ReviewConfig {
             prompt: Some(PromptConfig {
                 replace: Some(prompt),
@@ -391,7 +472,7 @@ fn synthesize_lachesi_dir_config(repo_path: &Path) -> Result<Option<RepoReviewCo
             ..ReviewConfig::default()
         });
     }
-    let packs = discover_lachesi_dir_policy_packs(repo_path)?;
+    let packs = discover_config_dir_policy_packs(repo_path, config_dir)?;
     if !packs.is_empty() {
         config.policy = Some(PolicyConfig {
             packs,
@@ -401,14 +482,14 @@ fn synthesize_lachesi_dir_config(repo_path: &Path) -> Result<Option<RepoReviewCo
     Ok(Some(config))
 }
 
-fn load_lachesi_dir_prompt(lachesi_dir: &Path) -> Result<Option<String>, String> {
+fn load_config_dir_prompt(config_dir: &Path) -> Result<Option<String>, String> {
     for file_name in [
         "system-prompt.md",
         "review-prompt.md",
         "review.md",
         "prompt.md",
     ] {
-        let path = lachesi_dir.join(file_name);
+        let path = config_dir.join(file_name);
         if path.is_file() {
             let prompt = fs::read_to_string(&path)
                 .map_err(|error| format!("Failed to read {}: {error}", path.display()))?
@@ -422,8 +503,11 @@ fn load_lachesi_dir_prompt(lachesi_dir: &Path) -> Result<Option<String>, String>
     Ok(None)
 }
 
-fn discover_lachesi_dir_policy_packs(repo_path: &Path) -> Result<Vec<String>, String> {
-    let packs_dir = repo_path.join(".lachesi/packs");
+fn discover_config_dir_policy_packs(
+    repo_path: &Path,
+    config_dir: &Path,
+) -> Result<Vec<String>, String> {
+    let packs_dir = config_dir.join("packs");
     if !packs_dir.is_dir() {
         return Ok(Vec::new());
     }
@@ -540,7 +624,7 @@ fn validate_config(
         errors.push(message(
             config_path,
             format!(
-                "Unsupported .lachesi.yaml version {}. Supported version is {SUPPORTED_VERSION}.",
+                "Unsupported Norn repository config version {}. Supported version is {SUPPORTED_VERSION}.",
                 config.version
             ),
         ));
@@ -588,8 +672,10 @@ pub(crate) fn validate_external_config_layer(value: &Value) -> Result<(), String
 pub(crate) fn load_repository_policy_layer(
     repo_path: &Path,
 ) -> Result<(Option<JsonValue>, Vec<RepoConfigValidationMessage>), String> {
-    let config_path = repo_path.join(CONFIG_FILE);
-    if config_path.is_file() {
+    let Some(config_path) = discover_repo_config_source(repo_path)? else {
+        return Ok((None, Vec::new()));
+    };
+    if !is_config_dir_source(&config_path) {
         let contents = fs::read_to_string(&config_path)
             .map_err(|error| format!("Failed to read {}: {error}", config_path.display()))?;
         let standalone = load_from_str(repo_path, &config_path, &contents, None);
@@ -617,18 +703,36 @@ pub(crate) fn load_repository_policy_layer(
             .map_err(|error| format!("Failed to normalize {}: {error}", config_path.display()));
     }
 
-    synthesize_lachesi_dir_config(repo_path)?
+    synthesize_config_dir(repo_path, &config_path)?
         .map(|config| {
             serde_json::to_value(config)
                 .map(compact_policy_layer)
-                .map_err(|error| format!("Failed to normalize .lachesi config: {error}"))
+                .map_err(|error| {
+                    format!(
+                        "Failed to normalize {} config: {error}",
+                        config_path.display()
+                    )
+                })
         })
         .transpose()
         .map(|layer| (layer, Vec::new()))
 }
 
 pub(crate) fn load_local_policy_layer(repo_path: &Path) -> Result<Option<JsonValue>, String> {
-    let path = repo_path.join(".lachesi.local.yaml");
+    let canonical = repo_path.join(LOCAL_CONFIG_FILE);
+    let legacy = repo_path.join(LEGACY_LOCAL_CONFIG_FILE);
+    if canonical.exists() && legacy.exists() {
+        return Err(format!(
+            "Norn found both canonical local override {} and legacy override {}. Migrate or remove the legacy source; Norn will not merge them implicitly.",
+            canonical.display(),
+            legacy.display()
+        ));
+    }
+    let path = if canonical.exists() {
+        canonical
+    } else {
+        legacy
+    };
     let metadata = match fs::symlink_metadata(&path) {
         Ok(metadata) => metadata,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
@@ -640,14 +744,17 @@ pub(crate) fn load_local_policy_layer(repo_path: &Path) -> Result<Option<JsonVal
         }
     };
     if metadata.file_type().is_symlink() {
-        return Err(
-            ".lachesi.local.yaml must be a regular file and cannot be a symbolic link.".to_string(),
-        );
+        return Err(format!(
+            "{} must be a regular file and cannot be a symbolic link.",
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or(LOCAL_CONFIG_FILE)
+        ));
     }
     if !metadata.is_file() {
         return Ok(None);
     }
-    validate_local_policy_override_state(repo_path)?;
+    validate_local_policy_override_state(repo_path, &path)?;
     let contents = fs::read_to_string(&path)
         .map_err(|error| format!("Failed to read {}: {error}", path.display()))?;
     let yaml = serde_yaml::from_str::<Value>(&contents)
@@ -666,41 +773,38 @@ pub(crate) fn load_local_policy_layer(repo_path: &Path) -> Result<Option<JsonVal
         .map_err(|error| format!("Failed to normalize {}: {error}", path.display()))
 }
 
-fn validate_local_policy_override_state(repo_path: &Path) -> Result<(), String> {
-    let tracked = run_local_policy_git(
-        repo_path,
-        &["ls-files", "--error-unmatch", "--", ".lachesi.local.yaml"],
-    )
-    .map_err(|error| format!("Failed to inspect local policy tracking state: {error}"))?;
+fn validate_local_policy_override_state(repo_path: &Path, path: &Path) -> Result<(), String> {
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| "Local policy override has an invalid file name.".to_string())?;
+    let tracked =
+        run_local_policy_git(repo_path, &["ls-files", "--error-unmatch", "--", file_name])
+            .map_err(|error| format!("Failed to inspect local policy tracking state: {error}"))?;
     if tracked.status.success() {
-        return Err(
-            ".lachesi.local.yaml is tracked by Git and cannot be used as a local policy override."
-                .to_string(),
-        );
+        return Err(format!(
+            "{file_name} is tracked by Git and cannot be used as a local policy override."
+        ));
     }
     if tracked.status.code() != Some(1) {
         return Err(format!(
-            "Could not determine whether .lachesi.local.yaml is tracked: {}",
+            "Could not determine whether {file_name} is tracked: {}",
             String::from_utf8_lossy(&tracked.stderr).trim()
         ));
     }
 
-    let ignored = run_local_policy_git(
-        repo_path,
-        &["check-ignore", "--quiet", "--", ".lachesi.local.yaml"],
-    )
-    .map_err(|error| format!("Failed to inspect local policy ignore state: {error}"))?;
+    let ignored = run_local_policy_git(repo_path, &["check-ignore", "--quiet", "--", file_name])
+        .map_err(|error| format!("Failed to inspect local policy ignore state: {error}"))?;
     if ignored.status.success() {
         return Ok(());
     }
     if ignored.status.code() == Some(1) {
-        return Err(
-            ".lachesi.local.yaml must be untracked and covered by a Git ignore rule before it can be used."
-                .to_string(),
-        );
+        return Err(format!(
+            "{file_name} must be untracked and covered by a Git ignore rule before it can be used."
+        ));
     }
     Err(format!(
-        "Could not determine whether .lachesi.local.yaml is ignored: {}",
+        "Could not determine whether {file_name} is ignored: {}",
         String::from_utf8_lossy(&ignored.stderr).trim()
     ))
 }
@@ -726,6 +830,574 @@ fn run_local_policy_git(repo_path: &Path, args: &[&str]) -> std::io::Result<std:
             .args(args)
             .output()
     }
+}
+
+pub fn migrate_repository_config(
+    repo_path: &Path,
+    dry_run: bool,
+) -> Result<RepoConfigMigrationResult, String> {
+    if !repo_path.is_dir() {
+        return Err(format!(
+            "Repository path does not exist or is not a directory: {}",
+            repo_path.display()
+        ));
+    }
+
+    let mappings = [
+        (LEGACY_CONFIG_FILE, CONFIG_FILE, false),
+        (LEGACY_CONFIG_DIR, CONFIG_DIR, true),
+        (LEGACY_LOCAL_CONFIG_FILE, LOCAL_CONFIG_FILE, false),
+    ];
+    let mut actions = Vec::new();
+    let legacy_root_present = [LEGACY_CONFIG_FILE, LEGACY_CONFIG_DIR]
+        .iter()
+        .any(|name| fs::symlink_metadata(repo_path.join(name)).is_ok());
+    let canonical_root_present = [CONFIG_FILE, CONFIG_DIR]
+        .iter()
+        .any(|name| fs::symlink_metadata(repo_path.join(name)).is_ok());
+    if legacy_root_present && canonical_root_present {
+        return Err(
+            "Cannot migrate a legacy repository config root while a canonical .norn.yaml or .norn root already exists. Norn never overwrites or creates a second canonical repository config root; keep exactly one root, then retry."
+                .to_string(),
+        );
+    }
+    if repo_path.join(LEGACY_CONFIG_FILE).exists() && repo_path.join(LEGACY_CONFIG_DIR).exists() {
+        return Err(format!(
+            "Cannot migrate both {} and {} because they are ambiguous repository config roots. Keep one legacy root, then retry.",
+            repo_path.join(LEGACY_CONFIG_FILE).display(),
+            repo_path.join(LEGACY_CONFIG_DIR).display()
+        ));
+    }
+    let legacy_local = repo_path.join(LEGACY_LOCAL_CONFIG_FILE);
+    let canonical_local = repo_path.join(LOCAL_CONFIG_FILE);
+    if legacy_local.is_file() && !canonical_local.exists() {
+        validate_local_policy_override_state(repo_path, &legacy_local)?;
+        if !local_policy_path_is_ignored(repo_path, LOCAL_CONFIG_FILE)? {
+            let gitignore = repo_path.join(".gitignore");
+            if gitignore.exists() && !gitignore.is_file() {
+                return Err(format!(
+                    "Cannot add the canonical local-override ignore rule because {} is not a regular file.",
+                    gitignore.display()
+                ));
+            }
+            actions.push(RepoConfigMigrationAction {
+                source: gitignore.display().to_string(),
+                target: gitignore.display().to_string(),
+                kind: "edit".to_string(),
+                content_changes: vec![format!(
+                    "Add /{LOCAL_CONFIG_FILE} so the migrated local override remains ignored."
+                )],
+            });
+        }
+    }
+    for (legacy_name, canonical_name, expected_directory) in mappings {
+        let source = repo_path.join(legacy_name);
+        let metadata = match fs::symlink_metadata(&source) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => {
+                return Err(format!(
+                    "Failed to inspect migration source {}: {error}",
+                    source.display()
+                ))
+            }
+        };
+        if metadata.file_type().is_symlink() {
+            return Err(format!(
+                "Cannot migrate symbolic link {}. Replace it with a regular file or directory first.",
+                source.display()
+            ));
+        }
+        let target = repo_path.join(canonical_name);
+        match fs::symlink_metadata(&target) {
+            Ok(_) => {
+                return Err(format!(
+                    "Cannot migrate {} because {} already exists. Norn never overwrites a canonical repository config target.",
+                    source.display(),
+                    target.display()
+                ))
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => {
+                return Err(format!(
+                    "Failed to inspect migration target {}: {error}",
+                    target.display()
+                ))
+            }
+        }
+        let is_dir = metadata.is_dir();
+        if !is_dir && !metadata.is_file() {
+            return Err(format!(
+                "Cannot migrate {} because it is not a regular file or directory.",
+                source.display()
+            ));
+        }
+        if is_dir != expected_directory {
+            return Err(format!(
+                "Cannot migrate {} because it must be a regular {}.",
+                source.display(),
+                if expected_directory {
+                    "directory"
+                } else {
+                    "file"
+                }
+            ));
+        }
+        let content_changes = if migration_has_content_changes(&source)? {
+            vec![
+                "Rewrite legacy .lachesi repository-config paths to their .norn equivalents."
+                    .to_string(),
+            ]
+        } else {
+            Vec::new()
+        };
+        actions.push(RepoConfigMigrationAction {
+            source: source.display().to_string(),
+            target: target.display().to_string(),
+            kind: if is_dir { "directory" } else { "file" }.to_string(),
+            content_changes,
+        });
+    }
+
+    if !dry_run {
+        for action in &actions {
+            let source = Path::new(&action.source);
+            let target = Path::new(&action.target);
+            if action.kind == "edit" {
+                ensure_canonical_local_ignore(repo_path)?;
+            } else if action.kind == "directory" {
+                migrate_config_directory(source, target)?;
+            } else {
+                migrate_config_file(source, target)?;
+            }
+        }
+    }
+
+    Ok(RepoConfigMigrationResult {
+        repo_path: repo_path.display().to_string(),
+        dry_run,
+        actions,
+    })
+}
+
+fn local_policy_path_is_ignored(repo_path: &Path, file_name: &str) -> Result<bool, String> {
+    let ignored = run_local_policy_git(
+        repo_path,
+        &["check-ignore", "--quiet", "--no-index", "--", file_name],
+    )
+    .map_err(|error| format!("Failed to inspect canonical local policy ignore state: {error}"))?;
+    match ignored.status.code() {
+        Some(0) => Ok(true),
+        Some(1) => Ok(false),
+        _ => Err(format!(
+            "Could not determine whether {file_name} is ignored: {}",
+            String::from_utf8_lossy(&ignored.stderr).trim()
+        )),
+    }
+}
+
+fn ensure_canonical_local_ignore(repo_path: &Path) -> Result<(), String> {
+    let path = repo_path.join(".gitignore");
+    let existing_permissions = match fs::symlink_metadata(&path) {
+        Ok(metadata) if metadata.file_type().is_symlink() => {
+            return Err(format!(
+                "Cannot update symbolic link {}. Replace it with a regular file first.",
+                path.display()
+            ));
+        }
+        Ok(metadata) if metadata.is_file() => Some(metadata.permissions()),
+        Ok(_) => {
+            return Err(format!("{} must be a regular file.", path.display()));
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+        Err(error) => return Err(format!("Failed to inspect {}: {error}", path.display())),
+    };
+    let original = match fs::read(&path) {
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Vec::new(),
+        Err(error) => return Err(format!("Failed to read {}: {error}", path.display())),
+    };
+    let text = std::str::from_utf8(&original)
+        .map_err(|error| format!("{} is not valid UTF-8: {error}", path.display()))?;
+    let mut updated = text.to_string();
+    if !updated.is_empty() && !updated.ends_with('\n') {
+        updated.push('\n');
+    }
+    updated.push_str(&format!("/{LOCAL_CONFIG_FILE}\n"));
+
+    let mut temporary = tempfile::Builder::new()
+        .prefix(".norn-gitignore-migration-")
+        .tempfile_in(repo_path)
+        .map_err(|error| format!("Failed to stage {}: {error}", path.display()))?;
+    temporary
+        .write_all(updated.as_bytes())
+        .map_err(|error| format!("Failed to stage {}: {error}", path.display()))?;
+    set_staged_file_permissions(temporary.as_file(), existing_permissions, &path)?;
+    temporary
+        .as_file()
+        .sync_all()
+        .map_err(|error| format!("Failed to sync {}: {error}", path.display()))?;
+    if path.exists() {
+        temporary
+            .persist(&path)
+            .map_err(|error| format!("Failed to update {}: {}", path.display(), error.error))?;
+    } else {
+        temporary.persist_noclobber(&path).map_err(|error| {
+            format!(
+                "Failed to create {} without overwriting it: {}",
+                path.display(),
+                error.error
+            )
+        })?;
+    }
+    if local_policy_path_is_ignored(repo_path, LOCAL_CONFIG_FILE)? {
+        Ok(())
+    } else {
+        Err(format!(
+            "{} is still not ignored after updating {}; fix the Git ignore rules before retrying.",
+            LOCAL_CONFIG_FILE,
+            path.display()
+        ))
+    }
+}
+
+fn migration_has_content_changes(path: &Path) -> Result<bool, String> {
+    let metadata = fs::symlink_metadata(path)
+        .map_err(|error| format!("Failed to inspect {}: {error}", path.display()))?;
+    if metadata.file_type().is_symlink() {
+        return Err(format!(
+            "Cannot migrate symbolic link {}. Replace it with a regular file or directory first.",
+            path.display()
+        ));
+    }
+    if metadata.is_dir() {
+        for entry in fs::read_dir(path)
+            .map_err(|error| format!("Failed to inspect {}: {error}", path.display()))?
+        {
+            let entry =
+                entry.map_err(|error| format!("Failed to inspect migration source: {error}"))?;
+            if migration_has_content_changes(&entry.path())? {
+                return Ok(true);
+            }
+        }
+        return Ok(false);
+    }
+    if !metadata.is_file() {
+        return Err(format!(
+            "Cannot migrate unsupported filesystem entry {}.",
+            path.display()
+        ));
+    }
+    if !is_yaml_path(path) {
+        return Ok(false);
+    }
+    let bytes =
+        fs::read(path).map_err(|error| format!("Failed to read {}: {error}", path.display()))?;
+    Ok(transform_migration_bytes(path, &bytes)? != bytes)
+}
+
+fn is_yaml_path(path: &Path) -> bool {
+    matches!(
+        path.extension().and_then(|value| value.to_str()),
+        Some("yaml" | "yml")
+    )
+}
+
+fn transform_migration_bytes(path: &Path, bytes: &[u8]) -> Result<Vec<u8>, String> {
+    if !is_yaml_path(path) {
+        return Ok(bytes.to_vec());
+    }
+    serde_yaml::from_slice::<Value>(bytes)
+        .map_err(|error| format!("Failed to parse {}: {error}", path.display()))?;
+    let source = std::str::from_utf8(bytes)
+        .map_err(|error| format!("Failed to decode {} as UTF-8: {error}", path.display()))?;
+    Ok(rewrite_known_yaml_path_text(source).into_bytes())
+}
+
+fn rewrite_known_yaml_path_text(source: &str) -> String {
+    let mut output = String::with_capacity(source.len());
+    let mut path_sequence_indent = None;
+
+    for line_with_ending in source.split_inclusive('\n') {
+        let (line, ending) = line_with_ending
+            .strip_suffix('\n')
+            .map_or((line_with_ending, ""), |line| (line, "\n"));
+        let content = line.trim_start_matches([' ', '\t']);
+        let indent = line.len() - content.len();
+        let significant = !content.is_empty() && !content.starts_with('#');
+        if significant && path_sequence_indent.is_some_and(|active| indent <= active) {
+            path_sequence_indent = None;
+        }
+
+        let field = yaml_mapping_field(content);
+        let rewritten = if let Some((field_name, value_is_empty)) = field {
+            if is_migrated_path_field(field_name) {
+                path_sequence_indent = value_is_empty.then_some(indent);
+                rewrite_path_tokens_preserving_comment(line)
+            } else if path_sequence_indent.is_some_and(|active| indent > active)
+                && yaml_sequence_scalar(content)
+            {
+                rewrite_path_tokens_preserving_comment(line)
+            } else {
+                line.to_string()
+            }
+        } else if path_sequence_indent.is_some_and(|active| indent > active)
+            && yaml_sequence_scalar(content)
+        {
+            rewrite_path_tokens_preserving_comment(line)
+        } else {
+            line.to_string()
+        };
+        output.push_str(&rewritten);
+        output.push_str(ending);
+    }
+
+    output
+}
+
+fn yaml_mapping_field(content: &str) -> Option<(&str, bool)> {
+    let content = content.strip_prefix("- ").unwrap_or(content);
+    let code = &content[..yaml_comment_start(content).unwrap_or(content.len())];
+    let colon = code.find(':')?;
+    let field = code[..colon]
+        .trim()
+        .trim_matches(|character| matches!(character, '\'' | '"'));
+    if field.is_empty() {
+        return None;
+    }
+    Some((field, code[colon + 1..].trim().is_empty()))
+}
+
+fn is_migrated_path_field(field: &str) -> bool {
+    matches!(
+        field,
+        "path" | "packs" | "policyPacks" | "include" | "exclude"
+    )
+}
+
+fn yaml_sequence_scalar(content: &str) -> bool {
+    let Some(value) = content.strip_prefix('-') else {
+        return false;
+    };
+    let code = &value[..yaml_comment_start(value).unwrap_or(value.len())];
+    !code.contains(':')
+}
+
+fn rewrite_path_tokens_preserving_comment(line: &str) -> String {
+    let comment = yaml_comment_start(line).unwrap_or(line.len());
+    let (code, suffix) = line.split_at(comment);
+    let rewritten = code
+        .replace(LEGACY_LOCAL_CONFIG_FILE, LOCAL_CONFIG_FILE)
+        .replace(LEGACY_CONFIG_FILE, CONFIG_FILE)
+        .replace(".lachesi/", ".norn/");
+    format!(
+        "{}{suffix}",
+        replace_exact_legacy_directory_tokens(&rewritten)
+    )
+}
+
+fn replace_exact_legacy_directory_tokens(text: &str) -> String {
+    const LEGACY: &str = ".lachesi";
+    let mut output = String::with_capacity(text.len());
+    let mut cursor = 0;
+    for (offset, _) in text.match_indices(LEGACY) {
+        let end = offset + LEGACY.len();
+        let before = text[..offset].chars().next_back();
+        let after = text[end..].chars().next();
+        let starts_at_boundary = before.is_none_or(|character| {
+            character.is_whitespace()
+                || matches!(
+                    character,
+                    '/' | '\\' | '"' | '\'' | '[' | '{' | '(' | ':' | ','
+                )
+        });
+        let ends_at_boundary = after.is_none_or(|character| {
+            character.is_whitespace()
+                || matches!(character, '/' | '\\' | '"' | '\'' | ']' | '}' | ')' | ',')
+        });
+        if starts_at_boundary && ends_at_boundary {
+            output.push_str(&text[cursor..offset]);
+            output.push_str(".norn");
+            cursor = end;
+        }
+    }
+    output.push_str(&text[cursor..]);
+    output
+}
+
+fn yaml_comment_start(text: &str) -> Option<usize> {
+    let mut single_quoted = false;
+    let mut double_quoted = false;
+    let mut escaped = false;
+    for (index, character) in text.char_indices() {
+        if double_quoted {
+            if escaped {
+                escaped = false;
+            } else if character == '\\' {
+                escaped = true;
+            } else if character == '"' {
+                double_quoted = false;
+            }
+            continue;
+        }
+        if single_quoted {
+            if character == '\'' {
+                single_quoted = false;
+            }
+            continue;
+        }
+        match character {
+            '"' => double_quoted = true,
+            '\'' => single_quoted = true,
+            '#' if text[..index]
+                .chars()
+                .next_back()
+                .is_none_or(char::is_whitespace) =>
+            {
+                return Some(index)
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+fn migrate_config_file(source: &Path, target: &Path) -> Result<(), String> {
+    let source_permissions = fs::symlink_metadata(source)
+        .map_err(|error| format!("Failed to inspect {}: {error}", source.display()))?
+        .permissions();
+    let bytes = fs::read(source)
+        .map_err(|error| format!("Failed to read {}: {error}", source.display()))?;
+    let transformed = transform_migration_bytes(source, &bytes)?;
+    let parent = target
+        .parent()
+        .ok_or_else(|| format!("Migration target has no parent: {}", target.display()))?;
+    let mut temporary = tempfile::Builder::new()
+        .prefix(".norn-config-migration-")
+        .tempfile_in(parent)
+        .map_err(|error| format!("Failed to stage repository config migration: {error}"))?;
+    temporary
+        .write_all(&transformed)
+        .map_err(|error| format!("Failed to stage repository config migration: {error}"))?;
+    set_staged_file_permissions(temporary.as_file(), Some(source_permissions), target)?;
+    temporary
+        .as_file()
+        .sync_all()
+        .map_err(|error| format!("Failed to sync repository config migration: {error}"))?;
+    temporary.persist_noclobber(target).map_err(|error| {
+        format!(
+            "Failed to publish migrated repository config at {} without overwriting it: {}",
+            target.display(),
+            error.error
+        )
+    })?;
+    fs::remove_file(source).map_err(|error| {
+        format!(
+            "Migrated repository config to {}, but could not remove legacy source {}: {error}. Remove the legacy source before loading config again.",
+            target.display(),
+            source.display()
+        )
+    })
+}
+
+fn set_staged_file_permissions(
+    file: &fs::File,
+    source_permissions: Option<fs::Permissions>,
+    target: &Path,
+) -> Result<(), String> {
+    let permissions = match source_permissions {
+        Some(permissions) => permissions,
+        None => {
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                fs::Permissions::from_mode(0o644)
+            }
+            #[cfg(not(unix))]
+            {
+                let mut permissions = file
+                    .metadata()
+                    .map_err(|error| format!("Failed to inspect staged file: {error}"))?
+                    .permissions();
+                permissions.set_readonly(false);
+                permissions
+            }
+        }
+    };
+    file.set_permissions(permissions).map_err(|error| {
+        format!(
+            "Failed to preserve permissions for {}: {error}",
+            target.display()
+        )
+    })
+}
+
+fn migrate_config_directory(source: &Path, target: &Path) -> Result<(), String> {
+    let parent = target
+        .parent()
+        .ok_or_else(|| format!("Migration target has no parent: {}", target.display()))?;
+    let staged = tempfile::Builder::new()
+        .prefix(".norn-config-migration-")
+        .tempdir_in(parent)
+        .map_err(|error| format!("Failed to stage repository config migration: {error}"))?;
+    copy_config_directory(source, staged.path())?;
+    let staged_path = staged.keep();
+    if let Err(error) = crate::runtime_identity::rename_directory_noclobber(&staged_path, target) {
+        let _ = fs::remove_dir_all(&staged_path);
+        return Err(format!(
+            "Failed to publish migrated repository config at {} without overwriting it: {error}",
+            target.display()
+        ));
+    }
+    fs::remove_dir_all(source).map_err(|error| {
+        format!(
+            "Migrated repository config to {}, but could not remove legacy source {}: {error}. Remove the legacy source before loading config again.",
+            target.display(),
+            source.display()
+        )
+    })
+}
+
+fn copy_config_directory(source: &Path, destination: &Path) -> Result<(), String> {
+    for entry in fs::read_dir(source)
+        .map_err(|error| format!("Failed to read {}: {error}", source.display()))?
+    {
+        let entry =
+            entry.map_err(|error| format!("Failed to inspect migration source: {error}"))?;
+        let source_path = entry.path();
+        let target_path = destination.join(entry.file_name());
+        let metadata = fs::symlink_metadata(&source_path)
+            .map_err(|error| format!("Failed to inspect {}: {error}", source_path.display()))?;
+        if metadata.file_type().is_symlink() {
+            return Err(format!(
+                "Cannot migrate symbolic link {}. Replace it with a regular file or directory first.",
+                source_path.display()
+            ));
+        }
+        if metadata.is_dir() {
+            fs::create_dir(&target_path)
+                .map_err(|error| format!("Failed to create {}: {error}", target_path.display()))?;
+            copy_config_directory(&source_path, &target_path)?;
+        } else if metadata.is_file() {
+            let bytes = fs::read(&source_path)
+                .map_err(|error| format!("Failed to read {}: {error}", source_path.display()))?;
+            let transformed = transform_migration_bytes(&source_path, &bytes)?;
+            fs::write(&target_path, transformed)
+                .map_err(|error| format!("Failed to write {}: {error}", target_path.display()))?;
+            fs::set_permissions(&target_path, metadata.permissions()).map_err(|error| {
+                format!(
+                    "Failed to preserve permissions for {}: {error}",
+                    target_path.display()
+                )
+            })?;
+        } else {
+            return Err(format!(
+                "Cannot migrate unsupported filesystem entry {}.",
+                source_path.display()
+            ));
+        }
+    }
+    Ok(())
 }
 
 #[cfg(target_os = "macos")]
@@ -1347,8 +2019,8 @@ fn collect_forbidden_fields(
 mod tests {
     use super::{
         finalize_resolved_config, load_from_repo_path, load_from_str, load_local_policy_layer,
-        load_repository_policy_layer, validate_external_config_layer, RepoReviewConfig,
-        RepoReviewConfigLoadResult,
+        load_repository_policy_layer, migrate_repository_config, validate_external_config_layer,
+        RepoReviewConfig, RepoReviewConfigLoadResult,
     };
     use std::fs;
     use std::path::{Path, PathBuf};
@@ -1367,7 +2039,7 @@ mod tests {
     }
 
     fn load_test_config(repo: &std::path::Path, contents: &str) -> RepoReviewConfigLoadResult {
-        load_from_str(repo, &repo.join(".lachesi.yaml"), contents, None)
+        load_from_str(repo, &repo.join(".norn.yaml"), contents, None)
     }
 
     fn load_test_config_with_profile(
@@ -1375,7 +2047,7 @@ mod tests {
         contents: &str,
         profile: &str,
     ) -> RepoReviewConfigLoadResult {
-        load_from_str(repo, &repo.join(".lachesi.yaml"), contents, Some(profile))
+        load_from_str(repo, &repo.join(".norn.yaml"), contents, Some(profile))
     }
 
     #[test]
@@ -1387,6 +2059,75 @@ mod tests {
         assert!(result.warnings.is_empty());
         assert!(result.errors.is_empty());
         let _ = fs::remove_dir_all(repo);
+    }
+
+    #[test]
+    fn canonical_config_wins_for_fresh_repositories() {
+        let repo = temp_repo();
+        fs::write(repo.join(".norn.yaml"), "version: 0.1\n").expect("canonical config");
+
+        let result = load_from_repo_path(&repo).expect("canonical load");
+
+        assert!(result.exists);
+        assert_eq!(
+            result.config_path,
+            repo.join(".norn.yaml").to_string_lossy()
+        );
+        let _ = fs::remove_dir_all(repo);
+    }
+
+    #[test]
+    fn legacy_config_remains_a_fallback() {
+        let repo = temp_repo();
+        fs::write(repo.join(".lachesi.yaml"), "version: 0.1\n").expect("legacy config");
+
+        let result = load_from_repo_path(&repo).expect("legacy fallback");
+
+        assert!(result.exists);
+        assert_eq!(
+            result.config_path,
+            repo.join(".lachesi.yaml").to_string_lossy()
+        );
+        let _ = fs::remove_dir_all(repo);
+    }
+
+    #[test]
+    fn every_canonical_and_legacy_root_combination_is_rejected() {
+        for (canonical_name, legacy_name) in [
+            (".norn.yaml", ".lachesi.yaml"),
+            (".norn.yaml", ".lachesi"),
+            (".norn", ".lachesi.yaml"),
+            (".norn", ".lachesi"),
+        ] {
+            let repo = temp_repo();
+            for name in [canonical_name, legacy_name] {
+                let path = repo.join(name);
+                if name.ends_with(".yaml") {
+                    fs::write(path, "version: 0.1\n").expect("config file");
+                } else {
+                    fs::create_dir(path).expect("config directory");
+                }
+            }
+
+            let error = load_from_repo_path(&repo).expect_err("mixed namespaces must fail");
+            assert!(error.contains("will not merge them implicitly"), "{error}");
+            let _ = fs::remove_dir_all(repo);
+        }
+    }
+
+    #[test]
+    fn file_and_directory_roots_in_the_same_namespace_are_rejected() {
+        for (file_name, directory_name) in [(".norn.yaml", ".norn"), (".lachesi.yaml", ".lachesi")]
+        {
+            let repo = temp_repo();
+            fs::write(repo.join(file_name), "version: 0.1\n").expect("config file");
+            fs::create_dir(repo.join(directory_name)).expect("config directory");
+
+            let error = load_from_repo_path(&repo).expect_err("ambiguous roots must fail");
+
+            assert!(error.contains("will not choose between them implicitly"));
+            let _ = fs::remove_dir_all(repo);
+        }
     }
 
     #[test]
@@ -1447,7 +2188,7 @@ version: 2.0
         assert_eq!(result.errors.len(), 1);
         assert!(result.errors[0]
             .message
-            .contains("Unsupported .lachesi.yaml version"));
+            .contains("Unsupported Norn repository config version"));
     }
 
     #[test]
@@ -1594,6 +2335,313 @@ review:
         let _ = fs::remove_dir_all(ignored_repo);
         let _ = fs::remove_dir_all(unignored_repo);
         let _ = fs::remove_dir_all(tracked_repo);
+    }
+
+    #[test]
+    fn canonical_local_policy_layer_is_untracked_ignored_and_preferred() {
+        let repo = temp_repo();
+        assert!(std::process::Command::new("git")
+            .arg("init")
+            .arg("-q")
+            .arg(&repo)
+            .status()
+            .expect("git init")
+            .success());
+        fs::write(repo.join(".gitignore"), ".norn.local.yaml\n").expect("ignore fixture");
+        fs::write(repo.join(".norn.local.yaml"), "review:\n  mode: strict\n")
+            .expect("canonical local policy");
+
+        assert!(load_local_policy_layer(&repo)
+            .expect("canonical local policy")
+            .is_some());
+
+        fs::write(repo.join(".lachesi.local.yaml"), "review:\n  mode: fast\n")
+            .expect("legacy local policy");
+        let error = load_local_policy_layer(&repo).expect_err("mixed local overrides must fail");
+        assert!(error.contains("will not merge them implicitly"));
+        let _ = fs::remove_dir_all(repo);
+    }
+
+    #[test]
+    fn repository_config_migration_previews_rewrites_and_never_overwrites() {
+        let repo = temp_repo();
+        fs::write(
+            repo.join(".lachesi.yaml"),
+            "version: 0.1\npolicy:\n  packs:\n    - \".lachesi/packs/team\" # keep .lachesi/comment\n  policyPacks: [\".lachesi\", \"./.lachesi\", \".lachesi-pack.yaml\"]\nrules:\n  - paths:\n      include:\n        - ./.lachesi.yaml\n      exclude:\n        - config/.lachesi.local.yaml\n",
+        )
+        .expect("legacy root config");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(
+                repo.join(".lachesi.yaml"),
+                fs::Permissions::from_mode(0o640),
+            )
+            .expect("legacy config permissions");
+        }
+        let preview = migrate_repository_config(&repo, true).expect("migration preview");
+        assert!(preview.dry_run);
+        assert_eq!(preview.actions.len(), 1);
+        assert!(preview
+            .actions
+            .iter()
+            .all(|action| !action.content_changes.is_empty()));
+        assert!(repo.join(".lachesi.yaml").exists());
+        assert!(!repo.join(".norn.yaml").exists());
+
+        let migrated = migrate_repository_config(&repo, false).expect("migration execution");
+        assert!(!migrated.dry_run);
+        assert!(!repo.join(".lachesi.yaml").exists());
+        assert!(fs::read_to_string(repo.join(".norn.yaml"))
+            .expect("canonical root config")
+            .contains(".norn/packs/team"));
+        let canonical =
+            fs::read_to_string(repo.join(".norn.yaml")).expect("canonical root config paths");
+        assert!(canonical.contains("./.norn.yaml"));
+        assert!(canonical.contains("config/.norn.local.yaml"));
+        assert!(canonical.contains("    - \".norn/packs/team\" # keep .lachesi/comment"));
+        assert!(canonical.contains("policyPacks: [\".norn\", \"./.norn\", \".lachesi-pack.yaml\"]"));
+        assert!(!canonical.contains("./.lachesi.yaml"));
+        assert!(!canonical.contains("config/.lachesi.local.yaml"));
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(
+                fs::metadata(repo.join(".norn.yaml"))
+                    .expect("canonical config metadata")
+                    .permissions()
+                    .mode()
+                    & 0o777,
+                0o640
+            );
+        }
+        assert!(migrate_repository_config(&repo, false)
+            .expect("idempotent migration")
+            .actions
+            .is_empty());
+
+        let canonical_before =
+            fs::read_to_string(repo.join(".norn.yaml")).expect("canonical config before conflict");
+        fs::write(repo.join(".lachesi.yaml"), "version: 0.1\n").expect("legacy conflict");
+        let error = migrate_repository_config(&repo, false)
+            .expect_err("canonical targets must never be overwritten");
+        assert!(error.contains("never overwrites"));
+        assert_eq!(
+            fs::read_to_string(repo.join(".norn.yaml")).expect("preserved canonical config"),
+            canonical_before
+        );
+        let _ = fs::remove_dir_all(repo);
+    }
+
+    #[test]
+    fn repository_config_directory_migration_is_no_clobber_and_rewrites_yaml() {
+        let repo = temp_repo();
+        fs::create_dir_all(repo.join(".lachesi/packs/team")).expect("legacy pack directory");
+        fs::write(
+            repo.join(".lachesi/packs/team/pack.yaml"),
+            "id: team\nreview:\n  prompt:\n    extend: Keep the prose example .lachesi/examples unchanged.\npolicy:\n  packs:\n    - .lachesi/packs/base\n",
+        )
+        .expect("legacy pack");
+
+        migrate_repository_config(&repo, false).expect("directory migration");
+
+        assert!(!repo.join(".lachesi").exists());
+        assert!(fs::read_to_string(repo.join(".norn/packs/team/pack.yaml"))
+            .expect("canonical pack")
+            .contains(".norn/packs/base"));
+        assert!(fs::read_to_string(repo.join(".norn/packs/team/pack.yaml"))
+            .expect("canonical pack")
+            .contains("prose example .lachesi/examples unchanged"));
+        let _ = fs::remove_dir_all(repo);
+    }
+
+    #[test]
+    fn repository_config_directory_migration_stages_before_atomic_publication() {
+        let repo = temp_repo();
+        fs::create_dir_all(repo.join(".lachesi/packs/team")).expect("legacy pack directory");
+        fs::write(repo.join(".lachesi/packs/team/pack.yaml"), "not: [valid")
+            .expect("invalid legacy pack");
+
+        let error = migrate_repository_config(&repo, false)
+            .expect_err("invalid staged config must not publish a target");
+
+        assert!(error.contains("Failed to parse"));
+        assert!(repo.join(".lachesi").exists());
+        assert!(!repo.join(".norn").exists());
+        let _ = fs::remove_dir_all(repo);
+    }
+
+    #[test]
+    fn atomic_directory_publication_never_replaces_a_concurrent_target() {
+        let repo = temp_repo();
+        let staged = repo.join("staged");
+        let target = repo.join("target");
+        fs::create_dir(&staged).expect("staged directory");
+        fs::write(staged.join("new.txt"), "new").expect("staged content");
+        fs::create_dir(&target).expect("concurrent target");
+        fs::write(target.join("existing.txt"), "existing").expect("target content");
+
+        let error = crate::runtime_identity::rename_directory_noclobber(&staged, &target)
+            .expect_err("concurrent target must not be replaced");
+
+        assert!(matches!(
+            error.kind(),
+            std::io::ErrorKind::AlreadyExists | std::io::ErrorKind::Other
+        ));
+        assert!(staged.join("new.txt").exists());
+        assert_eq!(
+            fs::read_to_string(target.join("existing.txt")).expect("preserved target"),
+            "existing"
+        );
+        let _ = fs::remove_dir_all(repo);
+    }
+
+    #[test]
+    fn repository_config_migration_rejects_ambiguous_legacy_roots() {
+        let repo = temp_repo();
+        fs::write(repo.join(".lachesi.yaml"), "version: 0.1\n").expect("legacy file");
+        fs::create_dir(repo.join(".lachesi")).expect("legacy directory");
+
+        let error = migrate_repository_config(&repo, true)
+            .expect_err("ambiguous legacy roots must not be migrated");
+
+        assert!(error.contains("ambiguous repository config roots"));
+        assert!(!repo.join(".norn.yaml").exists());
+        assert!(!repo.join(".norn").exists());
+        let _ = fs::remove_dir_all(repo);
+    }
+
+    #[test]
+    fn repository_config_migration_rejects_mixed_canonical_and_legacy_roots() {
+        for (canonical, legacy) in [(".norn", ".lachesi.yaml"), (".norn.yaml", ".lachesi")] {
+            let repo = temp_repo();
+            if canonical.ends_with(".yaml") {
+                fs::write(repo.join(canonical), "version: 0.1\n").expect("canonical file");
+            } else {
+                fs::create_dir(repo.join(canonical)).expect("canonical directory");
+            }
+            if legacy.ends_with(".yaml") {
+                fs::write(repo.join(legacy), "version: 0.1\n").expect("legacy file");
+            } else {
+                fs::create_dir(repo.join(legacy)).expect("legacy directory");
+            }
+
+            let error = migrate_repository_config(&repo, false)
+                .expect_err("mixed canonical and legacy roots must not be migrated");
+
+            assert!(error.contains("canonical .norn.yaml or .norn root already exists"));
+            assert!(repo.join(canonical).exists());
+            assert!(repo.join(legacy).exists());
+            let _ = fs::remove_dir_all(repo);
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn repository_config_migration_rejects_symlink_sources() {
+        use std::os::unix::fs::symlink;
+
+        let repo = temp_repo();
+        let outside = repo.with_extension("secret.yaml");
+        fs::write(&outside, "token: must-not-be-copied\n").expect("outside file");
+        symlink(&outside, repo.join(".lachesi.yaml")).expect("legacy symlink");
+
+        let error = migrate_repository_config(&repo, false)
+            .expect_err("symlinked migration source must fail");
+
+        assert!(error.contains("Cannot migrate symbolic link"));
+        assert!(!repo.join(".norn.yaml").exists());
+        let _ = fs::remove_dir_all(repo);
+        let _ = fs::remove_file(outside);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn repository_config_migration_dry_run_rejects_nested_symlinks_without_reading_them() {
+        use std::os::unix::fs::symlink;
+
+        let repo = temp_repo();
+        let outside = repo.with_extension("outside.yaml");
+        fs::create_dir(repo.join(".lachesi")).expect("legacy config directory");
+        fs::write(&outside, b"\xff\xfe\xfd").expect("outside non-UTF-8 file");
+        symlink(&outside, repo.join(".lachesi/policy.yaml")).expect("nested legacy symlink");
+
+        let error = migrate_repository_config(&repo, true)
+            .expect_err("dry-run must reject nested symlinks before reading them");
+
+        assert!(error.contains("Cannot migrate symbolic link"));
+        assert!(!repo.join(".norn").exists());
+        let _ = fs::remove_dir_all(repo);
+        let _ = fs::remove_file(outside);
+    }
+
+    #[test]
+    fn repository_config_migration_rejects_wrong_source_kinds() {
+        for legacy_name in [".lachesi.yaml", ".lachesi.local.yaml"] {
+            let repo = temp_repo();
+            fs::create_dir(repo.join(legacy_name)).expect("invalid legacy directory");
+
+            let error = migrate_repository_config(&repo, false)
+                .expect_err("file-shaped legacy source must reject directories");
+
+            assert!(error.contains("must be a regular file"));
+            assert!(repo.join(legacy_name).is_dir());
+            assert!(!repo.join(legacy_name.replace(".lachesi", ".norn")).exists());
+            let _ = fs::remove_dir_all(repo);
+        }
+    }
+
+    #[test]
+    fn repository_config_migration_keeps_local_override_ignored() {
+        let repo = temp_repo();
+        assert!(std::process::Command::new("git")
+            .arg("init")
+            .arg("-q")
+            .arg(&repo)
+            .status()
+            .expect("git init")
+            .success());
+        fs::write(repo.join(".gitignore"), "/.lachesi.local.yaml\n").expect("legacy ignore rule");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(repo.join(".gitignore"), fs::Permissions::from_mode(0o664))
+                .expect("gitignore permissions");
+        }
+        fs::write(
+            repo.join(".lachesi.local.yaml"),
+            "review:\n  mode: strict\n",
+        )
+        .expect("legacy local override");
+
+        let preview = migrate_repository_config(&repo, true).expect("migration preview");
+        assert!(preview.actions.iter().any(|action| action.kind == "edit"));
+        assert!(!fs::read_to_string(repo.join(".gitignore"))
+            .expect("unchanged ignore file")
+            .contains(".norn.local.yaml"));
+
+        migrate_repository_config(&repo, false).expect("migration execution");
+        assert!(!repo.join(".lachesi.local.yaml").exists());
+        assert!(repo.join(".norn.local.yaml").exists());
+        assert!(fs::read_to_string(repo.join(".gitignore"))
+            .expect("updated ignore file")
+            .contains("/.norn.local.yaml"));
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(
+                fs::metadata(repo.join(".gitignore"))
+                    .expect("updated gitignore metadata")
+                    .permissions()
+                    .mode()
+                    & 0o777,
+                0o664
+            );
+        }
+        assert!(load_local_policy_layer(&repo)
+            .expect("migrated local override remains valid")
+            .is_some());
+        let _ = fs::remove_dir_all(repo);
     }
 
     #[cfg(unix)]

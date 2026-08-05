@@ -26,7 +26,7 @@ After the human-readable review, include a machine-readable findings block:
 
 ```json
 {
-  "schemaVersion": "lachesi.review.v1",
+  "schemaVersion": "norn.review.v1",
   "findings": [
     {
       "title": "Short finding title",

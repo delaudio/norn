@@ -172,7 +172,7 @@ describe("RepositoryExplorerPanel", () => {
     expect(await screen.findByRole("button", { name: "Source" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Preview" })).toBeInTheDocument();
     expect(
-      await screen.findByText("Mock repository fixture for Lachesi browser development."),
+      await screen.findByText("Mock repository fixture for Norn browser development."),
     ).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Preview" }));
@@ -200,7 +200,7 @@ describe("RepositoryExplorerPanel", () => {
     await user.click(screen.getByRole("button", { name: "Source" }));
 
     expect(
-      screen.getByText("Mock repository fixture for Lachesi browser development."),
+      screen.getByText("Mock repository fixture for Norn browser development."),
     ).toBeInTheDocument();
   });
 });

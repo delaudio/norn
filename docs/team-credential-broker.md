@@ -5,7 +5,7 @@ broker. Local desktop keychain credentials remain outside this mechanism.
 
 ## Encryption and references
 
-The deployment supplies a 32-byte external master key as base64. Lachesi uses
+The deployment supplies a 32-byte external master key as base64. Norn uses
 AES-256-GCM with a fresh 96-bit nonce for every credential version. The service
 database stores only tenant, opaque credential reference, provider, version,
 status, nonce, and ciphertext. It never stores the master key or plaintext.

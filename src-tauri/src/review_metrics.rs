@@ -10,7 +10,7 @@ use crate::review_feedback::{
     ReviewFindingFeedbackAction, ReviewFindingFeedbackEvent, ReviewFindingFeedbackIdentity,
 };
 
-pub const REVIEW_EFFECTIVENESS_SCHEMA_VERSION: &str = "lachesi.review-effectiveness.v1";
+pub const REVIEW_EFFECTIVENESS_SCHEMA_VERSION: &str = "norn.review-effectiveness.v1";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ReviewEffectivenessRunStatus {

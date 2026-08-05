@@ -6,7 +6,7 @@
 
 ## Context
 
-Lachesi is currently Tauri-first:
+Norn is currently Tauri-first:
 
 - the executable entrypoint is the desktop app
 - Bitbucket access, review execution, review persistence, fix sessions, and
@@ -111,18 +111,18 @@ The CLI should not import or initialize a Tauri runtime.
 
 ## Command Surface
 
-### `lachesi review`
+### `norn review`
 
 Primary v0.1 command:
 
 ```sh
-lachesi review --workspace example-workspace --repo frontend-app --pr 1731
+norn review --workspace example-workspace --repo frontend-app --pr 1731
 ```
 
 Options implemented in the first CLI cut:
 
 ```sh
-lachesi review \
+norn review \
   [--repo-path <path>] \
   [--scope working-tree|branch|pr] \
   [--base <ref>] \
@@ -149,12 +149,12 @@ Defaults:
   values must match the selected local checkout
 - `--pr` is valid only for PR scope and `--base` only for branch scope
 - branch scope reviews committed changes from merge base through `HEAD`; when
-  local changes are present, Lachesi warns that working-tree scope must be run
+  local changes are present, Norn warns that working-tree scope must be run
   separately
-- `.lachesi.yaml` is loaded from repo root when present
+- `.norn.yaml` is loaded from repo root when present
 - `--profile` overrides `review.profile`; if omitted, `review.profile` or a
   `default` profile is used when configured
-- local `.lachesi.local.yaml` is loaded when present
+- local `.norn.local.yaml` is loaded when present
 - manual publication is not attempted
 - findings do not fail the process unless `--fail-on-findings` is set
 - local analyzers are skipped by default because agent-driven review follows
@@ -165,47 +165,59 @@ Defaults:
 - `--run-analyzers` requires a non-empty review target and fails target
   resolution instead of reporting that analyzers ran when there are no changes
 - headless review uses temporary local storage by default and removes it after
-  completion; setting `LACHESI_DATA_DIR` explicitly opts into a chosen
+  completion; setting `NORN_DATA_DIR` explicitly opts into a chosen
   persistent location
 
 Planned options such as custom config paths, JSONL streaming, evidence-only
 execution, per-run session instructions, and source-specific enrichment
 switches are not part of the first CLI cut. They must not be advertised by
-`lachesi review --help` until implemented.
+`norn review --help` until implemented.
 
-### `lachesi config validate`
+### `norn config validate`
 
 Validates effective config without running review:
 
 ```sh
-lachesi config validate --repo-path .
+norn config validate --repo-path .
 ```
 
 Exit behavior follows the config exit-code model below.
 
-### `lachesi metrics`
+### `norn config migrate`
+
+Previews or executes the bounded repository-config namespace migration:
+
+```sh
+norn config migrate --repo-path . --dry-run --format json
+```
+
+The dry run lists source/target renames and YAML policy-path rewrites without
+changing the repository. Omitting `--dry-run` performs the migration and never
+overwrites an existing canonical target.
+
+### `norn metrics`
 
 Aggregates persisted structured review runs and append-only finding feedback:
 
 ```sh
-lachesi metrics --tenant local --workspace example-workspace --repo frontend-app
+norn metrics --tenant local --workspace example-workspace --repo frontend-app
 ```
 
-The command supports human and `lachesi.review-effectiveness.v1` JSON output,
+The command supports human and `norn.review-effectiveness.v1` JSON output,
 tenant/provider/repository filters, and an inclusive-start/exclusive-end
 completion-time window. Metric definitions and missing-feedback behavior are
 specified in [Review effectiveness metrics](0008-review-effectiveness-metrics.md).
 
-### `lachesi evidence`
+### `norn evidence`
 
 Planned follow-up command:
 
 ```sh
-lachesi evidence --workspace example-workspace --repo frontend-app --pr 1731 --format json
+norn evidence --workspace example-workspace --repo frontend-app --pr 1731 --format json
 ```
 
 This will run configured analyzers and emit evidence without invoking the
-model. Neither this command nor `lachesi review --evidence-only` is implemented
+model. Neither this command nor `norn review --evidence-only` is implemented
 in the first CLI cut.
 
 ## Output Formats
@@ -232,7 +244,7 @@ The top-level JSON object should be:
 
 ```json
 {
-  "schemaVersion": "lachesi.headless-review.v1",
+  "schemaVersion": "norn.headless-review.v1",
   "status": "succeeded",
   "exitCode": 1,
   "warnings": [],
@@ -258,7 +270,8 @@ The top-level JSON object should be:
 }
 ```
 
-The top-level headless envelope uses `lachesi.headless-review.v1`.
+The top-level headless envelope uses `norn.headless-review.v1`. Readers retain
+support for the legacy Lachesi schema identifier during the compatibility window.
 `reviewRun` independently uses the same `v0.1` contract documented in the
 findings spec. Setup and runtime failures use the same top-level headless
 schema with `status: "failed"`, `exitCode`, and `error`.
@@ -312,24 +325,24 @@ is controlled by `--min-severity` or repo config.
 Local usage optimizes for readable terminal output:
 
 ```sh
-lachesi review --workspace example-workspace --repo backend-api --pr 1020
+norn review --workspace example-workspace --repo backend-api --pr 1020
 ```
 
 Expected behavior:
 
 - use app config and keychain credentials when available
 - resolve local repo path from explicit flag, settings, or discovery
-- load `.lachesi.yaml` and `.lachesi.local.yaml`
+- load `.norn.yaml` and `.norn.local.yaml`
 - print progress to stderr
 - print markdown result to stdout unless `--output` is set
-- keep review state ephemeral unless `LACHESI_DATA_DIR` is explicitly configured
+- keep review state ephemeral unless `NORN_DATA_DIR` is explicitly configured
 
 ## CI Usage
 
 CI usage should be deterministic and non-interactive:
 
 ```sh
-lachesi review \
+norn review \
   --workspace "$BITBUCKET_WORKSPACE" \
   --repo "$BITBUCKET_REPO_SLUG" \
   --pr "$BITBUCKET_PR_ID" \
@@ -360,7 +373,7 @@ Bitbucket-linked review requires:
 
 The core should preserve the existing security boundary:
 
-- secrets are not read from `.lachesi.yaml`
+- secrets are not read from `.norn.yaml`
 - credential sources and raw analyzer evidence are not included in JSON output
 - model-derived summaries and findings can reflect reviewed source content and
   must be handled with the same confidentiality as the diff
@@ -390,8 +403,8 @@ These can be added later after the shared review core is stable.
 3. Define a storage trait for review-store persistence.
 4. Define provider traits for Bitbucket, Jira, Notion, and model execution.
 5. Add a CLI binary entrypoint that calls the core without Tauri.
-6. Implement `lachesi config validate`.
-7. Implement `lachesi review --format markdown|json`.
+6. Implement `norn config validate`.
+7. Implement `norn review --format markdown|json`.
 8. Add `--evidence-only` once analyzer execution is available.
 
 The extraction should be incremental. Desktop behavior must keep working while

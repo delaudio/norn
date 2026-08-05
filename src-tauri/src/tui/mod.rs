@@ -102,7 +102,7 @@ enum TuiLaunchMode {
 }
 
 fn tui_usage() -> &'static str {
-    "Usage: lac [--current-repo] [--workspace]\n\nBy default, lac opens pull requests for the git repository in the current directory."
+    "Usage: norn-tui [--current-repo] [--workspace]\n\nBy default, norn-tui opens pull requests for the git repository in the current directory."
 }
 
 fn launch_mode_from_args<I, S>(args: I) -> Result<TuiLaunchMode, String>
@@ -118,7 +118,7 @@ where
             "-h" | "--help" => return Ok(TuiLaunchMode::Help),
             unknown => {
                 return Err(format!(
-                    "Unknown option `{unknown}`. Use `lac --workspace` for the configured repository picker."
+                    "Unknown option `{unknown}`. Use `norn-tui --workspace` for the configured repository picker."
                 ));
             }
         }
@@ -1551,7 +1551,7 @@ mod tests {
             .duration_since(UNIX_EPOCH)
             .expect("system time")
             .as_nanos();
-        std::env::temp_dir().join(format!("lachesi-tui-{name}-{}-{nonce}", std::process::id()))
+        std::env::temp_dir().join(format!("norn-tui-{name}-{}-{nonce}", std::process::id()))
     }
 
     #[test]

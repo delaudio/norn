@@ -2402,42 +2402,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "lachesi"
-version = "0.1.0"
-dependencies = [
- "aes-gcm",
- "base64 0.22.1",
- "chrono",
- "crossterm",
- "ctrlc",
- "dirs 5.0.1",
- "ed25519-dalek",
- "getrandom 0.2.17",
- "hex",
- "hmac",
- "image",
- "keyring",
- "libc",
- "openidconnect",
- "ratatui",
- "ratatui-image",
- "reqwest 0.12.28",
- "rusqlite",
- "serde",
- "serde_json",
- "serde_yaml",
- "sha2",
- "tauri",
- "tauri-build",
- "tauri-plugin-notification",
- "tauri-plugin-opener",
- "tempfile",
- "time",
- "toml 0.8.2",
- "unicode-segmentation",
-]
-
-[[package]]
 name = "lazy_static"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2708,6 +2672,42 @@ dependencies = [
  "cfg-if",
  "cfg_aliases",
  "libc",
+]
+
+[[package]]
+name = "norn"
+version = "0.1.0"
+dependencies = [
+ "aes-gcm",
+ "base64 0.22.1",
+ "chrono",
+ "crossterm",
+ "ctrlc",
+ "dirs 5.0.1",
+ "ed25519-dalek",
+ "getrandom 0.2.17",
+ "hex",
+ "hmac",
+ "image",
+ "keyring",
+ "libc",
+ "openidconnect",
+ "ratatui",
+ "ratatui-image",
+ "reqwest 0.12.28",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "sha2",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-notification",
+ "tauri-plugin-opener",
+ "tempfile",
+ "time",
+ "toml 0.8.2",
+ "unicode-segmentation",
 ]
 
 [[package]]

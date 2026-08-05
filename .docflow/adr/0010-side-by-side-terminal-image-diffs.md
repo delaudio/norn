@@ -1,7 +1,7 @@
 ---
 adr: 0010
 title: Compare modified image versions side by side in the terminal UI
-status: Accepted
+status: Implemented
 date: 2026-07-31
 owner: default-agent
 supersedes:
@@ -27,7 +27,7 @@ unavailable.
 
 ## Capability statement
 
-Lachesi will present the base and changed versions of a modified supported
+Norn presents the base and changed versions of a modified supported
 raster image side by side in a sufficiently wide graphics-capable terminal.
 The existing single-image selection remains available as a fallback and for
 added or deleted images.
@@ -75,9 +75,11 @@ added or deleted images.
 |------|----------|--------|--------|
 | 2026-07-31 | r1 | default-agent | Initial draft. |
 | 2026-07-31 | r2 | default-agent | Accepted for TUI-only implementation. |
+| 2026-08-04 | r3 | codex | Recorded implementation shipped through PR #148 and aligned the current product name. |
 
 ## Approvals
 
 | Role | Name | Date | Signature |
 |------|------|------|-----------|
 | Maintainer | fdg | 2026-07-31 | approved through implementation instruction |
+| Maintainer | fdg | 2026-08-04 | approved through autonomous issue-completion instruction |

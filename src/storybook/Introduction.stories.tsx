@@ -5,13 +5,13 @@ function Introduction() {
     <main className="min-h-screen bg-background text-foreground">
       <section className="border-b border-border bg-secondary px-8 py-14">
         <div className="mx-auto max-w-5xl">
-          <p className="mb-3 text-sm font-medium text-muted-foreground">Lachesi Design System</p>
+          <p className="mb-3 text-sm font-medium text-muted-foreground">Norn Design System</p>
           <h1 className="max-w-3xl text-4xl font-semibold tracking-normal">
             Product UI patterns for local-first pull request review.
           </h1>
           <p className="mt-5 max-w-2xl text-base leading-7 text-muted-foreground">
-            This Storybook documents Lachesi components, app surfaces, review states, and
-            interaction patterns used by the desktop review workspace.
+            This Storybook documents Norn components, app surfaces, review states, and interaction
+            patterns used by the desktop review workspace.
           </p>
         </div>
       </section>

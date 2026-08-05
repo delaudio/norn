@@ -1,12 +1,12 @@
 # Agentic Code Review Rules
 
 This is a public prototype policy pack for reviewing code produced or heavily
-modified by AI coding agents. It demonstrates Lachesi's local policy pack
+modified by AI coding agents. It demonstrates Norn's local policy pack
 format without depending on a hosted registry or private policy content.
 
 ## Install Locally
 
-Reference the pack from a repository-owned `.lachesi.yaml`:
+Reference the pack from a repository-owned `.norn.yaml`:
 
 ```yaml
 version: 0.1
@@ -49,6 +49,6 @@ rules should warn rather than claim complete static-analysis coverage.
 ## Files
 
 - `pack.yaml` - loadable policy pack manifest.
-- `examples/lachesi.yaml` - repository config that enables this pack.
+- `examples/norn.yaml` - repository config that enables this pack.
 - `examples/review-output.md` - sample human-readable output.
 - `examples/review-output.json` - sample structured output.

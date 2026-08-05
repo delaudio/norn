@@ -1,5 +1,18 @@
+import { readMigratedStorageValue } from "./storageMigration";
+
 function storageKey(workspace: string, repo: string, prId: number): string {
-  return `lachesi.viewedFiles.${workspace}/${repo}#${prId}`;
+  return `norn.viewedFiles.v1.${workspace}/${repo}#${prId}`;
+}
+
+function legacyStorageKey(key: string): string {
+  return key.replace(/^norn\.viewedFiles\.v1\./, "lachesi.viewedFiles.");
+}
+
+function normalizeLegacyViewedFiles(raw: string): string | null {
+  const parsed: unknown = JSON.parse(raw);
+  return Array.isArray(parsed) && parsed.every((item) => typeof item === "string")
+    ? JSON.stringify(parsed)
+    : null;
 }
 
 export function viewedFilesStorageKey(
@@ -14,7 +27,14 @@ export function viewedFilesStorageKey(
 export function loadViewedFiles(key: string | null): Set<string> {
   if (!key || typeof localStorage === "undefined") return new Set();
   try {
-    const value = JSON.parse(localStorage.getItem(key) ?? "[]");
+    const value = JSON.parse(
+      readMigratedStorageValue(
+        localStorage,
+        key,
+        legacyStorageKey(key),
+        normalizeLegacyViewedFiles,
+      ) ?? "[]",
+    );
     if (!Array.isArray(value)) return new Set();
     return new Set(value.filter((item) => typeof item === "string"));
   } catch {

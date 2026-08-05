@@ -78,7 +78,7 @@ impl OperationalTelemetry {
     }
 
     pub fn record_received(&self, provider: PullRequestReviewEventProvider) {
-        self.increment("lachesi_review_events_received_total", provider, "received");
+        self.increment("norn_review_events_received_total", provider, "received");
     }
 
     pub fn record_queued(
@@ -87,7 +87,7 @@ impl OperationalTelemetry {
         delivery_id: &str,
         job_id: &str,
     ) -> String {
-        self.increment("lachesi_review_jobs_total", provider, "queued");
+        self.increment("norn_review_jobs_total", provider, "queued");
         let correlation_id = self.correlation_for_delivery(delivery_id);
         let trace = OperationalTrace {
             correlation_id: correlation_id.clone(),
@@ -114,9 +114,9 @@ impl OperationalTelemetry {
         queue_wait: Duration,
         review_duration: Duration,
     ) {
-        self.increment("lachesi_review_jobs_total", provider, "completed");
-        self.observe("lachesi_review_queue_wait_ms", provider, queue_wait);
-        self.observe("lachesi_review_duration_ms", provider, review_duration);
+        self.increment("norn_review_jobs_total", provider, "completed");
+        self.observe("norn_review_queue_wait_ms", provider, queue_wait);
+        self.observe("norn_review_duration_ms", provider, review_duration);
     }
 
     pub fn record_failure(
@@ -127,19 +127,19 @@ impl OperationalTelemetry {
         retrying: bool,
         dead_letter: bool,
     ) {
-        self.increment("lachesi_review_jobs_total", provider, "failed");
+        self.increment("norn_review_jobs_total", provider, "failed");
         if retrying {
-            self.increment("lachesi_review_retries_total", provider, "scheduled");
+            self.increment("norn_review_retries_total", provider, "scheduled");
         }
         if dead_letter {
             self.increment(
-                "lachesi_review_dead_letter_jobs_total",
+                "norn_review_dead_letter_jobs_total",
                 provider,
                 "dead_lettered",
             );
         }
-        self.observe("lachesi_review_queue_wait_ms", provider, queue_wait);
-        self.observe("lachesi_review_duration_ms", provider, review_duration);
+        self.observe("norn_review_queue_wait_ms", provider, queue_wait);
+        self.observe("norn_review_duration_ms", provider, review_duration);
     }
 
     pub fn record_publication(
@@ -152,8 +152,8 @@ impl OperationalTelemetry {
             PublicationOutcome::Completed => "completed",
             PublicationOutcome::Failed => "failed",
         };
-        self.increment("lachesi_review_publications_total", provider, outcome);
-        self.observe("lachesi_review_publication_duration_ms", provider, duration);
+        self.increment("norn_review_publications_total", provider, outcome);
+        self.observe("norn_review_publication_duration_ms", provider, duration);
     }
 
     pub fn trace_for_job(&self, job_id: &str) -> Option<OperationalTrace> {
@@ -268,11 +268,11 @@ mod tests {
             true,
         );
         let metrics = telemetry.prometheus();
-        assert!(metrics.contains("lachesi_review_jobs_total{provider=\"github\",outcome=\"queued\",repository_scope=\"repository\"} 1"));
-        assert!(metrics.contains("lachesi_review_retries_total"));
-        assert!(metrics.contains("lachesi_review_dead_letter_jobs_total"));
-        assert!(metrics.contains("lachesi_review_queue_wait_ms_count"));
-        assert!(metrics.contains("lachesi_review_duration_ms_count"));
+        assert!(metrics.contains("norn_review_jobs_total{provider=\"github\",outcome=\"queued\",repository_scope=\"repository\"} 1"));
+        assert!(metrics.contains("norn_review_retries_total"));
+        assert!(metrics.contains("norn_review_dead_letter_jobs_total"));
+        assert!(metrics.contains("norn_review_queue_wait_ms_count"));
+        assert!(metrics.contains("norn_review_duration_ms_count"));
         assert!(!metrics.contains("delivery-secret-123"));
         assert!(!metrics.contains("job-42"));
         assert_eq!(

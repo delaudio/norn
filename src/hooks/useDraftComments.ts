@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { readMigratedStorageValue } from "@/lib/storageMigration";
 import { tauriCall } from "@/lib/tauri";
 import type { DraftComment, PrComment, ReviewProvider } from "@/types";
 
@@ -8,7 +9,50 @@ function storageKey(
   repo: string,
   prId: number,
 ): string {
+  return `norn.drafts.v1.${provider}:${workspace}/${repo}/${prId}`;
+}
+
+function legacyStorageKey(
+  provider: ReviewProvider,
+  workspace: string,
+  repo: string,
+  prId: number,
+): string {
   return `lachesi.drafts.${provider}:${workspace}/${repo}/${prId}`;
+}
+
+function normalizeLegacyDrafts(raw: string): string | null {
+  const parsed: unknown = JSON.parse(raw);
+  if (
+    !Array.isArray(parsed) ||
+    !parsed.every((draft) => {
+      if (draft == null || typeof draft !== "object") return false;
+      const value = draft as Record<string, unknown>;
+      return (
+        typeof value.localId === "string" &&
+        typeof value.prId === "number" &&
+        typeof value.path === "string" &&
+        (value.to == null || typeof value.to === "number") &&
+        (value.from == null || typeof value.from === "number") &&
+        typeof value.raw === "string" &&
+        (value.parentId == null ||
+          typeof value.parentId === "string" ||
+          typeof value.parentId === "number") &&
+        typeof value.createdAt === "number"
+      );
+    })
+  ) {
+    return null;
+  }
+  return JSON.stringify(
+    parsed.map((draft) => {
+      const record = draft as Record<string, unknown>;
+      return {
+        ...record,
+        parentId: record.parentId == null ? null : String(record.parentId),
+      };
+    }),
+  );
 }
 
 function loadDrafts(
@@ -18,7 +62,12 @@ function loadDrafts(
   prId: number,
 ): DraftComment[] {
   try {
-    const raw = localStorage.getItem(storageKey(provider, workspace, repo, prId));
+    const raw = readMigratedStorageValue(
+      localStorage,
+      storageKey(provider, workspace, repo, prId),
+      legacyStorageKey(provider, workspace, repo, prId),
+      normalizeLegacyDrafts,
+    );
     const parsed = raw ? (JSON.parse(raw) as DraftComment[]) : [];
     return parsed.map((draft) => ({
       ...draft,

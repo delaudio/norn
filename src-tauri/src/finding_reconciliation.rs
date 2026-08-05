@@ -1,4 +1,4 @@
-//! Provider-neutral reconciliation of Lachesi-authored finding comments.
+//! Provider-neutral reconciliation of Norn-authored finding comments.
 //!
 //! Reconciliation is explicit. It matches tracked publications by finding
 //! fingerprint, verifies provider ownership through hidden markers, preserves
@@ -19,8 +19,9 @@ use crate::finding_publication::{
 use crate::review_event::PullRequestReviewEventProvider;
 
 const MAX_RECONCILIATION_FINDINGS: usize = 250;
-const RESOLVED_NOTICE: &str = "> This finding is no longer present in the latest Lachesi review.";
-const RESOLVED_MARKER: &str = "<!-- lachesi:finding-state:resolved -->";
+const RESOLVED_NOTICE: &str = "> This finding is no longer present in the latest Norn review.";
+const RESOLVED_MARKER: &str = "<!-- norn:finding-state:resolved -->";
+const LEGACY_RESOLVED_MARKER: &str = "<!-- lachesi:finding-state:resolved -->";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum FindingReconciliationSchemaVersion {
@@ -276,9 +277,12 @@ where
                 .map(str::to_string);
             let has_lineage_marker = trailing_control_lines(&provider_comment.markdown)
                 .iter()
-                .any(|line| line.starts_with("<!-- lachesi:finding-lineage:"));
+                .any(|line| is_finding_lineage_marker(line));
             let lineage_marker_matches =
-                comment_has_marker(&provider_comment.markdown, &lineage_marker);
+                comment_has_marker(&provider_comment.markdown, &lineage_marker)
+                    || legacy_marker(&lineage_marker).is_some_and(|legacy| {
+                        comment_has_marker(&provider_comment.markdown, &legacy)
+                    });
             let Some(exact_marker) = exact_marker else {
                 actions.push(failed_action(
                     fingerprint,
@@ -288,9 +292,8 @@ where
                     FindingPublicationError {
                         code: FindingPublicationErrorCode::PermissionDenied,
                         retryable: false,
-                        message:
-                            "The tracked provider comment is not owned by this Lachesi finding."
-                                .to_string(),
+                        message: "The tracked provider comment is not owned by this Norn finding."
+                            .to_string(),
                     },
                 ));
                 continue;
@@ -304,9 +307,8 @@ where
                     FindingPublicationError {
                         code: FindingPublicationErrorCode::PermissionDenied,
                         retryable: false,
-                        message:
-                            "The tracked provider comment is not owned by this Lachesi finding."
-                                .to_string(),
+                        message: "The tracked provider comment is not owned by this Norn finding."
+                            .to_string(),
                     },
                 ));
                 continue;
@@ -658,7 +660,8 @@ pub fn dry_run_reconciliation_summary(
     for (fingerprint, finding) in current {
         let marker = finding_marker(finding);
         let digest = marker
-            .strip_prefix("<!-- lachesi:finding:")
+            .strip_prefix("<!-- norn:finding:")
+            .or_else(|| marker.strip_prefix("<!-- lachesi:finding:"))
             .and_then(|value| value.strip_suffix(" -->"))
             .unwrap_or("unknown");
         actions.push(successful_action(
@@ -835,6 +838,7 @@ fn failed_action(
 
 fn comment_is_resolved(markdown: &str) -> bool {
     comment_has_marker(markdown, RESOLVED_MARKER)
+        || comment_has_marker(markdown, LEGACY_RESOLVED_MARKER)
 }
 
 fn comment_has_marker(markdown: &str, marker: &str) -> bool {
@@ -846,14 +850,30 @@ fn trailing_control_lines(markdown: &str) -> Vec<&str> {
         .lines()
         .rev()
         .skip_while(|line| line.is_empty())
-        .take_while(|line| line.starts_with("<!-- lachesi:") && line.ends_with(" -->"))
+        .take_while(|line| is_control_line(line))
         .collect()
 }
 
 fn is_control_line(line: &str) -> bool {
     line == RESOLVED_MARKER
-        || (line.starts_with("<!-- lachesi:finding:") && line.ends_with(" -->"))
-        || (line.starts_with("<!-- lachesi:finding-lineage:") && line.ends_with(" -->"))
+        || line == LEGACY_RESOLVED_MARKER
+        || is_exact_finding_marker(line)
+        || is_finding_lineage_marker(line)
+}
+
+fn is_finding_lineage_marker(line: &str) -> bool {
+    [
+        "<!-- norn:finding-lineage:",
+        "<!-- lachesi:finding-lineage:",
+    ]
+    .iter()
+    .any(|prefix| line.starts_with(prefix) && line.ends_with(" -->"))
+}
+
+fn legacy_marker(marker: &str) -> Option<String> {
+    marker
+        .strip_prefix("<!-- norn:")
+        .map(|suffix| format!("<!-- lachesi:{suffix}"))
 }
 
 fn active_markdown(markdown: &str) -> String {
@@ -898,7 +918,8 @@ fn validate_identifier(field: &str, value: &str) -> Result<(), FindingPublicatio
 
 fn is_exact_finding_marker(value: &str) -> bool {
     value
-        .strip_prefix("<!-- lachesi:finding:")
+        .strip_prefix("<!-- norn:finding:")
+        .or_else(|| value.strip_prefix("<!-- lachesi:finding:"))
         .and_then(|value| value.strip_suffix(" -->"))
         .is_some_and(|digest| {
             digest.len() == 64 && digest.bytes().all(|byte| byte.is_ascii_hexdigit())
@@ -1354,6 +1375,39 @@ mod tests {
     }
 
     #[test]
+    fn legacy_namespaced_markers_are_reconciled_and_rewritten_canonically() {
+        let api = MockApi::default();
+        let store = MockStore::default();
+        let previous = finding("legacy-markers", OLD_HEAD_SHA);
+        let tracked = api.insert(&previous, "comment-legacy-markers", false, &[]);
+        {
+            let mut state = api.0.lock().unwrap();
+            let markdown = &mut state
+                .comments
+                .get_mut("comment-legacy-markers")
+                .expect("legacy comment")
+                .comment
+                .markdown;
+            *markdown = markdown.replace("<!-- norn:", "<!-- lachesi:");
+        }
+
+        let summary = FindingReconciler::new(&api, &store)
+            .reconcile(&request(
+                vec![tracked],
+                vec![finding("legacy-markers", HEAD_SHA)],
+            ))
+            .expect("legacy marker reconciliation");
+
+        assert_eq!(summary.status, FindingReconciliationStatus::Succeeded);
+        assert_eq!(summary.counts.unchanged, 1);
+        let state = api.0.lock().unwrap();
+        let markdown = &state.comments["comment-legacy-markers"].comment.markdown;
+        assert!(markdown.contains("<!-- norn:finding-lineage:"));
+        assert!(markdown.contains("<!-- norn:finding:"));
+        assert!(!markdown.contains("<!-- lachesi:"));
+    }
+
+    #[test]
     fn reconciles_new_changed_moved_fixed_and_reopened_findings() {
         let api = MockApi::default();
         let store = MockStore::default();
@@ -1625,8 +1679,8 @@ mod tests {
                 .markdown
                 .lines()
                 .map(|line| {
-                    if line.starts_with("<!-- lachesi:finding-lineage:") {
-                        "<!-- lachesi:finding-lineage:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa -->"
+                    if is_finding_lineage_marker(line) {
+                        "<!-- norn:finding-lineage:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa -->"
                     } else {
                         line
                     }
@@ -1673,7 +1727,8 @@ mod tests {
         let api = MockApi::default();
         let store = MockStore::default();
         let previous = finding("legacy", OLD_HEAD_SHA);
-        let previous_marker = finding_marker(&previous);
+        let previous_marker = legacy_marker(&finding_marker(&previous))
+            .expect("canonical marker should have a legacy alias");
         let tracked = api.insert(&previous, "comment-legacy", false, &[]);
         let FindingPublicationReservation::Acquired(lease) = store
             .reserve(&previous, &previous_marker)
@@ -1714,7 +1769,8 @@ mod tests {
         let api = MockApi::default();
         let store = MockStore::default();
         let previous = finding("other", OLD_HEAD_SHA);
-        let previous_marker = finding_marker(&previous);
+        let previous_marker = legacy_marker(&finding_marker(&previous))
+            .expect("canonical marker should have a legacy alias");
         let mut tracked = api.insert(&previous, "comment-other", false, &[]);
         tracked.finding_fingerprint = "victim".to_string();
         {

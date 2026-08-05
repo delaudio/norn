@@ -164,7 +164,7 @@ pub fn parse_git_remote(remote: &str) -> Result<(ReviewProvider, String, String)
         (host, path)
     } else {
         return Err(format!(
-            "Unsupported git remote URL: {display_remote}. Run `lac` from a clone whose remote is on github.com or bitbucket.org, or use `lac --workspace` to open configured repositories."
+            "Unsupported git remote URL: {display_remote}. Run `norn-tui` from a clone whose remote is on github.com or bitbucket.org, or use `norn-tui --workspace` to open configured repositories."
         ));
     };
 
@@ -173,7 +173,7 @@ pub fn parse_git_remote(remote: &str) -> Result<(ReviewProvider, String, String)
         "github.com" => ReviewProvider::Github,
         _ => {
             return Err(format!(
-                "Unsupported git remote host `{host}`. Run `lac` from a clone whose remote is on github.com or bitbucket.org, or use `lac --workspace` to open configured repositories."
+                "Unsupported git remote host `{host}`. Run `norn-tui` from a clone whose remote is on github.com or bitbucket.org, or use `norn-tui --workspace` to open configured repositories."
             ));
         }
     };
@@ -239,7 +239,7 @@ fn current_repo_remote(root: &Path) -> Result<(String, String), String> {
 pub fn resolve_current_repo_from_dir(dir: &Path) -> Result<RepoRef, String> {
     let root = git_output(&["rev-parse", "--show-toplevel"], dir).map_err(|_| {
         format!(
-            "{} is not inside a git repository. Run `lac` from a local clone with a GitHub or Bitbucket remote, or use `lac --workspace` to open configured repositories.",
+            "{} is not inside a git repository. Run `norn-tui` from a local clone with a GitHub or Bitbucket remote, or use `norn-tui --workspace` to open configured repositories.",
             dir.display()
         )
     })?;
@@ -261,7 +261,7 @@ pub fn resolve_current_repo() -> Result<RepoRef, String> {
 }
 
 fn missing_remote_message() -> String {
-    "This git repository has no remotes configured. Add an origin remote for GitHub or Bitbucket, or use `lac --workspace` to open configured repositories."
+    "This git repository has no remotes configured. Add an origin remote for GitHub or Bitbucket, or use `norn-tui --workspace` to open configured repositories."
         .to_string()
 }
 
@@ -510,7 +510,7 @@ mod tests {
         };
 
         assert!(error.contains("not inside a git repository"));
-        assert!(error.contains("lac --workspace"));
+        assert!(error.contains("norn-tui --workspace"));
         fs::remove_dir_all(path).expect("cleanup temp dir");
     }
 
@@ -530,7 +530,7 @@ mod tests {
         };
 
         assert!(error.contains("no remotes configured"));
-        assert!(error.contains("lac --workspace"));
+        assert!(error.contains("norn-tui --workspace"));
         fs::remove_dir_all(path).expect("cleanup temp repo");
     }
 

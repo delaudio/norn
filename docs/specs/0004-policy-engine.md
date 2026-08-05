@@ -6,7 +6,7 @@
 
 ## Context
 
-Lachesi should review pull requests against project-specific rules, not only
+Norn should review pull requests against project-specific rules, not only
 generic code-review heuristics.
 
 `main` already has the early building blocks:
@@ -15,7 +15,7 @@ generic code-review heuristics.
 - Jira and linked resource context in review payloads
 - normalized `ReviewRun` and `Finding` objects with `ruleId`, `severity`,
   `rationale`, `anchor`, `evidenceIds`, and publication state
-- `.lachesi.yaml` as the repo-owned config surface for policy sources
+- `.norn.yaml` as the repo-owned config surface for policy sources
 
 There is no first-class policy engine yet. v0.1 should therefore start with an
 incremental contract that is useful immediately and does not promise a broad
@@ -43,7 +43,7 @@ v0.1 supports four policy source types.
 
 ### ADR Sources
 
-ADR sources point to markdown files or directories listed in `.lachesi.yaml`:
+ADR sources point to markdown files or directories listed in `.norn.yaml`:
 
 ```yaml
 policy:
@@ -73,7 +73,7 @@ Concrete v0.1 examples from this repo:
 
 ### Explicit Rule Blocks
 
-Explicit rules can be declared in `.lachesi.yaml`:
+Explicit rules can be declared in `.norn.yaml`:
 
 ```yaml
 policy:
@@ -114,7 +114,7 @@ policy:
         change keys directly.
 ```
 
-These are first-class in v0.1 because they are cheap to evaluate: Lachesi can
+These are first-class in v0.1 because they are cheap to evaluate: Norn can
 match them against the changed path list before invoking the model.
 
 ### Limited AST-Oriented Rules
@@ -179,12 +179,12 @@ without explaining why.
 
 Policy inputs are resolved in this order:
 
-1. built-in Lachesi review heuristics
+1. built-in Norn review heuristics
 2. ADR-derived policy context
-3. explicit `.lachesi.yaml` rules
+3. explicit `.norn.yaml` rules
 4. path-scoped rules matching changed files
 5. analyzer or AST rule declarations
-6. local `.lachesi.local.yaml` policy overrides
+6. local `.norn.local.yaml` policy overrides
 7. session-level reviewer instructions
 
 Later layers may narrow, suppress, or strengthen earlier layers, but they should
@@ -198,9 +198,9 @@ Rules conflict when they share a target and give incompatible instructions.
 Conflict resolution:
 
 1. exact `id` override wins
-2. local `.lachesi.local.yaml` may disable a rule for one machine
+2. local `.norn.local.yaml` may disable a rule for one machine
 3. session overrides may suppress a rule for one run
-4. otherwise the stricter rule wins and Lachesi emits a policy warning
+4. otherwise the stricter rule wins and Norn emits a policy warning
 
 Severity conflict:
 
@@ -235,7 +235,7 @@ Expired suppressions should warn and stop suppressing the rule.
 
 ## Finding Projection
 
-When a policy rule produces a violation, Lachesi creates or asks the model to
+When a policy rule produces a violation, Norn creates or asks the model to
 create a normalized finding:
 
 ```ts
@@ -284,7 +284,7 @@ The prompt must include structured policy context:
 The model may interpret whether changed code violates the rule, but the output
 must preserve the rule id in the resulting finding.
 
-This gives Lachesi immediate value from ADR/path rules while leaving room for
+This gives Norn immediate value from ADR/path rules while leaving room for
 stronger analyzers later.
 
 ## Examples
@@ -303,7 +303,7 @@ policy:
           - "src/**"
       instruction: >
         Bitbucket, Jira, Notion, and model credentials must not be written to
-        settings.json, .lachesi.yaml, localStorage, or frontend state.
+        settings.json, .norn.yaml, localStorage, or frontend state.
       remediation: >
         Store secrets through the credentials module and OS keychain. Keep only
         non-secret config in settings.json or repo config.
@@ -355,5 +355,5 @@ The first implementation slice should:
 6. require generated policy findings to preserve `ruleId`
 7. emit validation warnings for unsupported AST rules
 
-The policy engine should be additive. A repo without `.lachesi.yaml` should keep
+The policy engine should be additive. A repo without `.norn.yaml` should keep
 the current review behavior.

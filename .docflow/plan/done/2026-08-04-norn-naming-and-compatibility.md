@@ -28,3 +28,8 @@ organization renaming out of scope.
 - `../../adr/0006-terminal-ui.md`
 - `../../adr/0007-headless-review-cli.md`
 - GitHub issue #173
+
+---
+
+Shipped as commit `79a90ece76be7b778383ea8c8fa88108ba66f51f`
+through [PR #195](https://github.com/lachesi-hq/lachesi/pull/195).

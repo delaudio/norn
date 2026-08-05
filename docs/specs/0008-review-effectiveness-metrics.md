@@ -6,18 +6,18 @@
 
 ## Purpose
 
-Lachesi aggregates review activity from persisted structured review runs and
+Norn aggregates review activity from persisted structured review runs and
 append-only finding feedback. The report describes review throughput, finding
 mix, explicit reviewer dispositions, and first-review latency without ranking
 individual developers or treating a finding as a prevented incident.
 
-The versioned JSON schema is `lachesi.review-effectiveness.v1`. The same
-aggregation powers the human-readable `lachesi metrics` report.
+The versioned JSON schema is `norn.review-effectiveness.v1`. The same
+aggregation powers the human-readable `norn metrics` report.
 
 ## Command
 
 ```sh
-lachesi metrics \
+norn metrics \
   [--tenant <id>] \
   [--provider github|bitbucket] \
   [--workspace <name>] \
@@ -97,7 +97,7 @@ integer average, median, minimum, and maximum milliseconds. For an even number
 of samples, the median is the integer midpoint of the two central values.
 Average, median, minimum, and maximum are `null` when there are no samples.
 
-This latency measures Lachesi review execution from stored run creation to
+This latency measures Norn review execution from stored run creation to
 completion. It does not claim to measure time from pull-request creation,
 reviewer response time, or delivery to production.
 
@@ -105,7 +105,7 @@ reviewer response time, or delivery to production.
 
 Successful reviews with no findings contribute to `reviewCount` and
 first-review latency but not to feedback denominators. Findings without
-feedback remain visible through `findingsWithoutFeedback`; Lachesi does not
+feedback remain visible through `findingsWithoutFeedback`; Norn does not
 infer acceptance or rejection.
 
 Legacy stores without structured review-run ids do not become synthetic metric
@@ -119,7 +119,7 @@ affect the requested report.
 
 ```json
 {
-  "schemaVersion": "lachesi.review-effectiveness.v1",
+  "schemaVersion": "norn.review-effectiveness.v1",
   "filter": {
     "tenantId": "local",
     "fromMs": 1000,
