@@ -2,46 +2,88 @@
 :root {
   color-scheme: light;
 
-  --lachesi-bg: #ffffff;
-  --lachesi-bg-subtle: #f6f8fa;
-  --lachesi-surface: #ffffff;
-  --lachesi-surface-raised: #ffffff;
-  --lachesi-border: #d1d9e0;
-  --lachesi-border-strong: #b7c0ca;
-  --lachesi-text: #1f2328;
-  --lachesi-text-muted: #59636e;
-  --lachesi-text-soft: #6e7781;
-  --lachesi-accent: #2fa99a;
-  --lachesi-accent-strong: #188477;
-  --lachesi-accent-muted: #d7f4ef;
-  --lachesi-warning: #d6a11d;
-  --lachesi-danger: #cf222e;
-  --lachesi-radius-sm: 6px;
-  --lachesi-radius-md: 8px;
-  --lachesi-radius-lg: 12px;
-  --lachesi-shadow-soft: 0 16px 48px rgba(31, 35, 40, 0.12);
-  --lachesi-font-sans: "Geist Variable", -apple-system, BlinkMacSystemFont, "Segoe UI",
+  --norn-bg: #ffffff;
+  --norn-bg-subtle: #f6f8fa;
+  --norn-surface: #ffffff;
+  --norn-surface-raised: #ffffff;
+  --norn-border: #d1d9e0;
+  --norn-border-strong: #b7c0ca;
+  --norn-text: #1f2328;
+  --norn-text-muted: #59636e;
+  --norn-text-soft: #6e7781;
+  --norn-accent: #2fa99a;
+  --norn-accent-strong: #188477;
+  --norn-accent-muted: #d7f4ef;
+  --norn-warning: #d6a11d;
+  --norn-danger: #cf222e;
+  --norn-radius-sm: 6px;
+  --norn-radius-md: 8px;
+  --norn-radius-lg: 12px;
+  --norn-shadow-soft: 0 16px 48px rgba(31, 35, 40, 0.12);
+  --norn-font-sans: "Geist Variable", -apple-system, BlinkMacSystemFont, "Segoe UI",
     "Noto Sans", Helvetica, Arial, sans-serif;
-  --lachesi-font-mono: "Geist Mono Variable", ui-monospace, SFMono-Regular, Menlo, Consolas,
+  --norn-font-mono: "Geist Mono Variable", ui-monospace, SFMono-Regular, Menlo, Consolas,
     monospace;
+
+  --lachesi-bg: var(--norn-bg);
+  --lachesi-bg-subtle: var(--norn-bg-subtle);
+  --lachesi-surface: var(--norn-surface);
+  --lachesi-surface-raised: var(--norn-surface-raised);
+  --lachesi-border: var(--norn-border);
+  --lachesi-border-strong: var(--norn-border-strong);
+  --lachesi-text: var(--norn-text);
+  --lachesi-text-muted: var(--norn-text-muted);
+  --lachesi-text-soft: var(--norn-text-soft);
+  --lachesi-accent: var(--norn-accent);
+  --lachesi-accent-strong: var(--norn-accent-strong);
+  --lachesi-accent-muted: var(--norn-accent-muted);
+  --lachesi-warning: var(--norn-warning);
+  --lachesi-danger: var(--norn-danger);
+  --lachesi-radius-sm: var(--norn-radius-sm);
+  --lachesi-radius-md: var(--norn-radius-md);
+  --lachesi-radius-lg: var(--norn-radius-lg);
+  --lachesi-shadow-soft: var(--norn-shadow-soft);
+  --lachesi-font-sans: var(--norn-font-sans);
+  --lachesi-font-mono: var(--norn-font-mono);
 }
 
 [data-theme="dark"] {
   color-scheme: dark;
 
-  --lachesi-bg: #0d0d0d;
-  --lachesi-bg-subtle: #101113;
-  --lachesi-surface: #141414;
-  --lachesi-surface-raised: #1a1a1a;
-  --lachesi-border: #2a2a2a;
-  --lachesi-border-strong: #3a3a3a;
-  --lachesi-text: #e0e0e0;
-  --lachesi-text-muted: #9a9a9a;
-  --lachesi-text-soft: #777777;
-  --lachesi-accent: #2fa99a;
-  --lachesi-accent-strong: #49c6b8;
-  --lachesi-accent-muted: rgba(47, 169, 154, 0.18);
-  --lachesi-warning: #d6a11d;
-  --lachesi-danger: #f85149;
-  --lachesi-shadow-soft: 0 18px 56px rgba(0, 0, 0, 0.42);
+  --norn-bg: #0d0d0d;
+  --norn-bg-subtle: #101113;
+  --norn-surface: #141414;
+  --norn-surface-raised: #1a1a1a;
+  --norn-border: #2a2a2a;
+  --norn-border-strong: #3a3a3a;
+  --norn-text: #e0e0e0;
+  --norn-text-muted: #9a9a9a;
+  --norn-text-soft: #777777;
+  --norn-accent: #2fa99a;
+  --norn-accent-strong: #49c6b8;
+  --norn-accent-muted: rgba(47, 169, 154, 0.18);
+  --norn-warning: #d6a11d;
+  --norn-danger: #f85149;
+  --norn-shadow-soft: 0 18px 56px rgba(0, 0, 0, 0.42);
+
+  --lachesi-bg: var(--norn-bg);
+  --lachesi-bg-subtle: var(--norn-bg-subtle);
+  --lachesi-surface: var(--norn-surface);
+  --lachesi-surface-raised: var(--norn-surface-raised);
+  --lachesi-border: var(--norn-border);
+  --lachesi-border-strong: var(--norn-border-strong);
+  --lachesi-text: var(--norn-text);
+  --lachesi-text-muted: var(--norn-text-muted);
+  --lachesi-text-soft: var(--norn-text-soft);
+  --lachesi-accent: var(--norn-accent);
+  --lachesi-accent-strong: var(--norn-accent-strong);
+  --lachesi-accent-muted: var(--norn-accent-muted);
+  --lachesi-warning: var(--norn-warning);
+  --lachesi-danger: var(--norn-danger);
+  --lachesi-radius-sm: var(--norn-radius-sm);
+  --lachesi-radius-md: var(--norn-radius-md);
+  --lachesi-radius-lg: var(--norn-radius-lg);
+  --lachesi-shadow-soft: var(--norn-shadow-soft);
+  --lachesi-font-sans: var(--norn-font-sans);
+  --lachesi-font-mono: var(--norn-font-mono);
 }

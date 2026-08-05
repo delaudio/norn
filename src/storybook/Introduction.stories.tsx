@@ -42,7 +42,7 @@ function Introduction() {
           <dl className="mt-5 space-y-4 text-sm">
             <div>
               <dt className="text-muted-foreground">URL</dt>
-              <dd className="mt-1 font-mono text-foreground">design-system.lachesi.dev</dd>
+              <dd className="mt-1 font-mono text-foreground">design-system.norn.dev</dd>
             </div>
             <div>
               <dt className="text-muted-foreground">Build output</dt>

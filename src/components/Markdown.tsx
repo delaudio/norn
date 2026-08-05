@@ -48,7 +48,7 @@ export function Markdown({ children, className, headingIdPrefix }: MarkdownProps
   };
 
   return (
-    <div className={cn("lachesi-md font-sans", className)}>
+    <div className={cn("norn-md font-sans", className)}>
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         components={{

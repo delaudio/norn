@@ -44,31 +44,31 @@
    Semantic CSS variables consumed by Tailwind utilities via @theme inline.
 ---------------------------------------------------------------------------- */
 :root {
-  --background: var(--lachesi-bg);
-  --foreground: var(--lachesi-text);
-  --card: var(--lachesi-surface);
-  --card-foreground: var(--lachesi-text);
-  --popover: var(--lachesi-surface-raised);
-  --popover-foreground: var(--lachesi-text);
+  --background: var(--norn-bg);
+  --foreground: var(--norn-text);
+  --card: var(--norn-surface);
+  --card-foreground: var(--norn-text);
+  --popover: var(--norn-surface-raised);
+  --popover-foreground: var(--norn-text);
   --primary: #ffffff;
   --primary-foreground: #0d0d0d;
-  --secondary: var(--lachesi-bg-subtle);
-  --secondary-foreground: var(--lachesi-text);
-  --muted: var(--lachesi-bg-subtle);
-  --muted-foreground: var(--lachesi-text-muted);
-  --accent: var(--lachesi-accent-muted);
-  --accent-foreground: var(--lachesi-accent-strong);
-  --destructive: var(--lachesi-danger);
+  --secondary: var(--norn-bg-subtle);
+  --secondary-foreground: var(--norn-text);
+  --muted: var(--norn-bg-subtle);
+  --muted-foreground: var(--norn-text-muted);
+  --accent: var(--norn-accent-muted);
+  --accent-foreground: var(--norn-accent-strong);
+  --destructive: var(--norn-danger);
   --destructive-foreground: #ffffff;
   --success: #1a7f37;
-  --warning: var(--lachesi-warning);
-  --border: var(--lachesi-border);
-  --input: var(--lachesi-border);
+  --warning: var(--norn-warning);
+  --border: var(--norn-border);
+  --input: var(--norn-border);
   --ring: #1f6feb;
 
   /* Sidebar / surfaces */
-  --sidebar: var(--lachesi-bg-subtle);
-  --sidebar-foreground: var(--lachesi-text);
+  --sidebar: var(--norn-bg-subtle);
+  --sidebar-foreground: var(--norn-text);
 
   /* Diff */
   --diff-add-bg: #e6ffec;
@@ -82,44 +82,44 @@
   /* Bottom pane toolbar */
   --toolbar-height: 32px;
   --toolbar-bg: #f6f8fa;
-  --toolbar-line: var(--lachesi-border);
-  --toolbar-line-strong: var(--lachesi-border-strong);
-  --toolbar-icon: var(--lachesi-text-muted);
-  --toolbar-ink: var(--lachesi-text);
+  --toolbar-line: var(--norn-border);
+  --toolbar-line-strong: var(--norn-border-strong);
+  --toolbar-icon: var(--norn-text-muted);
+  --toolbar-ink: var(--norn-text);
   --toolbar-hover-bg: #eef2f6;
   --toolbar-active-bg: rgba(31, 111, 235, 0.12);
   --toolbar-active-ink: #0969da;
   --toolbar-accent: #1f6feb;
   --toolbar-tooltip-bg: #ffffff;
 
-  --radius: var(--lachesi-radius-md);
+  --radius: var(--norn-radius-md);
 }
 
 [data-theme="dark"] {
-  --background: var(--lachesi-bg);
-  --foreground: var(--lachesi-text);
-  --card: var(--lachesi-surface);
-  --card-foreground: var(--lachesi-text);
-  --popover: var(--lachesi-surface-raised);
-  --popover-foreground: var(--lachesi-text);
+  --background: var(--norn-bg);
+  --foreground: var(--norn-text);
+  --card: var(--norn-surface);
+  --card-foreground: var(--norn-text);
+  --popover: var(--norn-surface-raised);
+  --popover-foreground: var(--norn-text);
   --primary: #ffffff;
   --primary-foreground: #0d0d0d;
-  --secondary: var(--lachesi-surface);
+  --secondary: var(--norn-surface);
   --secondary-foreground: #ffffff;
-  --muted: var(--lachesi-surface-raised);
-  --muted-foreground: var(--lachesi-text-soft);
-  --accent: var(--lachesi-surface-raised);
+  --muted: var(--norn-surface-raised);
+  --muted-foreground: var(--norn-text-soft);
+  --accent: var(--norn-surface-raised);
   --accent-foreground: #ffffff;
-  --destructive: var(--lachesi-danger);
+  --destructive: var(--norn-danger);
   --destructive-foreground: #ffffff;
   --success: #3fb950;
-  --warning: var(--lachesi-warning);
-  --border: var(--lachesi-border);
-  --input: var(--lachesi-border);
+  --warning: var(--norn-warning);
+  --border: var(--norn-border);
+  --input: var(--norn-border);
   --ring: #2f81f7;
 
-  --sidebar: var(--lachesi-surface);
-  --sidebar-foreground: var(--lachesi-text);
+  --sidebar: var(--norn-surface);
+  --sidebar-foreground: var(--norn-text);
 
   --diff-add-bg: #12261e;
   --diff-add-gutter: #1f572f;
@@ -132,7 +132,7 @@
   --toolbar-bg: #141414;
   --toolbar-line: #2a2a2a;
   --toolbar-line-strong: #2a2a2a;
-  --toolbar-icon: var(--lachesi-text-soft);
+  --toolbar-icon: var(--norn-text-soft);
   --toolbar-ink: #ffffff;
   --toolbar-hover-bg: #1a1a1a;
   --toolbar-active-bg: #1f1f1f;
@@ -394,63 +394,63 @@ body {
   padding: 1.5rem 2rem 2.5rem;
 }
 
-.repo-markdown-viewer .lachesi-md {
+.repo-markdown-viewer .norn-md {
   max-width: 48rem;
   font-size: 0.95rem;
   line-height: 1.7;
 }
 
-.repo-markdown-viewer .lachesi-md h1,
-.repo-markdown-viewer .lachesi-md h2,
-.repo-markdown-viewer .lachesi-md h3,
-.repo-markdown-viewer .lachesi-md h4 {
+.repo-markdown-viewer .norn-md h1,
+.repo-markdown-viewer .norn-md h2,
+.repo-markdown-viewer .norn-md h3,
+.repo-markdown-viewer .norn-md h4 {
   scroll-margin-top: 1rem;
   letter-spacing: 0;
 }
 
-.repo-markdown-viewer .lachesi-md h1 {
+.repo-markdown-viewer .norn-md h1 {
   font-size: 1.8em;
   color: var(--repo-md-accent-strong);
 }
 
-.repo-markdown-viewer .lachesi-md h2 {
+.repo-markdown-viewer .norn-md h2 {
   font-size: 1.35em;
   color: var(--repo-md-accent);
   border-bottom-color: color-mix(in srgb, var(--repo-md-accent) 38%, var(--border));
 }
 
-.repo-markdown-viewer .lachesi-md h3,
-.repo-markdown-viewer .lachesi-md h4 {
+.repo-markdown-viewer .norn-md h3,
+.repo-markdown-viewer .norn-md h4 {
   color: color-mix(in srgb, var(--repo-md-accent) 82%, var(--foreground));
 }
 
-.repo-markdown-viewer .lachesi-md a {
+.repo-markdown-viewer .norn-md a {
   color: var(--repo-md-accent-strong);
 }
 
-.repo-markdown-viewer .lachesi-md code {
+.repo-markdown-viewer .norn-md code {
   border: 1px solid var(--repo-md-code-border);
   background: var(--repo-md-code-bg);
   color: var(--repo-md-code-text);
 }
 
-.repo-markdown-viewer .lachesi-md pre {
+.repo-markdown-viewer .norn-md pre {
   border: 1px solid var(--repo-md-code-border);
   background: color-mix(in srgb, var(--repo-md-code-bg) 78%, var(--background));
 }
 
-.repo-markdown-viewer .lachesi-md pre code {
+.repo-markdown-viewer .norn-md pre code {
   border: 0;
   color: var(--foreground);
 }
 
-.repo-markdown-viewer .lachesi-md blockquote {
+.repo-markdown-viewer .norn-md blockquote {
   border-left-color: var(--repo-md-accent);
   background: var(--repo-md-accent-soft);
   color: color-mix(in srgb, var(--foreground) 76%, var(--muted-foreground));
 }
 
-.repo-markdown-viewer .lachesi-md th {
+.repo-markdown-viewer .norn-md th {
   background: var(--repo-md-accent-soft);
   color: var(--repo-md-accent);
 }
@@ -769,83 +769,83 @@ body {
 /* ----------------------------------------------------------------------------
    Rendered markdown (PR descriptions, comment bodies).
 ---------------------------------------------------------------------------- */
-.lachesi-md {
+.norn-md {
   font-size: 0.875rem;
   line-height: 1.6;
   color: var(--foreground);
   word-break: break-word;
 }
-.lachesi-md > *:first-child {
+.norn-md > *:first-child {
   margin-top: 0;
 }
-.lachesi-md > *:last-child {
+.norn-md > *:last-child {
   margin-bottom: 0;
 }
-.lachesi-md h1,
-.lachesi-md h2,
-.lachesi-md h3,
-.lachesi-md h4 {
+.norn-md h1,
+.norn-md h2,
+.norn-md h3,
+.norn-md h4 {
   font-weight: 600;
   line-height: 1.3;
   margin: 1.2em 0 0.5em;
 }
-.lachesi-md h1 {
+.norn-md h1 {
   font-size: 1.4em;
 }
-.lachesi-md h2 {
+.norn-md h2 {
   font-size: 1.2em;
   padding-bottom: 0.2em;
   border-bottom: 1px solid var(--border);
 }
-.lachesi-md h3 {
+.norn-md h3 {
   font-size: 1.05em;
 }
-.lachesi-md p {
+.norn-md p {
   margin: 0.6em 0;
 }
-.lachesi-md ul,
-.lachesi-md ol {
+.norn-md ul,
+.norn-md ol {
   margin: 0.6em 0;
   padding-left: 1.4em;
 }
-.lachesi-md ul {
+.norn-md ul {
   list-style: disc;
 }
-.lachesi-md ol {
+.norn-md ol {
   list-style: decimal;
 }
-.lachesi-md li {
+.norn-md li {
   margin: 0.2em 0;
 }
-.lachesi-md a {
+.norn-md a {
   color: var(--accent-foreground);
   text-decoration: underline;
 }
-.lachesi-md code {
+.norn-md code {
   font-family: var(--font-mono);
   font-size: 0.85em;
   background: var(--muted);
   padding: 0.1em 0.35em;
   border-radius: 0.3em;
 }
-.lachesi-md pre {
+.norn-md pre {
   background: var(--muted);
   padding: 0.75em 1em;
   border-radius: 0.4em;
   overflow-x: auto;
   margin: 0.6em 0;
 }
-.lachesi-md pre code {
+.norn-md pre code {
   background: transparent;
   padding: 0;
 }
-.lachesi-md blockquote {
+.norn-md blockquote {
   border-left: 3px solid var(--border);
   padding-left: 0.8em;
   margin: 0.6em 0;
   color: var(--muted-foreground);
 }
-.lachesi-md table {
+.norn-md table {
   display: block;
   width: max-content;
   max-width: 100%;
@@ -853,16 +853,16 @@ body {
   margin: 0.6em 0;
   overflow-x: auto;
 }
-.lachesi-md th,
-.lachesi-md td {
+.norn-md th,
+.norn-md td {
   border: 1px solid var(--border);
   padding: 0.3em 0.6em;
 }
-.lachesi-md hr {
+.norn-md hr {
   border: 0;
   border-top: 1px solid var(--border);
   margin: 1em 0;
 }
-.lachesi-md img {
+.norn-md img {
   max-width: 100%;
 }

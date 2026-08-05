@@ -1,46 +1,46 @@
 @import "../../../../src/styles/brand.css";
 
 :root {
-  --sl-font: var(--lachesi-font-sans);
-  --sl-font-mono: var(--lachesi-font-mono);
-  --sl-color-accent-low: var(--lachesi-accent-muted);
-  --sl-color-accent: var(--lachesi-accent);
-  --sl-color-accent-high: var(--lachesi-accent-strong);
-  --sl-color-text-accent: var(--lachesi-accent-strong);
-  --sl-color-bg: var(--lachesi-bg);
-  --sl-color-bg-overlap: var(--lachesi-surface);
-  --sl-color-bg-nav: color-mix(in srgb, var(--lachesi-surface) 88%, transparent);
-  --sl-color-bg-sidebar: var(--lachesi-bg);
-  --sl-color-bg-inline-code: var(--lachesi-bg-subtle);
-  --sl-color-hairline: var(--lachesi-border);
-  --sl-color-hairline-light: var(--lachesi-border);
-  --sl-color-text: var(--lachesi-text);
-  --sl-color-text-muted: var(--lachesi-text-muted);
-  --sl-color-link: var(--lachesi-accent-strong);
-  --lachesi-docs-sidebar-active-text: #ffffff;
+  --sl-font: var(--norn-font-sans);
+  --sl-font-mono: var(--norn-font-mono);
+  --sl-color-accent-low: var(--norn-accent-muted);
+  --sl-color-accent: var(--norn-accent);
+  --sl-color-accent-high: var(--norn-accent-strong);
+  --sl-color-text-accent: var(--norn-accent-strong);
+  --sl-color-bg: var(--norn-bg);
+  --sl-color-bg-overlap: var(--norn-surface);
+  --sl-color-bg-nav: color-mix(in srgb, var(--norn-surface) 88%, transparent);
+  --sl-color-bg-sidebar: var(--norn-bg);
+  --sl-color-bg-inline-code: var(--norn-bg-subtle);
+  --sl-color-hairline: var(--norn-border);
+  --sl-color-hairline-light: var(--norn-border);
+  --sl-color-text: var(--norn-text);
+  --sl-color-text-muted: var(--norn-text-muted);
+  --sl-color-link: var(--norn-accent-strong);
+  --norn-docs-sidebar-active-text: #ffffff;
 }
 
 :root[data-theme="dark"] {
-  --sl-color-bg-overlap: var(--lachesi-surface);
-  --sl-color-bg-nav: color-mix(in srgb, var(--lachesi-surface) 84%, transparent);
-  --sl-color-text-accent: var(--lachesi-accent-strong);
-  --sl-color-link: var(--lachesi-accent-strong);
-  --lachesi-docs-sidebar-active-text: #071211;
+  --sl-color-bg-overlap: var(--norn-surface);
+  --sl-color-bg-nav: color-mix(in srgb, var(--norn-surface) 84%, transparent);
+  --sl-color-text-accent: var(--norn-accent-strong);
+  --sl-color-link: var(--norn-accent-strong);
+  --norn-docs-sidebar-active-text: #071211;
 }
 
 html,
 body {
-  background: var(--lachesi-bg);
-  color: var(--lachesi-text);
+  background: var(--norn-bg);
+  color: var(--norn-text);
 }
 
 .header {
-  border-bottom: 1px solid var(--lachesi-border);
+  border-bottom: 1px solid var(--norn-border);
   backdrop-filter: blur(12px);
 }
 
 .site-title {
-  color: var(--lachesi-text);
+  color: var(--norn-text);
   font-weight: 650;
   letter-spacing: 0;
 }
@@ -50,82 +50,82 @@ body {
 }
 
 .hero > img {
-  filter: drop-shadow(var(--lachesi-shadow-soft));
+  filter: drop-shadow(var(--norn-shadow-soft));
 }
 
 .hero .tagline {
-  color: var(--lachesi-text-muted);
+  color: var(--norn-text-muted);
 }
 
 .sl-markdown-content {
-  color: var(--lachesi-text);
+  color: var(--norn-text);
 }
 
 .sl-markdown-content :is(h1, h2, h3, h4) {
-  color: var(--lachesi-text);
+  color: var(--norn-text);
   letter-spacing: 0;
 }
 
 .sl-markdown-content :is(p, li) {
-  color: var(--lachesi-text);
+  color: var(--norn-text);
 }
 
 .sl-markdown-content a {
-  color: var(--lachesi-accent-strong);
+  color: var(--norn-accent-strong);
 }
 
 .sl-markdown-content code:not(:where(.astro-code code)) {
-  border: 1px solid var(--lachesi-border);
-  border-radius: var(--lachesi-radius-sm);
-  background: var(--lachesi-bg-subtle);
-  color: var(--lachesi-text);
+  border: 1px solid var(--norn-border);
+  border-radius: var(--norn-radius-sm);
+  background: var(--norn-bg-subtle);
+  color: var(--norn-text);
 }
 
 .card {
-  border-color: var(--lachesi-border);
-  border-radius: var(--lachesi-radius-md);
-  background: var(--lachesi-surface);
+  border-color: var(--norn-border);
+  border-radius: var(--norn-radius-md);
+  background: var(--norn-surface);
 }
 
 .card:hover {
-  border-color: var(--lachesi-border-strong);
+  border-color: var(--norn-border-strong);
 }
 
 .pagination-links a,
 .sl-link-button {
-  border-radius: var(--lachesi-radius-md);
+  border-radius: var(--norn-radius-md);
 }
 
 .right-sidebar,
 .sidebar-pane {
-  border-color: var(--lachesi-border);
+  border-color: var(--norn-border);
 }
 
 .sidebar-content,
 .right-sidebar {
-  color: var(--lachesi-text-muted);
+  color: var(--norn-text-muted);
 }
 
 .sidebar-content a,
 .right-sidebar a {
-  color: var(--lachesi-text-muted);
+  color: var(--norn-text-muted);
 }
 
 .right-sidebar a[aria-current="true"],
 .right-sidebar a[aria-current="location"] {
-  color: var(--lachesi-accent-strong);
+  color: var(--norn-accent-strong);
 }
 
 .sidebar-content a[aria-current="page"] {
-  color: var(--lachesi-docs-sidebar-active-text);
+  color: var(--norn-docs-sidebar-active-text);
   font-weight: 650;
 }
 
 .sidebar-content summary,
 .sidebar-content .large {
-  color: var(--lachesi-text);
+  color: var(--norn-text);
 }
 
 .social-icons::before {
-  background: var(--lachesi-border);
+  background: var(--norn-border);
 }

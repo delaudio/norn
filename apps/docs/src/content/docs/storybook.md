@@ -24,7 +24,7 @@ The static output is written to `storybook-static/`.
 The public Storybook target is:
 
 ```txt
-https://design-system.lachesi.dev
+https://design-system.norn.dev
 ```
 
 Deployment is configured through `wrangler.design-system.jsonc` and can be run with:

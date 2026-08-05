@@ -2,7 +2,7 @@ import starlight from "@astrojs/starlight";
 import { defineConfig } from "astro/config";
 
 export default defineConfig({
-  site: "https://docs.lachesi.dev",
+  site: "https://docs.norn.dev",
   integrations: [
     starlight({
       title: "Norn Docs",
@@ -16,11 +16,11 @@ export default defineConfig({
         {
           icon: "github",
           label: "GitHub",
-          href: "https://github.com/lachesi-hq/lachesi",
+          href: "https://github.com/lachesi-hq/norn",
         },
       ],
       editLink: {
-        baseUrl: "https://github.com/lachesi-hq/lachesi/edit/main/apps/docs/",
+        baseUrl: "https://github.com/lachesi-hq/norn/edit/main/apps/docs/",
       },
       sidebar: [
         {

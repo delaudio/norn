@@ -331,7 +331,7 @@ bundle produced by `pnpm tauri build`.
 The design system Storybook is prepared for publication at:
 
 ```txt
-https://design-system.lachesi.dev
+https://design-system.norn.dev
 ```
 
 Deployment instructions for Cloudflare are in `docs/storybook-publishing.md`.

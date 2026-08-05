@@ -3,7 +3,7 @@
 Norn Storybook is prepared for a public static deployment on Cloudflare Pages at:
 
 ```txt
-https://design-system.lachesi.dev
+https://design-system.norn.dev
 ```
 
 ## Build
@@ -50,10 +50,10 @@ The Cloudflare API token for this flow must be able to deploy Workers. A Pages-o
 Attach this custom domain to the Cloudflare Pages project:
 
 ```txt
-design-system.lachesi.dev
+design-system.norn.dev
 ```
 
-If `lachesi.dev` is already managed in Cloudflare DNS, Cloudflare can create or validate the required DNS record from the Pages custom domain flow.
+If `norn.dev` is already managed in Cloudflare DNS, Cloudflare can create or validate the required DNS record from the Pages custom domain flow.
 
 ## Static Headers
 
