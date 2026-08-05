@@ -7,6 +7,7 @@ use std::{
     collections::{hash_map::DefaultHasher, HashMap},
     hash::{Hash, Hasher},
     io::Write,
+    path::Path,
     process::{Command, Stdio},
     time::Duration,
 };
@@ -14,6 +15,7 @@ use std::{
 use crossterm::event::{self, Event, KeyCode, MouseButton, MouseEvent, MouseEventKind};
 
 use crate::config::{self, AiProvider, AppConfig, RepoRef};
+use crate::readiness::{self, ReadinessIssueSeverity, ReadinessStatus};
 use crate::services::bitbucket::{
     create_general_comment_native, get_pr_file_preview_native,
     get_stable_pull_request_review_snapshot_native, validate_repo_review_config_native, PrComment,
@@ -50,6 +52,7 @@ pub fn run_from_env() -> Result<(), String> {
         }
         TuiLaunchMode::Workspace => false,
     };
+    run_tui_preflight(resolve_current_repo, Path::new("."))?;
     let mut app = TuiApp::from_config(config);
     if resolve_current_repo {
         app.focus = FocusPane::PullRequests;
@@ -88,6 +91,50 @@ pub fn run_from_env() -> Result<(), String> {
                 Event::Resize(_, _) => {}
                 _ => {}
             }
+        }
+    }
+
+    Ok(())
+}
+
+fn run_tui_preflight(resolve_current_repo: bool, cwd: &Path) -> Result<(), String> {
+    let report = readiness::collect_report(cwd, !resolve_current_repo);
+    let status = readiness::derive_status(&report.issues);
+    if let ReadinessStatus::Fail = status {
+        eprintln!("norn-tui cannot start:");
+        for issue in report
+            .issues
+            .iter()
+            .filter(|issue| issue.severity == ReadinessIssueSeverity::Error)
+        {
+            eprintln!("  - {}: {}", issue.code, issue.message);
+            eprintln!("    remediation: {}", issue.remediation);
+        }
+        eprintln!("Run `norn doctor --repo-path .` for full diagnostics.");
+        return Err("Readiness preflight failed; complete machine/repository setup before starting the TUI.".to_string());
+    }
+
+    let warning_count = report
+        .issues
+        .iter()
+        .filter(|issue| issue.severity == ReadinessIssueSeverity::Warning)
+        .count();
+    if warning_count > 0 {
+        eprintln!("norn-tui starting with readiness warnings ({warning_count}):");
+        for issue in report
+            .issues
+            .iter()
+            .filter(|issue| issue.severity == ReadinessIssueSeverity::Warning)
+        {
+            eprintln!("  - {}: {}", issue.code, issue.message);
+            eprintln!("    remediation: {}", issue.remediation);
+        }
+        eprintln!("Run `norn doctor --repo-path .` to resolve or confirm a safe degraded mode.");
+        if report.issues.iter().any(|issue| {
+            issue.scope == crate::readiness::ReadinessIssueScope::Machine
+                && issue.severity == ReadinessIssueSeverity::Warning
+        }) {
+            eprintln!("If provider setup is incomplete, run `norn setup` first.");
         }
     }
 
@@ -1570,6 +1617,27 @@ mod tests {
     fn tui_launch_rejects_unknown_options() {
         let error = launch_mode_from_args(["--repo"]).unwrap_err();
         assert!(error.contains("Unknown option"));
+    }
+
+    #[test]
+    fn tui_preflight_rejects_current_repo_without_git_root() {
+        let repo = temp_repo_path("without-git");
+        std::fs::create_dir_all(&repo).unwrap();
+
+        let error = run_tui_preflight(true, &repo);
+        assert!(error.is_err());
+        assert_eq!(
+            error.unwrap_err(),
+            "Readiness preflight failed; complete machine/repository setup before starting the TUI."
+        );
+    }
+
+    #[test]
+    fn tui_preflight_accepts_workspace_mode_without_git_root() {
+        let repo = temp_repo_path("workspace-no-git");
+        std::fs::create_dir_all(&repo).unwrap();
+
+        assert!(run_tui_preflight(false, &repo).is_ok());
     }
 
     #[test]

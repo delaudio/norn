@@ -288,7 +288,7 @@ pub fn run_doctor(
     }
 }
 
-fn collect_report(repo_path: &Path, machine_only: bool) -> DoctorReport {
+pub fn collect_report(repo_path: &Path, machine_only: bool) -> DoctorReport {
     let mut issues = Vec::new();
     let machine = collect_machine_state(&mut issues);
     let repository = if machine_only {
@@ -307,7 +307,7 @@ fn collect_report(repo_path: &Path, machine_only: bool) -> DoctorReport {
     }
 }
 
-fn derive_status(issues: &[ReadinessIssue]) -> ReadinessStatus {
+pub fn derive_status(issues: &[ReadinessIssue]) -> ReadinessStatus {
     if issues
         .iter()
         .any(|issue| issue.severity == ReadinessIssueSeverity::Error)
