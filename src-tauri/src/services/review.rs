@@ -3210,7 +3210,6 @@ fn build_claude_text_command(
             "--include-partial-messages",
         ])
         .env("NORN_REVIEW_CHILD", "1")
-        .env("LACHESI_REVIEW_CHILD", "1")
         .stdin(Stdio::from(prompt_file));
     let repository_access =
         execution_context == ProviderExecutionContext::Repository && repo_path.is_some();
@@ -3288,7 +3287,6 @@ fn validate_isolated_provider_cli(ai_provider: AiProvider) -> Result<(), String>
     let output = user_installed_cli_command(program)
         .args(args)
         .env("NORN_REVIEW_CHILD", "1")
-        .env("LACHESI_REVIEW_CHILD", "1")
         .current_dir(temp_dir.path())
         .output()
         .map_err(|error| format!("Failed to validate the installed {label} CLI: {error}"))?;
@@ -3360,7 +3358,6 @@ fn build_codex_text_command(
         .args(["exec", "--sandbox", "read-only", "--output-last-message"])
         .arg(&output_path)
         .env("NORN_REVIEW_CHILD", "1")
-        .env("LACHESI_REVIEW_CHILD", "1")
         // The review payload is the complete instruction boundary. Loading
         // repository or user rules can re-enable the Norn review skill in
         // the child and recursively invoke this command.
@@ -6380,10 +6377,6 @@ mod tests {
         assert!(command.get_envs().any(|(key, value)| {
             key == "NORN_REVIEW_CHILD" && value.is_some_and(|value| value.to_string_lossy() == "1")
         }));
-        assert!(command.get_envs().any(|(key, value)| {
-            key == "LACHESI_REVIEW_CHILD"
-                && value.is_some_and(|value| value.to_string_lossy() == "1")
-        }));
         assert!(temp_dir.path().join("prompt.md").is_file());
         assert_eq!(output_path, temp_dir.path().join("output.md"));
         assert_eq!(command.get_current_dir(), Some(temp_dir.path()));
@@ -6414,10 +6407,6 @@ mod tests {
         assert!(!args.iter().any(|arg| arg == "--allowedTools"));
         assert!(command.get_envs().any(|(key, value)| {
             key == "NORN_REVIEW_CHILD" && value.is_some_and(|value| value.to_string_lossy() == "1")
-        }));
-        assert!(command.get_envs().any(|(key, value)| {
-            key == "LACHESI_REVIEW_CHILD"
-                && value.is_some_and(|value| value.to_string_lossy() == "1")
         }));
         assert!(temp_dir.path().join("prompt.md").is_file());
         assert_eq!(command.get_current_dir(), Some(temp_dir.path()));
