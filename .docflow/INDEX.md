@@ -17,3 +17,4 @@ metadata.
 | 0010 | Compare modified image versions side by side in the terminal UI | Implemented | 2026-07-31 | default-agent | tui, diff, images, terminal |
 | 0011 | Adopt Norn names with a bounded Lachesi compatibility window | Accepted | 2026-08-04 | codex | norn, naming, compatibility, migration, distribution |
 | 0012 | Define the Norn first-run onboarding contract | Accepted | 2026-08-05 | codex | norn, onboarding, config, cli |
+| 0013 | Read-only readiness probing for machine and repository onboarding | Accepted | 2026-08-05 | codex | norn, onboarding, readiness, cli |
