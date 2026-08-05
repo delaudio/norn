@@ -5,6 +5,7 @@ use serde::Serialize;
 
 use crate::config::{AiProvider, ReviewProvider};
 use crate::headless_review::{self, HeadlessReviewRequest, ReviewScope};
+use crate::readiness;
 use crate::repo_config::{self, LoadedPolicyPack, RepoConfigValidationMessage};
 use crate::review_evaluation;
 use crate::review_event::PullRequestReviewEventProvider;
@@ -169,6 +170,7 @@ fn is_cli_command(args: &[String]) -> bool {
         args.first().map(String::as_str),
         Some(
             "config"
+                | "doctor"
                 | "evaluate"
                 | "metrics"
                 | "review"
@@ -213,6 +215,15 @@ fn run_args(args: &[String], stdout: &mut dyn Write, stderr: &mut dyn Write) -> 
         let _ = writeln!(stdout, "{}", evaluate_usage());
         return 0;
     }
+    if args.first().map(String::as_str) == Some("doctor")
+        && args
+            .iter()
+            .skip(1)
+            .any(|arg| arg == "--help" || arg == "-h")
+    {
+        let _ = writeln!(stdout, "{}", doctor_usage());
+        return 0;
+    }
     if args.iter().any(|arg| arg == "--help" || arg == "-h") {
         let _ = writeln!(stdout, "{}", usage());
         return 0;
@@ -234,6 +245,13 @@ fn run_args(args: &[String], stdout: &mut dyn Write, stderr: &mut dyn Write) -> 
             Ok(args) => run_evaluate(args, stdout, stderr),
             Err(error) => {
                 let _ = writeln!(stderr, "{error}\n\n{}", evaluate_usage());
+                2
+            }
+        },
+        Some("doctor") => match readiness::parse_doctor_args(args) {
+            Ok(args) => readiness::run_doctor(args, stdout, stderr),
+            Err(error) => {
+                let _ = writeln!(stderr, "{error}\n\n{}", doctor_usage());
                 2
             }
         },
@@ -1039,7 +1057,19 @@ Config validation:
                           [--format human|json] [--json]
 Config migration:
   norn config migrate [--repo-path <path>] [--dry-run]
-                         [--format human|json] [--json]"
+                         [--format human|json] [--json]
+Doctor:
+  norn doctor [--repo-path <path>] [--machine-only]
+              [--format human|json] [--json]"
+}
+
+fn doctor_usage() -> &'static str {
+    "Usage:
+  norn doctor [--repo-path <path>] [--machine-only]
+              [--format human|json] [--json]
+
+`doctor` reports read-only machine and repository readiness, including
+provider tooling, credential state, analyzer setup, and git metadata."
 }
 
 fn review_usage() -> &'static str {
@@ -1081,6 +1111,7 @@ mod tests {
     };
     use crate::config::AiProvider;
     use crate::headless_review::ReviewScope;
+    use crate::readiness;
     use crate::review_event::PullRequestReviewEventProvider;
     use crate::review_metrics::{aggregate_review_effectiveness, ReviewEffectivenessFilter};
     use crate::services::review::ReviewFindingSeverity;
@@ -1182,6 +1213,90 @@ mod tests {
         let output = String::from_utf8(stdout).expect("metrics help");
         assert!(output.contains("norn metrics"));
         assert!(output.contains("start-inclusive and end-exclusive"));
+    }
+
+    #[test]
+    fn doctor_help_exposes_readiness_options() {
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+        let code = run_args(
+            &["doctor".to_string(), "--help".to_string()],
+            &mut stdout,
+            &mut stderr,
+        );
+
+        assert_eq!(code, 0);
+        assert!(stderr.is_empty());
+        let output = String::from_utf8(stdout).expect("doctor help");
+        assert!(output.contains("norn doctor"));
+        assert!(output.contains("--machine-only"));
+        assert!(output.contains("--format human|json"));
+    }
+
+    #[test]
+    fn doctor_defaults_with_invalid_format_is_rejected() {
+        let error = readiness::parse_doctor_args(&[
+            "doctor".to_string(),
+            "--format".to_string(),
+            "xml".to_string(),
+        ])
+        .expect_err("invalid doctor format should be rejected");
+
+        assert!(error.contains("`--format` must be"));
+    }
+
+    #[test]
+    fn doctor_json_returns_status_and_schema() {
+        let repo = temp_repo();
+        std::process::Command::new("/usr/bin/git")
+            .arg("-C")
+            .arg(&repo)
+            .args(["init", "--initial-branch", "main"])
+            .output()
+            .expect("git init");
+        fs::write(repo.join("README.md"), "hello\n").expect("write readme");
+        std::process::Command::new("/usr/bin/git")
+            .arg("-C")
+            .arg(&repo)
+            .args(["add", "README.md"])
+            .output()
+            .expect("git add");
+        std::process::Command::new("/usr/bin/git")
+            .arg("-C")
+            .arg(&repo)
+            .args([
+                "-c",
+                "user.email=ci@example.com",
+                "-c",
+                "user.name=CI",
+                "commit",
+                "-m",
+                "init",
+            ])
+            .output()
+            .expect("git commit");
+
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+        let code = run_args(
+            &[
+                "doctor".to_string(),
+                "--repo-path".to_string(),
+                repo.display().to_string(),
+                "--json".to_string(),
+            ],
+            &mut stdout,
+            &mut stderr,
+        );
+
+        assert_eq!(code, 2);
+        assert!(stderr.is_empty());
+        let output: serde_json::Value = serde_json::from_slice(&stdout).expect("doctor output");
+        assert_eq!(output["schemaVersion"], "norn.readiness.v1");
+        assert_eq!(output["status"].as_str(), Some("fail"));
+        assert!(output["issues"]
+            .as_array()
+            .is_some_and(|issues| !issues.is_empty()));
     }
 
     #[test]
