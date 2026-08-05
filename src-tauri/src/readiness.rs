@@ -803,7 +803,7 @@ fn collect_repository_state_skipped(repo_path: &Path) -> RepositoryState {
     }
 }
 
-fn collect_repository_evidence(repo_path: &Path) -> RepositoryEvidenceState {
+pub(crate) fn collect_repository_evidence(repo_path: &Path) -> RepositoryEvidenceState {
     let mut manifests = Vec::new();
     let mut project_types = Vec::new();
     let mut task_runners = Vec::new();

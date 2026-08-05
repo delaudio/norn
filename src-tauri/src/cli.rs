@@ -8,7 +8,9 @@ use crate::config::{AiProvider, ReviewProvider};
 use crate::credentials;
 use crate::headless_review::{self, HeadlessReviewRequest, ReviewScope};
 use crate::readiness;
-use crate::repo_config::{self, LoadedPolicyPack, RepoConfigValidationMessage};
+use crate::repo_config::{
+    self, InitMode as RepoInitMode, LoadedPolicyPack, RepoConfigValidationMessage, RepoInitProposal,
+};
 use crate::review_evaluation;
 use crate::review_event::PullRequestReviewEventProvider;
 use crate::review_metrics::{
@@ -150,7 +152,29 @@ struct InitOutput {
     mode: &'static str,
     dry_run: bool,
     would_apply: bool,
+    proposal: InitProposalOutput,
     actions: Vec<repo_config::RepoConfigMigrationAction>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct InitProposalOutput {
+    mode: &'static str,
+    project_types: Vec<String>,
+    task_runners: Vec<String>,
+    instruction_sources: Vec<String>,
+    analyzer_candidates: Vec<InitAnalyzerOutput>,
+    suggested_excludes: Vec<String>,
+    config_preview: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct InitAnalyzerOutput {
+    id: String,
+    command: String,
+    required: bool,
+    timeout_seconds: u64,
 }
 
 struct HeadlessDataDirGuard {
@@ -504,6 +528,44 @@ fn parse_init_args(args: &[String]) -> Result<InitArgs, String> {
     })
 }
 
+fn map_repo_init_mode(mode: &InitMode) -> RepoInitMode {
+    match mode {
+        InitMode::Quick => RepoInitMode::Quick,
+        InitMode::Guided => RepoInitMode::Guided,
+    }
+}
+
+fn init_mode_label(mode: InitMode) -> &'static str {
+    match mode {
+        InitMode::Quick => "quick",
+        InitMode::Guided => "guided",
+    }
+}
+
+fn build_init_proposal_output(proposal: &RepoInitProposal) -> InitProposalOutput {
+    InitProposalOutput {
+        mode: match proposal.mode {
+            RepoInitMode::Quick => "quick",
+            RepoInitMode::Guided => "guided",
+        },
+        project_types: proposal.project_types.clone(),
+        task_runners: proposal.task_runners.clone(),
+        instruction_sources: proposal.instruction_sources.clone(),
+        analyzer_candidates: proposal
+            .analyzer_candidates
+            .iter()
+            .map(|analyzer| InitAnalyzerOutput {
+                id: analyzer.id.clone(),
+                command: analyzer.command.clone(),
+                required: analyzer.required,
+                timeout_seconds: analyzer.timeout_seconds,
+            })
+            .collect(),
+        suggested_excludes: proposal.suggested_excludes.clone(),
+        config_preview: proposal.config_contents.clone(),
+    }
+}
+
 fn run_setup(args: SetupArgs, stdout: &mut dyn Write, stderr: &mut dyn Write) -> i32 {
     let current = crate::config::load();
     let tools = collect_setup_tools(current.ai_provider);
@@ -626,6 +688,19 @@ fn run_init(args: InitArgs, stdout: &mut dyn Write, stderr: &mut dyn Write) -> i
         return 2;
     }
 
+    let repo_init_mode = map_repo_init_mode(&args.mode);
+    let proposal = match repo_config::proposal_for_repo_init(&args.repo_path, repo_init_mode) {
+        Ok(proposal) => proposal,
+        Err(error) => {
+            let _ = writeln!(
+                stderr,
+                "Failed to generate repository init proposal: {error}"
+            );
+            return 2;
+        }
+    };
+    let proposal_output = build_init_proposal_output(&proposal);
+
     let mut result = match repo_config::migrate_repository_config(&args.repo_path, args.dry_run) {
         Ok(result) => result,
         Err(error) => {
@@ -634,12 +709,13 @@ fn run_init(args: InitArgs, stdout: &mut dyn Write, stderr: &mut dyn Write) -> i
         }
     };
 
-    match repo_config::default_init_action_if_needed(&args.repo_path) {
+    match repo_config::default_init_action_if_needed_with_mode(&args.repo_path, repo_init_mode) {
         Ok(Some(action)) => {
             if args.yes && !args.dry_run {
-                if let Err(error) =
-                    repo_config::write_default_repo_config_if_missing(&args.repo_path)
-                {
+                if let Err(error) = repo_config::write_default_repo_config_if_missing_with_mode(
+                    &args.repo_path,
+                    repo_init_mode,
+                ) {
                     let _ = writeln!(
                         stderr,
                         "Failed to create default repository config: {error}"
@@ -659,13 +735,14 @@ fn run_init(args: InitArgs, stdout: &mut dyn Write, stderr: &mut dyn Write) -> i
     let output = InitOutput {
         schema_version: "norn.init.v1",
         repo_path: result.repo_path,
-        mode: if args.mode == InitMode::Guided {
+        mode: if init_mode_label(args.mode) == "guided" {
             "guided"
         } else {
             "quick"
         },
         dry_run: args.dry_run,
         would_apply: args.yes && !args.dry_run,
+        proposal: proposal_output,
         actions: result.actions,
     };
 
@@ -680,6 +757,12 @@ fn run_init(args: InitArgs, stdout: &mut dyn Write, stderr: &mut dyn Write) -> i
         let _ = writeln!(stdout, "{rendered}");
     } else {
         let _ = writeln!(stdout, "Norn repository init in `{}` mode", output.mode);
+        let project_types = if output.proposal.project_types.is_empty() {
+            "unknown".to_string()
+        } else {
+            output.proposal.project_types.join(", ")
+        };
+        let _ = writeln!(stdout, "Detected project types: {project_types}");
         if output.actions.is_empty() {
             let _ = writeln!(stdout, "No repository initialization actions needed.");
         } else {
@@ -698,6 +781,16 @@ fn run_init(args: InitArgs, stdout: &mut dyn Write, stderr: &mut dyn Write) -> i
             } else {
                 let _ = writeln!(stdout, "Run `norn init --yes` to apply.");
             }
+        }
+        if !output.proposal.analyzer_candidates.is_empty() {
+            let _ = writeln!(stdout, "Analyzer candidates (disabled by default):");
+            for analyzer in &output.proposal.analyzer_candidates {
+                let _ = writeln!(stdout, "  - {}: {}", analyzer.id, analyzer.command);
+            }
+        }
+        let _ = writeln!(stdout, "Proposed config:");
+        for line in output.proposal.config_preview.lines() {
+            let _ = writeln!(stdout, "  {line}");
         }
     }
 
@@ -2143,6 +2236,67 @@ token: unsafe
         assert_eq!(output["repoPath"], repo.display().to_string());
         assert_eq!(output["mode"], "quick");
         assert_eq!(output["dryRun"], true);
+        let proposal = output["proposal"].as_object().expect("proposal");
+        assert_eq!(proposal["mode"], "quick");
+        assert!(proposal["projectTypes"].is_array());
+        assert!(proposal["taskRunners"].is_array());
+        assert!(proposal["instructionSources"].is_array());
+        assert!(proposal["analyzerCandidates"].is_array());
+        assert!(proposal["configPreview"].is_string());
+    }
+
+    #[test]
+    fn setup_json_and_human_output_do_not_leak_credential_values() {
+        let original_github_token = std::env::var_os("GITHUB_TOKEN");
+        let original_bitbucket_token = std::env::var_os("BITBUCKET_TOKEN");
+        let original_bitbucket_user = std::env::var_os("BITBUCKET_USERNAME");
+
+        let github_token = "ghs_live_SECRET_TOKEN_FOR_TEST_DO_NOT_LEAK";
+        let bitbucket_token = "bb_secret_TOKEN_FOR_TEST_DO_NOT_LEAK";
+        let bitbucket_user = "test-user-for-test";
+
+        std::env::set_var("GITHUB_TOKEN", github_token);
+        std::env::set_var("BITBUCKET_TOKEN", bitbucket_token);
+        std::env::set_var("BITBUCKET_USERNAME", bitbucket_user);
+
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+        let code = run_args(
+            &["setup".to_string(), "--json".to_string()],
+            &mut stdout,
+            &mut stderr,
+        );
+
+        assert_eq!(code, 0);
+        assert!(stderr.is_empty());
+        let output = String::from_utf8(stdout.clone()).expect("setup json output");
+        assert!(!output.contains(github_token));
+        assert!(!output.contains(bitbucket_token));
+        assert!(!output.contains(bitbucket_user));
+
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+        let code = run_args(&["setup".to_string()], &mut stdout, &mut stderr);
+
+        assert_eq!(code, 0);
+        assert!(stderr.is_empty());
+        let output = String::from_utf8(stdout).expect("setup human output");
+        assert!(!output.contains(github_token));
+        assert!(!output.contains(bitbucket_token));
+        assert!(!output.contains(bitbucket_user));
+
+        match original_github_token {
+            Some(value) => std::env::set_var("GITHUB_TOKEN", value),
+            None => std::env::remove_var("GITHUB_TOKEN"),
+        }
+        match original_bitbucket_token {
+            Some(value) => std::env::set_var("BITBUCKET_TOKEN", value),
+            None => std::env::remove_var("BITBUCKET_TOKEN"),
+        }
+        match original_bitbucket_user {
+            Some(value) => std::env::set_var("BITBUCKET_USERNAME", value),
+            None => std::env::remove_var("BITBUCKET_USERNAME"),
+        }
     }
 
     #[test]

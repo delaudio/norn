@@ -4,6 +4,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use crate::readiness;
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value as JsonValue;
 use serde_yaml::Value;
@@ -16,6 +17,31 @@ const LOCAL_CONFIG_FILE: &str = ".norn.local.yaml";
 const LEGACY_LOCAL_CONFIG_FILE: &str = ".lachesi.local.yaml";
 const DEFAULT_REPO_INIT_CONFIG_FILE: &str = ".norn.yaml";
 const SUPPORTED_VERSION: &str = "0.1";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum InitMode {
+    Quick,
+    Guided,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct RepoInitAnalyzerProposal {
+    pub id: String,
+    pub command: String,
+    pub required: bool,
+    pub timeout_seconds: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct RepoInitProposal {
+    pub mode: InitMode,
+    pub project_types: Vec<String>,
+    pub task_runners: Vec<String>,
+    pub instruction_sources: Vec<String>,
+    pub analyzer_candidates: Vec<RepoInitAnalyzerProposal>,
+    pub suggested_excludes: Vec<String>,
+    pub config_contents: String,
+}
 
 #[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -391,8 +417,365 @@ fn is_config_dir_source(path: &Path) -> bool {
     )
 }
 
-fn render_default_repo_config_contents() -> String {
-    format!("version: {SUPPORTED_VERSION}\nreview:\n  mode: balanced\n")
+fn review_mode_for_init(mode: InitMode) -> &'static str {
+    match mode {
+        InitMode::Quick => "balanced",
+        InitMode::Guided => "strict",
+    }
+}
+
+fn yaml_scalar(value: &str) -> String {
+    let escaped = value.replace('"', "\\\"");
+    format!("\"{}\"", escaped)
+}
+
+fn mode_label(mode: InitMode) -> &'static str {
+    match mode {
+        InitMode::Quick => "quick",
+        InitMode::Guided => "guided",
+    }
+}
+
+fn collect_task_runners(evidence: &readiness::RepositoryEvidenceState) -> Vec<String> {
+    if evidence.taskRunners.is_empty() {
+        return vec!["npm".to_string(), "make".to_string()];
+    }
+    evidence.taskRunners.clone()
+}
+
+fn collect_instruction_sources(evidence: &readiness::RepositoryEvidenceState) -> Vec<String> {
+    if evidence.instructionSources.is_empty() {
+        return vec!["README.md".to_string()];
+    }
+
+    let mut sources = Vec::new();
+    for path in &evidence.instructionSources {
+        if let Some(name) = Path::new(path).file_name() {
+            sources.push(name.to_string_lossy().to_string());
+        }
+    }
+    if sources.is_empty() {
+        sources.push("README.md".to_string());
+    }
+    sources.sort();
+    sources.dedup();
+    sources
+}
+
+fn collect_project_types(evidence: &readiness::RepositoryEvidenceState) -> Vec<String> {
+    if evidence.projectTypes.is_empty() {
+        vec!["unknown".to_string()]
+    } else {
+        evidence.projectTypes.clone()
+    }
+}
+
+fn collect_excludes(evidence: &readiness::RepositoryEvidenceState) -> Vec<String> {
+    const DEFAULT_EXCLUDES: &[&str] = &[
+        "coverage/**",
+        "dist/**",
+        "out/**",
+        "target/**",
+        "build/**",
+        ".next/**",
+        ".nuxt/**",
+        ".parcel-cache/**",
+        "node_modules/**",
+        ".gradle/**",
+    ];
+    let mut excludes = BTreeSet::new();
+    for path in evidence
+        .generatedPaths
+        .iter()
+        .chain(evidence.vendorPaths.iter())
+    {
+        let name = Path::new(path)
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("");
+        match name {
+            "coverage" => {
+                excludes.insert("coverage/**");
+            }
+            "dist" => {
+                excludes.insert("dist/**");
+            }
+            "out" => {
+                excludes.insert("out/**");
+            }
+            "target" => {
+                excludes.insert("target/**");
+            }
+            "build" => {
+                excludes.insert("build/**");
+            }
+            ".next" => {
+                excludes.insert(".next/**");
+            }
+            ".nuxt" => {
+                excludes.insert(".nuxt/**");
+            }
+            ".parcel-cache" => {
+                excludes.insert(".parcel-cache/**");
+            }
+            "node_modules" => {
+                excludes.insert("node_modules/**");
+            }
+            ".gradle" => {
+                excludes.insert(".gradle/**");
+            }
+            _ => {
+                if let Some(stem) = Path::new(path)
+                    .file_stem()
+                    .and_then(|stem| stem.to_str())
+                    .filter(|stem| stem.starts_with("dist") || stem.starts_with("build"))
+                {
+                    if stem == "dist" {
+                        excludes.insert("dist/**");
+                    } else if stem == "build" {
+                        excludes.insert("build/**");
+                    }
+                }
+            }
+        }
+    }
+    for entry in DEFAULT_EXCLUDES {
+        excludes.insert(entry);
+    }
+    excludes.into_iter().map(ToString::to_string).collect()
+}
+
+fn package_manager(repo_path: &Path) -> &'static str {
+    if repo_path.join("pnpm-lock.yaml").is_file() {
+        "pnpm"
+    } else if repo_path.join("yarn.lock").is_file() {
+        "yarn"
+    } else {
+        "npm"
+    }
+}
+
+fn package_json_script_exists(repo_path: &Path, script: &str) -> bool {
+    let Ok(contents) = fs::read_to_string(repo_path.join("package.json")) else {
+        return false;
+    };
+    let Ok(json) = serde_json::from_str::<JsonValue>(&contents) else {
+        return false;
+    };
+    json.get("scripts")
+        .and_then(|scripts| scripts.get(script))
+        .and_then(|value| value.as_str())
+        .is_some_and(|value| !value.trim().is_empty())
+}
+
+fn has_file(repo_path: &Path, name: &str) -> bool {
+    repo_path.join(name).is_file()
+}
+
+fn collect_init_analyzer_candidates(
+    repo_path: &Path,
+    project_types: &[String],
+) -> Vec<RepoInitAnalyzerProposal> {
+    let mut candidates = BTreeMap::new();
+
+    if project_types.iter().any(|project| {
+        matches!(
+            project.as_str(),
+            "javascript" | "typescript" | "deno" | "node"
+        )
+    }) {
+        let manager = package_manager(repo_path);
+        if package_json_script_exists(repo_path, "typecheck") {
+            candidates.insert(
+                "typecheck".to_string(),
+                RepoInitAnalyzerProposal {
+                    id: "typecheck".to_string(),
+                    command: format!("{manager} run typecheck"),
+                    required: false,
+                    timeout_seconds: 120,
+                },
+            );
+        }
+        if package_json_script_exists(repo_path, "lint") {
+            candidates.insert(
+                "lint".to_string(),
+                RepoInitAnalyzerProposal {
+                    id: "lint".to_string(),
+                    command: format!("{manager} run lint"),
+                    required: false,
+                    timeout_seconds: 120,
+                },
+            );
+        }
+        if package_json_script_exists(repo_path, "test") {
+            candidates.insert(
+                "test".to_string(),
+                RepoInitAnalyzerProposal {
+                    id: "test".to_string(),
+                    command: format!("CI=1 {manager} run test"),
+                    required: false,
+                    timeout_seconds: 120,
+                },
+            );
+        }
+        if manager == "pnpm" {
+            candidates.insert(
+                "dependency-audit".to_string(),
+                RepoInitAnalyzerProposal {
+                    id: "dependency-audit".to_string(),
+                    command: "pnpm audit --audit-level moderate".to_string(),
+                    required: false,
+                    timeout_seconds: 120,
+                },
+            );
+        } else {
+            candidates.insert(
+                "dependency-audit".to_string(),
+                RepoInitAnalyzerProposal {
+                    id: "dependency-audit".to_string(),
+                    command: "npm audit --audit-level moderate".to_string(),
+                    required: false,
+                    timeout_seconds: 120,
+                },
+            );
+        }
+    }
+
+    if project_types.iter().any(|project| project == "rust") || has_file(repo_path, "Cargo.toml") {
+        candidates.insert(
+            "cargo-check".to_string(),
+            RepoInitAnalyzerProposal {
+                id: "cargo-check".to_string(),
+                command: "cargo check --all-targets".to_string(),
+                required: false,
+                timeout_seconds: 120,
+            },
+        );
+        candidates.insert(
+            "cargo-test".to_string(),
+            RepoInitAnalyzerProposal {
+                id: "cargo-test".to_string(),
+                command: "cargo test --all-features".to_string(),
+                required: false,
+                timeout_seconds: 120,
+            },
+        );
+    }
+
+    if project_types.iter().any(|project| project == "go") {
+        candidates.insert(
+            "go-test".to_string(),
+            RepoInitAnalyzerProposal {
+                id: "go-test".to_string(),
+                command: "go test ./...".to_string(),
+                required: false,
+                timeout_seconds: 120,
+            },
+        );
+    }
+
+    if project_types.iter().any(|project| project == "python") {
+        candidates.insert(
+            "python-lint".to_string(),
+            RepoInitAnalyzerProposal {
+                id: "python-lint".to_string(),
+                command: "ruff check .".to_string(),
+                required: false,
+                timeout_seconds: 120,
+            },
+        );
+        candidates.insert(
+            "python-test".to_string(),
+            RepoInitAnalyzerProposal {
+                id: "python-test".to_string(),
+                command: "pytest".to_string(),
+                required: false,
+                timeout_seconds: 120,
+            },
+        );
+    }
+
+    candidates
+        .into_iter()
+        .map(|(_, candidate)| candidate)
+        .collect()
+}
+
+fn render_default_repo_config_contents(proposal: &RepoInitProposal) -> String {
+    let mut lines = vec![format!("version: {SUPPORTED_VERSION}")];
+    lines.push("".to_string());
+    lines.push("review:".to_string());
+    lines.push(format!("  mode: {}", review_mode_for_init(proposal.mode)));
+
+    if !proposal.suggested_excludes.is_empty() {
+        lines.push("".to_string());
+        lines.push("paths:".to_string());
+        lines.push("  exclude:".to_string());
+        for exclude in &proposal.suggested_excludes {
+            lines.push(format!("    - {}", yaml_scalar(exclude)));
+        }
+    }
+
+    if !proposal.analyzer_candidates.is_empty() {
+        lines.push("".to_string());
+        lines.push("analyzers:".to_string());
+        for analyzer in &proposal.analyzer_candidates {
+            lines.push(format!("  {}:", analyzer.id));
+            lines.push("    enabled: false".to_string());
+            lines.push(format!(
+                "    required: {}",
+                if analyzer.required { "true" } else { "false" }
+            ));
+            lines.push(format!("    timeout_seconds: {}", analyzer.timeout_seconds));
+            lines.push(format!("    command: {}", yaml_scalar(&analyzer.command)));
+        }
+    }
+
+    if proposal.mode == InitMode::Guided {
+        lines.push("".to_string());
+        lines.push("profiles:".to_string());
+        lines.push("  fast:".to_string());
+        lines.push("    mode: fast".to_string());
+        if !proposal.analyzer_candidates.is_empty() {
+            lines.push("    analyzers:".to_string());
+            for analyzer in &proposal.analyzer_candidates {
+                lines.push(format!("      {}: optional", analyzer.id));
+            }
+        }
+        lines.push("  strict:".to_string());
+        lines.push("    mode: strict".to_string());
+    }
+
+    lines.join("\n") + "\n"
+}
+
+pub(crate) fn proposal_for_repo_init(
+    repo_path: &Path,
+    mode: InitMode,
+) -> Result<RepoInitProposal, String> {
+    if !repo_path.is_dir() {
+        return Err(format!(
+            "Repository path does not exist or is not a directory: {}",
+            repo_path.display()
+        ));
+    }
+
+    let evidence = readiness::collect_repository_evidence(repo_path);
+    let project_types = collect_project_types(&evidence);
+    let analyzer_candidates = collect_init_analyzer_candidates(repo_path, &project_types);
+    let proposal = RepoInitProposal {
+        mode,
+        project_types: project_types.clone(),
+        task_runners: collect_task_runners(&evidence),
+        instruction_sources: collect_instruction_sources(&evidence),
+        analyzer_candidates,
+        suggested_excludes: collect_excludes(&evidence),
+        config_contents: String::new(),
+    };
+
+    let mut proposal = proposal;
+    proposal.config_contents = render_default_repo_config_contents(&proposal);
+    Ok(proposal)
 }
 
 pub(crate) fn discover_repo_config_source(path: &Path) -> Result<Option<PathBuf>, String> {
@@ -441,6 +824,13 @@ fn discover_repo_config_source_inner(repo_path: &Path) -> Result<Option<PathBuf>
 pub(crate) fn default_init_action_if_needed(
     repo_path: &Path,
 ) -> Result<Option<RepoConfigMigrationAction>, String> {
+    default_init_action_if_needed_with_mode(repo_path, InitMode::Quick)
+}
+
+pub(crate) fn default_init_action_if_needed_with_mode(
+    repo_path: &Path,
+    mode: InitMode,
+) -> Result<Option<RepoConfigMigrationAction>, String> {
     let config_source = discover_repo_config_source_inner(repo_path)?;
     if config_source.is_some() {
         return Ok(None);
@@ -451,17 +841,55 @@ pub(crate) fn default_init_action_if_needed(
         return Ok(None);
     }
 
+    let proposal = proposal_for_repo_init(repo_path, mode)?;
+    let mut content_changes = Vec::new();
+    content_changes.push(format!(
+        "Generate a {} initialization proposal for {}.",
+        mode_label(mode),
+        repo_path.display()
+    ));
+    if proposal.project_types.is_empty() {
+        content_changes.push("Detected project type: unknown".to_string());
+    } else {
+        content_changes.push(format!(
+            "Detected project types: {}",
+            proposal.project_types.join(", ")
+        ));
+    }
+    if !proposal.analyzer_candidates.is_empty() {
+        content_changes.push(format!(
+            "Candidate analyzers (all default disabled): {}",
+            proposal
+                .analyzer_candidates
+                .iter()
+                .map(|analyzer| analyzer.id.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        ));
+    }
+    if !proposal.suggested_excludes.is_empty() {
+        content_changes.push(format!(
+            "Suggested excludes: {}",
+            proposal.suggested_excludes.join(", ")
+        ));
+    }
+
     Ok(Some(RepoConfigMigrationAction {
         source: String::from("<norn-init-template>"),
         target: default_target.display().to_string(),
         kind: "file".to_string(),
-        content_changes: vec![
-            "Create a default .norn.yaml from repository evidence and stable defaults.".to_string(),
-        ],
+        content_changes,
     }))
 }
 
 pub(crate) fn write_default_repo_config_if_missing(repo_path: &Path) -> Result<bool, String> {
+    write_default_repo_config_if_missing_with_mode(repo_path, InitMode::Quick)
+}
+
+pub(crate) fn write_default_repo_config_if_missing_with_mode(
+    repo_path: &Path,
+    mode: InitMode,
+) -> Result<bool, String> {
     if !repo_path.is_dir() {
         return Err(format!(
             "Repository path does not exist or is not a directory: {}",
@@ -480,7 +908,8 @@ pub(crate) fn write_default_repo_config_if_missing(repo_path: &Path) -> Result<b
             target.display()
         )
     })?;
-    let contents = render_default_repo_config_contents();
+    let proposal = proposal_for_repo_init(repo_path, mode)?;
+    let contents = proposal.config_contents;
     let mut temporary = tempfile::Builder::new()
         .prefix(".norn-repo-init-")
         .tempfile_in(parent)
@@ -2165,6 +2594,95 @@ mod tests {
         assert_eq!(action.kind, "file");
         assert!(action.source == "<norn-init-template>");
         assert!(action.target.ends_with(".norn.yaml"));
+
+        let _ = fs::remove_dir_all(repo);
+    }
+
+    #[test]
+    fn proposal_generation_is_stable_and_mode_specific() {
+        let repo = temp_repo();
+        fs::write(repo.join("package.json"), "{\"scripts\":{}}").expect("package");
+        fs::write(
+            repo.join("Cargo.toml"),
+            "[package]\nname = \"test\"\nversion = \"0.1.0\"\n",
+        )
+        .expect("cargo");
+
+        let quick_first =
+            super::proposal_for_repo_init(&repo, super::InitMode::Quick).expect("quick proposal");
+        let quick_second =
+            super::proposal_for_repo_init(&repo, super::InitMode::Quick).expect("quick proposal");
+        assert_eq!(quick_first, quick_second);
+        assert_eq!(quick_first.mode, super::InitMode::Quick);
+        assert_eq!(quick_first.project_types, vec!["javascript", "rust"]);
+        assert_eq!(
+            quick_first.config_contents.lines().next().unwrap(),
+            "version: 0.1"
+        );
+
+        let guided =
+            super::proposal_for_repo_init(&repo, super::InitMode::Guided).expect("guided proposal");
+        assert_eq!(guided.mode, super::InitMode::Guided);
+        assert!(guided.config_contents.contains("mode: strict"));
+        assert!(guided.config_contents.contains("profiles:"));
+
+        let _ = fs::remove_dir_all(repo);
+    }
+
+    #[test]
+    fn proposal_generation_defaults_for_unknown_project_types() {
+        let repo = temp_repo();
+        let proposal =
+            super::proposal_for_repo_init(&repo, super::InitMode::Quick).expect("quick proposal");
+
+        assert_eq!(proposal.project_types, vec!["unknown"]);
+        assert!(proposal.task_runners.contains(&"npm".to_string()));
+        assert_eq!(proposal.instruction_sources, vec!["README.md"]);
+        assert!(proposal
+            .config_contents
+            .contains("review:\n  mode: balanced"));
+        assert!(proposal.analyzer_candidates.is_empty());
+
+        let _ = fs::remove_dir_all(repo);
+    }
+
+    #[test]
+    fn proposal_generation_handles_mixed_and_monorepo_repositories() {
+        let repo = temp_repo();
+        fs::create_dir_all(repo.join("packages/app")).expect("create package dir");
+        fs::create_dir_all(repo.join("services/api")).expect("create service dir");
+        fs::create_dir_all(repo.join("dist")).expect("create dist");
+        fs::create_dir_all(repo.join("node_modules")).expect("create node_modules");
+
+        fs::write(
+            repo.join("package.json"),
+            "{\"name\":\"root\",\"scripts\":{\"lint\":\"eslint .\"}}",
+        )
+        .expect("write package root");
+        fs::write(
+            repo.join("packages/app/package.json"),
+            "{\"name\":\"app\",\"scripts\":{\"test\":\"vitest\"}}",
+        )
+        .expect("write package app");
+        fs::write(
+            repo.join("services/api/Cargo.toml"),
+            "[package]\nname = \"api\"\nversion = \"0.1.0\"\n",
+        )
+        .expect("write cargo");
+
+        let proposal =
+            super::proposal_for_repo_init(&repo, super::InitMode::Quick).expect("quick proposal");
+        assert_eq!(proposal.project_types, vec!["javascript", "rust"]);
+        assert!(proposal.analyzer_candidates.iter().any(|a| a.id == "lint"));
+        assert!(proposal
+            .analyzer_candidates
+            .iter()
+            .any(|a| a.id == "cargo-check"));
+        assert!(proposal.suggested_excludes.contains(&"dist/**".to_string()));
+        assert!(proposal
+            .suggested_excludes
+            .contains(&"node_modules/**".to_string()));
+        assert!(!proposal.config_contents.contains("profiles:"));
 
         let _ = fs::remove_dir_all(repo);
     }
