@@ -28,4 +28,4 @@ readiness probe used by CLI, TUI, and desktop flows before onboarding writes.
 - `../../adr/0013-norn-readiness-probe.md`
 - `../../adr/0012-norn-onboarding-contract.md`
 - GitHub issue #187
-Updated by commit f232574 on 2026-08-05.
+Updated by commit 30e2323 on 2026-08-05.
