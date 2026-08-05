@@ -169,6 +169,45 @@ publish:
 Some of this is already used for prompt/config loading; some is intentionally documented as the
 contract for the next review-engine milestones.
 
+### Using Norn locally (5-minute onboarding)
+
+For a quick, consistent setup:
+
+1. Install and verify the CLI:
+
+```sh
+brew install norn
+norn --version
+norn doctor --machine-only
+```
+
+2. In a Git repository you own, create Norn config:
+
+```sh
+cd /path/to/repo
+norn init --quick --repo-path . --yes
+```
+
+3. (Optional) Validate and migrate old settings:
+
+```sh
+norn doctor --repo-path .
+norn config validate --repo-path .
+norn config migrate --repo-path .
+```
+
+4. Review from CLI:
+
+```sh
+norn review --repo-path . --scope working-tree
+```
+
+If you already have legacy files, Norn now keeps the same compatibility rules:
+`.norn.yaml`/`.norn/` are primary, and `.lachesi.yaml`/`.lachesi/` are used only for migration.
+
+Desktop users should then run the app with the same repository path configured in Settings and use
+the same `.norn.yaml` and `.norn/` files from each repository.
+
 ## Architecture
 
 Norn is split across a React frontend and a Rust/Tauri backend.

@@ -71,7 +71,7 @@ the desktop app, and preserves Lachesi's staged review workflow.
    shipped Tauri capabilities, and the TUI restores terminal state on normal
    exit, interruption, and panic.
 8. Starting AI review from the TUI skips local evidence analyzers because
-   repository validation belongs to the development flow before Lachesi review.
+   repository validation belongs to the development flow before Norn review.
 
 ## Out of scope
 

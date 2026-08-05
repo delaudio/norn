@@ -1,7 +1,7 @@
 interface:
   display_name: "Norn Review"
   short_description: "Review code changes with Norn before completion or push"
-  default_prompt: "Use $norn-review to review code changes before completing this task or pushing a branch."
+  default_prompt: "Use $norn-review to review code changes before completing this task or pushing a branch. Default provider comes from config; only add --ai-provider claude|codex when explicitly requested."
 
 policy:
   allow_implicit_invocation: true

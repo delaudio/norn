@@ -17,7 +17,7 @@ tags: [cli, headless, review, automation, codex]
 Lachesi supports desktop and terminal interfaces, but automated coding agents,
 local scripts, and CI jobs need a non-interactive review surface. Driving the
 terminal UI is not a stable automation contract, and a Codex skill alone cannot
-provide Lachesi review semantics without an executable interface.
+provide Norn review semantics without an executable interface.
 
 The native layer already owns repository resolution, effective repository
 configuration, local evidence analyzers, AI provider execution, structured
@@ -71,7 +71,7 @@ orchestrated safely by coding agents and CI.
    and instructs the reviewer to use only the supplied payload. A
    `NORN_REVIEW_CHILD` environment marker prevents skills or hooks from
    recursively enforcing another review; integrations also recognize the
-   legacy `LACHESI_REVIEW_CHILD` marker during the compatibility window.
+   `NORN_REVIEW_CHILD` marker.
 6. JSON output uses the existing structured review finding semantics, never
    serializes credential sources or raw evidence payloads, and documents that
    summaries and findings can reflect content from the reviewed diff or model.

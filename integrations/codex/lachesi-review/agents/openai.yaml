@@ -1,7 +1,0 @@
-interface:
-  display_name: "Norn Review (legacy alias)"
-  short_description: "Deprecated compatibility alias for Norn Review"
-  default_prompt: "Use $lachesi-review only as a compatibility alias; follow the canonical Norn review workflow."
-
-policy:
-  allow_implicit_invocation: false

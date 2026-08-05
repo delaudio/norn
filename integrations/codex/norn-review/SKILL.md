@@ -9,6 +9,10 @@ Run Norn as an independent, read-only reviewer after the repository's normal
 validation commands pass. Headless review skips repository analyzers by default
 because this workflow has already run the task's validation gate.
 
+Use `--ai-provider claude` or `--ai-provider codex` when the task or user
+request requires one provider. The command will use the configured default when
+omitted.
+
 ## Pre-Push Requirement
 
 Before every `git push` that publishes code changes, run Norn on the exact
@@ -32,17 +36,15 @@ diff, or rerun repository validation. Norn resolves the repository, base,
 configuration, policy packs, and diff itself.
 
 Use `$HOME/.local/bin/norn` directly when it is executable; otherwise use
-`norn` from `PATH`. During the compatibility window only, fall back to
-`$HOME/.local/bin/lachesi` and then `lachesi` when the canonical executable is
-unavailable.
+`norn` from `PATH`.
 
 ## Guard
 
-If `NORN_REVIEW_CHILD=1` or `LACHESI_REVIEW_CHILD=1`, stop this workflow immediately. The current agent
+If `NORN_REVIEW_CHILD=1`, stop this workflow immediately. The current agent
 is already the reviewer launched by Norn.
 
-If neither the canonical Norn executable nor its documented legacy alias is
-executable, report that setup failure instead of substituting an ad hoc review.
+If the canonical Norn executable is not executable, report setup failure instead of
+substituting an ad hoc review.
 
 ## Select The Target
 
@@ -69,9 +71,22 @@ guard above. Prefer:
   --fail-on-findings
 ```
 
+To force a provider in this explicit workflow:
+
+```bash
+"$HOME/.local/bin/norn" review --repo-path . --scope working-tree \
+  --format json --fail-on-findings --ai-provider codex
+```
+
+or
+
+```bash
+"$HOME/.local/bin/norn" review --repo-path . --scope working-tree \
+  --format json --fail-on-findings --ai-provider claude
+```
+
 If `$HOME/.local/bin/norn` is not executable, use the same arguments with
-`norn` from `PATH`, then use the legacy alias only as the final compatibility
-fallback.
+`norn` from `PATH`; if unavailable, report setup failure.
 
 For an explicit standalone branch review where validation has already run,
 replace the scope with `branch`. The task agent owns validation before
