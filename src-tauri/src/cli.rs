@@ -385,6 +385,7 @@ fn parse_setup_args(args: &[String]) -> Result<SetupArgs, String> {
     let mut format = OutputFormat::Human;
     let mut dry_run = false;
     let mut yes = false;
+    let mut explicit_dry_run = false;
     let mut index = 1;
     while index < args.len() {
         match args[index].as_str() {
@@ -400,15 +401,21 @@ fn parse_setup_args(args: &[String]) -> Result<SetupArgs, String> {
                 };
             }
             "--json" => format = OutputFormat::Json,
-            "--dry-run" => dry_run = true,
-            "--yes" => yes = true,
+            "--dry-run" => {
+                explicit_dry_run = true;
+                dry_run = true;
+            }
+            "--yes" => {
+                yes = true;
+                dry_run = false;
+            }
             unknown => return Err(format!("Unknown option `{unknown}`.")),
         }
         index += 1;
     }
 
-    if !dry_run && !yes {
-        dry_run = true;
+    if yes && explicit_dry_run {
+        return Err("`--yes` and `--dry-run` are mutually exclusive for `norn setup`.".to_string());
     }
 
     Ok(SetupArgs {
@@ -427,6 +434,7 @@ fn parse_init_args(args: &[String]) -> Result<InitArgs, String> {
     let mut dry_run = true;
     let mut yes = false;
     let mut format = OutputFormat::Human;
+    let mut explicit_dry_run = false;
     let mut index = 1;
     while index < args.len() {
         match args[index].as_str() {
@@ -442,7 +450,10 @@ fn parse_init_args(args: &[String]) -> Result<InitArgs, String> {
                 dry_run = true;
             }
             "--quick" => mode = InitMode::Quick,
-            "--dry-run" => dry_run = true,
+            "--dry-run" => {
+                explicit_dry_run = true;
+                dry_run = true;
+            }
             "--yes" => {
                 yes = true;
                 dry_run = false;
@@ -463,8 +474,8 @@ fn parse_init_args(args: &[String]) -> Result<InitArgs, String> {
         }
         index += 1;
     }
-    if !yes {
-        dry_run = true;
+    if yes && explicit_dry_run {
+        return Err("`--yes` and `--dry-run` are mutually exclusive for `norn init`.".to_string());
     }
 
     Ok(InitArgs {
@@ -1603,19 +1614,31 @@ mod tests {
     }
 
     #[test]
-    fn setup_args_accepts_formats_and_defaults_to_dry_run() {
+    fn setup_args_accepts_formats_and_defaults_to_apply_mode() {
         let parsed =
             parse_setup_args(&["setup".to_string(), "--json".to_string()]).expect("setup parse");
 
         assert_eq!(parsed.format, OutputFormat::Json);
         assert!(!parsed.yes);
-        assert!(parsed.dry_run);
+        assert!(!parsed.dry_run);
 
         let parsed = parse_setup_args(&["setup".to_string()]).expect("setup parse");
 
         assert_eq!(parsed.format, OutputFormat::Human);
         assert!(!parsed.yes);
-        assert!(parsed.dry_run);
+        assert!(!parsed.dry_run);
+    }
+
+    #[test]
+    fn setup_args_rejects_conflicting_mode_flags() {
+        let error = parse_setup_args(&[
+            "setup".to_string(),
+            "--yes".to_string(),
+            "--dry-run".to_string(),
+        ])
+        .expect_err("conflict should fail");
+
+        assert!(error.contains("`--yes` and `--dry-run`"));
     }
 
     #[test]
@@ -1646,6 +1669,18 @@ mod tests {
         assert!(!parsed.dry_run);
         assert!(parsed.yes);
         assert_eq!(parsed.format, OutputFormat::Json);
+    }
+
+    #[test]
+    fn init_args_rejects_conflicting_mode_flags() {
+        let error = parse_init_args(&[
+            "init".to_string(),
+            "--yes".to_string(),
+            "--dry-run".to_string(),
+        ])
+        .expect_err("conflict should fail");
+
+        assert!(error.contains("`--yes` and `--dry-run`"));
     }
 
     #[test]
@@ -1885,6 +1920,27 @@ token: unsafe
         assert_eq!(output["repoPath"], repo.display().to_string());
         assert_eq!(output["mode"], "quick");
         assert_eq!(output["dryRun"], true);
+    }
+
+    #[test]
+    fn setup_json_report_includes_schema_and_setup_state() {
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+        let code = run_args(
+            &["setup".to_string(), "--json".to_string()],
+            &mut stdout,
+            &mut stderr,
+        );
+
+        assert_eq!(code, 0);
+        assert!(stderr.is_empty());
+        let output: serde_json::Value = serde_json::from_slice(&stdout).expect("setup json output");
+        assert_eq!(output["schemaVersion"], "norn.setup.v1");
+        assert_eq!(output["wouldApply"], false);
+        assert!(output["machineTools"].as_array().is_some());
+        assert!(output["machineCredentials"].as_array().is_some());
+        assert!(output["setupNotes"].is_array());
+        assert!(!output["machineTools"].as_array().expect("machine tools").is_empty());
     }
 
     #[test]
