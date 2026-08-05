@@ -1,0 +1,124 @@
+name: homebrew-lifecycle-smoke
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Release tag to validate (v<semver>). Defaults to package version."
+        required: false
+  schedule:
+    - cron: "0 4 * * 2"
+  pull_request:
+    paths:
+      - ".github/workflows/homebrew-lifecycle-smoke.yml"
+      - "homebrew-tap/Formula/norn.rb"
+      - "homebrew-tap/Casks/norn.rb"
+      - "docs/homebrew-distribution.md"
+      - "scripts/validate-homebrew-manifests.mjs"
+
+permissions:
+  contents: read
+
+jobs:
+  lifecycle:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-13
+            architecture: x86_64
+          - runner: macos-14
+            architecture: arm64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Resolve release tag and urls
+        id: release
+        run: |
+          RELEASE_TAG="${{ github.event.inputs.release_tag }}"
+          if [ -z "$RELEASE_TAG" ]; then
+            VERSION_FROM_PACKAGE=$(node -p "require('./package.json').version")
+            RELEASE_TAG="v$VERSION_FROM_PACKAGE"
+          fi
+
+          VERSION="${RELEASE_TAG#v}"
+          if [ -z "$VERSION" ]; then
+            echo "Unable to resolve release tag." >&2
+            exit 1
+          fi
+
+          BASE_URL="https://github.com/lachesi-hq/lachesi/releases/download/$RELEASE_TAG"
+          ARCH_URL="$BASE_URL/norn-$VERSION-macos-${{ matrix.architecture }}.tar.gz"
+          OTHER_ARCH="x86_64"
+          if [ "${{ matrix.architecture }}" = "x86_64" ]; then
+            OTHER_ARCH="arm64"
+          fi
+          OTHER_ARCH_URL="$BASE_URL/norn-$VERSION-macos-$OTHER_ARCH.tar.gz"
+
+          echo "release_tag=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "arch_url=$ARCH_URL" >> "$GITHUB_OUTPUT"
+          echo "other_arch_url=$OTHER_ARCH_URL" >> "$GITHUB_OUTPUT"
+
+      - name: Skip if assets are not yet published
+        id: gate
+        run: |
+          echo "Checking ${{ steps.release.outputs.arch_url }}"
+          if ! curl -fsI "${{ steps.release.outputs.arch_url }}" >/dev/null; then
+            echo "::warning::Skipping formula lifecycle: artifact unavailable for ${{ matrix.architecture }}"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "Checking ${{ steps.release.outputs.other_arch_url }}"
+          if ! curl -fsI "${{ steps.release.outputs.other_arch_url }}" >/dev/null; then
+            echo "::warning::Skipping formula lifecycle: release is incomplete for other architecture."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+
+      - name: Validate homebrew manifests
+        if: steps.gate.outputs.skip == 'false'
+        run: node scripts/validate-homebrew-manifests.mjs
+
+      - name: Install formula and smoke-test
+        if: steps.gate.outputs.skip == 'false'
+        run: |
+          brew install --formula homebrew-tap/Formula/norn.rb
+          norn --version
+          norn --help
+          norn-tui --version
+          brew test norn
+
+      - name: Upgrade/reinstall/rollback check
+        if: steps.gate.outputs.skip == 'false'
+        run: |
+          brew upgrade --formula norn || true
+          brew reinstall --formula homebrew-tap/Formula/norn.rb
+          brew uninstall --formula norn
+          brew install --formula homebrew-tap/Formula/norn.rb
+          brew test norn
+
+      - name: Remove installed formulas on completion
+        if: steps.gate.outputs.skip == 'false'
+        run: brew uninstall --formula norn || true
+
+      - name: Check cask metadata and smoke path
+        if: steps.gate.outputs.skip == 'false'
+        run: |
+          CASK_URL=$(node -e "const fs=require('fs'); const text=fs.readFileSync('homebrew-tap/Casks/norn.rb','utf8');const m=text.match(/url \"([^\"]+)\"/); console.log(m?.[1] || '');")
+          if [ -z "$CASK_URL" ]; then
+            echo "Cask has no URL; skipping cask smoke."
+            exit 0
+          fi
+
+          if curl -fsI "$CASK_URL" >/dev/null; then
+            brew install --cask homebrew-tap/Casks/norn.rb
+            brew uninstall --cask norn || true
+          else
+            echo "::warning::Cask artifact not yet available; skipping cask install smoke."
+          fi

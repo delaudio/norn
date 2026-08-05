@@ -213,6 +213,18 @@ Implementation specs live in:
 pnpm install
 ```
 
+### Production install (no source checkout)
+
+For colleagues using Homebrew, use the distribution runbook:
+
+```sh
+brew tap lachesi-hq/tap
+brew install norn
+```
+
+See [Homebrew distribution and release operations](docs/homebrew-distribution.md)
+for install, upgrade, rollback, and release operator guidance.
+
 ### Run
 
 ```sh
