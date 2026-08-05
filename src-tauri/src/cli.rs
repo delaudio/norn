@@ -688,6 +688,41 @@ fn run_init(args: InitArgs, stdout: &mut dyn Write, stderr: &mut dyn Write) -> i
         return 2;
     }
 
+    if let Ok(Some(config_source)) = repo_config::discover_repo_config_source(&args.repo_path) {
+        match repo_config::load_from_repo_path(&args.repo_path) {
+            Ok(result) if !result.errors.is_empty() => {
+                let _ = writeln!(
+                    stderr,
+                    "Cannot run onboarding with repository config at {}.",
+                    config_source.display(),
+                );
+                for error in result.errors {
+                    let _ = writeln!(stderr, "  - {}", error.message);
+                }
+                let _ = writeln!(
+                    stderr,
+                    "Use `norn doctor --repo-path {}` to repair configuration before retrying.",
+                    args.repo_path.display()
+                );
+                return 2;
+            }
+            Ok(_) => {}
+            Err(error) => {
+                let _ = writeln!(
+                    stderr,
+                    "Cannot run onboarding with repository config at {}: {error}",
+                    config_source.display()
+                );
+                let _ = writeln!(
+                    stderr,
+                    "Use `norn doctor --repo-path {}` to repair configuration before retrying.",
+                    args.repo_path.display()
+                );
+                return 2;
+            }
+        }
+    }
+
     let repo_init_mode = map_repo_init_mode(&args.mode);
     let proposal = match repo_config::proposal_for_repo_init(&args.repo_path, repo_init_mode) {
         Ok(proposal) => proposal,
@@ -1981,6 +2016,76 @@ mod tests {
         assert!(output["actions"].as_array().expect("actions").is_empty());
         assert!(stderr.is_empty());
 
+        let _ = fs::remove_dir_all(repo);
+    }
+
+    #[test]
+    fn init_run_rejects_invalid_repository_config_with_guidance() {
+        let repo = temp_repo();
+        fs::write(
+            repo.join(".norn.yaml"),
+            r#"
+version: 2.0
+review:
+  mode: fast
+"#,
+        )
+        .expect("legacy config");
+
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+        let code = run_args(
+            &[
+                "init".to_string(),
+                "--repo-path".to_string(),
+                repo.to_string_lossy().to_string(),
+                "--yes".to_string(),
+            ],
+            &mut stdout,
+            &mut stderr,
+        );
+
+        assert_eq!(code, 2);
+        let stderr = String::from_utf8(stderr).expect("stderr");
+        assert!(stderr.contains("Cannot run onboarding with repository config"));
+        assert!(stderr.contains("norn doctor --repo-path"));
+        let preserved = fs::read_to_string(repo.join(".norn.yaml")).expect("config remains");
+        assert!(preserved.contains("version: 2.0"));
+        let _ = fs::remove_dir_all(repo);
+    }
+
+    #[test]
+    fn init_run_does_not_alter_valid_repo_config_with_unknown_fields() {
+        let repo = temp_repo();
+        let original = r#"
+# Keep unknown keys for compatibility
+version: 0.1
+review:
+  mode: balanced
+x-custom:
+  keep: yes
+prompt:
+  replace: |
+    keep this prompt override
+"#;
+        fs::write(repo.join(".norn.yaml"), original).expect("legacy config");
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+        let code = run_args(
+            &[
+                "init".to_string(),
+                "--repo-path".to_string(),
+                repo.to_string_lossy().to_string(),
+                "--dry-run".to_string(),
+            ],
+            &mut stdout,
+            &mut stderr,
+        );
+
+        assert_eq!(code, 0);
+        assert!(stderr.is_empty());
+        let after = fs::read_to_string(repo.join(".norn.yaml")).expect("config remains");
+        assert_eq!(after, original);
         let _ = fs::remove_dir_all(repo);
     }
 

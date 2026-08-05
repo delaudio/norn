@@ -109,6 +109,25 @@ pub fn run_from_env() -> Result<(), String> {
 fn run_tui_preflight(resolve_current_repo: bool, cwd: &Path) -> Result<(), String> {
     let report = readiness::collect_report(cwd, !resolve_current_repo);
     let status = readiness::derive_status(&report.issues);
+    let has_machine_issues = report
+        .issues
+        .iter()
+        .any(|issue| issue.scope == crate::readiness::ReadinessIssueScope::Machine);
+    let has_repository_issues = report
+        .issues
+        .iter()
+        .any(|issue| issue.scope == crate::readiness::ReadinessIssueScope::Repository);
+    let has_repository_config_issues = report.issues.iter().any(|issue| {
+        issue.scope == crate::readiness::ReadinessIssueScope::Repository
+            && (issue.code.starts_with("repository.config")
+                || issue.code == "repository.analyzerUnavailable")
+    });
+    let has_existing_repo_config = report
+        .repository
+        .config
+        .as_ref()
+        .is_some_and(|config| config.exists);
+
     if let ReadinessStatus::Fail = status {
         eprintln!("norn-tui cannot start:");
         for issue in report
@@ -119,7 +138,18 @@ fn run_tui_preflight(resolve_current_repo: bool, cwd: &Path) -> Result<(), Strin
             eprintln!("  - {}: {}", issue.code, issue.message);
             eprintln!("    remediation: {}", issue.remediation);
         }
-        eprintln!("Run `norn doctor --repo-path .` for full diagnostics.");
+        if has_machine_issues {
+            eprintln!("Machine readiness issues detected; resolve first with `norn setup`.");
+            eprintln!("You can rerun `norn-tui` after setup is complete.");
+        }
+        if has_repository_issues {
+            eprintln!("Run `norn doctor --repo-path .` to inspect repository issues.");
+        }
+        if has_repository_config_issues && has_existing_repo_config {
+            eprintln!(
+                "Repository config issues detected; run `norn doctor --repo-path .` to repair first."
+            );
+        }
         eprintln!("Use `norn-tui --skip-readiness` only if setup must be deferred.");
         return Err("Readiness preflight failed; complete machine/repository setup before starting the TUI.".to_string());
     }
@@ -159,13 +189,21 @@ fn run_tui_preflight(resolve_current_repo: bool, cwd: &Path) -> Result<(), Strin
             eprintln!("  - {}: {}", issue.code, issue.message);
             eprintln!("    remediation: {}", issue.remediation);
         }
-        eprintln!("Run `norn doctor --repo-path .` to resolve or confirm a safe degraded mode.");
-        if report.issues.iter().any(|issue| {
-            issue.scope == crate::readiness::ReadinessIssueScope::Machine
-                && issue.severity == ReadinessIssueSeverity::Warning
-        }) {
-            eprintln!("If provider setup is incomplete, run `norn setup` first.");
+        if has_machine_issues {
+            eprintln!(
+                "Run `norn setup` to repair machine readiness before entering a strict flow."
+            );
         }
+        if has_repository_issues {
+            if has_existing_repo_config {
+                eprintln!(
+                    "Run `norn doctor --repo-path .` if repository checks should be repaired."
+                );
+            } else if has_repository_config_issues {
+                eprintln!("Run `norn init --yes` to seed defaults for this repository.");
+            }
+        }
+        eprintln!("Run `norn doctor --repo-path .` to confirm a safe degraded mode.");
     }
 
     Ok(())
@@ -1698,6 +1736,32 @@ mod tests {
             error.unwrap_err(),
             "Readiness preflight failed; complete machine/repository setup before starting the TUI."
         );
+    }
+
+    #[test]
+    fn tui_preflight_rejects_current_repo_with_invalid_config() {
+        let repo = temp_repo_path("autoinit-invalid-config");
+        std::fs::create_dir_all(&repo).expect("create invalid-config repo");
+        assert!(std::process::Command::new("/usr/bin/git")
+            .arg("-C")
+            .arg(&repo)
+            .args(["init", "--initial-branch", "main"])
+            .status()
+            .expect("git init")
+            .success());
+        std::fs::write(
+            repo.join(".norn.yaml"),
+            r#"
+version: 2.0
+review:
+  mode: fast
+"#,
+        )
+        .expect("write invalid config");
+        assert!(run_tui_preflight(true, &repo).is_err());
+
+        let original = fs::read_to_string(repo.join(".norn.yaml")).expect("config preserved");
+        assert!(original.contains("version: 2.0"));
     }
 
     #[test]
