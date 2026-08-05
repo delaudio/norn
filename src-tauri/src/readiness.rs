@@ -284,6 +284,7 @@ pub fn run_doctor(
 
     match report.status {
         ReadinessStatus::Fail => 2,
+        ReadinessStatus::Warn => 1,
         _ => 0,
     }
 }
@@ -1458,6 +1459,41 @@ mod tests {
         assert!(output["issues"]
             .as_array()
             .is_some_and(|issues| !issues.is_empty()));
+    }
+
+    #[test]
+    fn doctor_json_distinguishes_warn_as_exit_one() {
+        let repo = temp_repo();
+        init_git_repo(&repo);
+        std::process::Command::new("/usr/bin/git")
+            .arg("-C")
+            .arg(&repo)
+            .args([
+                "remote",
+                "add",
+                "origin",
+                "https://github.com/example/repo.git",
+            ])
+            .output()
+            .expect("git remote add");
+        fs::write(repo.join("next.txt"), "untracked\n").expect("write untracked");
+
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+        let code = run_doctor(
+            DoctorArgs {
+                repo_path: repo,
+                machine_only: false,
+                format: DoctorFormat::Json,
+            },
+            &mut stdout,
+            &mut stderr,
+        );
+
+        assert_eq!(code, 1);
+        assert!(stderr.is_empty());
+        let output: serde_json::Value = serde_json::from_slice(&stdout).expect("doctor JSON output");
+        assert_eq!(output["status"], "warn");
     }
 
     #[test]
