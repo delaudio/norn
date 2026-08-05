@@ -23,7 +23,7 @@ const failConnection = async () => {
 const SAMPLE_REPOS: RepoRef[] = [
   { provider: "bitbucket", workspace: "example-workspace", repo: "frontend-app" },
   { provider: "bitbucket", workspace: "example-workspace", repo: "backend-api" },
-  { provider: "github", workspace: "lachesi-hq", repo: "lachesi" },
+  { provider: "github", workspace: "delaudio", repo: "norn" },
 ];
 
 const meta = {

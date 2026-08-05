@@ -1926,7 +1926,7 @@ review:
 
     #[test]
     fn independent_resource_failures_keep_successful_pr_data_visible() {
-        let mut app = TuiApp::from_repos(vec![repo("lachesi-hq", "lachesi")]);
+        let mut app = TuiApp::from_repos(vec![repo("delaudio", "norn")]);
         app.pull_requests = vec![pr(7, "Progressive loading")];
         app.pr_request_id = 12;
         app.detail_load = LoadState::Loading;
@@ -1951,7 +1951,7 @@ review:
 
     #[test]
     fn stale_ai_review_results_cannot_replace_a_newer_run() {
-        let mut app = TuiApp::from_repos(vec![repo("lachesi-hq", "lachesi")]);
+        let mut app = TuiApp::from_repos(vec![repo("delaudio", "norn")]);
         app.ai_request_id = 2;
         app.ai_review_state = Some(AiReviewRunState {
             status: AiReviewRunStatus::Running,
@@ -1977,7 +1977,7 @@ review:
 
     #[test]
     fn ai_review_results_update_markers_for_the_event_target() {
-        let mut app = TuiApp::from_repos(vec![repo("lachesi-hq", "lachesi")]);
+        let mut app = TuiApp::from_repos(vec![repo("delaudio", "norn")]);
         app.pull_requests = vec![pr(7, "Reviewed"), pr(8, "Highlighted")];
         app.selected_pr = 1;
         app.ai_request_id = 3;
@@ -1998,7 +1998,7 @@ review:
 
     #[test]
     fn repo_selection_stays_in_bounds() {
-        let mut app = TuiApp::from_repos(vec![repo("lachesi-hq", "lachesi")]);
+        let mut app = TuiApp::from_repos(vec![repo("delaudio", "norn")]);
         app.pull_requests.clear();
 
         app.handle_key(KeyCode::Down);
@@ -2010,7 +2010,7 @@ review:
 
     #[test]
     fn mouse_selects_pull_request_rows() {
-        let mut app = TuiApp::from_repos(vec![repo("lachesi-hq", "lachesi")]);
+        let mut app = TuiApp::from_repos(vec![repo("delaudio", "norn")]);
         app.pull_requests = vec![pr(1, "One"), pr(2, "Two")];
 
         app.handle_mouse(
@@ -2029,7 +2029,7 @@ review:
 
     #[test]
     fn mouse_wheel_scrolls_only_detail_panes() {
-        let mut app = TuiApp::from_repos(vec![repo("lachesi-hq", "lachesi")]);
+        let mut app = TuiApp::from_repos(vec![repo("delaudio", "norn")]);
         app.detail_view = DetailView::AiReview;
 
         app.handle_mouse(
@@ -2058,7 +2058,7 @@ review:
 
     #[test]
     fn diff_view_toggle_opens_and_closes_full_page() {
-        let mut app = TuiApp::from_repos(vec![repo("lachesi-hq", "lachesi")]);
+        let mut app = TuiApp::from_repos(vec![repo("delaudio", "norn")]);
 
         app.handle_key(KeyCode::Char('g'));
         assert_eq!(app.detail_view, DetailView::Diff);
@@ -2071,7 +2071,7 @@ review:
 
     #[test]
     fn diff_view_selection_moves_between_files() {
-        let mut app = TuiApp::from_repos(vec![repo("lachesi-hq", "lachesi")]);
+        let mut app = TuiApp::from_repos(vec![repo("delaudio", "norn")]);
         app.detail_view = DetailView::Diff;
         app.focus = FocusPane::Diff;
         app.diff =
@@ -2087,7 +2087,7 @@ review:
 
     #[test]
     fn diff_view_mode_toggle_cycles_between_unified_and_split() {
-        let mut app = TuiApp::from_repos(vec![repo("lachesi-hq", "lachesi")]);
+        let mut app = TuiApp::from_repos(vec![repo("delaudio", "norn")]);
         app.diff_scroll = 12;
 
         app.handle_key(KeyCode::Char('u'));
@@ -2102,7 +2102,7 @@ review:
 
     #[test]
     fn running_review_marker_is_removed_when_review_finishes() {
-        let mut app = TuiApp::from_repos(vec![repo("lachesi-hq", "lachesi")]);
+        let mut app = TuiApp::from_repos(vec![repo("delaudio", "norn")]);
 
         app.mark_ai_review_running(7);
         assert_eq!(app.ai_review_running_pr_ids, vec![7]);
@@ -2116,7 +2116,7 @@ review:
 
     #[test]
     fn stale_marker_snapshots_cannot_erase_newer_local_state() {
-        let mut app = TuiApp::from_repos(vec![repo("lachesi-hq", "lachesi")]);
+        let mut app = TuiApp::from_repos(vec![repo("delaudio", "norn")]);
         app.repo_request_id = 4;
         app.marker_generation = 1;
         app.mark_ai_review_running(7);
@@ -2139,7 +2139,7 @@ review:
 
     #[test]
     fn copies_loaded_ai_review_output_without_visible_wrapping() {
-        let mut app = TuiApp::from_repos(vec![repo("lachesi-hq", "lachesi")]);
+        let mut app = TuiApp::from_repos(vec![repo("delaudio", "norn")]);
         app.ai_review_output = Some("full markdown\nwith second line".to_string());
         app.ai_review_load = LoadState::Ready;
         let mut copied = String::new();
@@ -2156,7 +2156,7 @@ review:
 
     #[test]
     fn copy_review_reports_missing_output() {
-        let mut app = TuiApp::from_repos(vec![repo("lachesi-hq", "lachesi")]);
+        let mut app = TuiApp::from_repos(vec![repo("delaudio", "norn")]);
         app.ai_review_load = LoadState::Ready;
 
         app.copy_loaded_ai_review_output_with(|_| Err("should not copy".to_string()));
@@ -2167,7 +2167,7 @@ review:
 
     #[test]
     fn copy_review_rejects_output_from_the_previous_pr_while_loading() {
-        let mut app = TuiApp::from_repos(vec![repo("lachesi-hq", "lachesi")]);
+        let mut app = TuiApp::from_repos(vec![repo("delaudio", "norn")]);
         app.ai_review_output = Some("previous review".to_string());
         app.ai_review_load = LoadState::Loading;
         let mut copied = false;
@@ -2192,7 +2192,7 @@ review:
 
     #[test]
     fn mouse_wheel_scrolls_diff_view_without_switching_to_ai_review() {
-        let mut app = TuiApp::from_repos(vec![repo("lachesi-hq", "lachesi")]);
+        let mut app = TuiApp::from_repos(vec![repo("delaudio", "norn")]);
         app.detail_view = DetailView::Diff;
 
         app.handle_mouse(
@@ -2212,7 +2212,7 @@ review:
 
     #[test]
     fn composer_stages_local_draft_without_publishing() {
-        let mut app = TuiApp::from_repos(vec![repo("lachesi-hq", "lachesi")]);
+        let mut app = TuiApp::from_repos(vec![repo("delaudio", "norn")]);
         app.pull_requests.push(PullRequestSummary {
             id: 7,
             title: "Draftable".to_string(),
@@ -2406,7 +2406,7 @@ review:
         )
         .expect("write pack");
 
-        let mut repo = repo("lachesi-hq", "lachesi");
+        let mut repo = repo("delaudio", "norn");
         repo.local_path = Some(repo_path.display().to_string());
         let app = TuiApp::from_repos(vec![repo]);
 

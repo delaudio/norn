@@ -14,7 +14,7 @@ through Homebrew on clean machines.
 From a clean machine (no source checkout required):
 
 ```sh
-brew tap lachesi-hq/tap
+brew tap delaudio/tap
 brew install norn
 
 norn --version
@@ -69,7 +69,7 @@ and reinstall.
 
 ```sh
 brew tap --repair
-brew tap reset lachesi-hq/tap <tap-commit-sha>
+brew tap reset delaudio/tap <tap-commit-sha>
 brew install delaudio/tap/norn
 ```
 

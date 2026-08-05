@@ -2597,7 +2597,7 @@ profiles:
         let partial_identity = parse_review_args(&[
             "review".to_string(),
             "--workspace".to_string(),
-            "lachesi-hq".to_string(),
+            "delaudio".to_string(),
         ])
         .expect_err("partial repository identity must be rejected");
         assert!(partial_identity.contains("provided together"));

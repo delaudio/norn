@@ -10,7 +10,7 @@ const terminalOptions: ReviewTerminalOption[] = [
 
 const repos: RepoRef[] = [
   { provider: "bitbucket", workspace: "example-workspace", repo: "frontend-app" },
-  { provider: "github", workspace: "lachesi-hq", repo: "lachesi" },
+  { provider: "github", workspace: "delaudio", repo: "norn" },
 ];
 
 function renderSettings(onSave = vi.fn()) {
@@ -48,11 +48,11 @@ describe("SettingsDialog", () => {
     renderSettings(onSave);
 
     expect(screen.getByDisplayValue("example-workspace")).toBeVisible();
-    expect(screen.queryByDisplayValue("lachesi-hq")).not.toBeInTheDocument();
+    expect(screen.queryByDisplayValue("delaudio")).not.toBeInTheDocument();
 
     await user.selectOptions(screen.getByLabelText("Review provider"), "github");
     expect(screen.queryByDisplayValue("example-workspace")).not.toBeInTheDocument();
-    expect(screen.getByDisplayValue("lachesi-hq")).toBeVisible();
+    expect(screen.getByDisplayValue("delaudio")).toBeVisible();
 
     await user.type(screen.getByLabelText("GitHub token"), "test-token");
     await user.click(screen.getByRole("button", { name: "Save" }));
@@ -69,8 +69,8 @@ describe("SettingsDialog", () => {
           }),
           expect.objectContaining({
             provider: "github",
-            workspace: "lachesi-hq",
-            repo: "lachesi",
+            workspace: "delaudio",
+            repo: "norn",
           }),
         ]),
       }),

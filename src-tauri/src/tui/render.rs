@@ -2464,8 +2464,8 @@ mod tests {
         let repos = vec![
             RepoRef {
                 provider: ReviewProvider::Github,
-                workspace: "lachesi-hq".to_string(),
-                repo: "lachesi".to_string(),
+                workspace: "delaudio".to_string(),
+                repo: "norn".to_string(),
                 local_path: None,
             },
             RepoRef {

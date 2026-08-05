@@ -1417,28 +1417,28 @@ mod tests {
     fn cwd_fallback_requires_matching_repository_identity() {
         let identity = RepoRef {
             provider: ReviewProvider::Github,
-            workspace: "lachesi-hq".to_string(),
-            repo: "lachesi".to_string(),
+            workspace: "delaudio".to_string(),
+            repo: "norn".to_string(),
             local_path: Some("/tmp/lachesi".to_string()),
         };
 
         assert!(repo_identity_matches_target(
             &identity,
             Some(ReviewProvider::Github),
-            "lachesi-hq",
-            "lachesi",
+            "delaudio",
+            "norn",
         ));
         assert!(!repo_identity_matches_target(
             &identity,
             Some(ReviewProvider::Bitbucket),
-            "lachesi-hq",
-            "lachesi",
+            "delaudio",
+            "norn",
         ));
         assert!(!repo_identity_matches_target(
             &identity,
             Some(ReviewProvider::Github),
             "other",
-            "lachesi",
+            "norn",
         ));
     }
 
@@ -1453,7 +1453,7 @@ mod tests {
                 repo_path: None,
                 scope,
                 base: None,
-                workspace: Some("lachesi-hq".to_string()),
+                workspace: Some("delaudio".to_string()),
                 repo: Some("norn".to_string()),
                 pr_id: None,
                 provider: Some(ReviewProvider::Github),
@@ -1466,7 +1466,7 @@ mod tests {
 
             assert_eq!(
                 requested_repo_identity(&request),
-                Some(("lachesi-hq", "norn"))
+                Some(("delaudio", "norn"))
             );
         }
     }
@@ -1488,7 +1488,7 @@ mod tests {
             scope: ReviewScope::Branch,
             base: Some("HEAD".to_string()),
             workspace: Some("different-workspace".to_string()),
-            repo: Some("lachesi".to_string()),
+            repo: Some("norn".to_string()),
             pr_id: None,
             provider: Some(ReviewProvider::Github),
             profile: None,
@@ -1512,7 +1512,7 @@ mod tests {
             repo_path: None,
             scope: ReviewScope::WorkingTree,
             base: None,
-            workspace: Some("lachesi-hq".to_string()),
+            workspace: Some("delaudio".to_string()),
             repo: None,
             pr_id: None,
             provider: None,
@@ -1568,8 +1568,8 @@ mod tests {
             id: "run-1".to_string(),
             schema_version: "v0.1".to_string(),
             provider: ReviewRunProvider::Github,
-            workspace: "lachesi-hq".to_string(),
-            repo: "lachesi".to_string(),
+            workspace: "delaudio".to_string(),
+            repo: "norn".to_string(),
             pr_id: 0,
             source_branch: "feature".to_string(),
             destination_branch: "main".to_string(),
@@ -1619,8 +1619,8 @@ mod tests {
             target: HeadlessReviewTarget {
                 scope: "pr".to_string(),
                 repo_path: "/tmp/lachesi".to_string(),
-                workspace: Some("lachesi-hq".to_string()),
-                repo: "lachesi".to_string(),
+                workspace: Some("delaudio".to_string()),
+                repo: "norn".to_string(),
                 pr_id: Some(42),
                 source: "feature".to_string(),
                 destination: "main".to_string(),
@@ -1629,8 +1629,8 @@ mod tests {
                 id: "run-1".to_string(),
                 schema_version: "v0.1".to_string(),
                 provider: ReviewRunProvider::Github,
-                workspace: "lachesi-hq".to_string(),
-                repo: "lachesi".to_string(),
+                workspace: "delaudio".to_string(),
+                repo: "norn".to_string(),
                 pr_id: 42,
                 source_branch: "feature".to_string(),
                 destination_branch: "main".to_string(),

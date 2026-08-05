@@ -18,7 +18,7 @@ export const mockConfig: AppConfig = {
       localPath: "/Users/alex/dev/example/frontend-app",
     },
     { provider: "bitbucket", workspace: "example-workspace", repo: "backend-api", localPath: null },
-    { provider: "github", workspace: "lachesi-hq", repo: "lachesi", localPath: null },
+    { provider: "github", workspace: "delaudio", repo: "norn", localPath: null },
   ],
   reviewProvider: "bitbucket",
   defaultDiffView: "unified",
