@@ -16,6 +16,7 @@ use crossterm::event::{self, Event, KeyCode, MouseButton, MouseEvent, MouseEvent
 
 use crate::config::{self, AiProvider, AppConfig, RepoRef};
 use crate::readiness::{self, ReadinessIssueSeverity, ReadinessStatus};
+use crate::repo_config;
 use crate::services::bitbucket::{
     create_general_comment_native, get_pr_file_preview_native,
     get_stable_pull_request_review_snapshot_native, validate_repo_review_config_native, PrComment,
@@ -121,6 +122,26 @@ fn run_tui_preflight(resolve_current_repo: bool, cwd: &Path) -> Result<(), Strin
         eprintln!("Run `norn doctor --repo-path .` for full diagnostics.");
         eprintln!("Use `norn-tui --skip-readiness` only if setup must be deferred.");
         return Err("Readiness preflight failed; complete machine/repository setup before starting the TUI.".to_string());
+    }
+
+    if resolve_current_repo {
+        if let Some(git_root) = &report.repository.gitRoot {
+            let repo_root = Path::new(git_root);
+            if let Ok(Some(_action)) = repo_config::default_init_action_if_needed(repo_root) {
+                match repo_config::write_default_repo_config_if_missing(repo_root) {
+                    Ok(was_written) => {
+                        if was_written {
+                            eprintln!(
+                                "norn-tui created a default .norn.yaml for first-time onboarding."
+                            );
+                        }
+                    }
+                    Err(error) => {
+                        eprintln!("norn-tui could not create default .norn.yaml yet: {error}");
+                    }
+                }
+            }
+        }
     }
 
     let warning_count = report
@@ -1685,6 +1706,59 @@ mod tests {
         std::fs::create_dir_all(&repo).unwrap();
 
         assert!(run_tui_preflight(false, &repo).is_ok());
+    }
+
+    #[test]
+    fn tui_preflight_autocreates_default_repo_config_for_current_repo() {
+        let repo = temp_repo_path("autoinit");
+        std::fs::create_dir_all(&repo).unwrap();
+        assert!(std::process::Command::new("/usr/bin/git")
+            .arg("-C")
+            .arg(&repo)
+            .args(["init", "--initial-branch", "main"])
+            .status()
+            .expect("git init")
+            .success());
+        std::fs::write(repo.join("README.md"), "repo\n").expect("write readme");
+        assert!(std::process::Command::new("/usr/bin/git")
+            .arg("-C")
+            .arg(&repo)
+            .args(["add", "README.md"])
+            .status()
+            .expect("git add")
+            .success());
+        assert!(std::process::Command::new("/usr/bin/git")
+            .arg("-C")
+            .arg(&repo)
+            .args([
+                "-c",
+                "user.email=ci@example.com",
+                "-c",
+                "user.name=CI",
+                "commit",
+                "-m",
+                "init",
+            ])
+            .status()
+            .expect("git commit")
+            .success());
+        assert!(std::process::Command::new("/usr/bin/git")
+            .arg("-C")
+            .arg(&repo)
+            .args([
+                "remote",
+                "add",
+                "origin",
+                "https://github.com/example/repo.git",
+            ])
+            .status()
+            .expect("git remote add")
+            .success());
+
+        assert!(run_tui_preflight(true, &repo).is_ok());
+        let config = std::fs::read_to_string(repo.join(".norn.yaml")).expect("default config");
+        assert!(config.contains("version: 0.1"));
+        assert!(config.contains("review:\n  mode: balanced"));
     }
 
     #[test]

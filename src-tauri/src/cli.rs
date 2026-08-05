@@ -626,13 +626,35 @@ fn run_init(args: InitArgs, stdout: &mut dyn Write, stderr: &mut dyn Write) -> i
         return 2;
     }
 
-    let result = match repo_config::migrate_repository_config(&args.repo_path, args.dry_run) {
+    let mut result = match repo_config::migrate_repository_config(&args.repo_path, args.dry_run) {
         Ok(result) => result,
         Err(error) => {
             let _ = writeln!(stderr, "{error}");
             return 2;
         }
     };
+
+    match repo_config::default_init_action_if_needed(&args.repo_path) {
+        Ok(Some(action)) => {
+            if args.yes && !args.dry_run {
+                if let Err(error) =
+                    repo_config::write_default_repo_config_if_missing(&args.repo_path)
+                {
+                    let _ = writeln!(
+                        stderr,
+                        "Failed to create default repository config: {error}"
+                    );
+                    return 2;
+                }
+            }
+            result.actions.push(action);
+        }
+        Ok(None) => {}
+        Err(error) => {
+            let _ = writeln!(stderr, "{error}");
+            return 2;
+        }
+    }
 
     let output = InitOutput {
         schema_version: "norn.init.v1",
@@ -1741,6 +1763,85 @@ mod tests {
         let output: Value = serde_json::from_slice(&stdout).expect("json output");
         assert_eq!(output["dryRun"], true);
         assert!(output["actions"].as_array().expect("actions").len() > 0);
+        let _ = fs::remove_dir_all(repo);
+    }
+
+    #[test]
+    fn init_run_dry_run_suggests_default_repo_config_when_missing() {
+        let repo = temp_repo();
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+        let code = run_args(
+            &[
+                "init".to_string(),
+                "--repo-path".to_string(),
+                repo.to_string_lossy().to_string(),
+                "--dry-run".to_string(),
+                "--json".to_string(),
+            ],
+            &mut stdout,
+            &mut stderr,
+        );
+
+        assert_eq!(code, 0);
+        assert!(!repo.join(".norn.yaml").exists());
+        assert!(stderr.is_empty());
+
+        let output: Value = serde_json::from_slice(&stdout).expect("json output");
+        let actions = output["actions"].as_array().expect("actions");
+        let default_init_action = actions.iter().find(|action| {
+            action["target"]
+                .as_str()
+                .is_some_and(|target| target.ends_with(".norn.yaml"))
+                && action["kind"].as_str() == Some("file")
+        });
+        assert!(default_init_action.is_some());
+        let _ = fs::remove_dir_all(repo);
+    }
+
+    #[test]
+    fn init_run_yes_writes_default_repo_config() {
+        let repo = temp_repo();
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+        let code = run_args(
+            &[
+                "init".to_string(),
+                "--repo-path".to_string(),
+                repo.to_string_lossy().to_string(),
+                "--yes".to_string(),
+            ],
+            &mut stdout,
+            &mut stderr,
+        );
+
+        assert_eq!(code, 0);
+        assert!(repo.join(".norn.yaml").exists());
+        assert!(stderr.is_empty());
+        let contents = fs::read_to_string(repo.join(".norn.yaml")).expect("config contents");
+        assert!(contents.contains("version: 0.1"));
+        assert!(contents.contains("review:\n  mode: balanced"));
+        assert!(String::from_utf8_lossy(&stdout).contains("Migration applied."));
+
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+        let code = run_args(
+            &[
+                "init".to_string(),
+                "--repo-path".to_string(),
+                repo.to_string_lossy().to_string(),
+                "--yes".to_string(),
+                "--json".to_string(),
+            ],
+            &mut stdout,
+            &mut stderr,
+        );
+
+        assert_eq!(code, 0);
+        let output: Value = serde_json::from_slice(&stdout).expect("json output");
+        assert_eq!(output["dryRun"], false);
+        assert!(output["actions"].as_array().expect("actions").is_empty());
+        assert!(stderr.is_empty());
         let _ = fs::remove_dir_all(repo);
     }
 

@@ -14,6 +14,7 @@ const CONFIG_DIR: &str = ".norn";
 const LEGACY_CONFIG_DIR: &str = ".lachesi";
 const LOCAL_CONFIG_FILE: &str = ".norn.local.yaml";
 const LEGACY_LOCAL_CONFIG_FILE: &str = ".lachesi.local.yaml";
+const DEFAULT_REPO_INIT_CONFIG_FILE: &str = ".norn.yaml";
 const SUPPORTED_VERSION: &str = "0.1";
 
 #[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq)]
@@ -390,7 +391,15 @@ fn is_config_dir_source(path: &Path) -> bool {
     )
 }
 
-fn discover_repo_config_source(repo_path: &Path) -> Result<Option<PathBuf>, String> {
+fn render_default_repo_config_contents() -> String {
+    format!("version: {SUPPORTED_VERSION}\nreview:\n  mode: balanced\n")
+}
+
+pub(crate) fn discover_repo_config_source(path: &Path) -> Result<Option<PathBuf>, String> {
+    discover_repo_config_source_inner(path)
+}
+
+fn discover_repo_config_source_inner(repo_path: &Path) -> Result<Option<PathBuf>, String> {
     let canonical_file = repo_path.join(CONFIG_FILE);
     let canonical_dir = repo_path.join(CONFIG_DIR);
     let legacy_file = repo_path.join(LEGACY_CONFIG_FILE);
@@ -426,6 +435,91 @@ fn discover_repo_config_source(repo_path: &Path) -> Result<Option<PathBuf>, Stri
         )),
         (Some(path), None) | (None, Some(path)) => Ok(Some(path)),
         (None, None) => Ok(None),
+    }
+}
+
+pub(crate) fn default_init_action_if_needed(
+    repo_path: &Path,
+) -> Result<Option<RepoConfigMigrationAction>, String> {
+    let config_source = discover_repo_config_source_inner(repo_path)?;
+    if config_source.is_some() {
+        return Ok(None);
+    }
+
+    let default_target = repo_path.join(DEFAULT_REPO_INIT_CONFIG_FILE);
+    if default_target.exists() {
+        return Ok(None);
+    }
+
+    Ok(Some(RepoConfigMigrationAction {
+        source: String::from("<norn-init-template>"),
+        target: default_target.display().to_string(),
+        kind: "file".to_string(),
+        content_changes: vec![
+            "Create a default .norn.yaml from repository evidence and stable defaults.".to_string(),
+        ],
+    }))
+}
+
+pub(crate) fn write_default_repo_config_if_missing(repo_path: &Path) -> Result<bool, String> {
+    if !repo_path.is_dir() {
+        return Err(format!(
+            "Repository path does not exist or is not a directory: {}",
+            repo_path.display()
+        ));
+    }
+
+    let target = repo_path.join(DEFAULT_REPO_INIT_CONFIG_FILE);
+    if target.exists() {
+        return Ok(false);
+    }
+
+    let parent = target.parent().ok_or_else(|| {
+        format!(
+            "Default repo config target has no parent: {}",
+            target.display()
+        )
+    })?;
+    let contents = render_default_repo_config_contents();
+    let mut temporary = tempfile::Builder::new()
+        .prefix(".norn-repo-init-")
+        .tempfile_in(parent)
+        .map_err(|error| {
+            format!(
+                "Failed to stage default repository config at {}: {error}",
+                target.display()
+            )
+        })?;
+    temporary.write_all(contents.as_bytes()).map_err(|error| {
+        format!(
+            "Failed to stage default repository config at {}: {error}",
+            target.display()
+        )
+    })?;
+    set_staged_file_permissions(temporary.as_file(), None, &target).map_err(|error| {
+        format!(
+            "Failed to stage default repository config at {}: {error}",
+            target.display()
+        )
+    })?;
+    temporary.as_file().sync_all().map_err(|error| {
+        format!(
+            "Failed to persist default repository config at {}: {error}",
+            target.display()
+        )
+    })?;
+    match temporary.persist_noclobber(&target) {
+        Ok(_) => Ok(true),
+        Err(error) => {
+            if target.exists() {
+                return Ok(false);
+            }
+            Err(format!(
+                "Failed to write default repository config at {}: {}",
+                target.display(),
+                error.error
+            ))
+        }
     }
 }
 
@@ -2018,9 +2112,10 @@ fn collect_forbidden_fields(
 #[cfg(test)]
 mod tests {
     use super::{
-        finalize_resolved_config, load_from_repo_path, load_from_str, load_local_policy_layer,
-        load_repository_policy_layer, migrate_repository_config, validate_external_config_layer,
-        RepoReviewConfig, RepoReviewConfigLoadResult,
+        default_init_action_if_needed, finalize_resolved_config, load_from_repo_path,
+        load_from_str, load_local_policy_layer, load_repository_policy_layer,
+        migrate_repository_config, validate_external_config_layer,
+        write_default_repo_config_if_missing, RepoReviewConfig, RepoReviewConfigLoadResult,
     };
     use std::fs;
     use std::path::{Path, PathBuf};
@@ -2058,6 +2153,34 @@ mod tests {
         assert!(result.config.is_none());
         assert!(result.warnings.is_empty());
         assert!(result.errors.is_empty());
+        let _ = fs::remove_dir_all(repo);
+    }
+
+    #[test]
+    fn default_init_action_is_suggested_for_fresh_repository() {
+        let repo = temp_repo();
+        let action = default_init_action_if_needed(&repo).expect("proposal");
+        assert!(action.is_some());
+        let action = action.expect("fresh repo action");
+        assert_eq!(action.kind, "file");
+        assert!(action.source == "<norn-init-template>");
+        assert!(action.target.ends_with(".norn.yaml"));
+
+        let _ = fs::remove_dir_all(repo);
+    }
+
+    #[test]
+    fn write_default_repo_config_is_created_once() {
+        let repo = temp_repo();
+        assert!(!repo.join(".norn.yaml").exists());
+
+        assert!(write_default_repo_config_if_missing(&repo).expect("first write"));
+        assert!(repo.join(".norn.yaml").exists());
+        let contents = fs::read_to_string(repo.join(".norn.yaml")).expect("written config");
+        assert!(contents.contains("version: 0.1"));
+        assert!(contents.contains("review:\n  mode: balanced"));
+
+        assert!(!write_default_repo_config_if_missing(&repo).expect("second write"));
         let _ = fs::remove_dir_all(repo);
     }
 
