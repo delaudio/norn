@@ -16,11 +16,11 @@ export default defineConfig({
         {
           icon: "github",
           label: "GitHub",
-          href: "https://github.com/lachesi-hq/norn",
+          href: "https://github.com/delaudio/norn",
         },
       ],
       editLink: {
-        baseUrl: "https://github.com/lachesi-hq/norn/edit/main/apps/docs/",
+        baseUrl: "https://github.com/delaudio/norn/edit/main/apps/docs/",
       },
       sidebar: [
         {

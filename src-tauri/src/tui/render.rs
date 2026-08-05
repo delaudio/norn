@@ -2178,8 +2178,8 @@ mod tests {
         let mut terminal = Terminal::new(backend).expect("terminal");
         let repos = vec![RepoRef {
             provider: ReviewProvider::Github,
-            workspace: "lachesi-hq".to_string(),
-            repo: "lachesi".to_string(),
+            workspace: "delaudio".to_string(),
+            repo: "norn".to_string(),
             local_path: Some("/tmp/lachesi".to_string()),
         }];
         let pull_requests = vec![PullRequestSummary {
@@ -2235,7 +2235,7 @@ mod tests {
             .expect("draw");
 
         let text = buffer_text(&terminal);
-        assert!(text.contains("github lachesi-hq/norn"));
+        assert!(text.contains("github delaudio/norn"));
         assert!(text.contains("/tmp/lachesi"));
         assert!(text.contains("PR filter"));
         assert!(text.contains("[Open]"));

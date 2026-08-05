@@ -2,10 +2,10 @@ cask "norn" do
   version "0.1.0"
   sha256 :no_check
 
-  url "https://github.com/lachesi-hq/norn/releases/download/v#{version}/Norn-#{version}-universal.dmg"
+  url "https://github.com/delaudio/norn/releases/download/v#{version}/Norn-#{version}-universal.dmg"
   name "Norn"
   desc "Local-first pull request review with AI-assisted workflow"
-  homepage "https://github.com/lachesi-hq/norn"
+  homepage "https://github.com/delaudio/norn"
 
   app "Norn.app"
 

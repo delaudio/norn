@@ -61,7 +61,7 @@ revision from Homebrew history.
 
 ```sh
 brew uninstall norn
-brew install lachesi-hq/tap/norn
+brew install delaudio/tap/norn
 ```
 
 If a specific prior version is required, pin the tap to the older formula commit
@@ -70,7 +70,7 @@ and reinstall.
 ```sh
 brew tap --repair
 brew tap reset lachesi-hq/tap <tap-commit-sha>
-brew install lachesi-hq/tap/norn
+brew install delaudio/tap/norn
 ```
 
 ## Desktop cask path

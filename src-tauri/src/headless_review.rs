@@ -1480,7 +1480,7 @@ mod tests {
                 "remote",
                 "add",
                 "origin",
-                "git@github.com:lachesi-hq/norn.git",
+                "git@github.com:delaudio/norn.git",
             ],
         );
         let request = HeadlessReviewRequest {

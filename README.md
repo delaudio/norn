@@ -1,6 +1,6 @@
 # Norn
 
-[![Release][Release]](https://github.com/lachesi-hq/norn/releases)
+[![Release][Release]](https://github.com/delaudio/norn/releases)
 [![CI][CI]][CI Workflow]
 [![Contributing][Contributing]][Issues]
 
@@ -53,7 +53,7 @@ desktop and headless paths, not as ad-hoc one-off scripts.
 By default, install with Homebrew:
 
 ```sh
-brew tap lachesi-hq/tap
+brew tap delaudio/tap
 brew install norn
 ```
 
@@ -276,8 +276,8 @@ For security concerns, use `SECURITY.md` procedures.
 
 Norn is released under the license in `LICENSE`.
 
-[Release]: https://img.shields.io/github/v/release/lachesi-hq/norn?label=Norn&sort=semver
-[CI]: https://github.com/lachesi-hq/norn/actions/workflows/release-norn-macos.yml/badge.svg
-[CI Workflow]: https://github.com/lachesi-hq/norn/actions/workflows/release-norn-macos.yml
+[Release]: https://img.shields.io/github/v/release/delaudio/norn?label=Norn&sort=semver
+[CI]: https://github.com/delaudio/norn/actions/workflows/release-norn-macos.yml/badge.svg
+[CI Workflow]: https://github.com/delaudio/norn/actions/workflows/release-norn-macos.yml
 [Contributing]: https://img.shields.io/badge/CONTRIBUTING-guidelines-0ea5e9?logo=github&style=flat-square
-[Issues]: https://github.com/lachesi-hq/norn/issues
+[Issues]: https://github.com/delaudio/norn/issues

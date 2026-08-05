@@ -390,10 +390,10 @@ mod tests {
     #[test]
     fn parses_github_and_bitbucket_remote_urls() {
         assert_eq!(
-            parse_git_remote("git@github.com:lachesi-hq/norn.git").unwrap(),
+            parse_git_remote("git@github.com:delaudio/norn.git").unwrap(),
             (
                 ReviewProvider::Github,
-                "lachesi-hq".to_string(),
+                "delaudio".to_string(),
                 "norn".to_string()
             )
         );
@@ -406,10 +406,10 @@ mod tests {
             )
         );
         assert_eq!(
-            parse_git_remote("ssh://git@github.com/lachesi-hq/norn.git").unwrap(),
+            parse_git_remote("ssh://git@github.com/delaudio/norn.git").unwrap(),
             (
                 ReviewProvider::Github,
-                "lachesi-hq".to_string(),
+                "delaudio".to_string(),
                 "norn".to_string()
             )
         );
@@ -436,14 +436,14 @@ mod tests {
             .arg("remote")
             .arg("add")
             .arg("origin")
-            .arg("git@github.com:lachesi-hq/norn.git")
+            .arg("git@github.com:delaudio/norn.git")
             .output()
             .expect("git remote add");
 
         let resolved = resolve_current_repo_from_dir(&path).expect("current repo");
 
         assert_eq!(resolved.provider, ReviewProvider::Github);
-        assert_eq!(resolved.workspace, "lachesi-hq");
+        assert_eq!(resolved.workspace, "delaudio");
         assert_eq!(resolved.repo, "norn");
         assert_eq!(
             fs::canonicalize(resolved.local_path.as_deref().unwrap()).expect("resolved path"),
@@ -469,14 +469,14 @@ mod tests {
                 "remote",
                 "add",
                 "origin",
-                "git@github.com:lachesi-hq/norn.git",
+                "git@github.com:delaudio/norn.git",
             ])
             .output()
             .expect("git remote add");
         let cfg = config::AppConfig {
             repos: vec![config::RepoRef {
                 provider: ReviewProvider::Github,
-                workspace: "lachesi-hq".to_string(),
+                workspace: "delaudio".to_string(),
                 repo: "norn".to_string(),
                 local_path: Some(path.display().to_string()),
             }],
@@ -487,7 +487,7 @@ mod tests {
         let resolved = resolve_local_repo_for_provider_with_config(
             &cfg,
             ReviewProvider::Github,
-            "lachesi-hq",
+            "delaudio",
             "norn",
         )
         .expect("configured GitHub repo");
