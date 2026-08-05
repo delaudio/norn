@@ -1684,6 +1684,21 @@ mod tests {
     }
 
     #[test]
+    fn init_run_requires_yes_for_guided_mode() {
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+        let code = run_args(
+            &["init".to_string(), "--guided".to_string()],
+            &mut stdout,
+            &mut stderr,
+        );
+
+        assert_eq!(code, 2);
+        let stderr = String::from_utf8(stderr).expect("stderr");
+        assert!(stderr.contains("Guided mode requires `--yes`"));
+    }
+
+    #[test]
     fn setup_parser_rejects_unknown_options() {
         let error = parse_setup_args(&["setup".to_string(), "--mystery".to_string()])
             .expect_err("unknown setup flag should fail");
