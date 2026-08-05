@@ -20,6 +20,13 @@ fn entry_for_service(service: &str, account: &str) -> Result<Entry, String> {
     Entry::new(service, account).map_err(|e| e.to_string())
 }
 
+fn keychain_secret_no_copy(service: &str, account: &str) -> Option<String> {
+    entry_for_service(service, account)
+        .ok()?
+        .get_password()
+        .ok()
+}
+
 #[derive(Default, Deserialize)]
 struct TerminalConfig {
     credentials: Option<TerminalCredentialConfig>,
@@ -154,6 +161,45 @@ fn bitbucket_from_terminal_config(config: &TerminalConfig) -> Option<Credentials
 fn github_from_terminal_config(config: &TerminalConfig) -> Option<String> {
     let github = config.credentials.as_ref()?.github.as_ref()?;
     configured_env_value(github.token_env.as_deref())
+}
+
+pub fn has_bitbucket_credential_source() -> bool {
+    let mut valid_secret = false;
+    for service in [SERVICE, LEGACY_SERVICE] {
+        if let Some(secret) = keychain_secret_no_copy(service, ACCOUNT) {
+            if serde_json::from_str::<Credentials>(&secret)
+                .is_ok_and(|cred| !cred.username.is_empty() && !cred.token.is_empty())
+            {
+                valid_secret = true;
+                break;
+            }
+        }
+    }
+    if valid_secret {
+        return true;
+    }
+
+    let config = load_terminal_config();
+    if let Some(creds) = bitbucket_from_terminal_config(&config) {
+        return !creds.username.is_empty() && !creds.token.is_empty();
+    }
+
+    let username = std::env::var("BITBUCKET_USERNAME").ok();
+    let token = std::env::var("BITBUCKET_TOKEN").ok();
+    username.is_some_and(|username| !username.is_empty())
+        && token.is_some_and(|token| !token.is_empty())
+}
+
+pub fn has_github_credential_source() -> bool {
+    if keychain_secret_no_copy(SERVICE, ACCOUNT_GITHUB).is_some() {
+        return true;
+    }
+    if keychain_secret_no_copy(LEGACY_SERVICE, ACCOUNT_GITHUB).is_some() {
+        return true;
+    }
+    let config = load_terminal_config();
+    github_from_terminal_config(&config).is_some()
+        || std::env::var("GITHUB_TOKEN").is_ok_and(|token| !token.is_empty())
 }
 
 /// Resolve credentials: keychain first, terminal config env refs, then

@@ -1,9 +1,11 @@
 use std::io::{self, Write};
 use std::path::PathBuf;
+use std::process::Command;
 
 use serde::Serialize;
 
 use crate::config::{AiProvider, ReviewProvider};
+use crate::credentials;
 use crate::headless_review::{self, HeadlessReviewRequest, ReviewScope};
 use crate::readiness;
 use crate::repo_config::{self, LoadedPolicyPack, RepoConfigValidationMessage};
@@ -62,6 +64,28 @@ struct ConfigMigrateArgs {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+struct SetupArgs {
+    format: OutputFormat,
+    dry_run: bool,
+    yes: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum InitMode {
+    Quick,
+    Guided,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct InitArgs {
+    repo_path: PathBuf,
+    mode: InitMode,
+    dry_run: bool,
+    yes: bool,
+    format: OutputFormat,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct MetricsArgs {
     filter: ReviewEffectivenessFilter,
     format: OutputFormat,
@@ -87,6 +111,46 @@ struct ConfigValidateOutput {
     loaded_policy_packs: Vec<LoadedPolicyPack>,
     warnings: Vec<RepoConfigValidationMessage>,
     errors: Vec<RepoConfigValidationMessage>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SetupOutput {
+    schema_version: &'static str,
+    selected_ai_provider: String,
+    would_apply: bool,
+    config_path: String,
+    machine_tools: Vec<SetupToolReport>,
+    machine_credentials: Vec<SetupCredentialReport>,
+    setup_notes: Vec<String>,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SetupToolReport {
+    provider: String,
+    available: bool,
+    version: Option<String>,
+    required: bool,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SetupCredentialReport {
+    provider: String,
+    available: bool,
+    source: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct InitOutput {
+    schema_version: &'static str,
+    repo_path: String,
+    mode: &'static str,
+    dry_run: bool,
+    would_apply: bool,
+    actions: Vec<repo_config::RepoConfigMigrationAction>,
 }
 
 struct HeadlessDataDirGuard {
@@ -172,7 +236,9 @@ fn is_cli_command(args: &[String]) -> bool {
             "config"
                 | "doctor"
                 | "evaluate"
+                | "init"
                 | "metrics"
+                | "setup"
                 | "review"
                 | "service"
                 | "--help"
@@ -265,6 +331,20 @@ fn run_args(args: &[String], stdout: &mut dyn Write, stderr: &mut dyn Write) -> 
                 }
             }
         }
+        Some("setup") => match parse_setup_args(args) {
+            Ok(args) => run_setup(args, stdout, stderr),
+            Err(error) => {
+                let _ = writeln!(stderr, "{error}\n\n{}", usage());
+                2
+            }
+        },
+        Some("init") => match parse_init_args(args) {
+            Ok(args) => run_init(args, stdout, stderr),
+            Err(error) => {
+                let _ = writeln!(stderr, "{error}\n\n{}", usage());
+                2
+            }
+        },
         _ => match parse_config_validate_args(args) {
             Ok(args) => run_config_validate(args, stdout, stderr),
             Err(error) => {
@@ -295,6 +375,372 @@ fn parse_evaluate_args(args: &[String]) -> Result<EvaluateArgs, String> {
         index += 1;
     }
     Ok(parsed)
+}
+
+fn parse_setup_args(args: &[String]) -> Result<SetupArgs, String> {
+    if args.first().map(String::as_str) != Some("setup") {
+        return Err("Expected `norn setup`.".to_string());
+    }
+
+    let mut format = OutputFormat::Human;
+    let mut dry_run = false;
+    let mut yes = false;
+    let mut index = 1;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--format" => {
+                index += 1;
+                format = match args.get(index).map(String::as_str) {
+                    Some("human" | "text") => OutputFormat::Human,
+                    Some("json") => OutputFormat::Json,
+                    Some(_) => {
+                        return Err("`--format` must be `human`, `text`, or `json`.".to_string())
+                    }
+                    None => return Err("`--format` requires a value.".to_string()),
+                };
+            }
+            "--json" => format = OutputFormat::Json,
+            "--dry-run" => dry_run = true,
+            "--yes" => yes = true,
+            unknown => return Err(format!("Unknown option `{unknown}`.")),
+        }
+        index += 1;
+    }
+
+    if !dry_run && !yes {
+        dry_run = true;
+    }
+
+    Ok(SetupArgs {
+        format,
+        dry_run,
+        yes,
+    })
+}
+
+fn parse_init_args(args: &[String]) -> Result<InitArgs, String> {
+    if args.first().map(String::as_str) != Some("init") {
+        return Err("Expected `norn init`.".to_string());
+    }
+    let mut repo_path = PathBuf::from(".");
+    let mut mode = InitMode::Quick;
+    let mut dry_run = true;
+    let mut yes = false;
+    let mut format = OutputFormat::Human;
+    let mut index = 1;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--repo-path" => {
+                index += 1;
+                repo_path = PathBuf::from(
+                    args.get(index)
+                        .ok_or_else(|| "`--repo-path` requires a value.".to_string())?,
+                );
+            }
+            "--guided" => {
+                mode = InitMode::Guided;
+                dry_run = true;
+            }
+            "--quick" => mode = InitMode::Quick,
+            "--dry-run" => dry_run = true,
+            "--yes" => {
+                yes = true;
+                dry_run = false;
+            }
+            "--format" => {
+                index += 1;
+                format = match args.get(index).map(String::as_str) {
+                    Some("human" | "text") => OutputFormat::Human,
+                    Some("json") => OutputFormat::Json,
+                    Some(_) => {
+                        return Err("`--format` must be `human`, `text`, or `json`.".to_string())
+                    }
+                    None => return Err("`--format` requires a value.".to_string()),
+                };
+            }
+            "--json" => format = OutputFormat::Json,
+            unknown => return Err(format!("Unknown option `{unknown}`.")),
+        }
+        index += 1;
+    }
+    if !yes {
+        dry_run = true;
+    }
+
+    Ok(InitArgs {
+        repo_path,
+        mode,
+        dry_run,
+        yes,
+        format,
+    })
+}
+
+fn run_setup(args: SetupArgs, stdout: &mut dyn Write, stderr: &mut dyn Write) -> i32 {
+    let current = crate::config::load();
+    let tools = collect_setup_tools(current.ai_provider);
+    let selected_ai_provider = select_quick_ai_provider(&tools, current.ai_provider);
+    let mut notes = Vec::new();
+    if !args.yes && selected_ai_provider != current.ai_provider {
+        notes.push(format!(
+            "Quick default provider would be `{}`. Re-run with `--yes` to persist.",
+            selected_ai_provider.to_display_name()
+        ));
+    }
+
+    let has_setup_notes = !notes.is_empty();
+    let output = SetupOutput {
+        schema_version: "norn.setup.v1",
+        selected_ai_provider: selected_ai_provider.to_display_name().to_string(),
+        would_apply: args.yes && !args.dry_run,
+        config_path: config_path_display(),
+        machine_tools: tools.clone(),
+        machine_credentials: collect_setup_credentials(),
+        setup_notes: notes,
+    };
+
+    if args.format == OutputFormat::Json {
+        let rendered = match serde_json::to_string_pretty(&output) {
+            Ok(rendered) => rendered,
+            Err(error) => {
+                let _ = writeln!(stderr, "Failed to serialize setup output: {error}");
+                return 7;
+            }
+        };
+        let _ = writeln!(stdout, "{rendered}");
+    } else {
+        let _ = writeln!(
+            stdout,
+            "Norn setup proposal: use {} for local machine configuration.",
+            output.selected_ai_provider
+        );
+        let _ = writeln!(stdout, "Detected machine tooling:");
+        for tool in &output.machine_tools {
+            let status = if tool.available {
+                "available"
+            } else {
+                "missing"
+            };
+            let version = tool
+                .version
+                .clone()
+                .unwrap_or_else(|| "unavailable".to_string());
+            let _ = writeln!(stdout, "- {} ({status}) {version}", tool.provider);
+        }
+        let _ = writeln!(stdout, "Detected credential sources:");
+        for item in &output.machine_credentials {
+            let status = if item.available { "found" } else { "not found" };
+            let _ = writeln!(stdout, "- {}: {status} ({})", item.provider, item.source);
+        }
+        if output.would_apply {
+            let _ = writeln!(
+                stdout,
+                "Would apply provider selection to local app config."
+            );
+            if !args.yes {
+                let _ = writeln!(
+                    stdout,
+                    "Run with `--yes` (and default path) to persist this setup."
+                );
+            }
+        } else {
+            let _ = writeln!(stdout, "Run with `--yes` to persist this setup.");
+        }
+        if has_setup_notes {
+            for note in &output.setup_notes {
+                let _ = writeln!(stdout, "- {note}");
+            }
+        }
+    }
+
+    if args.yes && !args.dry_run && selected_ai_provider != current.ai_provider {
+        let mut updated = current;
+        updated.ai_provider = selected_ai_provider;
+        if let Err(error) = crate::config::save(&updated) {
+            let _ = writeln!(stderr, "Failed to persist setup config: {error}");
+            return 7;
+        }
+    }
+
+    if selected_ai_provider == AiProvider::Codex
+        && !output.machine_tools.iter().any(|tool| {
+            tool.provider == "codex"
+                && tool.available
+                && tool
+                    .version
+                    .as_ref()
+                    .is_some_and(|version| !version.is_empty())
+        })
+    {
+        1
+    } else if selected_ai_provider == AiProvider::Claude
+        && !output.machine_tools.iter().any(|tool| {
+            tool.provider == "claude"
+                && tool.available
+                && tool
+                    .version
+                    .as_ref()
+                    .is_some_and(|version| !version.is_empty())
+        })
+    {
+        1
+    } else {
+        0
+    }
+}
+
+fn run_init(args: InitArgs, stdout: &mut dyn Write, stderr: &mut dyn Write) -> i32 {
+    if args.mode == InitMode::Guided && !args.yes {
+        let _ = writeln!(
+            stderr,
+            "Guided mode requires `--yes` and is not interactive in this release."
+        );
+        return 2;
+    }
+
+    let result = match repo_config::migrate_repository_config(&args.repo_path, args.dry_run) {
+        Ok(result) => result,
+        Err(error) => {
+            let _ = writeln!(stderr, "{error}");
+            return 2;
+        }
+    };
+
+    let output = InitOutput {
+        schema_version: "norn.init.v1",
+        repo_path: result.repo_path,
+        mode: if args.mode == InitMode::Guided {
+            "guided"
+        } else {
+            "quick"
+        },
+        dry_run: args.dry_run,
+        would_apply: args.yes && !args.dry_run,
+        actions: result.actions,
+    };
+
+    if args.format == OutputFormat::Json {
+        let rendered = match serde_json::to_string_pretty(&output) {
+            Ok(rendered) => rendered,
+            Err(error) => {
+                let _ = writeln!(stderr, "Failed to serialize init output: {error}");
+                return 7;
+            }
+        };
+        let _ = writeln!(stdout, "{rendered}");
+    } else {
+        let _ = writeln!(stdout, "Norn repository init in `{}` mode", output.mode);
+        if output.actions.is_empty() {
+            let _ = writeln!(stdout, "No repository initialization actions needed.");
+        } else {
+            for action in output.actions.iter() {
+                let _ = writeln!(
+                    stdout,
+                    "- {} {} -> {}",
+                    action.kind, action.source, action.target
+                );
+                for change in &action.content_changes {
+                    let _ = writeln!(stdout, "  - {change}");
+                }
+            }
+            if output.dry_run {
+                let _ = writeln!(stdout, "Run `norn init --yes` to apply.");
+            }
+        }
+    }
+
+    0
+}
+
+fn detect_tool_version(provider: &str) -> Option<String> {
+    let output = Command::new(provider).arg("--version").output().ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    String::from_utf8(output.stdout)
+        .ok()
+        .map(|text| text.lines().next().unwrap_or_default().trim().to_string())
+        .filter(|text| !text.is_empty())
+}
+
+fn collect_setup_tools(selected: AiProvider) -> Vec<SetupToolReport> {
+    let codex = detect_tool_version("codex");
+    let claude = detect_tool_version("claude");
+    vec![
+        SetupToolReport {
+            provider: "codex".to_string(),
+            available: codex.is_some(),
+            version: codex,
+            required: selected == AiProvider::Codex,
+        },
+        SetupToolReport {
+            provider: "claude".to_string(),
+            available: claude.is_some(),
+            version: claude,
+            required: selected == AiProvider::Claude,
+        },
+    ]
+}
+
+fn select_quick_ai_provider(tools: &[SetupToolReport], configured: AiProvider) -> AiProvider {
+    if tools
+        .iter()
+        .any(|tool| tool.provider == "codex" && tool.available)
+    {
+        AiProvider::Codex
+    } else if tools
+        .iter()
+        .any(|tool| tool.provider == "claude" && tool.available)
+    {
+        AiProvider::Claude
+    } else {
+        configured
+    }
+}
+
+fn collect_setup_credentials() -> Vec<SetupCredentialReport> {
+    let github_available = credentials::has_github_credential_source();
+    let bitbucket_available = credentials::has_bitbucket_credential_source();
+    vec![
+        SetupCredentialReport {
+            provider: "github".to_string(),
+            available: github_available,
+            source: if github_available {
+                "keychain or env reference".to_string()
+            } else {
+                "none".to_string()
+            },
+        },
+        SetupCredentialReport {
+            provider: "bitbucket".to_string(),
+            available: bitbucket_available,
+            source: if bitbucket_available {
+                "keychain or env reference".to_string()
+            } else {
+                "none".to_string()
+            },
+        },
+    ]
+}
+
+fn config_path_display() -> String {
+    match dirs::config_dir() {
+        Some(dir) => dir.join("norn").join("settings.json").display().to_string(),
+        None => ".norn/settings.json".to_string(),
+    }
+}
+
+trait AiProviderName {
+    fn to_display_name(&self) -> &'static str;
+}
+
+impl AiProviderName for AiProvider {
+    fn to_display_name(&self) -> &'static str {
+        match self {
+            AiProvider::Claude => "claude",
+            AiProvider::Codex => "codex",
+        }
+    }
 }
 
 fn run_evaluate(args: EvaluateArgs, stdout: &mut dyn Write, stderr: &mut dyn Write) -> i32 {
@@ -1058,6 +1504,10 @@ Config validation:
 Config migration:
   norn config migrate [--repo-path <path>] [--dry-run]
                          [--format human|json] [--json]
+Onboarding:
+  norn setup [--format human|json] [--json] [--dry-run] [--yes]
+  norn init [--repo-path <path>] [--quick|--guided] [--dry-run] [--yes]
+              [--format human|json] [--json]
 Doctor:
   norn doctor [--repo-path <path>] [--machine-only]
               [--format human|json] [--json]"
@@ -1105,9 +1555,9 @@ The command exits 1 when a configured baseline regression is detected."
 #[cfg(test)]
 mod tests {
     use super::{
-        create_headless_data_dir, format_metrics_human, parse_evaluate_args, parse_metrics_args,
-        parse_review_args, review_needs_headless_storage, run_args, OutputFormat,
-        ReviewOutputFormat,
+        create_headless_data_dir, format_metrics_human, parse_evaluate_args, parse_init_args,
+        parse_metrics_args, parse_review_args, parse_setup_args, review_needs_headless_storage,
+        run_args, InitMode, OutputFormat, ReviewOutputFormat,
     };
     use crate::config::AiProvider;
     use crate::headless_review::ReviewScope;
@@ -1150,6 +1600,59 @@ mod tests {
                 .mode();
             assert_eq!(mode & 0o777, 0o700);
         }
+    }
+
+    #[test]
+    fn setup_args_accepts_formats_and_defaults_to_dry_run() {
+        let parsed =
+            parse_setup_args(&["setup".to_string(), "--json".to_string()]).expect("setup parse");
+
+        assert_eq!(parsed.format, OutputFormat::Json);
+        assert!(!parsed.yes);
+        assert!(parsed.dry_run);
+
+        let parsed = parse_setup_args(&["setup".to_string()]).expect("setup parse");
+
+        assert_eq!(parsed.format, OutputFormat::Human);
+        assert!(!parsed.yes);
+        assert!(parsed.dry_run);
+    }
+
+    #[test]
+    fn init_args_defaults_and_modes_are_parsed() {
+        let parsed = parse_init_args(&[
+            "init".to_string(),
+            "--repo-path".to_string(),
+            "/tmp/x".to_string(),
+        ])
+        .expect("init parse");
+
+        assert_eq!(parsed.repo_path, PathBuf::from("/tmp/x"));
+        assert_eq!(parsed.mode, InitMode::Quick);
+        assert!(parsed.dry_run);
+        assert!(!parsed.yes);
+        assert_eq!(parsed.format, OutputFormat::Human);
+
+        let parsed = parse_init_args(&[
+            "init".to_string(),
+            "--guided".to_string(),
+            "--yes".to_string(),
+            "--format".to_string(),
+            "json".to_string(),
+        ])
+        .expect("guided init parse");
+
+        assert_eq!(parsed.mode, InitMode::Guided);
+        assert!(!parsed.dry_run);
+        assert!(parsed.yes);
+        assert_eq!(parsed.format, OutputFormat::Json);
+    }
+
+    #[test]
+    fn setup_parser_rejects_unknown_options() {
+        let error = parse_setup_args(&["setup".to_string(), "--mystery".to_string()])
+            .expect_err("unknown setup flag should fail");
+        assert!(error.contains("Unknown option"));
     }
 
     #[test]
@@ -1355,6 +1858,33 @@ token: unsafe
         assert!(output.contains("\"valid\": false"));
         assert!(output.contains("looks like a credential"));
         let _ = fs::remove_dir_all(repo);
+    }
+
+    #[test]
+    fn init_json_report_includes_repository_path_and_mode() {
+        let repo = temp_repo();
+
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+        let code = run_args(
+            &[
+                "init".to_string(),
+                "--repo-path".to_string(),
+                repo.display().to_string(),
+                "--dry-run".to_string(),
+                "--json".to_string(),
+            ],
+            &mut stdout,
+            &mut stderr,
+        );
+
+        assert_eq!(code, 0);
+        assert!(stderr.is_empty());
+        let output: serde_json::Value = serde_json::from_slice(&stdout).expect("init json output");
+        assert_eq!(output["schemaVersion"], "norn.init.v1");
+        assert_eq!(output["repoPath"], repo.display().to_string());
+        assert_eq!(output["mode"], "quick");
+        assert_eq!(output["dryRun"], true);
     }
 
     #[test]
