@@ -390,11 +390,11 @@ mod tests {
     #[test]
     fn parses_github_and_bitbucket_remote_urls() {
         assert_eq!(
-            parse_git_remote("git@github.com:lachesi-hq/lachesi.git").unwrap(),
+            parse_git_remote("git@github.com:lachesi-hq/norn.git").unwrap(),
             (
                 ReviewProvider::Github,
                 "lachesi-hq".to_string(),
-                "lachesi".to_string()
+                "norn".to_string()
             )
         );
         assert_eq!(
@@ -406,11 +406,11 @@ mod tests {
             )
         );
         assert_eq!(
-            parse_git_remote("ssh://git@github.com/lachesi-hq/lachesi.git").unwrap(),
+            parse_git_remote("ssh://git@github.com/lachesi-hq/norn.git").unwrap(),
             (
                 ReviewProvider::Github,
                 "lachesi-hq".to_string(),
-                "lachesi".to_string()
+                "norn".to_string()
             )
         );
     }
@@ -436,7 +436,7 @@ mod tests {
             .arg("remote")
             .arg("add")
             .arg("origin")
-            .arg("git@github.com:lachesi-hq/lachesi.git")
+            .arg("git@github.com:lachesi-hq/norn.git")
             .output()
             .expect("git remote add");
 
@@ -444,7 +444,7 @@ mod tests {
 
         assert_eq!(resolved.provider, ReviewProvider::Github);
         assert_eq!(resolved.workspace, "lachesi-hq");
-        assert_eq!(resolved.repo, "lachesi");
+        assert_eq!(resolved.repo, "norn");
         assert_eq!(
             fs::canonicalize(resolved.local_path.as_deref().unwrap()).expect("resolved path"),
             fs::canonicalize(&path).expect("expected path")
@@ -469,7 +469,7 @@ mod tests {
                 "remote",
                 "add",
                 "origin",
-                "git@github.com:lachesi-hq/lachesi.git",
+                "git@github.com:lachesi-hq/norn.git",
             ])
             .output()
             .expect("git remote add");
@@ -477,7 +477,7 @@ mod tests {
             repos: vec![config::RepoRef {
                 provider: ReviewProvider::Github,
                 workspace: "lachesi-hq".to_string(),
-                repo: "lachesi".to_string(),
+                repo: "norn".to_string(),
                 local_path: Some(path.display().to_string()),
             }],
             review_provider: ReviewProvider::Bitbucket,
@@ -488,7 +488,7 @@ mod tests {
             &cfg,
             ReviewProvider::Github,
             "lachesi-hq",
-            "lachesi",
+            "norn",
         )
         .expect("configured GitHub repo");
 

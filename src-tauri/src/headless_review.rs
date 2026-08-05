@@ -1454,7 +1454,7 @@ mod tests {
                 scope,
                 base: None,
                 workspace: Some("lachesi-hq".to_string()),
-                repo: Some("lachesi".to_string()),
+                repo: Some("norn".to_string()),
                 pr_id: None,
                 provider: Some(ReviewProvider::Github),
                 profile: None,
@@ -1466,7 +1466,7 @@ mod tests {
 
             assert_eq!(
                 requested_repo_identity(&request),
-                Some(("lachesi-hq", "lachesi"))
+                Some(("lachesi-hq", "norn"))
             );
         }
     }
@@ -1480,7 +1480,7 @@ mod tests {
                 "remote",
                 "add",
                 "origin",
-                "git@github.com:lachesi-hq/lachesi.git",
+                "git@github.com:lachesi-hq/norn.git",
             ],
         );
         let request = HeadlessReviewRequest {

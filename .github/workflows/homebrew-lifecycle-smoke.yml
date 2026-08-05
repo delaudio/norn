@@ -49,7 +49,7 @@ jobs:
             exit 1
           fi
 
-          BASE_URL="https://github.com/lachesi-hq/lachesi/releases/download/$RELEASE_TAG"
+          BASE_URL="https://github.com/lachesi-hq/norn/releases/download/$RELEASE_TAG"
           ARCH_URL="$BASE_URL/norn-$VERSION-macos-${{ matrix.architecture }}.tar.gz"
           OTHER_ARCH="x86_64"
           if [ "${{ matrix.architecture }}" = "x86_64" ]; then

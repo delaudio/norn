@@ -1,6 +1,6 @@
 # Norn
 
-[![Release][Release]](https://github.com/lachesi-hq/lachesi/releases)
+[![Release][Release]](https://github.com/lachesi-hq/norn/releases)
 [![CI][CI]][CI Workflow]
 [![Contributing][Contributing]][Issues]
 
@@ -276,8 +276,8 @@ For security concerns, use `SECURITY.md` procedures.
 
 Norn is released under the license in `LICENSE`.
 
-[Release]: https://img.shields.io/github/v/release/lachesi-hq/lachesi?label=Norn&sort=semver
-[CI]: https://github.com/lachesi-hq/lachesi/actions/workflows/release-norn-macos.yml/badge.svg
-[CI Workflow]: https://github.com/lachesi-hq/lachesi/actions/workflows/release-norn-macos.yml
+[Release]: https://img.shields.io/github/v/release/lachesi-hq/norn?label=Norn&sort=semver
+[CI]: https://github.com/lachesi-hq/norn/actions/workflows/release-norn-macos.yml/badge.svg
+[CI Workflow]: https://github.com/lachesi-hq/norn/actions/workflows/release-norn-macos.yml
 [Contributing]: https://img.shields.io/badge/CONTRIBUTING-guidelines-0ea5e9?logo=github&style=flat-square
-[Issues]: https://github.com/lachesi-hq/lachesi/issues
+[Issues]: https://github.com/lachesi-hq/norn/issues

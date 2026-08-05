@@ -2235,7 +2235,7 @@ mod tests {
             .expect("draw");
 
         let text = buffer_text(&terminal);
-        assert!(text.contains("github lachesi-hq/lachesi"));
+        assert!(text.contains("github lachesi-hq/norn"));
         assert!(text.contains("/tmp/lachesi"));
         assert!(text.contains("PR filter"));
         assert!(text.contains("[Open]"));
