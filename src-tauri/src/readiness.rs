@@ -14,6 +14,38 @@ const NORN_LOCAL_CONFIG_FILE: &str = ".norn.local.yaml";
 const LEGACY_LOCAL_CONFIG_FILE: &str = ".lachesi.local.yaml";
 const SCHEMA_VERSION: &str = "norn.readiness.v1";
 const MAX_EVIDENCE_SCAN_DEPTH: usize = 3;
+const MAX_TEXT_SCAN_BYTES: u64 = 32 * 1024;
+const MAX_LEGACY_SCAN_FILES: usize = 10_000;
+
+const LEGACY_SCAN_SKIP_DIRS: &[&str] = &[
+    ".git",
+    "node_modules",
+    "target",
+    "dist",
+    "build",
+    "out",
+    ".next",
+    ".nuxt",
+    ".gradle",
+    ".idea",
+    "coverage",
+    ".parcel-cache",
+];
+
+const LEGACY_ALLOWLIST_TEXT: &[&str] = &[
+    ".lachesi.yaml",
+    ".lachesi.local.yaml",
+    ".lachesi.",
+    ".lachesi/",
+    "app.lachesi.desktop",
+    "lachesi.sqlite3",
+    "LACHESI_DATA_DIR",
+    "LACHESI_REVIEW_DATA_DIR",
+    "LACHESI_SERVICE_DATA_DIR",
+    "LACHESI_SERVICE_BIND_ADDR",
+    "lachesi-pack.yaml",
+    ".lachesi",
+];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -762,7 +794,28 @@ fn collect_repository_state(repo_path: &Path, issues: &mut Vec<ReadinessIssue>) 
                 .to_string(),
             remediation:
                 "Keep only `.norn`/`.norn.yaml` or only `.lachesi`/`.lachesi.yaml`, plus a single local override file."
-                    .to_string(),
+                .to_string(),
+        });
+    }
+
+    let legacy_reference_hits = find_unapproved_legacy_references(&git_root);
+    if !legacy_reference_hits.is_empty() {
+        let hit_list = legacy_reference_hits
+            .iter()
+            .take(5)
+            .map(|hit| hit.as_str())
+            .collect::<Vec<_>>();
+        issues.push(ReadinessIssue {
+            severity: ReadinessIssueSeverity::Error,
+            scope: ReadinessIssueScope::Repository,
+            code: "repository.legacyNameNotAllowed".to_string(),
+            message: format!(
+                "Found {} unapproved legacy-name references: {}",
+                legacy_reference_hits.len(),
+                hit_list.join(", ")
+            ),
+            remediation: "Replace legacy `lachesi` references with canonical `norn` equivalents or add migration gating exceptions before release."
+                .to_string(),
         });
     }
 
@@ -951,6 +1004,113 @@ pub(crate) fn collect_repository_evidence(repo_path: &Path) -> RepositoryEvidenc
         generatedPaths: generated_paths,
         vendorPaths: vendor_paths,
     }
+}
+
+fn find_unapproved_legacy_references(repo_path: &Path) -> Vec<String> {
+    let mut scan_stack = vec![(repo_path.to_path_buf(), 0usize)];
+    let mut matches = Vec::new();
+    let mut scanned_files = 0usize;
+
+    while let Some((path, depth)) = scan_stack.pop() {
+        if depth > MAX_EVIDENCE_SCAN_DEPTH {
+            continue;
+        }
+        let entries = match fs::read_dir(&path) {
+            Ok(entries) => entries,
+            Err(_) => continue,
+        };
+
+        for entry in entries.flatten() {
+            let entry_path = entry.path();
+            let name = entry.file_name().to_string_lossy().to_string();
+
+            if LEGACY_SCAN_SKIP_DIRS
+                .iter()
+                .any(|directory| *directory == name.as_str())
+            {
+                continue;
+            }
+
+            let relative = entry_path
+                .strip_prefix(repo_path)
+                .unwrap_or(&entry_path)
+                .to_string_lossy()
+                .to_string();
+
+            if path_contains_legacy_reference(&entry_path)
+                && !is_legacy_reference_allowed(&relative)
+            {
+                matches.push(relative.clone());
+            }
+
+            if entry_path.is_dir() {
+                if depth < MAX_EVIDENCE_SCAN_DEPTH {
+                    scan_stack.push((entry_path, depth + 1));
+                }
+                continue;
+            }
+
+            if !entry_path.is_file() || scanned_files >= MAX_LEGACY_SCAN_FILES {
+                continue;
+            }
+            scanned_files += 1;
+
+            for line in scan_lines_for_unapproved_legacy_references(&entry_path) {
+                matches.push(format!("{relative}:{line}"));
+            }
+        }
+    }
+
+    matches.sort();
+    matches.dedup();
+    matches
+}
+
+fn path_contains_legacy_reference(path: &Path) -> bool {
+    path.file_name()
+        .is_some_and(|name| name.to_string_lossy().to_lowercase().contains("lachesi"))
+}
+
+fn is_legacy_reference_allowed(reference: &str) -> bool {
+    let reference = reference.to_lowercase();
+    LEGACY_ALLOWLIST_TEXT
+        .iter()
+        .any(|allowed| reference.contains(&allowed.to_lowercase()))
+}
+
+fn scan_lines_for_unapproved_legacy_references(path: &Path) -> Vec<String> {
+    let content = match fs::read(path) {
+        Ok(content) => content,
+        Err(_) => return Vec::new(),
+    };
+
+    if content.len() as u64 > MAX_TEXT_SCAN_BYTES {
+        return Vec::new();
+    }
+    if content.contains(&0u8) {
+        return Vec::new();
+    }
+
+    let text = String::from_utf8_lossy(&content);
+    if text.contains('\u{fffd}') {
+        return Vec::new();
+    }
+
+    text.lines()
+        .enumerate()
+        .filter_map(|(index, line)| {
+            let line_lower = line.to_lowercase();
+            if !line_lower.contains("lachesi") || is_legacy_reference_allowed(line) {
+                return None;
+            }
+            let snippet = line.trim();
+            if snippet.is_empty() {
+                return None;
+            }
+            let snippet = snippet.chars().take(120).collect::<String>();
+            Some(format!("{:?}:{}", index + 1, snippet))
+        })
+        .collect()
 }
 
 struct DataDirectoryResolution {
@@ -1590,6 +1750,54 @@ mod tests {
             .issues
             .iter()
             .any(|issue| issue.code == "repository.configPrecedenceConflict"));
+    }
+
+    #[test]
+    fn doctor_reports_unapproved_legacy_name_occurrences() {
+        let repo = temp_repo();
+        init_git_repo(&repo);
+        std::process::Command::new("/usr/bin/git")
+            .arg("-C")
+            .arg(&repo)
+            .args([
+                "remote",
+                "add",
+                "origin",
+                "https://github.com/example/repo.git",
+            ])
+            .output()
+            .expect("git remote add");
+        fs::write(repo.join("README.md"), "# Welcome to lachesi\n").expect("legacy readme");
+
+        let report = collect_report(&repo, false);
+        assert!(report
+            .issues
+            .iter()
+            .any(|issue| issue.code == "repository.legacyNameNotAllowed"));
+    }
+
+    #[test]
+    fn doctor_allows_intentional_legacy_artifacts() {
+        let repo = temp_repo();
+        init_git_repo(&repo);
+        std::process::Command::new("/usr/bin/git")
+            .arg("-C")
+            .arg(&repo)
+            .args([
+                "remote",
+                "add",
+                "origin",
+                "https://github.com/example/repo.git",
+            ])
+            .output()
+            .expect("git remote add");
+        fs::write(repo.join(".lachesi.yaml"), "version: 0.1\n").expect("legacy config");
+
+        let report = collect_report(&repo, false);
+        assert!(report
+            .issues
+            .iter()
+            .all(|issue| issue.code != "repository.legacyNameNotAllowed"));
     }
 
     #[test]
