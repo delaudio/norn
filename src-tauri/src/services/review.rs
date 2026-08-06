@@ -3216,8 +3216,18 @@ fn build_claude_text_command(
     if repository_access {
         command.args(["--allowedTools", "Read,Glob,Grep"]);
     } else {
-        // Empty tools disables built-ins; bare mode also skips hooks and user customizations.
-        command.args(["--tools", "", "--bare"]);
+        // Empty tools disables all built-in tool access, which is the actual isolation
+        // guarantee we need here (the full diff is already in the prompt payload, so the
+        // reviewer doesn't need live file access). Deliberately do NOT also pass --bare:
+        // its minimal mode explicitly skips OS keychain reads, which breaks
+        // authentication for any user whose Claude Code login is stored in the keychain
+        // (the default on macOS). That surfaced as every isolated-context Claude review
+        // failing immediately with "Not logged in", reported up as a generic
+        // "AI provider review failed" — while Codex, which doesn't route auth through
+        // --bare-equivalent flags, kept working. See headless CLI review incident where
+        // --ai-provider claude failed on --scope working-tree/pr while --ai-provider
+        // codex succeeded.
+        command.args(["--tools", ""]);
     }
     if let Some(model) = claude_model.and_then(normalize_claude_model) {
         command.args(["--model", &model]);
@@ -3259,8 +3269,12 @@ fn validate_isolated_provider_cli(ai_provider: AiProvider) -> Result<(), String>
             AiProvider::Claude => (
                 "Claude",
                 "claude",
-                &["--tools", "", "--bare", "--help"],
-                &["--tools", "--bare"],
+                // Keep this in sync with build_claude_text_command's isolated-context
+                // flags. --bare is intentionally absent: it also skips OS keychain reads,
+                // which breaks authentication on setups where the Claude Code login is
+                // stored there.
+                &["--tools", "", "--help"],
+                &["--tools"],
             ),
             AiProvider::Codex => (
                 "Codex",
@@ -6403,7 +6417,9 @@ mod tests {
             .windows(2)
             .any(|pair| pair == ["--permission-mode", "plan"]));
         assert!(args.windows(2).any(|pair| pair == ["--tools", ""]));
-        assert!(args.iter().any(|arg| arg == "--bare"));
+        // --bare must NOT be present: it skips OS keychain reads and breaks
+        // authentication for users whose Claude Code login is stored there.
+        assert!(!args.iter().any(|arg| arg == "--bare"));
         assert!(!args.iter().any(|arg| arg == "--allowedTools"));
         assert!(command.get_envs().any(|(key, value)| {
             key == "NORN_REVIEW_CHILD" && value.is_some_and(|value| value.to_string_lossy() == "1")
