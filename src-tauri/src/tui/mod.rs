@@ -13,6 +13,12 @@ use std::{
 };
 
 use crossterm::event::{self, Event, KeyCode, MouseButton, MouseEvent, MouseEventKind};
+use ratatui::{
+    layout::{Alignment, Constraint, Direction, Layout},
+    prelude::{Frame, Text},
+    style::{Color, Style},
+    widgets::{Block, Borders, Paragraph},
+};
 
 use crate::config::{self, AiProvider, AppConfig, RepoRef};
 use crate::readiness::{self, ReadinessIssueSeverity, ReadinessStatus};
@@ -38,6 +44,17 @@ use terminal::TerminalGuard;
 const TUI_SKIP_AI_REVIEW_ANALYZERS: bool = true;
 const TICK_RATE: Duration = Duration::from_millis(250);
 const DEFAULT_REVIEW_PROMPT: &str = include_str!("../../../src/lib/defaultReviewPrompt.md");
+const CLAUDE_MODELS: [&str; 4] = ["", "sonnet", "opus", "fable"];
+const CLAUDE_EFFORTS: [&str; 6] = ["", "low", "medium", "high", "xhigh", "max"];
+const CODEX_MODELS: [&str; 3] = ["", "gpt-5.4", "gpt-5.5"];
+const CODEX_EFFORTS: [&str; 4] = ["", "low", "medium", "high"];
+const SETTING_FIELDS: [&str; 5] = [
+    "AI provider",
+    "Claude model",
+    "Claude effort",
+    "Codex model",
+    "Codex effort",
+];
 
 pub fn run_from_env() -> Result<(), String> {
     let launch_opts = launch_mode_from_args(std::env::args().skip(1))?;
@@ -79,7 +96,13 @@ pub fn run_from_env() -> Result<(), String> {
         let area = terminal.area().map_err(|error| error.to_string())?;
         app.prepare_rendered_diff(area);
         terminal
-            .draw(|frame| render(frame, app.view_state()))
+            .draw(|frame| {
+                if app.settings_open {
+                    render_settings(frame, &app);
+                } else {
+                    render(frame, app.view_state());
+                }
+            })
             .map_err(|error| error.to_string())?;
         if detect_image_support {
             app.image_support = TerminalImageSupport::detect();
@@ -94,6 +117,9 @@ pub fn run_from_env() -> Result<(), String> {
             match event::read().map_err(|error| error.to_string())? {
                 Event::Key(key) => app.handle_key(key.code),
                 Event::Mouse(mouse) => {
+                    if app.settings_open {
+                        continue;
+                    }
                     let area = terminal.area().map_err(|error| error.to_string())?;
                     app.handle_mouse(mouse, area);
                 }
@@ -227,6 +253,37 @@ fn tui_usage() -> &'static str {
     "Usage: norn-tui [--current-repo] [--workspace] [--skip-readiness] [--version]\n\nBy default, norn-tui opens pull requests for the git repository in the current directory."
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SettingsField {
+    AiProvider,
+    ClaudeModel,
+    ClaudeEffort,
+    CodexModel,
+    CodexEffort,
+}
+
+impl SettingsField {
+    fn as_index(self) -> usize {
+        match self {
+            Self::AiProvider => 0,
+            Self::ClaudeModel => 1,
+            Self::ClaudeEffort => 2,
+            Self::CodexModel => 3,
+            Self::CodexEffort => 4,
+        }
+    }
+
+    fn from_index(index: usize) -> Self {
+        match index % 5 {
+            0 => Self::AiProvider,
+            1 => Self::ClaudeModel,
+            2 => Self::ClaudeEffort,
+            3 => Self::CodexModel,
+            _ => Self::CodexEffort,
+        }
+    }
+}
+
 fn launch_mode_from_args<I, S>(args: I) -> Result<TuiLaunchOptions, String>
 where
     I: IntoIterator<Item = S>,
@@ -260,6 +317,77 @@ where
     Ok(options)
 }
 
+fn render_settings(frame: &mut Frame<'_>, app: &TuiApp) {
+    let area = frame.area();
+    frame.render_widget(Block::default().style(Style::default().bg(Color::Rgb(13, 17, 23))), area);
+    let [header, body, footer] = *Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(3),
+            Constraint::Min(5),
+            Constraint::Length(2),
+        ])
+        .split(area) else {
+            return;
+        };
+
+    let header_block = Block::default().borders(Borders::ALL).title("Norn AI settings");
+    let header_text = Text::from(
+        "\nUse ←/→ to change values, ↑/↓ to move between fields, Enter to save, Esc to cancel.",
+    );
+    frame.render_widget(
+        Paragraph::new(header_text).alignment(Alignment::Center).block(header_block),
+        header,
+    );
+
+    let body_lines = vec![
+        app.settings_field_line(SettingsField::AiProvider),
+        app.settings_field_line(SettingsField::ClaudeModel),
+        app.settings_field_line(SettingsField::ClaudeEffort),
+        app.settings_field_line(SettingsField::CodexModel),
+        app.settings_field_line(SettingsField::CodexEffort),
+        String::new(),
+        format!("Current provider: {}", app.settings_ai_provider_label()),
+        format!(
+            "Active Claude model/effort: {} / {}",
+            settings_option_label(&app.settings_claude_model),
+            settings_option_label(&app.settings_claude_effort)
+        ),
+        format!(
+            "Active Codex model/effort: {} / {}",
+            settings_option_label(&app.settings_codex_model),
+            settings_option_label(&app.settings_codex_effort)
+        ),
+    ];
+
+    let body_block = Block::default().borders(Borders::ALL).title("AI configuration");
+    frame.render_widget(
+        Paragraph::new(Text::from(body_lines.join("\n"))).block(body_block),
+        body,
+    );
+
+    let footer_block = Block::default().borders(Borders::ALL);
+    frame.render_widget(
+        Paragraph::new(format!("Status: {}", app.status))
+            .alignment(Alignment::Left)
+            .block(footer_block),
+        footer,
+    );
+}
+
+fn settings_option_label(value: &Option<String>) -> String {
+    value.clone().unwrap_or_else(|| "default".to_string())
+}
+
+impl TuiApp {
+    fn settings_ai_provider_label(&self) -> &'static str {
+        match self.settings_ai_provider {
+            AiProvider::Claude => "Claude",
+            AiProvider::Codex => "Codex",
+        }
+    }
+}
+
 struct TuiApp {
     repos: Vec<RepoRef>,
     selected_repo: usize,
@@ -280,6 +408,13 @@ struct TuiApp {
     claude_effort: Option<String>,
     codex_model: Option<String>,
     codex_effort: Option<String>,
+    settings_open: bool,
+    settings_field: SettingsField,
+    settings_ai_provider: AiProvider,
+    settings_claude_model: Option<String>,
+    settings_claude_effort: Option<String>,
+    settings_codex_model: Option<String>,
+    settings_codex_effort: Option<String>,
     ai_review_store: AiReviewRunStore,
     active_ai_target: Option<(String, String, u32)>,
     ai_review_state: Option<AiReviewRunState>,
@@ -323,12 +458,21 @@ struct RenderedDiffCache {
 
 impl TuiApp {
     fn from_config(config: AppConfig) -> Self {
+        let claude_model = config.claude_model.clone();
+        let claude_effort = config.claude_effort.clone();
+        let codex_model = config.codex_model.clone();
+        let codex_effort = config.codex_effort.clone();
         Self {
             ai_provider: config.ai_provider,
-            claude_model: config.claude_model,
-            claude_effort: config.claude_effort,
-            codex_model: config.codex_model,
-            codex_effort: config.codex_effort,
+            claude_model: claude_model.clone(),
+            claude_effort: claude_effort.clone(),
+            codex_model: codex_model.clone(),
+            codex_effort: codex_effort.clone(),
+            settings_ai_provider: config.ai_provider,
+            settings_claude_model: claude_model,
+            settings_claude_effort: claude_effort,
+            settings_codex_model: codex_model,
+            settings_codex_effort: codex_effort,
             ..Self::from_repos(config.repos)
         }
     }
@@ -337,6 +481,13 @@ impl TuiApp {
         Self {
             repos,
             selected_repo: 0,
+            settings_open: false,
+            settings_field: SettingsField::AiProvider,
+            settings_ai_provider: AiProvider::default(),
+            settings_claude_model: None,
+            settings_claude_effort: None,
+            settings_codex_model: None,
+            settings_codex_effort: None,
             focus: FocusPane::Repositories,
             pull_requests: Vec::new(),
             pr_filter: PrListFilter::Open,
@@ -606,7 +757,159 @@ impl TuiApp {
         }
     }
 
+    fn open_settings(&mut self) {
+        self.settings_open = true;
+        self.settings_field = SettingsField::AiProvider;
+        self.settings_ai_provider = self.ai_provider;
+        self.settings_claude_model = self.claude_model.clone();
+        self.settings_claude_effort = self.claude_effort.clone();
+        self.settings_codex_model = self.codex_model.clone();
+        self.settings_codex_effort = self.codex_effort.clone();
+        self.status = "Settings: ↑/↓ change field, ←/→ change value, Enter save, Esc cancel".to_string();
+    }
+
+    fn close_settings(&mut self) {
+        self.settings_open = false;
+        self.settings_field = SettingsField::AiProvider;
+        self.status = "Ready".to_string();
+    }
+
+    fn discard_settings(&mut self) {
+        self.close_settings();
+        self.status = "Settings cancelled".to_string();
+    }
+
+    fn cycle_or_value(options: &[&str], current: &Option<String>, forward: bool) -> Option<String> {
+        let current_value = current.as_deref().unwrap_or("");
+        let mut index = options
+            .iter()
+            .position(|value| value == &current_value)
+            .unwrap_or(0);
+        if forward {
+            index = (index + 1).rem_euclid(options.len());
+        } else {
+            index = index.saturating_sub(1);
+            index = index.rem_euclid(options.len());
+        }
+        match options[index] {
+            "" => None,
+            value => Some(value.to_string()),
+        }
+    }
+
+    fn cycle_settings_value(&mut self, forward: bool) {
+        match self.settings_field {
+            SettingsField::AiProvider => {
+                self.settings_ai_provider = if matches!(self.settings_ai_provider, AiProvider::Claude) {
+                    AiProvider::Codex
+                } else {
+                    AiProvider::Claude
+                };
+            }
+            SettingsField::ClaudeModel => {
+                self.settings_claude_model = Self::cycle_or_value(&CLAUDE_MODELS, &self.settings_claude_model, forward);
+            }
+            SettingsField::ClaudeEffort => {
+                self.settings_claude_effort =
+                    Self::cycle_or_value(&CLAUDE_EFFORTS, &self.settings_claude_effort, forward);
+            }
+            SettingsField::CodexModel => {
+                self.settings_codex_model =
+                    Self::cycle_or_value(&CODEX_MODELS, &self.settings_codex_model, forward);
+            }
+            SettingsField::CodexEffort => {
+                self.settings_codex_effort =
+                    Self::cycle_or_value(&CODEX_EFFORTS, &self.settings_codex_effort, forward);
+            }
+        }
+    }
+
+    fn next_settings_field(&mut self) {
+        let index = self.settings_field.as_index();
+        self.settings_field = SettingsField::from_index((index + 1) % SETTING_FIELDS.len());
+    }
+
+    fn previous_settings_field(&mut self) {
+        let index = self.settings_field.as_index();
+        self.settings_field = SettingsField::from_index((index + SETTING_FIELDS.len() - 1) % SETTING_FIELDS.len());
+    }
+
+    fn persist_settings(&mut self) -> Result<(), String> {
+        let mut cfg = config::load();
+        cfg.ai_provider = self.settings_ai_provider;
+        cfg.claude_model = self.settings_claude_model.clone();
+        cfg.claude_effort = self.settings_claude_effort.clone();
+        cfg.codex_model = self.settings_codex_model.clone();
+        cfg.codex_effort = self.settings_codex_effort.clone();
+        config::save(&cfg)?;
+        self.ai_provider = self.settings_ai_provider;
+        self.claude_model = self.settings_claude_model.clone();
+        self.claude_effort = self.settings_claude_effort.clone();
+        self.codex_model = self.settings_codex_model.clone();
+        self.codex_effort = self.settings_codex_effort.clone();
+        Ok(())
+    }
+
+    fn save_settings(&mut self) {
+        match self.persist_settings() {
+            Ok(()) => {
+                self.status = "AI settings saved.".to_string();
+                self.close_settings();
+            }
+            Err(error) => {
+                self.error = Some(error.clone());
+                self.status = "Failed to save AI settings".to_string();
+            }
+        }
+    }
+
+    fn option_label(value: &Option<String>) -> String {
+        value.clone().unwrap_or_else(|| "default".to_string())
+    }
+
+    fn render_settings_field_value(&self, field: SettingsField) -> String {
+        match field {
+            SettingsField::AiProvider => {
+                match self.settings_ai_provider {
+                    AiProvider::Claude => "Claude".to_string(),
+                    AiProvider::Codex => "Codex".to_string(),
+                }
+            }
+            SettingsField::ClaudeModel => Self::option_label(&self.settings_claude_model),
+            SettingsField::ClaudeEffort => {
+                Self::option_label(&self.settings_claude_effort)
+            }
+            SettingsField::CodexModel => Self::option_label(&self.settings_codex_model),
+            SettingsField::CodexEffort => {
+                Self::option_label(&self.settings_codex_effort)
+            }
+        }
+    }
+
+    fn settings_field_line(&self, field: SettingsField) -> String {
+        format!(
+            "{} {}: {}",
+            if self.settings_field == field { "▶" } else { " " },
+            SETTING_FIELDS[field.as_index()],
+            self.render_settings_field_value(field),
+        )
+    }
+
     fn handle_key(&mut self, code: KeyCode) {
+        if self.settings_open {
+            match code {
+                KeyCode::Esc => {
+                    self.discard_settings();
+                }
+                KeyCode::Enter => self.save_settings(),
+                KeyCode::Tab | KeyCode::Down | KeyCode::Char('j') => self.next_settings_field(),
+                KeyCode::Up | KeyCode::Char('k') => self.previous_settings_field(),
+                KeyCode::Left => self.cycle_settings_value(false),
+                KeyCode::Right => self.cycle_settings_value(true),
+                _ => {}
+            }
+            return;
+        }
         if self.composer.is_some() {
             self.handle_composer_key(code);
             return;
@@ -626,6 +929,7 @@ impl TuiApp {
             KeyCode::Char('v') => self.toggle_detail_view(),
             KeyCode::Char('y') => self.copy_ai_review_output(),
             KeyCode::Char('r') => self.refresh_active_view(),
+            KeyCode::Char('s') => self.open_settings(),
             KeyCode::PageUp => self.scroll_active_detail(-10),
             KeyCode::PageDown => self.scroll_active_detail(10),
             KeyCode::Home => self.reset_active_detail_scroll(),
