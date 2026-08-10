@@ -15,6 +15,7 @@ published comments. It is available as both a GUI desktop app and a terminal UI.
 - [What Is Norn](#what-is-norn)
 - [Quickstart](#quickstart)
 - [Documentation](#documentation)
+- [Agent skills](#agent-skills)
 - [CLI, App and TUI](#cli-app-and-tui)
 - [Development](#development)
 - [Architecture](#architecture)
@@ -107,6 +108,32 @@ Additional product references are also available:
 
 For API consumers and AI-assisted flows, the local configuration is the source of
 truth: keep local config files in the repository and review commands explicit.
+
+## Agent skills
+
+Norn includes a shared `norn-review` skill for Codex and Claude Code in
+`integrations/agent-skills/norn-review`. It runs the headless CLI as an
+independent review gate after implementation work and before a push.
+
+Install it from a Norn checkout for Codex:
+
+```sh
+mkdir -p "$HOME/.codex/skills"
+ln -s "$(pwd)/integrations/agent-skills/norn-review" \
+  "$HOME/.codex/skills/norn-review"
+```
+
+Or install the same skill for Claude Code:
+
+```sh
+mkdir -p "$HOME/.claude/skills"
+ln -s "$(pwd)/integrations/agent-skills/norn-review" \
+  "$HOME/.claude/skills/norn-review"
+```
+
+Invoke it explicitly with `$norn-review` in Codex or `/norn-review` in Claude
+Code. Both agents can also select it automatically when its description matches
+the current task.
 
 ## CLI, App and TUI
 
