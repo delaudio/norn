@@ -38,6 +38,17 @@ const checks = [
     "the verification toolchain includes rustfmt and Clippy",
   ],
   [
+    workflow.includes("name: Install Linux desktop build dependencies") &&
+      workflow.includes("if: runner.os == 'Linux'") &&
+      workflow.includes("sudo apt-get install --no-install-recommends --yes") &&
+      workflow.includes("libwebkit2gtk-4.1-dev") &&
+      workflow.includes("libayatana-appindicator3-dev") &&
+      workflow.includes("librsvg2-dev") &&
+      workflow.indexOf("name: Install Linux desktop build dependencies") <
+        workflow.indexOf("name: Run complete Rust gate"),
+    "the Ubuntu verification job installs Tauri system libraries before compiling all features",
+  ],
+  [
     workflow.includes("cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check"),
     "the release gate checks Rust formatting",
   ],
