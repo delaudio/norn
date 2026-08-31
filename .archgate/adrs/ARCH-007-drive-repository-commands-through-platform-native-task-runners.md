@@ -117,7 +117,7 @@ dev:
 	pnpm run dev
 
 tauri-dev:
-	BITBUCKET_USERNAME=$$BITBUCKET_USERNAME BITBUCKET_TOKEN=$$BITBUCKET_TOKEN pnpm tauri dev
+	pnpm tauri dev --features desktop-bundle
 
 build:
 	pnpm run build
@@ -148,7 +148,7 @@ dev:
     pnpm run dev
 
 tauri-dev:
-    pnpm tauri dev
+    pnpm tauri dev --features desktop-bundle
 
 build:
     pnpm run build

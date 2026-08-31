@@ -1,4 +1,4 @@
-import { Check, PencilSimple, PaperPlaneTilt, Trash, X } from "@phosphor-icons/react";
+import { Check, PaperPlaneTilt, PencilSimple, Trash, X } from "@phosphor-icons/react";
 import { useState } from "react";
 import { Markdown } from "@/components/Markdown";
 import { Badge } from "@/components/ui/badge";

@@ -319,7 +319,10 @@ where
 
 fn render_settings(frame: &mut Frame<'_>, app: &TuiApp) {
     let area = frame.area();
-    frame.render_widget(Block::default().style(Style::default().bg(Color::Rgb(13, 17, 23))), area);
+    frame.render_widget(
+        Block::default().style(Style::default().bg(Color::Rgb(13, 17, 23))),
+        area,
+    );
     let [header, body, footer] = *Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -327,16 +330,21 @@ fn render_settings(frame: &mut Frame<'_>, app: &TuiApp) {
             Constraint::Min(5),
             Constraint::Length(2),
         ])
-        .split(area) else {
-            return;
-        };
+        .split(area)
+    else {
+        return;
+    };
 
-    let header_block = Block::default().borders(Borders::ALL).title("Norn AI settings");
+    let header_block = Block::default()
+        .borders(Borders::ALL)
+        .title("Norn AI settings");
     let header_text = Text::from(
         "\nUse ←/→ to change values, ↑/↓ to move between fields, Enter to save, Esc to cancel.",
     );
     frame.render_widget(
-        Paragraph::new(header_text).alignment(Alignment::Center).block(header_block),
+        Paragraph::new(header_text)
+            .alignment(Alignment::Center)
+            .block(header_block),
         header,
     );
 
@@ -360,7 +368,9 @@ fn render_settings(frame: &mut Frame<'_>, app: &TuiApp) {
         ),
     ];
 
-    let body_block = Block::default().borders(Borders::ALL).title("AI configuration");
+    let body_block = Block::default()
+        .borders(Borders::ALL)
+        .title("AI configuration");
     frame.render_widget(
         Paragraph::new(Text::from(body_lines.join("\n"))).block(body_block),
         body,
@@ -765,7 +775,8 @@ impl TuiApp {
         self.settings_claude_effort = self.claude_effort.clone();
         self.settings_codex_model = self.codex_model.clone();
         self.settings_codex_effort = self.codex_effort.clone();
-        self.status = "Settings: ↑/↓ change field, ←/→ change value, Enter save, Esc cancel".to_string();
+        self.status =
+            "Settings: ↑/↓ change field, ←/→ change value, Enter save, Esc cancel".to_string();
     }
 
     fn close_settings(&mut self) {
@@ -800,14 +811,16 @@ impl TuiApp {
     fn cycle_settings_value(&mut self, forward: bool) {
         match self.settings_field {
             SettingsField::AiProvider => {
-                self.settings_ai_provider = if matches!(self.settings_ai_provider, AiProvider::Claude) {
-                    AiProvider::Codex
-                } else {
-                    AiProvider::Claude
-                };
+                self.settings_ai_provider =
+                    if matches!(self.settings_ai_provider, AiProvider::Claude) {
+                        AiProvider::Codex
+                    } else {
+                        AiProvider::Claude
+                    };
             }
             SettingsField::ClaudeModel => {
-                self.settings_claude_model = Self::cycle_or_value(&CLAUDE_MODELS, &self.settings_claude_model, forward);
+                self.settings_claude_model =
+                    Self::cycle_or_value(&CLAUDE_MODELS, &self.settings_claude_model, forward);
             }
             SettingsField::ClaudeEffort => {
                 self.settings_claude_effort =
@@ -831,7 +844,8 @@ impl TuiApp {
 
     fn previous_settings_field(&mut self) {
         let index = self.settings_field.as_index();
-        self.settings_field = SettingsField::from_index((index + SETTING_FIELDS.len() - 1) % SETTING_FIELDS.len());
+        self.settings_field =
+            SettingsField::from_index((index + SETTING_FIELDS.len() - 1) % SETTING_FIELDS.len());
     }
 
     fn persist_settings(&mut self) -> Result<(), String> {
@@ -869,27 +883,25 @@ impl TuiApp {
 
     fn render_settings_field_value(&self, field: SettingsField) -> String {
         match field {
-            SettingsField::AiProvider => {
-                match self.settings_ai_provider {
-                    AiProvider::Claude => "Claude".to_string(),
-                    AiProvider::Codex => "Codex".to_string(),
-                }
-            }
+            SettingsField::AiProvider => match self.settings_ai_provider {
+                AiProvider::Claude => "Claude".to_string(),
+                AiProvider::Codex => "Codex".to_string(),
+            },
             SettingsField::ClaudeModel => Self::option_label(&self.settings_claude_model),
-            SettingsField::ClaudeEffort => {
-                Self::option_label(&self.settings_claude_effort)
-            }
+            SettingsField::ClaudeEffort => Self::option_label(&self.settings_claude_effort),
             SettingsField::CodexModel => Self::option_label(&self.settings_codex_model),
-            SettingsField::CodexEffort => {
-                Self::option_label(&self.settings_codex_effort)
-            }
+            SettingsField::CodexEffort => Self::option_label(&self.settings_codex_effort),
         }
     }
 
     fn settings_field_line(&self, field: SettingsField) -> String {
         format!(
             "{} {}: {}",
-            if self.settings_field == field { "▶" } else { " " },
+            if self.settings_field == field {
+                "▶"
+            } else {
+                " "
+            },
             SETTING_FIELDS[field.as_index()],
             self.render_settings_field_value(field),
         )
@@ -2438,7 +2450,7 @@ review:
 
     #[test]
     fn tui_ai_review_skips_duplicate_analyzers() {
-        assert!(TUI_SKIP_AI_REVIEW_ANALYZERS);
+        const { assert!(TUI_SKIP_AI_REVIEW_ANALYZERS) };
     }
 
     #[test]

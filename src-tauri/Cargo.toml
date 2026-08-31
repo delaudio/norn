@@ -8,6 +8,12 @@ autobins = false
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[features]
+default = ["desktop-bundle"]
+# This feature is used for production builds or when a dev server is not specified, DO NOT REMOVE!!
+custom-protocol = ["tauri/custom-protocol"]
+desktop-bundle = []
+
 [lib]
 # The `_lib` suffix may seem redundant but it is necessary
 # to make the lib name unique and wouldn't conflict with the bin name.
@@ -22,6 +28,10 @@ path = "src/main.rs"
 [[bin]]
 name = "norn-tui"
 path = "src/bin/norn-tui.rs"
+
+[[bin]]
+name = "norn-app"
+path = "src/bin/norn-app.rs"
 
 [[bin]]
 name = "lachesi"

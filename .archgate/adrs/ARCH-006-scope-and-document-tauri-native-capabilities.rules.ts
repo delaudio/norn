@@ -28,9 +28,7 @@ export default {
         const capability = (await ctx.readJSON(CAPABILITY_FILE)) as {
           permissions?: unknown[];
         };
-        const permissions = Array.isArray(capability.permissions)
-          ? capability.permissions
-          : [];
+        const permissions = Array.isArray(capability.permissions) ? capability.permissions : [];
 
         for (const entry of permissions) {
           const id = permissionId(entry);

@@ -783,7 +783,7 @@ mod tests {
         .expect("Bitbucket fixture")
     }
 
-    fn github_headers<'a>(signature: &'a str) -> Vec<(&'a str, &'a str)> {
+    fn github_headers(signature: &str) -> Vec<(&str, &str)> {
         vec![
             ("Content-Type", "application/json; charset=utf-8"),
             ("X-Hub-Signature-256", signature),

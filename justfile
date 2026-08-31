@@ -20,13 +20,17 @@ dev:
 # Start the full Tauri app (real IPC).
 # Requires BITBUCKET_USERNAME and BITBUCKET_TOKEN in the environment.
 tauri-dev:
-    pnpm tauri dev
+    pnpm tauri dev --features desktop-bundle
+
+# Build and durably install CLI, TUI, desktop launcher, and compatibility aliases.
+install-local:
+    pnpm run install:local
 
 # Build the canonical headless CLI and its deprecated compatibility alias.
 cli-build:
     pnpm run cli:build
 
-# Install `norn` and the deprecated `lachesi` alias in ~/.local/bin.
+# Durably install `norn`, `norn-app`, and the deprecated `lachesi` alias.
 cli-install:
     pnpm run cli:install
 
@@ -38,7 +42,7 @@ tui:
 tui-build:
     pnpm run tui:build
 
-# Build and install the terminal UI as `norn-tui` in ~/.local/bin.
+# Durably install `norn-tui` and the deprecated `lac` alias.
 tui-install:
     pnpm run tui:install
 
@@ -78,4 +82,4 @@ check-versions:
 # Build the Windows distributable: the NSIS setup .exe (ARCH-008).
 # Output: src-tauri/target/release/bundle/nsis/Norn_<version>_x64-setup.exe
 bundle-windows:
-    pnpm tauri build --bundles nsis
+    pnpm tauri build --bundles nsis --features custom-protocol,desktop-bundle

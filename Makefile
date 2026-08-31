@@ -4,11 +4,11 @@
 # package.json / cargo / tauri commands so package.json stays authoritative.
 
 .DEFAULT_GOAL := help
-.PHONY: help dev tauri-dev cli-build cli-install tui tui-build tui-install build typecheck lint test test-tauri evaluate check bundle-windows
+.PHONY: help dev tauri-dev install-local cli-build cli-install tui tui-build tui-install build typecheck lint test test-tauri evaluate check bundle-windows
 
 # List available recipes (runs by default).
 help:
-	@echo "Norn recipes: dev tauri-dev cli-build cli-install tui tui-build tui-install build typecheck lint test test-tauri evaluate check bundle-windows"
+	@echo "Norn recipes: dev tauri-dev install-local cli-build cli-install tui tui-build tui-install build typecheck lint test test-tauri evaluate check bundle-windows"
 
 # Start the Vite dev server (browser mock IPC).
 dev:
@@ -17,13 +17,17 @@ dev:
 # Start the full Tauri app (real IPC).
 # Uses credentials from the OS keychain; if none are stored, BITBUCKET_USERNAME and BITBUCKET_TOKEN env vars are used as a dev fallback.
 tauri-dev:
-	pnpm tauri dev
+	pnpm tauri dev --features desktop-bundle
+
+# Build and durably install CLI, TUI, desktop launcher, and compatibility aliases.
+install-local:
+	pnpm run install:local
 
 # Build the canonical headless CLI and its deprecated compatibility alias.
 cli-build:
 	pnpm run cli:build
 
-# Install `norn` and the deprecated `lachesi` alias in ~/.local/bin.
+# Durably install `norn`, `norn-app`, and the deprecated `lachesi` alias.
 cli-install:
 	pnpm run cli:install
 
@@ -35,7 +39,7 @@ tui:
 tui-build:
 	pnpm run tui:build
 
-# Build and install the terminal UI as `norn-tui` in ~/.local/bin.
+# Durably install `norn-tui` and the deprecated `lac` alias.
 tui-install:
 	pnpm run tui:install
 

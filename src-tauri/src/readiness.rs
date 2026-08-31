@@ -1,3 +1,8 @@
+#![allow(
+    non_snake_case,
+    reason = "readiness DTO fields preserve the stable camelCase machine-output contract"
+)]
+
 use crate::{config, credentials, local_repo, repo_config};
 use serde::Serialize;
 
@@ -572,7 +577,7 @@ fn collect_repository_state(repo_path: &Path, issues: &mut Vec<ReadinessIssue>) 
         };
     };
 
-    let git_root = match run_git_command(&path, &"rev-parse", &["--show-toplevel"]) {
+    let git_root = match run_git_command(&path, "rev-parse", &["--show-toplevel"]) {
         Ok(root) => PathBuf::from(root),
         Err(error) => {
             issues.push(ReadinessIssue {
@@ -603,7 +608,7 @@ fn collect_repository_state(repo_path: &Path, issues: &mut Vec<ReadinessIssue>) 
         }
     };
 
-    let branch = match run_git_command(&git_root, &"rev-parse", &["--abbrev-ref", "HEAD"]) {
+    let branch = match run_git_command(&git_root, "rev-parse", &["--abbrev-ref", "HEAD"]) {
         Ok(branch) => Some(branch),
         Err(error) => {
             issues.push(ReadinessIssue {
@@ -619,7 +624,7 @@ fn collect_repository_state(repo_path: &Path, issues: &mut Vec<ReadinessIssue>) 
         }
     };
 
-    let head = match run_git_command(&git_root, &"rev-parse", &["HEAD"]) {
+    let head = match run_git_command(&git_root, "rev-parse", &["HEAD"]) {
         Ok(head) => Some(head),
         Err(error) => {
             issues.push(ReadinessIssue {
@@ -634,7 +639,7 @@ fn collect_repository_state(repo_path: &Path, issues: &mut Vec<ReadinessIssue>) 
         }
     };
 
-    let working_tree = match run_git_command(&git_root, &"status", &["--porcelain=v1"]) {
+    let working_tree = match run_git_command(&git_root, "status", &["--porcelain=v1"]) {
         Ok(status) => {
             let lines: Vec<&str> = status
                 .lines()
@@ -780,10 +785,8 @@ fn collect_repository_state(repo_path: &Path, issues: &mut Vec<ReadinessIssue>) 
 
     let config_state = repo_config_path;
     let has_precedence_conflict = config_state.exists
-        && ((config_state.canonicalSource
-            && (config_state.legacySource || config_state.legacyDirectory))
-            || (config_state.canonicalDirectory
-                && (config_state.legacySource || config_state.legacyDirectory)))
+        && (config_state.canonicalDirectory || config_state.canonicalSource)
+        && (config_state.legacyDirectory || config_state.legacySource)
         || (config_state.localOverridesCanonical && config_state.localOverridesLegacy);
     if has_precedence_conflict {
         issues.push(ReadinessIssue {
@@ -948,12 +951,8 @@ pub(crate) fn collect_repository_evidence(repo_path: &Path) -> RepositoryEvidenc
                         task_runners.push((*runner_name).to_string());
                     }
                 }
-                if INSTRUCTIONS
-                    .iter()
-                    .any(|instruction| *instruction == name.as_str())
-                {
-                    instruction_sources.push(entry_path.to_string_lossy().to_string());
-                } else if entry_path.ends_with(".github/copilot-instructions.md")
+                if INSTRUCTIONS.contains(&name.as_str())
+                    || entry_path.ends_with(".github/copilot-instructions.md")
                     || entry_path.ends_with(".github/instructions.md")
                 {
                     instruction_sources.push(entry_path.to_string_lossy().to_string());
@@ -969,13 +968,10 @@ pub(crate) fn collect_repository_evidence(repo_path: &Path) -> RepositoryEvidenc
                 if matches!(name.as_str(), ".git" | ".idea" | "node_modules") {
                     continue;
                 }
-                if depth + 1 <= MAX_EVIDENCE_SCAN_DEPTH {
+                if depth < MAX_EVIDENCE_SCAN_DEPTH {
                     evidence_dirs.push((entry_path.clone(), depth + 1));
                 }
-                if GENERATED_PATHS
-                    .iter()
-                    .any(|generated| *generated == name.as_str())
-                {
+                if GENERATED_PATHS.contains(&name.as_str()) {
                     generated_paths.push(entry_path.to_string_lossy().to_string());
                 }
                 continue;
@@ -1024,10 +1020,7 @@ fn find_unapproved_legacy_references(repo_path: &Path) -> Vec<String> {
             let entry_path = entry.path();
             let name = entry.file_name().to_string_lossy().to_string();
 
-            if LEGACY_SCAN_SKIP_DIRS
-                .iter()
-                .any(|directory| *directory == name.as_str())
-            {
+            if LEGACY_SCAN_SKIP_DIRS.contains(&name.as_str()) {
                 continue;
             }
 
@@ -1273,15 +1266,15 @@ fn installed_cli_command(program: &str) -> Command {
 }
 
 fn read_remote_state(root: &Path) -> (Option<RepositoryRemoteState>, Option<ReadinessIssue>) {
-    let remote_name = run_git_command(root, &"remote", &["get-url", "origin"])
+    let remote_name = run_git_command(root, "remote", &["get-url", "origin"])
         .ok()
         .or_else(|| {
-            let remotes = run_git_command(root, &"remote", &[]).ok()?;
+            let remotes = run_git_command(root, "remote", &[]).ok()?;
             remotes
                 .lines()
                 .map(str::trim)
                 .find(|line| !line.is_empty())
-                .and_then(|name| run_git_command(root, &"remote", &["get-url", name]).ok())
+                .and_then(|name| run_git_command(root, "remote", &["get-url", name]).ok())
         });
 
     let Some(remote) = remote_name else {
@@ -1299,11 +1292,11 @@ fn read_remote_state(root: &Path) -> (Option<RepositoryRemoteState>, Option<Read
     };
     let source = run_git_command(
         root,
-        &"remote",
+        "remote",
         &["name-rev", "--name-only", "HEAD@{upstream}"],
     )
     .ok();
-    let label = run_git_command(root, &"remote", &["get-url", "origin"])
+    let label = run_git_command(root, "remote", &["get-url", "origin"])
         .unwrap_or_else(|_| String::from("origin"));
     match local_repo::parse_git_remote(&remote) {
         Ok((provider, workspace, repo)) => (

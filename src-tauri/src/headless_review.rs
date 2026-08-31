@@ -361,8 +361,16 @@ fn map_native_review_error(error: HeadlessNativeReviewError) -> HeadlessReviewEr
 
 fn public_provider_error(message: &str) -> &'static str {
     let normalized = message.to_ascii_lowercase();
+    let app_server_sandbox_failure = normalized
+        .contains("failed to initialize in-process app-server client")
+        && normalized.contains("sandbox");
     if normalized.contains("empty review response") {
         "AI provider returned an empty review response."
+    } else if normalized.contains("operation not permitted")
+        || normalized.contains("permission denied")
+        || app_server_sandbox_failure
+    {
+        "AI provider CLI was blocked by filesystem or sandbox permissions. Run Norn with permission to access the provider configuration directory."
     } else if normalized.contains("structured review")
         || normalized.contains("invalid json")
         || normalized.contains("failed to parse")
@@ -1029,7 +1037,7 @@ fn working_tree_diff(repo_path: &Path) -> Result<(String, Vec<String>), Headless
             append_diff_section_header(&mut diff, "Untracked files (new files)");
             has_untracked_section = true;
         }
-        append_diff(&mut diff, &new_file_patch(&relative, &text));
+        append_diff(&mut diff, &new_file_patch(&relative, text));
         included_bytes = included_bytes.saturating_add(contents.len() as u64);
     }
     Ok((diff, warnings))
@@ -1677,6 +1685,29 @@ mod tests {
         assert_eq!(
             public_provider_error("failed to parse structured review JSON"),
             "AI provider returned invalid review output."
+        );
+    }
+
+    #[test]
+    fn provider_permission_errors_expose_an_actionable_sanitized_message() {
+        let expected = "AI provider CLI was blocked by filesystem or sandbox permissions. Run Norn with permission to access the provider configuration directory.";
+
+        for message in [
+            "codex exited with code 1. stderr: failed to initialize in-process app-server client: Operation not permitted (os error 1); token=secret-value",
+            "provider command failed: permission denied: /Users/example/.codex; TOKEN=secret-value",
+            "failed to initialize in-process app-server client because the sandbox blocked configuration access; TOKEN=secret-value",
+        ] {
+            let public_message = public_provider_error(message);
+            assert_eq!(public_message, expected);
+            assert!(!public_message.contains("secret-value"));
+            assert!(!public_message.contains("/Users/example"));
+        }
+
+        assert_eq!(
+            public_provider_error(
+                "failed to initialize in-process app-server client: invalid configuration"
+            ),
+            "AI provider review failed."
         );
     }
 

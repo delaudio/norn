@@ -28,7 +28,7 @@ This starts the Vite app with mock IPC handlers.
 ## Run The Desktop App
 
 ```sh
-pnpm tauri dev
+pnpm tauri dev --features desktop-bundle
 ```
 
 Use the settings screen to configure repositories, credentials, local clone paths, and AI provider options.
@@ -37,7 +37,7 @@ Use the settings screen to configure repositories, credentials, local clone path
 
 ```sh
 pnpm build
-pnpm tauri:build
+pnpm tauri build --features custom-protocol,desktop-bundle
 ```
 
 ## Test

@@ -96,9 +96,7 @@ function hasEffectiveTrueProperty(objectSource: string, expectedName: string): b
       .trim();
     if (!property) continue;
     if (property.startsWith("...") || property.startsWith("[")) {
-      const computed = property.match(
-        new RegExp(`^${computedName}\\s*:\\s*(true|false)\\s*$`),
-      );
+      const computed = property.match(new RegExp(`^${computedName}\\s*:\\s*(true|false)\\s*$`));
       effectiveValue = computed ? computed[1] === "true" : null;
       continue;
     }

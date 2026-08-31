@@ -9,7 +9,9 @@ export function draftCommentAnchorId(localId: string): string {
   return `draft-comment-${localId.replace(/[^a-zA-Z0-9_-]/g, "-")}`;
 }
 
-export function draftCommentLocationLabel(draft: Pick<DraftComment, "path" | "to" | "from" | "parentId">): string {
+export function draftCommentLocationLabel(
+  draft: Pick<DraftComment, "path" | "to" | "from" | "parentId">,
+): string {
   const line = draft.to ?? draft.from;
   const fileLabel = draft.path ? basename(draft.path) : null;
 

@@ -18,3 +18,4 @@ metadata.
 | 0011 | Adopt Norn names with a bounded Lachesi compatibility window | Accepted | 2026-08-04 | codex | norn, naming, compatibility, migration, distribution |
 | 0012 | Define the Norn first-run onboarding contract | Accepted | 2026-08-05 | codex | norn, onboarding, config, cli |
 | 0013 | Read-only readiness probing for machine and repository onboarding | Accepted | 2026-08-05 | codex | norn, onboarding, readiness, cli |
+| 0014 | Deliver Norn through reproducible releases and verified upgrade channels | Accepted | 2026-08-31 | codex | release, distribution, homebrew, cli, tui, desktop |

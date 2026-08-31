@@ -695,10 +695,7 @@ fn collect_init_analyzer_candidates(
         );
     }
 
-    candidates
-        .into_iter()
-        .map(|(_, candidate)| candidate)
-        .collect()
+    candidates.into_values().collect()
 }
 
 fn render_default_repo_config_contents(proposal: &RepoInitProposal) -> String {
@@ -1343,7 +1340,7 @@ fn run_local_policy_git(repo_path: &Path, args: &[&str]) -> std::io::Result<std:
             .chain(args.iter().map(|arg| shell_quote(arg)))
             .collect::<Vec<_>>()
             .join(" ");
-        return Command::new("/bin/zsh").arg("-lc").arg(command).output();
+        Command::new("/bin/zsh").arg("-lc").arg(command).output()
     }
     #[cfg(not(target_os = "macos"))]
     {
@@ -1993,9 +1990,7 @@ fn apply_review_profile(
                 .then(|| "default".to_string())
         });
 
-    let Some(profile_id) = requested_profile else {
-        return None;
-    };
+    let profile_id = requested_profile?;
     let Some(profile) = config.profiles.get(&profile_id).cloned() else {
         warnings.push(message(
             config_path,
@@ -2259,6 +2254,10 @@ fn merge_prompt_config(target: &mut Option<PromptConfig>, pack_prompt: Option<Pr
     }
 }
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the loader result helper mirrors every field in RepoReviewConfigLoadResult"
+)]
 fn result(
     repo_path: &Path,
     config_path: &Path,

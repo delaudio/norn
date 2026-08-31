@@ -14,7 +14,7 @@ COPY src-tauri/build.rs ./build.rs
 COPY src-tauri/tauri.conf.json ./tauri.conf.json
 COPY src-tauri/icons ./icons
 COPY src/lib/defaultReviewPrompt.md /build/src/lib/defaultReviewPrompt.md
-RUN cargo build --locked --release --bin norn --bin lachesi
+RUN cargo build --locked --release --no-default-features --bin norn --bin lachesi
 
 FROM debian:bookworm-slim
 

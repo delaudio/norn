@@ -420,7 +420,7 @@ fn configured_repo(workspace: &str, repo: &str) -> Result<PathBuf, String> {
         .ok_or_else(|| format!("Repository {workspace}/{repo} is not configured."))?;
     let repo_path = configured_repo_path(repo_ref)
         .ok_or_else(|| format!("Repository {workspace}/{repo} has no local path configured."))?;
-    if git_origin_matches(&repo_path, repo_ref.provider, workspace, repo)? != true {
+    if !git_origin_matches(&repo_path, repo_ref.provider, workspace, repo)? {
         let remote = match repo_ref.provider {
             ReviewProvider::Bitbucket => format!("bitbucket.org/{workspace}/{repo}"),
             ReviewProvider::Github => format!("github.com/{workspace}/{repo}"),
@@ -629,11 +629,11 @@ fn spawn_command(program: &Path, args: &[String]) -> Result<(), String> {
 fn open_with_system(file_path: &Path) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     {
-        return Command::new("/usr/bin/open")
+        Command::new("/usr/bin/open")
             .arg(file_path)
             .spawn()
             .map(|_| ())
-            .map_err(|e| format!("Failed to open file: {e}"));
+            .map_err(|e| format!("Failed to open file: {e}"))
     }
 
     #[cfg(target_os = "windows")]
