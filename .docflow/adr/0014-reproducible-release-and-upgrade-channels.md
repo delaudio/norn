@@ -1,7 +1,7 @@
 ---
 adr: 0014
 title: Deliver Norn through reproducible releases and verified upgrade channels
-status: Accepted
+status: Implemented
 date: 2026-08-31
 owner: codex
 supersedes:
@@ -98,9 +98,11 @@ contract is satisfied.
 | Date | Revision | Author | Change |
 |------|----------|--------|--------|
 | 2026-08-31 | r1 | codex | Accepted the reproducible release and verified upgrade delivery contract after guided assessment. |
+| 2026-08-31 | r2 | codex | Marked the delivery contract implemented after PR #205 shipped the governed release, Homebrew lifecycle, desktop, and local-installation channels. |
 
 ## Approvals
 
 | Role | Name | Date | Signature |
 |------|------|------|-----------|
 | Maintainer | fdg | 2026-08-31 | approved in chat |
+| Maintainer | fdg | 2026-08-31 | approved PR #205 merge in chat |
