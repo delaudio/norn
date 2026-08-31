@@ -49,9 +49,15 @@ const checks = [
   ],
   [
     workflow.includes(
-      "cargo test --locked --manifest-path src-tauri/Cargo.toml --all-targets --all-features",
+      "cargo test --locked --manifest-path src-tauri/Cargo.toml --bin norn --all-features",
     ),
-    "the release gate runs the complete locked Rust test suite",
+    "the release gate verifies desktop routing without launching GUI integration tests",
+  ],
+  [
+    workflow.includes(
+      "cargo test --locked --manifest-path src-tauri/Cargo.toml --all-targets --no-default-features --features custom-protocol",
+    ),
+    "the release gate tests the exact command release feature set",
   ],
   [
     workflow.includes("target: x86_64-apple-darwin") &&

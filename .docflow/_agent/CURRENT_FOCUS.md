@@ -8,14 +8,15 @@ If status files and git disagree, git is authoritative; correct this file.
 
 ## Active state
 
-- **Branch:** `codex/closeout-release-hardening`.
-- **Active item:** Docflow closeout for merged PR #205 and release-readiness
-  assessment.
-- **Plan item:** issues #198-#204 moved to `plan/done`; ADR 0014 is Implemented.
-- **Verification:** PR #205 shipped at `643ff6f` after typecheck, 104 frontend
-  tests plus tooling suites, complete Rust gates, a real Tauri build, Archgate
-  17/17, and Norn review. Formula and cask publication remain intentionally
-  release-triggered; the external tap was not mutated during implementation.
+- **Branch:** `release/v0.2.0`.
+- **Active item:** prepare the first governed Norn release, `v0.2.0`.
+- **Plan item:** operational release of implemented ADR 0014; no new capability
+  decision is required.
+- **Verification:** PR #205 shipped at `643ff6f` and its Docflow closeout at
+  `d78e108`. Version sources are being aligned to `0.2.0`. Publication is
+  blocked until the eight required Actions secrets and the exact-tag bootstrap
+  variable are configured; the historical `v0.1.0` release is not a complete
+  governed baseline and the public tap has no Norn formula or cask yet.
 
 ## Last shipped
 
@@ -24,5 +25,6 @@ permission diagnostics through PR #205.
 
 ## Next item
 
-- Determine whether the next governed release can be tagged now or needs a
-  release-candidate dry run and secret/bootstrap preparation first.
+- Merge the `0.2.0` version alignment, configure signing/notarization and tap
+  credentials, set `NORN_HOMEBREW_BOOTSTRAP_TAG=v0.2.0`, then create the signed
+  tag only after a final preflight.
