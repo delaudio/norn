@@ -42,3 +42,8 @@ adding another package manager.
 
 - `../../adr/0014-reproducible-release-and-upgrade-channels.md`
 - No pending plan item must land first.
+
+## Shipped
+
+Shipped at HEAD `24d9ce1fd4f84ab5611f3f3105ba38417c29828f` through
+[PR #208](https://github.com/delaudio/norn/pull/208).
