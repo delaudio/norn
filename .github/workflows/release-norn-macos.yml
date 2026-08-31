@@ -413,7 +413,11 @@ jobs:
           overwrite_files: false
           prerelease: true
 
+  # GitHub propagates skipped ancestors unless always() forces evaluation of
+  # needs.*.result. Formula verification is mandatory; the cask may be skipped
+  # only when the explicitly opt-in desktop channel is disabled.
   homebrew-formula-smoke:
+    if: ${{ always() && needs.release.result == 'success' }}
     needs: release
     strategy:
       fail-fast: false
@@ -472,7 +476,7 @@ jobs:
           fi
 
   homebrew-cask-smoke:
-    if: vars.NORN_DESKTOP_RELEASE_ENABLED == 'true'
+    if: ${{ always() && needs.release.result == 'success' && vars.NORN_DESKTOP_RELEASE_ENABLED == 'true' }}
     needs: release
     strategy:
       fail-fast: false
@@ -559,7 +563,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: gh release edit "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --prerelease=false --latest
 
+  # Preserve the same explicit result evaluation past the skipped desktop
+  # branch; never publish unless stable promotion actually succeeded.
   publish-homebrew-tap:
+    if: ${{ always() && needs.finalize-stable-release.result == 'success' }}
     needs: finalize-stable-release
     runs-on: ubuntu-latest
     timeout-minutes: 10

@@ -11,6 +11,12 @@ const appVerificationScript = readFileSync("scripts/verify-macos-app.sh", "utf8"
 const toolingTestRunner = readFileSync("scripts/run-tooling-tests.mjs", "utf8");
 const githubRefNameExpression = "$" + "{GITHUB_REF_NAME}";
 const desktopReleaseGate = "vars.NORN_DESKTOP_RELEASE_ENABLED == 'true'";
+const formulaSmokeGate = "$" + "{{ always() && needs.release.result == 'success' }}";
+const caskSmokeGate =
+  "$" +
+  "{{ always() && needs.release.result == 'success' && vars.NORN_DESKTOP_RELEASE_ENABLED == 'true' }}";
+const tapPublicationGate =
+  "$" + "{{ always() && needs.finalize-stable-release.result == 'success' }}";
 
 const checks = [
   [
@@ -161,6 +167,8 @@ const checks = [
   ],
   [
     /homebrew-formula-smoke:[\s\S]*needs: release/.test(workflow) &&
+      workflow.includes("Formula verification is mandatory; the cask may be skipped") &&
+      workflow.includes(`homebrew-formula-smoke:\n    if: ${formulaSmokeGate}`) &&
       workflow.includes("runner: macos-15-intel") &&
       workflow.includes("runner: macos-15") &&
       workflow.includes("bash scripts/homebrew-formula-lifecycle.sh") &&
@@ -169,7 +177,7 @@ const checks = [
   ],
   [
     /homebrew-cask-smoke:[\s\S]*needs: release/.test(workflow) &&
-      workflow.includes(`homebrew-cask-smoke:\n    if: ${desktopReleaseGate}`) &&
+      workflow.includes(`homebrew-cask-smoke:\n    if: ${caskSmokeGate}`) &&
       workflow.includes("bash scripts/homebrew-cask-lifecycle.sh") &&
       workflow.includes("NORN_RELEASE_CHANNEL: desktop") &&
       workflow.includes('curl -fsSL "$release_url/norn-cask.rb"'),
@@ -215,7 +223,8 @@ const checks = [
     "the candidate becomes stable after formula smoke and, when enabled, desktop smoke",
   ],
   [
-    /publish-homebrew-tap:[\s\S]*needs: finalize-stable-release/.test(workflow),
+    /publish-homebrew-tap:[\s\S]*needs: finalize-stable-release/.test(workflow) &&
+      workflow.includes(`publish-homebrew-tap:\n    if: ${tapPublicationGate}`),
     "tap publication follows stable-release promotion",
   ],
   [
