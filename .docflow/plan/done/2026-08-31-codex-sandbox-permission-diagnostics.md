@@ -29,3 +29,7 @@ permissions, or exposing provider stderr.
 
 - `../../adr/0007-headless-review-cli.md`
 - GitHub issue #198
+
+---
+
+Shipped at HEAD `643ff6f8ea9b52decc8c8860271621ca5c221439` through PR #205.

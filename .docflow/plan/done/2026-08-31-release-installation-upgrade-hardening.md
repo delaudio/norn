@@ -36,3 +36,7 @@ operating systems, or changes to review/provider semantics.
 - GitHub epic #204
 - Delivery order: #199 -> #200 -> #201; #203 may follow #199 independently;
   #202 remains a separate desktop slice after the release foundation.
+
+---
+
+Shipped at HEAD `643ff6f8ea9b52decc8c8860271621ca5c221439` through PR #205.
