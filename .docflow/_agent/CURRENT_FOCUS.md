@@ -8,11 +8,10 @@ If status files and git disagree, git is authoritative; correct this file.
 
 ## Active state
 
-- **Branch:** `fix/homebrew-lifecycle-temporary-tap`.
-- **Active item:** fix issue #213 after the `v0.2.3` candidate proved that
-  current Homebrew runners reject direct Formula installation from a Ruby file
-  outside a tap.
-- **Plan item:** `.docflow/plan/todo/0002-homebrew-formula-temporary-tap.md`,
+- **Branch:** `docs/close-homebrew-formula-temporary-tap`.
+- **Active item:** close the issue #213 delivery record after PR #214 and
+  prepare the signed `v0.2.4` recovery release.
+- **Plan item:** `.docflow/plan/done/2026-09-01-homebrew-formula-temporary-tap.md`,
   owned by implemented ADR 0014.
 - **Verification:** PR #205 shipped at `643ff6f` and its Docflow closeout at
   `d78e108`. Version sources were aligned to `0.2.0` through PR #207. The
@@ -30,15 +29,18 @@ If status files and git disagree, git is authoritative; correct this file.
   PR #212 forced explicit downstream result evaluation and version `0.2.3`.
   Run `33439848231` then built both command archives and correctly started the
   Formula smoke matrix, but both runners rejected direct Formula-path
-  installation before stable promotion or tap publication.
+  installation before stable promotion or tap publication. PR #214 fixed the
+  lifecycle with an isolated temporary tap, explicit candidate-tag resolution,
+  and schema-checked readiness outcomes. Clean-runner lifecycle run
+  `33444357192` passed on Intel and Apple Silicon.
 
 ## Last shipped
 
-`7b4ee28` - evaluate downstream release jobs after skipped optional work
-through PR #212.
+`7e9c759` - validate the Formula lifecycle through a temporary tap and close
+issue #213 through PR #214.
 
 ## Next item
 
-- Install lifecycle Formulae through an isolated temporary tap, add regression
-  coverage, align version sources to `0.2.4`, and publish the next signed
-  recovery tag after review and integration.
+- Publish and monitor the signed `v0.2.4` recovery tag, verify stable GitHub
+  promotion and public Formula tap publication, then remove the one-time
+  bootstrap variable.

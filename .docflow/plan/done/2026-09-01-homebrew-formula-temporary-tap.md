@@ -32,3 +32,8 @@ channel, adding an Apple signing requirement, or changing supported platforms.
 
 - `../../adr/0014-reproducible-release-and-upgrade-channels.md`
 - GitHub issue #213
+
+---
+
+Shipped at HEAD `7e9c7592840411240d45d3722dc9346aabc48a86` through PR #214. Clean-runner
+Homebrew lifecycle run `33444357192` passed on Intel and Apple Silicon.
