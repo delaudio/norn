@@ -71,12 +71,7 @@ test("allows only an explicitly matching one-time bootstrap tag", () => {
 });
 
 test("a configured bootstrap tag never bypasses a complete prior release", () => {
-  const selected = selectPreviousRelease(
-    [release("v1.0.0")],
-    "v1.1.0",
-    "formula",
-    "v1.1.0",
-  );
+  const selected = selectPreviousRelease([release("v1.0.0")], "v1.1.0", "formula", "v1.1.0");
   assert.equal(selected.bootstrap, false);
   assert.equal(selected.tag, "v1.0.0");
 });

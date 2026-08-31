@@ -30,4 +30,10 @@ test("command distributions explicitly disable desktop routing", () => {
     releaseWorkflow,
     /cargo build .*--target "\$TARGET" --no-default-features --features custom-protocol --bin norn --bin norn-tui/,
   );
+  assert.match(
+    releaseWorkflow,
+    /cargo test .*--all-targets --no-default-features --features custom-protocol/,
+  );
+  assert.match(releaseWorkflow, /cargo test .*--bin norn --all-features/);
+  assert.doesNotMatch(releaseWorkflow, /cargo test .*--all-targets --all-features/);
 });
