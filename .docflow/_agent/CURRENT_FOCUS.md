@@ -8,11 +8,11 @@ If status files and git disagree, git is authoritative; correct this file.
 
 ## Active state
 
-- **Branch:** `fix/release-skipped-dependency-chain`.
-- **Active item:** recover the first governed Norn release as `v0.2.3` after
-  the `v0.2.2` candidate exposed transitive GitHub Actions skip propagation
-  from the intentionally disabled desktop build.
-- **Plan item:** `.docflow/plan/done/2026-08-31-cli-only-release-channel.md`,
+- **Branch:** `fix/homebrew-lifecycle-temporary-tap`.
+- **Active item:** fix issue #213 after the `v0.2.3` candidate proved that
+  current Homebrew runners reject direct Formula installation from a Ruby file
+  outside a tap.
+- **Plan item:** `.docflow/plan/todo/0002-homebrew-formula-temporary-tap.md`,
   owned by implemented ADR 0014.
 - **Verification:** PR #205 shipped at `643ff6f` and its Docflow closeout at
   `d78e108`. Version sources were aligned to `0.2.0` through PR #207. The
@@ -27,13 +27,18 @@ If status files and git disagree, git is authoritative; correct this file.
   #211 fixed those tests; run `33437187047` published the complete `v0.2.2`
   command candidate as a prerelease, then skipped formula smoke, stable
   promotion, and tap publication through the transitive desktop skip chain.
+  PR #212 forced explicit downstream result evaluation and version `0.2.3`.
+  Run `33439848231` then built both command archives and correctly started the
+  Formula smoke matrix, but both runners rejected direct Formula-path
+  installation before stable promotion or tap publication.
 
 ## Last shipped
 
-`86f23d5` - make setup tests environment-independent through PR #211.
+`7b4ee28` - evaluate downstream release jobs after skipped optional work
+through PR #212.
 
 ## Next item
 
-- Require downstream command-only jobs to evaluate predecessor results with
-  `always()`, align version sources to `0.2.3`, and publish the next signed
+- Install lifecycle Formulae through an isolated temporary tap, add regression
+  coverage, align version sources to `0.2.4`, and publish the next signed
   recovery tag after review and integration.

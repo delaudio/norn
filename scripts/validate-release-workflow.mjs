@@ -248,6 +248,11 @@ const checks = [
       lifecycleWorkflow.includes("bash scripts/homebrew-cask-lifecycle.sh") &&
       !lifecycleWorkflow.includes("|| true") &&
       toolingTestRunner.includes('"scripts/run-with-timeout.test.mjs"') &&
+      formulaLifecycleScript.includes('brew tap-new --no-git "$tap_name"') &&
+      formulaLifecycleScript.includes('brew install --formula "$formula_ref"') &&
+      formulaLifecycleScript.includes('brew upgrade --formula "$formula_ref"') &&
+      formulaLifecycleScript.includes('brew untap "$tap_name"') &&
+      !formulaLifecycleScript.includes('brew install --formula "$candidate_formula"') &&
       formulaLifecycleScript.includes("node scripts/run-with-timeout.mjs --timeout-ms 60000") &&
       !formulaLifecycleScript.includes("perl -e") &&
       caskLifecycleScript.includes("bash scripts/verify-macos-app.sh") &&

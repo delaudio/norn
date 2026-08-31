@@ -4,6 +4,7 @@ import test from "node:test";
 
 const releaseWorkflow = readFileSync(".github/workflows/release-norn-macos.yml", "utf8");
 const lifecycleWorkflow = readFileSync(".github/workflows/homebrew-lifecycle-smoke.yml", "utf8");
+const formulaLifecycle = readFileSync("scripts/homebrew-formula-lifecycle.sh", "utf8");
 const desktopGate = "vars.NORN_DESKTOP_RELEASE_ENABLED == 'true'";
 
 function yamlBlock(contents, marker, nextPattern) {
@@ -111,4 +112,23 @@ test("scheduled lifecycle validation requires desktop assets only when enabled",
     step(lifecycle, "Download and validate previous stable cask"),
     new RegExp(desktopGate),
   );
+});
+
+test("formula lifecycle validation installs through an isolated temporary tap", () => {
+  assert.match(formulaLifecycle, /brew tap-new --no-git "\$tap_name"/);
+  assert.match(formulaLifecycle, /tap_root="\$\(brew --repository "\$tap_name"\)"/);
+  assert.match(formulaLifecycle, /tap_formula="\$tap_root\/Formula\/norn\.rb"/);
+  assert.match(formulaLifecycle, /formula_ref="\$\{tap_name\}\/norn"/);
+  assert.match(formulaLifecycle, /brew install --formula "\$formula_ref"/);
+  assert.match(formulaLifecycle, /brew upgrade --formula "\$formula_ref"/);
+  assert.match(formulaLifecycle, /brew test "\$formula_ref"/);
+  assert.match(formulaLifecycle, /remove_existing_tap\n/);
+  assert.match(formulaLifecycle, /brew tap \| grep -Fx "\$tap_name"/);
+  assert.match(formulaLifecycle, /trap cleanup EXIT/);
+  assert.match(formulaLifecycle, /brew untap "\$tap_name"/);
+  assert.doesNotMatch(
+    formulaLifecycle,
+    /brew install --formula "\$(?:candidate|previous)_formula"/,
+  );
+  assert.doesNotMatch(formulaLifecycle, /brew upgrade --formula "\$candidate_formula"/);
 });
