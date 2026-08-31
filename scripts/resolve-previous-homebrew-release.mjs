@@ -35,6 +35,10 @@ export function nextPageUrl(linkHeader) {
   return undefined;
 }
 
+export function candidateTagFromEnvironment(environment = process.env) {
+  return environment.NORN_CANDIDATE_TAG;
+}
+
 async function fetchReleases(repository, headers) {
   let url = `https://api.github.com/repos/${repository}/releases?per_page=100`;
   const releases = [];
@@ -129,12 +133,19 @@ export function selectPreviousRelease(
 
 async function main() {
   const repository = process.env.GITHUB_REPOSITORY;
-  const candidateTag = process.env.GITHUB_REF_NAME;
+  const candidateTag = candidateTagFromEnvironment();
   const outputPath = process.env.GITHUB_OUTPUT;
   const channel = process.env.NORN_RELEASE_CHANNEL ?? "formula";
   const bootstrapTag = process.env.NORN_HOMEBREW_BOOTSTRAP_TAG;
-  if (!repository || !candidateTag || !outputPath) {
-    throw new Error("GITHUB_REPOSITORY, GITHUB_REF_NAME, and GITHUB_OUTPUT are required.");
+  const missingInputs = [
+    ["GITHUB_REPOSITORY", repository],
+    ["GITHUB_OUTPUT", outputPath],
+    ["NORN_CANDIDATE_TAG", candidateTag],
+  ]
+    .filter(([, value]) => !value)
+    .map(([name]) => name);
+  if (missingInputs.length > 0) {
+    throw new Error(`Missing required release resolver inputs: ${missingInputs.join(", ")}.`);
   }
 
   const headers = {

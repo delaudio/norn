@@ -10,6 +10,7 @@ const testFiles = [
   "scripts/release-channels.test.mjs",
   "scripts/resolve-previous-homebrew-release.test.mjs",
   "scripts/run-with-timeout.test.mjs",
+  "scripts/validate-readiness-report.test.mjs",
 ];
 
 for (const testFile of testFiles) {
