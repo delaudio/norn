@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { nextPageUrl, selectPreviousRelease } from "./resolve-previous-homebrew-release.mjs";
+import {
+  candidateTagFromEnvironment,
+  nextPageUrl,
+  selectPreviousRelease,
+} from "./resolve-previous-homebrew-release.mjs";
 
 function release(tag, { complete = true, desktop = false, prerelease = false } = {}) {
   const version = tag.slice(1);
@@ -74,6 +78,17 @@ test("a configured bootstrap tag never bypasses a complete prior release", () =>
   const selected = selectPreviousRelease([release("v1.0.0")], "v1.1.0", "formula", "v1.1.0");
   assert.equal(selected.bootstrap, false);
   assert.equal(selected.tag, "v1.0.0");
+});
+
+test("only the explicit candidate tag controls dispatched release resolution", () => {
+  assert.equal(
+    candidateTagFromEnvironment({
+      GITHUB_REF_NAME: "feature/test-lifecycle",
+      NORN_CANDIDATE_TAG: "v1.2.3",
+    }),
+    "v1.2.3",
+  );
+  assert.equal(candidateTagFromEnvironment({ GITHUB_REF_NAME: "v1.2.3" }), undefined);
 });
 
 test("parses only GitHub API next-page links", () => {

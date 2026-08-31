@@ -10,6 +10,8 @@ const caskLifecycleScript = readFileSync("scripts/homebrew-cask-lifecycle.sh", "
 const appVerificationScript = readFileSync("scripts/verify-macos-app.sh", "utf8");
 const toolingTestRunner = readFileSync("scripts/run-tooling-tests.mjs", "utf8");
 const githubRefNameExpression = "$" + "{GITHUB_REF_NAME}";
+const releaseCandidateTag = "NORN_CANDIDATE_TAG: $" + "{{ github.ref_name }}";
+const dispatchedCandidateTag = "NORN_CANDIDATE_TAG: $" + "{{ steps.release.outputs.release_tag }}";
 const desktopReleaseGate = "vars.NORN_DESKTOP_RELEASE_ENABLED == 'true'";
 const formulaSmokeGate = "$" + "{{ always() && needs.release.result == 'success' }}";
 const caskSmokeGate =
@@ -202,6 +204,8 @@ const checks = [
     workflow.includes("vars.NORN_HOMEBREW_BOOTSTRAP_TAG") &&
       workflow.includes("steps.previous.outputs.bootstrap != 'true'") &&
       lifecycleWorkflow.includes("vars.NORN_HOMEBREW_BOOTSTRAP_TAG") &&
+      workflow.includes(releaseCandidateTag) &&
+      lifecycleWorkflow.includes(dispatchedCandidateTag) &&
       formulaLifecycleScript.includes("NORN_HOMEBREW_BOOTSTRAP:-false") &&
       caskLifecycleScript.includes("NORN_HOMEBREW_BOOTSTRAP:-false"),
     "only an explicitly tagged first governed release may use the fail-closed bootstrap path",

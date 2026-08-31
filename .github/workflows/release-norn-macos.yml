@@ -445,6 +445,7 @@ jobs:
         id: previous
         env:
           GITHUB_TOKEN: ${{ github.token }}
+          NORN_CANDIDATE_TAG: ${{ github.ref_name }}
           NORN_HOMEBREW_BOOTSTRAP_TAG: ${{ vars.NORN_HOMEBREW_BOOTSTRAP_TAG }}
         run: node scripts/resolve-previous-homebrew-release.mjs
 
@@ -516,6 +517,7 @@ jobs:
         id: previous
         env:
           GITHUB_TOKEN: ${{ github.token }}
+          NORN_CANDIDATE_TAG: ${{ github.ref_name }}
           NORN_RELEASE_CHANNEL: desktop
           NORN_HOMEBREW_BOOTSTRAP_TAG: ${{ vars.NORN_HOMEBREW_BOOTSTRAP_TAG }}
         run: node scripts/resolve-previous-homebrew-release.mjs

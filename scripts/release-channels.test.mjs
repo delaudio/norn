@@ -112,6 +112,10 @@ test("scheduled lifecycle validation requires desktop assets only when enabled",
     step(lifecycle, "Download and validate previous stable cask"),
     new RegExp(desktopGate),
   );
+  assert.match(
+    step(lifecycle, "Resolve previous stable formula"),
+    /NORN_CANDIDATE_TAG: \$\{\{ steps\.release\.outputs\.release_tag \}\}/,
+  );
 });
 
 test("formula lifecycle validation installs through an isolated temporary tap", () => {

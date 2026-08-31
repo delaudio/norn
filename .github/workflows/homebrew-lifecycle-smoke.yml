@@ -118,7 +118,7 @@ jobs:
         id: previous
         env:
           GITHUB_TOKEN: ${{ github.token }}
-          GITHUB_REF_NAME: ${{ steps.release.outputs.release_tag }}
+          NORN_CANDIDATE_TAG: ${{ steps.release.outputs.release_tag }}
           NORN_HOMEBREW_BOOTSTRAP_TAG: ${{ vars.NORN_HOMEBREW_BOOTSTRAP_TAG }}
         run: node scripts/resolve-previous-homebrew-release.mjs
 
@@ -153,7 +153,7 @@ jobs:
         id: previous-desktop
         env:
           GITHUB_TOKEN: ${{ github.token }}
-          GITHUB_REF_NAME: ${{ steps.release.outputs.release_tag }}
+          NORN_CANDIDATE_TAG: ${{ steps.release.outputs.release_tag }}
           NORN_RELEASE_CHANNEL: desktop
           NORN_HOMEBREW_BOOTSTRAP_TAG: ${{ vars.NORN_HOMEBREW_BOOTSTRAP_TAG }}
         run: node scripts/resolve-previous-homebrew-release.mjs
