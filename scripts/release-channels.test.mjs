@@ -41,8 +41,10 @@ test("the Ubuntu release gate installs Tauri system dependencies before Rust com
 test("command-only releases skip desktop work without weakening command gates", () => {
   const desktopBuild = job(releaseWorkflow, "build-macos-desktop");
   const release = job(releaseWorkflow, "release");
+  const formulaSmoke = job(releaseWorkflow, "homebrew-formula-smoke");
   const caskSmoke = job(releaseWorkflow, "homebrew-cask-smoke");
   const finalize = job(releaseWorkflow, "finalize-stable-release");
+  const tap = job(releaseWorkflow, "publish-homebrew-tap");
   const commandAssets = step(release, "Attach immutable command release assets");
   const desktopAssets = step(release, "Attach immutable desktop release assets");
 
@@ -60,9 +62,20 @@ test("command-only releases skip desktop work without weakening command gates", 
   assert.match(desktopAssets, /\.dmg/);
   assert.match(desktopAssets, /dist\/homebrew\/norn-cask\.rb/);
   assert.doesNotMatch(desktopAssets, /\.tar\.gz|dist\/homebrew\/norn\.rb(?:\n|$)/);
-  assert.match(caskSmoke, new RegExp(`^    if: ${desktopGate.replaceAll("'", "\\'")}$`, "m"));
+  assert.match(
+    formulaSmoke,
+    /^ {4}if: \$\{\{ always\(\) && needs\.release\.result == 'success' \}\}$/m,
+  );
+  assert.match(
+    caskSmoke,
+    /^ {4}if: \$\{\{ always\(\) && needs\.release\.result == 'success' && vars\.NORN_DESKTOP_RELEASE_ENABLED == 'true' \}\}$/m,
+  );
   assert.match(finalize, /needs\.homebrew-formula-smoke\.result == 'success'/);
   assert.match(finalize, /needs\.homebrew-cask-smoke\.result == 'skipped'/);
+  assert.match(
+    tap,
+    /^ {4}if: \$\{\{ always\(\) && needs\.finalize-stable-release\.result == 'success' \}\}$/m,
+  );
 });
 
 test("tap publication always advances the formula and gates the cask", () => {

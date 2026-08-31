@@ -1,7 +1,7 @@
 {
   "name": "norn",
   "private": true,
-  "version": "0.2.2",
+  "version": "0.2.3",
   "type": "module",
   "description": "A GitHub-feeling Bitbucket pull request review desktop app",
   "scripts": {
