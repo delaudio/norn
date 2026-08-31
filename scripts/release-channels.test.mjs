@@ -130,6 +130,11 @@ test("formula lifecycle validation installs through an isolated temporary tap", 
   assert.match(formulaLifecycle, /brew tap \| grep -Fx "\$tap_name"/);
   assert.match(formulaLifecycle, /trap cleanup EXIT/);
   assert.match(formulaLifecycle, /brew untap "\$tap_name"/);
+  assert.match(formulaLifecycle, /case "\$doctor_status" in/);
+  assert.match(formulaLifecycle, /0 \| 1\) ;;/);
+  assert.match(formulaLifecycle, /2\)[\s\S]*readiness_status=fail[\s\S]*return 2/);
+  assert.match(formulaLifecycle, /node scripts\/validate-readiness-report\.mjs/);
+  assert.doesNotMatch(formulaLifecycle, /norn doctor[^\n]*\|\| true/);
   assert.doesNotMatch(
     formulaLifecycle,
     /brew install --formula "\$(?:candidate|previous)_formula"/,

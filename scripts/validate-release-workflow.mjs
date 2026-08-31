@@ -6,6 +6,7 @@ const workflowPath = ".github/workflows/release-norn-macos.yml";
 const workflow = readFileSync(workflowPath, "utf8");
 const lifecycleWorkflow = readFileSync(".github/workflows/homebrew-lifecycle-smoke.yml", "utf8");
 const formulaLifecycleScript = readFileSync("scripts/homebrew-formula-lifecycle.sh", "utf8");
+const readinessReportValidator = readFileSync("scripts/validate-readiness-report.mjs", "utf8");
 const caskLifecycleScript = readFileSync("scripts/homebrew-cask-lifecycle.sh", "utf8");
 const appVerificationScript = readFileSync("scripts/verify-macos-app.sh", "utf8");
 const toolingTestRunner = readFileSync("scripts/run-tooling-tests.mjs", "utf8");
@@ -258,6 +259,9 @@ const checks = [
       formulaLifecycleScript.includes('brew untap "$tap_name"') &&
       !formulaLifecycleScript.includes('brew install --formula "$candidate_formula"') &&
       formulaLifecycleScript.includes("node scripts/run-with-timeout.mjs --timeout-ms 60000") &&
+      formulaLifecycleScript.includes('case "$doctor_status" in') &&
+      formulaLifecycleScript.includes("node scripts/validate-readiness-report.mjs") &&
+      readinessReportValidator.includes('report.schemaVersion !== "norn.readiness.v1"') &&
       !formulaLifecycleScript.includes("perl -e") &&
       caskLifecycleScript.includes("bash scripts/verify-macos-app.sh") &&
       caskLifecycleScript.includes("security add-generic-password") &&

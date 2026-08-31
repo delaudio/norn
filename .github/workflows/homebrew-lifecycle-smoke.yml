@@ -27,6 +27,8 @@ on:
       - "scripts/run-tooling-tests.mjs"
       - "scripts/run-with-timeout.mjs"
       - "scripts/run-with-timeout.test.mjs"
+      - "scripts/validate-readiness-report.mjs"
+      - "scripts/validate-readiness-report.test.mjs"
       - "scripts/validate-homebrew-manifests.mjs"
       - "scripts/validate-release-workflow.mjs"
 

@@ -79,14 +79,39 @@ stage_formula "$candidate_formula"
 
 verify_candidate() {
   local phase="$1"
+  local doctor_output="$diagnostics_root/${phase}-doctor.json"
+  local doctor_status=0
   echo "phase=${phase} version=${CANDIDATE_VERSION} architecture=${NORN_ARCHITECTURE} artifact=norn.rb"
   test "$(command -v norn)" = "$brew_bin/norn"
   test "$(command -v norn-tui)" = "$brew_bin/norn-tui"
   norn --version | grep -F "norn $CANDIDATE_VERSION"
   norn --help >/dev/null
   norn-tui --version | grep -F "$CANDIDATE_VERSION"
-  node scripts/run-with-timeout.mjs --timeout-ms 60000 -- \
-    norn doctor --machine-only --format json > "$diagnostics_root/${phase}-doctor.json"
+  if node scripts/run-with-timeout.mjs --timeout-ms 60000 -- \
+    norn doctor --machine-only --format json > "$doctor_output"; then
+    doctor_status=0
+  else
+    doctor_status=$?
+  fi
+  case "$doctor_status" in
+    0 | 1) ;;
+    2)
+      echo "phase=${phase} readiness_status=fail" >&2
+      return 2
+      ;;
+    *)
+      echo "Readiness probe failed with unexpected exit ${doctor_status}." >&2
+      return "$doctor_status"
+      ;;
+  esac
+  local readiness_status
+  if ! readiness_status="$(
+    node scripts/validate-readiness-report.mjs "$doctor_output" "$doctor_status"
+  )"; then
+    echo "phase=${phase} readiness_status=invalid" >&2
+    return 1
+  fi
+  echo "phase=${phase} readiness_status=${readiness_status}"
 }
 
 echo "phase=clean-install version=${CANDIDATE_VERSION} architecture=${NORN_ARCHITECTURE} artifact=norn.rb"
