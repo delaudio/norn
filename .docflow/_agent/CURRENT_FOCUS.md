@@ -8,15 +8,16 @@ If status files and git disagree, git is authoritative; correct this file.
 
 ## Active state
 
-- **Branch:** `release/v0.2.0`.
-- **Active item:** prepare the first governed Norn release, `v0.2.0`.
-- **Plan item:** operational release of implemented ADR 0014; no new capability
-  decision is required.
+- **Branch:** `release/v0.2.0-cli-channel`.
+- **Active item:** enable the first governed Norn release, `v0.2.0`, without an
+  Apple Developer Program dependency.
+- **Plan item:** `.docflow/plan/todo/0005-cli-only-release-channel.md`, owned by
+  implemented ADR 0014; no new capability decision is required.
 - **Verification:** PR #205 shipped at `643ff6f` and its Docflow closeout at
-  `d78e108`. Version sources are being aligned to `0.2.0`. Publication is
-  blocked until the eight required Actions secrets and the exact-tag bootstrap
-  variable are configured; the historical `v0.1.0` release is not a complete
-  governed baseline and the public tap has no Norn formula or cask yet.
+  `d78e108`. Version sources were aligned to `0.2.0` through PR #207. The
+  Homebrew tap credential is configured. Publication now requires a
+  command-only release path plus the exact-tag bootstrap variable; Apple
+  signing and notarization remain intentionally unavailable.
 
 ## Last shipped
 
@@ -25,6 +26,6 @@ permission diagnostics through PR #205.
 
 ## Next item
 
-- Merge the `0.2.0` version alignment, configure signing/notarization and tap
-  credentials, set `NORN_HOMEBREW_BOOTSTRAP_TAG=v0.2.0`, then create the signed
-  tag only after a final preflight.
+- Implement and merge the command-only release channel, set
+  `NORN_HOMEBREW_BOOTSTRAP_TAG=v0.2.0`, then create the signed tag only after a
+  final preflight.

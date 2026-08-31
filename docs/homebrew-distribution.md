@@ -75,8 +75,9 @@ brew install delaudio/tap/norn
 
 ## Desktop cask
 
-The desktop channel installs the signed and notarized app bundle without adding
-another `norn` executable, so it can coexist with the command formula:
+When a release enables the desktop channel, its cask installs the signed and
+notarized app bundle without adding another `norn` executable, so it can coexist
+with the command formula:
 
 ```sh
 brew install --cask norn
@@ -116,18 +117,22 @@ Before publishing each stable tag:
 - Publish immutable assets for both supported architectures:
   - `norn-<version>-macos-arm64.tar.gz`
   - `norn-<version>-macos-x86_64.tar.gz`
+- When the desktop channel is enabled, also publish:
   - `Norn-<version>-macos-arm64.dmg`
   - `Norn-<version>-macos-x86_64.dmg`
 - Attach `.sha256` sidecar files and metadata.
 - Render the formula from `packaging/homebrew/norn.rb.template` using the two
   archives and checksum sidecars produced by that same workflow run.
-- Render the cask from `packaging/homebrew/norn-cask.rb.template` using the two
-  notarized DMGs and checksum sidecars produced by that same workflow run.
-- Publish the rendered `norn.rb` and `norn-cask.rb` as immutable release assets.
-- Advance the public tap only after the formula and cask pass clean install, true
-  prior-version upgrade, uninstall, and reinstall tests on both supported macOS
-  architectures. The desktop checks include the app signature, Gatekeeper,
-  stapled notarization ticket, and a real launch/quit cycle.
+- When the desktop channel is enabled, render the cask from
+  `packaging/homebrew/norn-cask.rb.template` using the two notarized DMGs and
+  checksum sidecars produced by that same workflow run.
+- Publish the rendered `norn.rb` as an immutable release asset. Publish
+  `norn-cask.rb` only for a desktop-enabled release.
+- Advance the formula in the public tap only after its clean install, true
+  prior-version upgrade, uninstall, and reinstall tests pass on both supported
+  macOS architectures. A desktop-enabled release also gates cask publication on
+  those lifecycle checks, the app signature, Gatekeeper, the stapled
+  notarization ticket, and a real launch/quit cycle.
 - Keep the lifecycle smoke workflow green on the current GitHub-hosted Intel and
   Apple Silicon macOS runners.
 
@@ -138,28 +143,36 @@ Every release must include:
 - checksums, and
 - architecture marker in filename.
 
-The release workflow requires these repository Actions secrets:
+Every release requires this repository Actions secret:
 
 - `HOMEBREW_TAP_TOKEN`, scoped to update `delaudio/homebrew-tap`;
+
+The command-only channel is the default when the repository Actions variable
+`NORN_DESKTOP_RELEASE_ENABLED` is absent or is not exactly `true`. To publish a
+desktop release, set that variable to `true` and configure all of these
+additional repository Actions secrets:
+
 - `APPLE_CERTIFICATE`, a base64-encoded Developer ID Application certificate;
 - `APPLE_CERTIFICATE_PASSWORD` and `KEYCHAIN_PASSWORD`;
 - `APPLE_SIGNING_IDENTITY`;
 - `APPLE_ID`, `APPLE_PASSWORD`, and `APPLE_TEAM_ID` for notarization.
 
-For the first release produced by this governed pipeline, and only when no
-earlier stable release has complete formula and desktop assets for both
-architectures, set the repository Actions variable
-`NORN_HOMEBREW_BOOTSTRAP_TAG` to the exact candidate tag. That run still checks
-clean install, uninstall, reinstall, app launch, Gatekeeper, and local data and
-Keychain preservation. Remove the variable after publication. Later releases
-fail closed unless they can perform a real upgrade from the newest complete
-stable release; a stale bootstrap value cannot authorize a different tag.
+When a channel has no earlier complete stable release for both architectures,
+set the repository Actions variable `NORN_HOMEBREW_BOOTSTRAP_TAG` to the exact
+candidate tag. The command channel still checks clean install, uninstall, and
+reinstall. An enabled desktop channel additionally checks app launch,
+Gatekeeper, and local data and Keychain preservation. Remove the variable after
+publication. Later releases fail closed unless they can perform a real upgrade
+from the newest complete stable release; a stale bootstrap value cannot
+authorize a different tag.
 
 Signing material is imported into an ephemeral CI keychain and removed after the
 build. Credentials must not be written to manifests, release assets, metadata,
-or logs. If a secret is absent, either architecture is unsigned or unnotarized,
-manifest rendering fails, or any lifecycle check fails, the candidate remains a
-prerelease and the existing public tap entries remain unchanged.
+or logs. When desktop is enabled, a missing secret or any unsigned, unnotarized,
+or incomplete desktop architecture fails the release. Any command or enabled
+desktop lifecycle failure leaves the candidate as a prerelease and keeps the
+existing public tap entries unchanged. A command-only release does not create or
+modify a cask entry.
 
 Release workflows are serialized. Tap publication deliberately uses a normal
 fast-forward push and never rebases a generated manifest commit over a concurrent

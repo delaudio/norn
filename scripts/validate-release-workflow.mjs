@@ -10,12 +10,19 @@ const caskLifecycleScript = readFileSync("scripts/homebrew-cask-lifecycle.sh", "
 const appVerificationScript = readFileSync("scripts/verify-macos-app.sh", "utf8");
 const toolingTestRunner = readFileSync("scripts/run-tooling-tests.mjs", "utf8");
 const githubRefNameExpression = "$" + "{GITHUB_REF_NAME}";
+const desktopReleaseGate = "vars.NORN_DESKTOP_RELEASE_ENABLED == 'true'";
 
 const checks = [
   [
     workflow.includes("group: norn-macos-release") &&
       workflow.includes("cancel-in-progress: false"),
     "release and tap publication runs are serialized without cancelling an active release",
+  ],
+  [
+    lifecycleWorkflow.includes('".github/workflows/release-norn-macos.yml"') &&
+      lifecycleWorkflow.includes('"scripts/validate-release-workflow.mjs"') &&
+      lifecycleWorkflow.includes("node scripts/validate-release-workflow.mjs"),
+    "pull requests validate release workflow changes before a tag run",
   ],
   [
     workflow.includes("dtolnay/rust-toolchain@stable"),
@@ -103,11 +110,13 @@ const checks = [
     toolingTestRunner.includes('"scripts/render-homebrew-cask.test.mjs"') &&
       workflow.includes("node scripts/render-homebrew-cask.mjs") &&
       workflow.includes("name: norn-homebrew-cask") &&
-      workflow.includes("dist/homebrew/norn-cask.rb"),
-    "the architecture-specific cask is rendered, tested, and retained",
+      workflow.includes("dist/homebrew/norn-cask.rb") &&
+      workflow.includes(desktopReleaseGate),
+    "the architecture-specific cask is rendered, tested, and retained only for desktop releases",
   ],
   [
     workflow.includes("build-macos-desktop:") &&
+      workflow.includes(`build-macos-desktop:\n    if: ${desktopReleaseGate}`) &&
       workflow.includes(
         'pnpm tauri build --ci --target "$TARGET" --bundles dmg --features custom-protocol,desktop-bundle',
       ) &&
@@ -116,7 +125,14 @@ const checks = [
       workflow.includes("APPLE_ID") &&
       workflow.includes("APPLE_PASSWORD") &&
       workflow.includes("APPLE_TEAM_ID"),
-    "desktop builds require Apple signing and notarization credentials and explicit desktop routing",
+    "opt-in desktop builds require Apple signing and notarization credentials and explicit desktop routing",
+  ],
+  [
+    workflow.includes("needs.build-macos-desktop.result == 'success'") &&
+      workflow.includes("needs.build-macos-desktop.result == 'skipped'") &&
+      workflow.includes("Attach immutable command release assets") &&
+      workflow.includes("Attach immutable desktop release assets"),
+    "command releases proceed when desktop is disabled while enabled desktop failures block publication",
   ],
   [
     workflow.includes('codesign --verify --deep --strict "$app_path"') ||
@@ -142,18 +158,21 @@ const checks = [
   ],
   [
     /homebrew-cask-smoke:[\s\S]*needs: release/.test(workflow) &&
+      workflow.includes(`homebrew-cask-smoke:\n    if: ${desktopReleaseGate}`) &&
       workflow.includes("bash scripts/homebrew-cask-lifecycle.sh") &&
       workflow.includes("NORN_RELEASE_CHANNEL: desktop") &&
       workflow.includes('curl -fsSL "$release_url/norn-cask.rb"'),
-    "both desktop smoke runners use the public cask and test a true prior-release upgrade",
+    "opt-in desktop smoke runners use the public cask and test a true prior-release upgrade",
   ],
   [
     workflow.includes("homebrew-formula-smoke:") &&
       workflow.includes("secrets.HOMEBREW_TAP_TOKEN") &&
       workflow.includes("repository: delaudio/homebrew-tap") &&
       workflow.includes("public-tap/Formula/norn.rb") &&
-      workflow.includes("public-tap/Casks/norn.rb"),
-    "the public tap advances only after smoke tests with a secret-scoped credential",
+      workflow.includes("public-tap/Casks/norn.rb") &&
+      workflow.includes("NORN_DESKTOP_RELEASE_ENABLED") &&
+      workflow.includes("git add Formula/norn.rb"),
+    "the public tap always advances the verified formula and conditionally advances the cask with a secret-scoped credential",
   ],
   [
     toolingTestRunner.includes('"scripts/resolve-previous-homebrew-release.test.mjs"') &&
@@ -179,23 +198,30 @@ const checks = [
       /finalize-stable-release:[\s\S]*needs:[\s\S]*homebrew-formula-smoke[\s\S]*homebrew-cask-smoke/.test(
         workflow,
       ) &&
+      workflow.includes("needs.homebrew-formula-smoke.result == 'success'") &&
+      workflow.includes("needs.homebrew-cask-smoke.result == 'skipped'") &&
       workflow.includes("--prerelease=false --latest"),
-    "the candidate becomes a stable release only after both lifecycle smoke jobs",
+    "the candidate becomes stable after formula smoke and, when enabled, desktop smoke",
   ],
   [
     /publish-homebrew-tap:[\s\S]*needs: finalize-stable-release/.test(workflow),
     "tap publication follows stable-release promotion",
   ],
   [
-    lifecycleWorkflow.includes("Require complete stable release assets") &&
+    lifecycleWorkflow.includes("Require complete stable command release assets") &&
       lifecycleWorkflow.includes("steps.release.outputs.arm64_url") &&
       lifecycleWorkflow.includes("steps.release.outputs.x86_64_url") &&
-      lifecycleWorkflow.includes("steps.release.outputs.formula_url") &&
+      lifecycleWorkflow.includes("steps.release.outputs.formula_url"),
+    "scheduled lifecycle validation always requires complete command release assets",
+  ],
+  [
+    lifecycleWorkflow.includes("Require complete stable desktop release assets") &&
+      lifecycleWorkflow.includes(desktopReleaseGate) &&
       lifecycleWorkflow.includes("steps.release.outputs.desktop_arm64_url") &&
       lifecycleWorkflow.includes("steps.release.outputs.desktop_x86_64_url") &&
       lifecycleWorkflow.includes("steps.release.outputs.cask_url") &&
       !lifecycleWorkflow.includes("skip=true"),
-    "scheduled lifecycle validation fails when any required release asset is missing",
+    "scheduled lifecycle validation requires complete desktop assets only when desktop is enabled",
   ],
   [
     lifecycleWorkflow.includes("bash scripts/homebrew-formula-lifecycle.sh") &&
