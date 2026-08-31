@@ -244,6 +244,11 @@ pub fn run_from_env_if_cli() -> Option<i32> {
     Some(run_args(&args, &mut stdout, &mut stderr))
 }
 
+pub fn print_usage() -> i32 {
+    let mut stdout = io::stdout();
+    writeln!(stdout, "{}", usage()).map_or(1, |_| 0)
+}
+
 fn review_needs_headless_storage(args: &[String]) -> bool {
     args.first().map(String::as_str) == Some("review")
         && !args
@@ -652,31 +657,18 @@ fn run_setup(args: SetupArgs, stdout: &mut dyn Write, stderr: &mut dyn Write) ->
         }
     }
 
-    if selected_ai_provider == AiProvider::Codex
-        && !output.machine_tools.iter().any(|tool| {
-            tool.provider == "codex"
-                && tool.available
-                && tool
-                    .version
-                    .as_ref()
-                    .is_some_and(|version| !version.is_empty())
-        })
-    {
-        1
-    } else if selected_ai_provider == AiProvider::Claude
-        && !output.machine_tools.iter().any(|tool| {
-            tool.provider == "claude"
-                && tool.available
-                && tool
-                    .version
-                    .as_ref()
-                    .is_some_and(|version| !version.is_empty())
-        })
-    {
-        1
-    } else {
-        0
-    }
+    let selected_provider = match selected_ai_provider {
+        AiProvider::Codex => "codex",
+        AiProvider::Claude => "claude",
+    };
+    i32::from(!output.machine_tools.iter().any(|tool| {
+        tool.provider == selected_provider
+            && tool.available
+            && tool
+                .version
+                .as_ref()
+                .is_some_and(|version| !version.is_empty())
+    }))
 }
 
 fn run_init(args: InitArgs, stdout: &mut dyn Write, stderr: &mut dyn Write) -> i32 {
@@ -1890,7 +1882,7 @@ mod tests {
 
         let output: Value = serde_json::from_slice(&stdout).expect("json output");
         assert_eq!(output["dryRun"], true);
-        assert!(output["actions"].as_array().expect("actions").len() > 0);
+        assert!(!output["actions"].as_array().expect("actions").is_empty());
         let _ = fs::remove_dir_all(repo);
     }
 

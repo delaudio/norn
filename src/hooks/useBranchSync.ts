@@ -20,6 +20,10 @@ export function useBranchSync(
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    // A changed pull request selection invalidates results from the prior selection.
+    void workspace;
+    void repo;
+    void prId;
     setLoading(false);
     setResult(null);
     setError(null);

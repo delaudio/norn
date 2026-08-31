@@ -73,12 +73,14 @@ brew tap reset delaudio/tap <tap-commit-sha>
 brew install delaudio/tap/norn
 ```
 
-## Desktop cask path
+## Desktop cask
 
-Once notarized desktop artifacts are available:
+The desktop channel installs the signed and notarized app bundle without adding
+another `norn` executable, so it can coexist with the command formula:
 
 ```sh
 brew install --cask norn
+open -a Norn
 ```
 
 To remove the desktop app:
@@ -114,9 +116,20 @@ Before publishing each stable tag:
 - Publish immutable assets for both supported architectures:
   - `norn-<version>-macos-arm64.tar.gz`
   - `norn-<version>-macos-x86_64.tar.gz`
+  - `Norn-<version>-macos-arm64.dmg`
+  - `Norn-<version>-macos-x86_64.dmg`
 - Attach `.sha256` sidecar files and metadata.
-- Update formula/cask metadata to immutable release URLs and version.
-- Keep the lifecycle smoke workflow green on macOS 13 and 14.
+- Render the formula from `packaging/homebrew/norn.rb.template` using the two
+  archives and checksum sidecars produced by that same workflow run.
+- Render the cask from `packaging/homebrew/norn-cask.rb.template` using the two
+  notarized DMGs and checksum sidecars produced by that same workflow run.
+- Publish the rendered `norn.rb` and `norn-cask.rb` as immutable release assets.
+- Advance the public tap only after the formula and cask pass clean install, true
+  prior-version upgrade, uninstall, and reinstall tests on both supported macOS
+  architectures. The desktop checks include the app signature, Gatekeeper,
+  stapled notarization ticket, and a real launch/quit cycle.
+- Keep the lifecycle smoke workflow green on the current GitHub-hosted Intel and
+  Apple Silicon macOS runners.
 
 Every release must include:
 
@@ -124,6 +137,35 @@ Every release must include:
 - workflow run identifier,
 - checksums, and
 - architecture marker in filename.
+
+The release workflow requires these repository Actions secrets:
+
+- `HOMEBREW_TAP_TOKEN`, scoped to update `delaudio/homebrew-tap`;
+- `APPLE_CERTIFICATE`, a base64-encoded Developer ID Application certificate;
+- `APPLE_CERTIFICATE_PASSWORD` and `KEYCHAIN_PASSWORD`;
+- `APPLE_SIGNING_IDENTITY`;
+- `APPLE_ID`, `APPLE_PASSWORD`, and `APPLE_TEAM_ID` for notarization.
+
+For the first release produced by this governed pipeline, and only when no
+earlier stable release has complete formula and desktop assets for both
+architectures, set the repository Actions variable
+`NORN_HOMEBREW_BOOTSTRAP_TAG` to the exact candidate tag. That run still checks
+clean install, uninstall, reinstall, app launch, Gatekeeper, and local data and
+Keychain preservation. Remove the variable after publication. Later releases
+fail closed unless they can perform a real upgrade from the newest complete
+stable release; a stale bootstrap value cannot authorize a different tag.
+
+Signing material is imported into an ephemeral CI keychain and removed after the
+build. Credentials must not be written to manifests, release assets, metadata,
+or logs. If a secret is absent, either architecture is unsigned or unnotarized,
+manifest rendering fails, or any lifecycle check fails, the candidate remains a
+prerelease and the existing public tap entries remain unchanged.
+
+Release workflows are serialized. Tap publication deliberately uses a normal
+fast-forward push and never rebases a generated manifest commit over a concurrent
+tap update. An unexpected non-fast-forward push therefore fails closed; inspect
+the intervening tap change and rerun the failed job only if the candidate is
+still the intended latest stable release.
 
 You can manually trigger lifecycle smoke validation from this repo:
 

@@ -695,10 +695,10 @@ fn apply_signed_profile_analyzer_requirements(
                         "Invalid signed enforced analyzer `{id}`: {error}"
                     ))
                 })?;
-                if !analyzer
+                if analyzer
                     .command
                     .as_deref()
-                    .is_some_and(|command| !command.trim().is_empty())
+                    .is_none_or(|command| command.trim().is_empty())
                 {
                     return Err(OrganizationPolicyResolutionError::InvalidLayer(format!(
                         "Signed enforced profile `{profile_id}` requires analyzer `{id}`, but its signed executable definition has no command."

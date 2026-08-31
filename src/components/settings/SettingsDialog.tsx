@@ -280,10 +280,7 @@ function SettingsForm({
             </thead>
             <tbody>
               {visibleRepoRows.map(({ repo: r, index: originalIndex }, visibleIndex) => (
-                <tr
-                  key={repoRowKey(r, originalIndex)}
-                  className="border-t border-border align-top"
-                >
+                <tr key={repoRowKey(r, originalIndex)} className="border-t border-border align-top">
                   <td className="px-3 py-2">
                     <Input
                       aria-label={`${repositoryOwnerLabel} ${visibleIndex + 1}`}

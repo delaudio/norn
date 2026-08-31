@@ -58,6 +58,12 @@ brew tap delaudio/tap
 brew install norn
 ```
 
+Install the signed and notarized desktop app alongside the command tools with:
+
+```sh
+brew install --cask norn
+```
+
 Or run from source with your preferred package runner.
 
 ### 5-minute local onboarding
@@ -85,7 +91,7 @@ Compatibility files are still read during migration only (`.lachesi.yaml`,
 
 ```sh
 pnpm install
-pnpm tauri dev
+pnpm tauri dev --features desktop-bundle
 ```
 
 This starts the full GUI desktop app with Tauri IPC wired end-to-end.
@@ -139,24 +145,32 @@ the current task.
 
 Norn ships both a desktop app and terminal interfaces:
 
-- `norn`: review/repository CLI.
+- `norn`: review/repository CLI when subcommands are passed; no subcommand opens `norn-tui` by default.
 - `norn-tui`: terminal interface for PR browsing and review actions.
+- `norn-app`: launches the desktop GUI (`norn`/Tauri app).
 
 Build and install the canonical CLI from source:
 
 ```sh
-make cli-build
-make cli-install
+make install-local
 norn --version
+norn-tui --version
+norn-app --version
 ```
 
-Build/install the terminal UI:
+This installs durable executable files under `~/.local/bin`; it does not link
+back into `target/release`. Set `NORN_INSTALL_PREFIX=/absolute/prefix` to use a
+different `<prefix>/bin`. Component-specific installs remain available:
 
 ```sh
+make cli-install
 make tui-build
 make tui-install
-norn-tui --version
 ```
+
+See [local source installation](docs/local-source-installation.md) for atomic
+replacement behavior, command selection, compatibility aliases, and how to
+distinguish this path from a Homebrew-managed installation.
 
 `norn-tui` runs inside a local Git repo and resolves GitHub/Bitbucket from
 the configured remote.

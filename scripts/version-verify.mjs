@@ -3,25 +3,34 @@
 import { existsSync, readFileSync } from "node:fs";
 
 const sources = [
-  ["package.json", "package version", () => {
-    const pkg = JSON.parse(readFileSync("package.json", "utf8"));
-    return pkg.version;
-  }],
-  ["src-tauri/tauri.conf.json", "tauri version", () => {
-    const config = JSON.parse(readFileSync("src-tauri/tauri.conf.json", "utf8"));
-    return config.version;
-  }],
-  ["src-tauri/Cargo.toml", "Cargo version", () => {
-    const cargo = readFileSync("src-tauri/Cargo.toml", "utf8");
-    const match = cargo.match(/^version\s*=\s*"([^"]+)"/m);
-    return match?.[1];
-  }],
+  [
+    "package.json",
+    "package version",
+    () => {
+      const pkg = JSON.parse(readFileSync("package.json", "utf8"));
+      return pkg.version;
+    },
+  ],
+  [
+    "src-tauri/tauri.conf.json",
+    "tauri version",
+    () => {
+      const config = JSON.parse(readFileSync("src-tauri/tauri.conf.json", "utf8"));
+      return config.version;
+    },
+  ],
+  [
+    "src-tauri/Cargo.toml",
+    "Cargo version",
+    () => {
+      const cargo = readFileSync("src-tauri/Cargo.toml", "utf8");
+      const match = cargo.match(/^version\s*=\s*"([^"]+)"/m);
+      return match?.[1];
+    },
+  ],
 ];
 
-const optionalFormulaPaths = [
-  "Formula/norn.rb",
-  "homebrew-tap/Formula/norn.rb",
-];
+const optionalFormulaPaths = ["Formula/norn.rb", "homebrew-tap/Formula/norn.rb"];
 
 for (const path of optionalFormulaPaths) {
   if (!existsSync(path)) {

@@ -1,4 +1,13 @@
-import { Bar, BarChart, CartesianGrid, Cell, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import {
+  Bar,
+  BarChart,
+  CartesianGrid,
+  Cell,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from "recharts";
 import type { PullRequestSummary } from "@/types";
 
 interface PrByRepoChartProps {
@@ -67,8 +76,8 @@ export function PrByRepoChart({ pullRequests }: PrByRepoChartProps) {
             formatter={(value) => [value, "PRs"]}
           />
           <Bar dataKey="count" radius={[0, 4, 4, 0]}>
-            {data.map((_, index) => (
-              <Cell key={index} fill={COLORS[index % COLORS.length]} />
+            {data.map(({ repo }, index) => (
+              <Cell key={repo} fill={COLORS[index % COLORS.length]} />
             ))}
           </Bar>
         </BarChart>

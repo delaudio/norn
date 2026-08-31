@@ -1621,6 +1621,10 @@ pub fn validate_repo_review_config(
 }
 
 #[tauri::command]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the command parameters are the stable Tauri IPC configuration contract"
+)]
 pub fn save_config(
     repos: Vec<RepoRef>,
     review_provider: ReviewProvider,

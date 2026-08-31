@@ -229,6 +229,10 @@ pub struct ReviewFinding {
 
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
+#[allow(
+    clippy::enum_variant_names,
+    reason = "the serialized draft event names are part of the persisted review contract"
+)]
 pub enum ReviewFindingPublicationEventKind {
     StageDraft,
     RemoveDraft,
@@ -903,7 +907,7 @@ fn analyzer_specs_from_config(config: &repo_config::RepoReviewConfig) -> Vec<Ana
         }
         specs.push(AnalyzerSpec {
             title: id.replace(['_', '-'], " "),
-            source: analyzer_source(&id),
+            source: analyzer_source(id),
             id: id.clone(),
             command,
             timeout_seconds: analyzer.timeout_seconds.unwrap_or(120).clamp(1, 900),
@@ -1933,6 +1937,10 @@ fn extract_review_findings(
     findings
 }
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "review materialization intentionally receives the complete immutable run snapshot"
+)]
 fn materialize_review_run(
     workspace: &str,
     repo: &str,
@@ -3755,6 +3763,10 @@ fn build_conflict_resolution_payload(
     lines.join("\n")
 }
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the background fix worker receives a fully owned execution snapshot"
+)]
 fn run_fix_pipeline(
     store: AiReviewFixStore,
     key: String,
@@ -4328,6 +4340,10 @@ fn sync_branch_pipeline(
     }
 }
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the background conflict worker receives a fully owned execution snapshot"
+)]
 fn run_conflict_resolution_pipeline(
     store: AiReviewFixStore,
     key: String,
@@ -4460,9 +4476,10 @@ fn run_conflict_resolution_pipeline(
             session.public.phase = AiReviewFixPhase::ReadyToCommit;
             session.public.finished_at = Some(now_ms());
             session.public.error = None;
-            session.public.summary = Some(format!(
+            session.public.summary = Some(
                 "The branch now merges cleanly. Review the merge commit message and commit when ready."
-            ));
+                    .to_string(),
+            );
             session.public.suggested_commit_message = Some(commit_message);
             session.public.files_touched =
                 files_from_status(&git_status_lines(&repo_path).unwrap_or_default());
@@ -4613,6 +4630,10 @@ fn append_execution_policy_to_payloads(
     }
 }
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the background review worker receives the complete immutable review snapshot"
+)]
 fn run_inline_review_pipeline(
     store: AiReviewRunStore,
     key: String,
@@ -5546,6 +5567,10 @@ pub fn record_ai_review_finding_publication(
 }
 
 #[tauri::command]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the command parameters are the stable Tauri IPC review-start contract"
+)]
 pub async fn start_inline_review(
     store: tauri::State<'_, AiReviewRunStore>,
     workspace: String,
@@ -5608,6 +5633,10 @@ fn review_profile_for_thread(review_store: &AiReviewStoreData, thread_id: &str) 
 }
 
 #[tauri::command]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the command parameters are the stable Tauri IPC review-reply contract"
+)]
 pub async fn reply_inline_review(
     store: tauri::State<'_, AiReviewRunStore>,
     workspace: String,
@@ -5916,6 +5945,10 @@ pub fn get_ai_review_fix_state(
 }
 
 #[tauri::command]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the command parameters are the stable Tauri IPC fix-start contract"
+)]
 pub async fn start_ai_review_fix(
     store: tauri::State<'_, AiReviewFixStore>,
     workspace: String,
@@ -6038,6 +6071,10 @@ pub async fn start_ai_review_push(
 }
 
 #[tauri::command]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the command parameters are the stable Tauri IPC conflict-resolution contract"
+)]
 pub async fn start_ai_conflict_resolution(
     store: tauri::State<'_, AiReviewFixStore>,
     workspace: String,
@@ -6127,6 +6164,20 @@ pub fn reset_ai_review_fix_state(
         inner.sessions.remove(&key);
         Ok(())
     })
+}
+
+fn review_provider_for_repo(workspace: &str, repo: &str) -> ReviewProvider {
+    let cfg = config::load();
+    match cfg
+        .repos
+        .iter()
+        .find(|candidate| candidate.workspace == workspace && candidate.repo == repo)
+        .map(|candidate| candidate.provider)
+        .unwrap_or(cfg.review_provider)
+    {
+        ConfigReviewProvider::Bitbucket => ReviewProvider::Bitbucket,
+        ConfigReviewProvider::Github => ReviewProvider::Github,
+    }
 }
 
 #[cfg(test)]
@@ -7144,18 +7195,5 @@ Fix: invalidate the query after the mutation succeeds."#;
         }))
         .expect("legacy numeric event id");
         assert_eq!(event.remote_comment_id.as_deref(), Some("42"));
-    }
-}
-fn review_provider_for_repo(workspace: &str, repo: &str) -> ReviewProvider {
-    let cfg = config::load();
-    match cfg
-        .repos
-        .iter()
-        .find(|candidate| candidate.workspace == workspace && candidate.repo == repo)
-        .map(|candidate| candidate.provider)
-        .unwrap_or(cfg.review_provider)
-    {
-        ConfigReviewProvider::Bitbucket => ReviewProvider::Bitbucket,
-        ConfigReviewProvider::Github => ReviewProvider::Github,
     }
 }

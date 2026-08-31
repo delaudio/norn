@@ -35,7 +35,7 @@ pnpm run typecheck    # tsc --noEmit
 pnpm run test         # Vitest/jsdom test suite
 pnpm run lint         # Biome checks
 pnpm run build        # TypeScript + Vite production build
-pnpm tauri dev        # start full Tauri app
+pnpm tauri dev --features desktop-bundle # start full Tauri app
 archgate check        # run ADR compliance checks
 ```
 
@@ -150,6 +150,17 @@ macOS GUI-launched apps have a minimal `PATH` that omits user install
 locations. Without `/bin/zsh -l`, binaries installed by Homebrew, npm, or local
 CLI installers may not be found.
 
+A bare command-build `norn` invocation launches the TUI only when both stdin
+and stdout are attached to terminals. Non-interactive zero-argument command
+invocations print CLI help. Tauri development and package builds must enable
+the `desktop-bundle` Cargo feature so a zero-argument desktop launch opens the
+GUI consistently on every supported operating system. That feature is the safe
+Cargo default so an ordinary Tauri bundle cannot silently get command routing;
+CLI archives, service images, and local command installers must pass
+`--no-default-features` explicitly. A desktop-bundle binary is GUI-only even
+when the operating system supplies launch arguments; CLI flags and subcommands
+are supported only by command-distribution builds.
+
 App-generated data lives under `dirs::data_local_dir()` in the `norn`
 subdirectory. The legacy `lachesi` subdirectory is migration input only.
 Secrets must stay in the OS credentials store or local environment, never in
@@ -161,3 +172,27 @@ tuples. Use `fill="var(--primary)"`, not `fill="hsl(var(--primary))"`.
 Navigation is state-driven through the `AppSelection` union type, not React
 Router. Browser dev and Storybook use the mock IPC layer in
 `src/mock-tauri/`.
+
+`src-tauri/Cargo.toml` must keep the `custom-protocol` cargo feature
+(`custom-protocol = ["tauri/custom-protocol"]`) declared. Without it, every
+Tauri build — `cargo build`, `cargo build --release`, and even `tauri build`
+if the feature is missing entirely — loads `build.devUrl` from
+`tauri.conf.json` instead of the embedded `frontendDist`. That means the
+compiled binary silently tries to reach the Vite dev server on every launch;
+if it isn't running, the window shows a blank white screen with no console
+error and no crash. `pnpm run cli:build` passes `--no-default-features
+--features custom-protocol` explicitly for this reason — don't drop either flag
+when touching the script.
+
+The headless service image is intentionally exempt from `custom-protocol`: it
+does not copy or serve frontend assets. Its Docker build must still pass
+`--no-default-features` so the service entrypoint uses command routing.
+
+`tauri.conf.json`'s `mainBinaryName` does not select a different `[[bin]]`
+target to compile. It only renames whichever binary `cargo` produces for the
+package name (`norn`, from `main.rs`) when `tauri build` bundles it. Pointing
+`mainBinaryName` at another bin target (e.g. `norn-app`) just mislabels the
+wrong binary inside the package. The bundled app therefore stays the `norn`
+binary and is compiled with `desktop-bundle`; runtime environment and terminal
+heuristics are not portable enough to distinguish a package launch from the
+command distribution.

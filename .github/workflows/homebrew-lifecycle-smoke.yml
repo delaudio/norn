@@ -4,121 +4,172 @@ on:
   workflow_dispatch:
     inputs:
       release_tag:
-        description: "Release tag to validate (v<semver>). Defaults to package version."
+        description: "Stable release tag to validate (v<semver>). Defaults to package version."
         required: false
   schedule:
     - cron: "0 4 * * 2"
   pull_request:
     paths:
       - ".github/workflows/homebrew-lifecycle-smoke.yml"
-      - "homebrew-tap/Formula/norn.rb"
-      - "homebrew-tap/Casks/norn.rb"
+      - "packaging/homebrew/norn.rb.template"
+      - "packaging/homebrew/norn-cask.rb.template"
       - "docs/homebrew-distribution.md"
+      - "scripts/homebrew-cask-lifecycle.sh"
+      - "scripts/homebrew-formula-lifecycle.sh"
+      - "scripts/render-homebrew-cask.mjs"
+      - "scripts/render-homebrew-cask.test.mjs"
+      - "scripts/render-homebrew-formula.mjs"
+      - "scripts/render-homebrew-formula.test.mjs"
+      - "scripts/resolve-previous-homebrew-release.mjs"
+      - "scripts/resolve-previous-homebrew-release.test.mjs"
+      - "scripts/run-tooling-tests.mjs"
+      - "scripts/run-with-timeout.mjs"
+      - "scripts/run-with-timeout.test.mjs"
       - "scripts/validate-homebrew-manifests.mjs"
 
 permissions:
   contents: read
 
 jobs:
-  lifecycle:
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - runner: macos-13
-            architecture: x86_64
-          - runner: macos-14
-            architecture: arm64
-    runs-on: ${{ matrix.runner }}
+  contract:
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v5
 
-      - name: Resolve release tag and urls
+      - name: Validate lifecycle tooling
+        run: |
+          node scripts/run-tooling-tests.mjs
+          node scripts/validate-homebrew-manifests.mjs
+          bash -n scripts/homebrew-cask-lifecycle.sh
+          bash -n scripts/homebrew-formula-lifecycle.sh
+          bash -n scripts/verify-macos-app.sh
+
+  lifecycle:
+    if: github.event_name != 'pull_request'
+    needs: contract
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15-intel
+            architecture: x86_64
+          - runner: macos-15
+            architecture: arm64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Resolve candidate release
         id: release
         run: |
-          RELEASE_TAG="${{ github.event.inputs.release_tag }}"
-          if [ -z "$RELEASE_TAG" ]; then
-            VERSION_FROM_PACKAGE=$(node -p "require('./package.json').version")
-            RELEASE_TAG="v$VERSION_FROM_PACKAGE"
+          set -euo pipefail
+          release_tag="${{ github.event.inputs.release_tag }}"
+          if [ -z "$release_tag" ]; then
+            release_tag="v$(node -p "require('./package.json').version")"
           fi
-
-          VERSION="${RELEASE_TAG#v}"
-          if [ -z "$VERSION" ]; then
-            echo "Unable to resolve release tag." >&2
+          if [[ ! "$release_tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Release tag must use stable v<semver> syntax." >&2
             exit 1
           fi
+          version="${release_tag#v}"
+          base_url="https://github.com/delaudio/norn/releases/download/$release_tag"
+          echo "release_tag=$release_tag" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "formula_url=$base_url/norn.rb" >> "$GITHUB_OUTPUT"
+          echo "cask_url=$base_url/norn-cask.rb" >> "$GITHUB_OUTPUT"
+          echo "architecture_url=$base_url/norn-$version-macos-${{ matrix.architecture }}.tar.gz" >> "$GITHUB_OUTPUT"
+          echo "arm64_url=$base_url/norn-$version-macos-arm64.tar.gz" >> "$GITHUB_OUTPUT"
+          echo "x86_64_url=$base_url/norn-$version-macos-x86_64.tar.gz" >> "$GITHUB_OUTPUT"
+          echo "desktop_arm64_url=$base_url/Norn-$version-macos-arm64.dmg" >> "$GITHUB_OUTPUT"
+          echo "desktop_x86_64_url=$base_url/Norn-$version-macos-x86_64.dmg" >> "$GITHUB_OUTPUT"
 
-          BASE_URL="https://github.com/delaudio/norn/releases/download/$RELEASE_TAG"
-          ARCH_URL="$BASE_URL/norn-$VERSION-macos-${{ matrix.architecture }}.tar.gz"
-          OTHER_ARCH="x86_64"
-          if [ "${{ matrix.architecture }}" = "x86_64" ]; then
-            OTHER_ARCH="arm64"
-          fi
-          OTHER_ARCH_URL="$BASE_URL/norn-$VERSION-macos-$OTHER_ARCH.tar.gz"
-
-          echo "release_tag=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "arch_url=$ARCH_URL" >> "$GITHUB_OUTPUT"
-          echo "other_arch_url=$OTHER_ARCH_URL" >> "$GITHUB_OUTPUT"
-
-      - name: Skip if assets are not yet published
-        id: gate
+      - name: Require complete stable release assets
         run: |
-          echo "Checking ${{ steps.release.outputs.arch_url }}"
-          if ! curl -fsI "${{ steps.release.outputs.arch_url }}" >/dev/null; then
-            echo "::warning::Skipping formula lifecycle: artifact unavailable for ${{ matrix.architecture }}"
-            echo "skip=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
+          set -euo pipefail
+          echo "phase=asset-check version=${{ steps.release.outputs.version }} architecture=${{ matrix.architecture }}"
+          curl -fsI "${{ steps.release.outputs.arm64_url }}" >/dev/null
+          curl -fsI "${{ steps.release.outputs.x86_64_url }}" >/dev/null
+          curl -fsI "${{ steps.release.outputs.formula_url }}" >/dev/null
+          curl -fsI "${{ steps.release.outputs.desktop_arm64_url }}" >/dev/null
+          curl -fsI "${{ steps.release.outputs.desktop_x86_64_url }}" >/dev/null
+          curl -fsI "${{ steps.release.outputs.cask_url }}" >/dev/null
 
-          echo "Checking ${{ steps.release.outputs.other_arch_url }}"
-          if ! curl -fsI "${{ steps.release.outputs.other_arch_url }}" >/dev/null; then
-            echo "::warning::Skipping formula lifecycle: release is incomplete for other architecture."
-            echo "skip=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          echo "skip=false" >> "$GITHUB_OUTPUT"
-
-      - name: Validate homebrew manifests
-        if: steps.gate.outputs.skip == 'false'
-        run: node scripts/validate-homebrew-manifests.mjs
-
-      - name: Install formula and smoke-test
-        if: steps.gate.outputs.skip == 'false'
+      - name: Download and validate candidate formula
         run: |
-          brew install --formula homebrew-tap/Formula/norn.rb
-          norn --version
-          norn --help
-          norn-tui --version
-          brew test norn
+          set -euo pipefail
+          curl -fsSL "${{ steps.release.outputs.formula_url }}" -o "$RUNNER_TEMP/norn.rb"
+          node scripts/validate-homebrew-manifests.mjs --formula "$RUNNER_TEMP/norn.rb"
+          ruby -c "$RUNNER_TEMP/norn.rb"
 
-      - name: Upgrade/reinstall/rollback check
-        if: steps.gate.outputs.skip == 'false'
+      - name: Resolve previous stable formula
+        id: previous
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GITHUB_REF_NAME: ${{ steps.release.outputs.release_tag }}
+          NORN_HOMEBREW_BOOTSTRAP_TAG: ${{ vars.NORN_HOMEBREW_BOOTSTRAP_TAG }}
+        run: node scripts/resolve-previous-homebrew-release.mjs
+
+      - name: Download and validate previous stable formula
+        if: steps.previous.outputs.bootstrap != 'true'
         run: |
-          brew upgrade --formula norn || true
-          brew reinstall --formula homebrew-tap/Formula/norn.rb
-          brew uninstall --formula norn
-          brew install --formula homebrew-tap/Formula/norn.rb
-          brew test norn
+          set -euo pipefail
+          curl -fsSL "${{ steps.previous.outputs.formula_url }}" -o "$RUNNER_TEMP/previous-norn.rb"
+          node scripts/validate-homebrew-manifests.mjs --formula "$RUNNER_TEMP/previous-norn.rb"
+          ruby -c "$RUNNER_TEMP/previous-norn.rb"
 
-      - name: Remove installed formulas on completion
-        if: steps.gate.outputs.skip == 'false'
-        run: brew uninstall --formula norn || true
+      - name: Validate clean install, upgrade or authorized bootstrap, uninstall, and reinstall
+        env:
+          CANDIDATE_FORMULA: ${{ runner.temp }}/norn.rb
+          PREVIOUS_FORMULA: ${{ runner.temp }}/previous-norn.rb
+          CANDIDATE_VERSION: ${{ steps.release.outputs.version }}
+          PREVIOUS_VERSION: ${{ steps.previous.outputs.version }}
+          NORN_ARCHITECTURE: ${{ matrix.architecture }}
+          NORN_HOMEBREW_BOOTSTRAP: ${{ steps.previous.outputs.bootstrap }}
+        run: bash scripts/homebrew-formula-lifecycle.sh
 
-      - name: Check cask metadata and smoke path
-        if: steps.gate.outputs.skip == 'false'
+      - name: Download and validate candidate cask
         run: |
-          CASK_URL=$(node -e "const fs=require('fs'); const text=fs.readFileSync('homebrew-tap/Casks/norn.rb','utf8');const m=text.match(/url \"([^\"]+)\"/); console.log(m?.[1] || '');")
-          if [ -z "$CASK_URL" ]; then
-            echo "Cask has no URL; skipping cask smoke."
-            exit 0
+          set -euo pipefail
+          curl -fsSL "${{ steps.release.outputs.cask_url }}" -o "$RUNNER_TEMP/norn-cask.rb"
+          node scripts/validate-homebrew-manifests.mjs --cask "$RUNNER_TEMP/norn-cask.rb"
+          ruby -c "$RUNNER_TEMP/norn-cask.rb"
+
+      - name: Resolve previous stable desktop release
+        id: previous-desktop
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GITHUB_REF_NAME: ${{ steps.release.outputs.release_tag }}
+          NORN_RELEASE_CHANNEL: desktop
+          NORN_HOMEBREW_BOOTSTRAP_TAG: ${{ vars.NORN_HOMEBREW_BOOTSTRAP_TAG }}
+        run: node scripts/resolve-previous-homebrew-release.mjs
+
+      - name: Download and validate previous stable cask
+        if: steps.previous-desktop.outputs.bootstrap != 'true'
+        run: |
+          set -euo pipefail
+          curl -fsSL "${{ steps.previous-desktop.outputs.cask_url }}" -o "$RUNNER_TEMP/previous-norn-cask.rb"
+          node scripts/validate-homebrew-manifests.mjs --cask "$RUNNER_TEMP/previous-norn-cask.rb"
+          ruby -c "$RUNNER_TEMP/previous-norn-cask.rb"
+
+      - name: Validate desktop install, upgrade or authorized bootstrap, uninstall, and reinstall
+        env:
+          CANDIDATE_CASK: ${{ runner.temp }}/norn-cask.rb
+          PREVIOUS_CASK: ${{ runner.temp }}/previous-norn-cask.rb
+          CANDIDATE_VERSION: ${{ steps.release.outputs.version }}
+          PREVIOUS_VERSION: ${{ steps.previous-desktop.outputs.version }}
+          NORN_ARCHITECTURE: ${{ matrix.architecture }}
+          NORN_HOMEBREW_BOOTSTRAP: ${{ steps.previous-desktop.outputs.bootstrap }}
+        run: bash scripts/homebrew-cask-lifecycle.sh
+
+      - name: Remove desktop and formula after lifecycle test
+        if: always()
+        run: |
+          if brew list --cask norn >/dev/null 2>&1; then
+            brew uninstall --cask norn
           fi
-
-          if curl -fsI "$CASK_URL" >/dev/null; then
-            brew install --cask homebrew-tap/Casks/norn.rb
-            brew uninstall --cask norn || true
-          else
-            echo "::warning::Cask artifact not yet available; skipping cask install smoke."
+          if brew list --formula norn >/dev/null 2>&1; then
+            brew uninstall --formula norn
           fi

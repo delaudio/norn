@@ -36,7 +36,7 @@ The Windows distributable for Lachesi MUST be the **Tauri NSIS setup `.exe`**:
 - `src-tauri/tauri.conf.json` MUST keep `bundle.active: true`, and `bundle.targets` MUST either be `"all"` or an array that includes `"nsis"`, so the NSIS installer can be produced.
 - `bundle.icon` MUST include a Windows `.ico` file (NSIS and the Windows executable require it).
 - `productName` and `identifier` MUST remain set, as the installer derives its product name and upgrade identity from them.
-- The Windows release build MUST be produced **locally on Windows** through the `just` task runner using an explicit NSIS bundle command (`pnpm tauri build --bundles nsis`), so the distributed artifact is unambiguously the NSIS installer even though `bundle.targets` stays `"all"` for other platforms.
+- The Windows release build MUST be produced **locally on Windows** through the `just` task runner using an explicit NSIS bundle command (`pnpm tauri build --bundles nsis --features custom-protocol,desktop-bundle`), so the distributed artifact is unambiguously the NSIS installer, loads embedded frontend assets, and uses desktop launch routing even though `bundle.targets` stays `"all"` for other platforms.
 
 Scope and explicit non-goals for this ADR:
 
@@ -59,7 +59,7 @@ These are host-machine prerequisites and are not checkable from the repository, 
 
 ### Do
 
-- **DO** produce the Windows installer with `pnpm tauri build --bundles nsis` (wired through the `just` `bundle-windows` recipe per [ARCH-007](./ARCH-007-drive-repository-commands-through-platform-native-task-runners.md)).
+- **DO** produce the Windows installer with `pnpm tauri build --bundles nsis --features custom-protocol,desktop-bundle` (wired through the `just` `bundle-windows` recipe per [ARCH-007](./ARCH-007-drive-repository-commands-through-platform-native-task-runners.md)).
 - **DO** keep `bundle.targets` as `"all"` or an array containing `"nsis"` in `tauri.conf.json`.
 - **DO** keep a valid `.ico` in `bundle.icon` and ensure `productName` and `identifier` stay populated.
 - **DO** distribute the generated NSIS setup `.exe` (found under `src-tauri/target/release/bundle/nsis/`) as the Windows artifact.
@@ -127,7 +127,7 @@ Windows release build, wired through the `just` task runner (ARCH-007):
 ```just
 # justfile (Windows) — produces the NSIS setup .exe only
 bundle-windows:
-    pnpm tauri build --bundles nsis
+    pnpm tauri build --bundles nsis --features custom-protocol,desktop-bundle
 ```
 
 The signed installer path after a successful build:

@@ -8,12 +8,26 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: norn-macos-release
+  cancel-in-progress: false
+
+env:
+  RUST_TOOLCHAIN: "1.94.0"
+
 jobs:
   checks:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@v5
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+          components: rustfmt, clippy
 
       - name: Enable Corepack
         run: corepack enable
@@ -29,12 +43,28 @@ jobs:
           GITHUB_WORKFLOW: ${{ github.workflow }}
           GITHUB_RUN_ID: ${{ github.run_id }}
 
-      - name: Run frontend + Rust gates
+      - name: Validate release workflow contract
         run: |
+          node scripts/validate-release-workflow.mjs
+          pnpm run test:tooling
+
+      - name: Run frontend gates
+        run: |
+          pnpm run lint
           pnpm run typecheck
           pnpm run test
-          pnpm run test:tauri
           pnpm run build
+
+      - name: Run complete Rust gate
+        run: |
+          cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
+          cargo clippy --locked --manifest-path src-tauri/Cargo.toml --all-targets --all-features -- -D warnings
+          cargo test --locked --manifest-path src-tauri/Cargo.toml --test cli_entrypoint --no-default-features
+          cargo test --locked --manifest-path src-tauri/Cargo.toml --all-targets --all-features
+          pnpm run test:tauri
+
+      - name: Run release metadata and architecture gates
+        run: |
           pnpm run version:verify
           node scripts/validate-homebrew-manifests.mjs
           if command -v archgate >/dev/null; then
@@ -49,14 +79,23 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - runner: macos-13
+          - runner: macos-15-intel
             architecture: x86_64
-          - runner: macos-14
+            target: x86_64-apple-darwin
+          - runner: macos-15
             architecture: arm64
+            target: aarch64-apple-darwin
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@v5
+
+      - name: Install Rust target
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+          targets: ${{ matrix.target }}
 
       - name: Enable Corepack
         run: corepack enable
@@ -65,26 +104,38 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Build release artifacts
+        env:
+          ARCHITECTURE: ${{ matrix.architecture }}
+          TARGET: ${{ matrix.target }}
         run: |
+          set -euo pipefail
           node scripts/release-guard.mjs
           tag="${GITHUB_REF_NAME}"
           version="${tag#v}"
-          artifacts_dir="dist/release-${{ matrix.architecture }}"
+          artifacts_dir="dist/release-${ARCHITECTURE}"
           mkdir -p "$artifacts_dir"
 
-          cargo build --manifest-path src-tauri/Cargo.toml --release --bin norn --bin norn-tui
+          cargo build --locked --manifest-path src-tauri/Cargo.toml --release --target "$TARGET" --no-default-features --features custom-protocol --bin norn --bin norn-tui
 
-          tarball="norn-${version}-macos-${{ matrix.architecture }}.tar.gz"
-          tar -czf "$artifacts_dir/$tarball" -C src-tauri/target/release norn norn-tui
-          shasum -a 256 "$artifacts_dir/$tarball" > "$artifacts_dir/$tarball.sha256"
+          tarball="norn-${version}-macos-${ARCHITECTURE}.tar.gz"
+          tar -czf "$artifacts_dir/$tarball" -C "src-tauri/target/$TARGET/release" norn norn-tui
+          checksum="$(shasum -a 256 "$artifacts_dir/$tarball" | awk '{print $1}')"
+          printf '%s  %s\n' "$checksum" "$tarball" > "$artifacts_dir/$tarball.sha256"
 
       - name: Publish build metadata
+        env:
+          ARCHITECTURE: ${{ matrix.architecture }}
+          TARGET: ${{ matrix.target }}
         run: |
+          set -euo pipefail
           release_tag="${GITHUB_REF_NAME#v}"
-          cat > "dist/release-${{ matrix.architecture }}/norn-${{ matrix.architecture }}-metadata.json" <<EOF
+          rustc_version="$(rustc --version)"
+          cat > "dist/release-${ARCHITECTURE}/norn-${ARCHITECTURE}-metadata.json" <<EOF
           {
             "version": "${release_tag}",
-            "architecture": "${{ matrix.architecture }}",
+            "architecture": "${ARCHITECTURE}",
+            "target": "${TARGET}",
+            "toolchain": "${rustc_version}",
             "runner": "${{ matrix.runner }}",
             "sha": "${GITHUB_SHA}",
             "workflow_run": "${GITHUB_RUN_ID}",
@@ -100,27 +151,419 @@ jobs:
             dist/release-${{ matrix.architecture }}/*.tar.gz
             dist/release-${{ matrix.architecture }}/*.sha256
             dist/release-${{ matrix.architecture }}/*-metadata.json
+          if-no-files-found: error
+
+  build-macos-desktop:
+    needs: checks
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15-intel
+            architecture: x86_64
+            target: x86_64-apple-darwin
+          - runner: macos-15
+            architecture: arm64
+            target: aarch64-apple-darwin
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Install Rust target
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+          targets: ${{ matrix.target }}
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Require signing and notarization credentials
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+        run: |
+          set -euo pipefail
+          for required in \
+            APPLE_CERTIFICATE \
+            APPLE_CERTIFICATE_PASSWORD \
+            APPLE_SIGNING_IDENTITY \
+            APPLE_ID \
+            APPLE_PASSWORD \
+            APPLE_TEAM_ID \
+            KEYCHAIN_PASSWORD; do
+            if [ -z "${!required:-}" ]; then
+              echo "Missing required macOS release secret: ${required}." >&2
+              exit 1
+            fi
+          done
+
+      - name: Import Apple signing certificate
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+        run: |
+          set -euo pipefail
+          certificate_path="$RUNNER_TEMP/norn-release-certificate.p12"
+          keychain_path="$RUNNER_TEMP/norn-release.keychain-db"
+          original_keychain="$(security default-keychain | tr -d '"')"
+          printf '%s' "$APPLE_CERTIFICATE" | base64 --decode > "$certificate_path"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$keychain_path"
+          security set-keychain-settings -lut 21600 "$keychain_path"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$keychain_path"
+          security import "$certificate_path" -k "$keychain_path" \
+            -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: \
+            -s -k "$KEYCHAIN_PASSWORD" "$keychain_path"
+          security list-keychains -d user -s "$keychain_path" "$original_keychain"
+          security default-keychain -s "$keychain_path"
+          echo "NORN_RELEASE_KEYCHAIN=$keychain_path" >> "$GITHUB_ENV"
+          echo "NORN_ORIGINAL_KEYCHAIN=$original_keychain" >> "$GITHUB_ENV"
+          echo "NORN_CERTIFICATE_PATH=$certificate_path" >> "$GITHUB_ENV"
+
+      - name: Build signed and notarized desktop artifact
+        env:
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          ARCHITECTURE: ${{ matrix.architecture }}
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          node scripts/release-guard.mjs
+          pnpm tauri build --ci --target "$TARGET" --bundles dmg --features custom-protocol,desktop-bundle
+
+          version="${GITHUB_REF_NAME#v}"
+          bundle_root="src-tauri/target/$TARGET/release/bundle"
+          app_path="$bundle_root/macos/Norn.app"
+          dmg_count="$(find "$bundle_root/dmg" -maxdepth 1 -type f -name '*.dmg' | wc -l | tr -d ' ')"
+          if [ "$dmg_count" != "1" ]; then
+            echo "Expected exactly one DMG, found ${dmg_count}." >&2
+            exit 1
+          fi
+          dmg_path="$(find "$bundle_root/dmg" -maxdepth 1 -type f -name '*.dmg' -print)"
+
+          bash scripts/verify-macos-app.sh "$app_path"
+          spctl --assess --type open --context context:primary-signature "$dmg_path"
+
+          artifacts_dir="dist/desktop-${ARCHITECTURE}"
+          mkdir -p "$artifacts_dir"
+          artifact_name="Norn-${version}-macos-${ARCHITECTURE}.dmg"
+          cp "$dmg_path" "$artifacts_dir/$artifact_name"
+          checksum="$(shasum -a 256 "$artifacts_dir/$artifact_name" | awk '{print $1}')"
+          printf '%s  %s\n' "$checksum" "$artifact_name" > "$artifacts_dir/$artifact_name.sha256"
+
+          rustc_version="$(rustc --version)"
+          cat > "$artifacts_dir/Norn-${ARCHITECTURE}-desktop-metadata.json" <<EOF
+          {
+            "version": "${version}",
+            "architecture": "${ARCHITECTURE}",
+            "target": "${TARGET}",
+            "toolchain": "${rustc_version}",
+            "runner": "${{ matrix.runner }}",
+            "sha": "${GITHUB_SHA}",
+            "workflow_run": "${GITHUB_RUN_ID}",
+            "signed": true,
+            "notarized": true,
+            "stapled": true
+          }
+          EOF
+
+      - name: Upload signed desktop artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: norn-macos-desktop-${{ matrix.architecture }}
+          path: |
+            dist/desktop-${{ matrix.architecture }}/*.dmg
+            dist/desktop-${{ matrix.architecture }}/*.sha256
+            dist/desktop-${{ matrix.architecture }}/*-metadata.json
+          if-no-files-found: error
+
+      - name: Remove ephemeral signing material
+        if: always()
+        run: |
+          set -euo pipefail
+          if [ -n "${NORN_ORIGINAL_KEYCHAIN:-}" ]; then
+            security default-keychain -s "$NORN_ORIGINAL_KEYCHAIN"
+          fi
+          if [ -n "${NORN_RELEASE_KEYCHAIN:-}" ] && [ -e "$NORN_RELEASE_KEYCHAIN" ]; then
+            security delete-keychain "$NORN_RELEASE_KEYCHAIN"
+          fi
+          if [ -n "${NORN_CERTIFICATE_PATH:-}" ] && [ -e "$NORN_CERTIFICATE_PATH" ]; then
+            rm -f "$NORN_CERTIFICATE_PATH"
+          fi
 
   release:
     needs:
       - checks
       - build-macos-artifacts
+      - build-macos-desktop
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - name: Checkout
         uses: actions/checkout@v5
+
+      - name: Install Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.3"
 
       - name: Download artifact
         uses: actions/download-artifact@v5
         with:
           path: release-artifacts
 
+      - name: Render verified Homebrew manifests
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          node scripts/render-homebrew-formula.mjs \
+            --version "$version" \
+            --artifacts-dir release-artifacts \
+            --output dist/homebrew/norn.rb
+          node scripts/render-homebrew-cask.mjs \
+            --version "$version" \
+            --artifacts-dir release-artifacts \
+            --output dist/homebrew/norn-cask.rb
+          node scripts/validate-homebrew-manifests.mjs \
+            --formula dist/homebrew/norn.rb \
+            --cask dist/homebrew/norn-cask.rb
+          ruby -c dist/homebrew/norn.rb
+          ruby -c dist/homebrew/norn-cask.rb
+
+      - name: Upload verified Homebrew formula
+        uses: actions/upload-artifact@v4
+        with:
+          name: norn-homebrew-formula
+          path: dist/homebrew/norn.rb
+          if-no-files-found: error
+
+      - name: Upload verified Homebrew cask
+        uses: actions/upload-artifact@v4
+        with:
+          name: norn-homebrew-cask
+          path: dist/homebrew/norn-cask.rb
+          if-no-files-found: error
+
       - name: Attach immutable release assets
         uses: softprops/action-gh-release@v2
         with:
           files: |
             release-artifacts/**/*.tar.gz
+            release-artifacts/**/*.dmg
             release-artifacts/**/*.sha256
             release-artifacts/**/*-metadata.json
+            dist/homebrew/norn.rb
+            dist/homebrew/norn-cask.rb
           fail_on_unmatched_files: true
           overwrite_files: false
+          prerelease: true
+
+  homebrew-formula-smoke:
+    needs: release
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15-intel
+            architecture: x86_64
+          - runner: macos-15
+            architecture: arm64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 15
+    steps:
+      - name: Checkout lifecycle tooling
+        uses: actions/checkout@v5
+
+      - name: Download candidate formula from the published prerelease
+        run: |
+          set -euo pipefail
+          mkdir -p dist/homebrew
+          curl -fsSL \
+            "https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}/norn.rb" \
+            -o dist/homebrew/norn.rb
+
+      - name: Resolve previous stable formula
+        id: previous
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          NORN_HOMEBREW_BOOTSTRAP_TAG: ${{ vars.NORN_HOMEBREW_BOOTSTRAP_TAG }}
+        run: node scripts/resolve-previous-homebrew-release.mjs
+
+      - name: Download and validate previous stable formula
+        if: steps.previous.outputs.bootstrap != 'true'
+        run: |
+          set -euo pipefail
+          curl -fsSL "${{ steps.previous.outputs.formula_url }}" -o "$RUNNER_TEMP/previous-norn.rb"
+          node scripts/validate-homebrew-manifests.mjs --formula "$RUNNER_TEMP/previous-norn.rb"
+          ruby -c "$RUNNER_TEMP/previous-norn.rb"
+
+      - name: Validate clean install, upgrade or authorized bootstrap, uninstall, and reinstall
+        env:
+          CANDIDATE_FORMULA: dist/homebrew/norn.rb
+          PREVIOUS_FORMULA: ${{ runner.temp }}/previous-norn.rb
+          CANDIDATE_VERSION: ${{ github.ref_name }}
+          PREVIOUS_VERSION: ${{ steps.previous.outputs.version }}
+          NORN_ARCHITECTURE: ${{ matrix.architecture }}
+          NORN_HOMEBREW_BOOTSTRAP: ${{ steps.previous.outputs.bootstrap }}
+        run: |
+          CANDIDATE_VERSION="${CANDIDATE_VERSION#v}" \
+            bash scripts/homebrew-formula-lifecycle.sh
+
+      - name: Remove formula after lifecycle test
+        if: always()
+        run: |
+          if brew list --formula norn >/dev/null 2>&1; then
+            brew uninstall --formula norn
+          fi
+
+  homebrew-cask-smoke:
+    needs: release
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15-intel
+            architecture: x86_64
+          - runner: macos-15
+            architecture: arm64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    steps:
+      - name: Checkout lifecycle tooling
+        uses: actions/checkout@v5
+
+      - name: Download candidate manifests from the published prerelease
+        run: |
+          set -euo pipefail
+          mkdir -p dist/homebrew
+          release_url="https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}"
+          curl -fsSL "$release_url/norn.rb" -o dist/homebrew/norn.rb
+          curl -fsSL "$release_url/norn-cask.rb" -o dist/homebrew/norn-cask.rb
+
+      - name: Validate candidate manifests
+        run: |
+          set -euo pipefail
+          node scripts/validate-homebrew-manifests.mjs \
+            --formula dist/homebrew/norn.rb \
+            --cask dist/homebrew/norn-cask.rb
+          ruby -c dist/homebrew/norn.rb
+          ruby -c dist/homebrew/norn-cask.rb
+
+      - name: Install candidate command formula
+        run: brew install --formula dist/homebrew/norn.rb
+
+      - name: Resolve previous stable desktop release
+        id: previous
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          NORN_RELEASE_CHANNEL: desktop
+          NORN_HOMEBREW_BOOTSTRAP_TAG: ${{ vars.NORN_HOMEBREW_BOOTSTRAP_TAG }}
+        run: node scripts/resolve-previous-homebrew-release.mjs
+
+      - name: Download and validate previous stable cask
+        if: steps.previous.outputs.bootstrap != 'true'
+        run: |
+          set -euo pipefail
+          curl -fsSL "${{ steps.previous.outputs.cask_url }}" -o "$RUNNER_TEMP/previous-norn-cask.rb"
+          node scripts/validate-homebrew-manifests.mjs --cask "$RUNNER_TEMP/previous-norn-cask.rb"
+          ruby -c "$RUNNER_TEMP/previous-norn-cask.rb"
+
+      - name: Validate desktop install, upgrade or authorized bootstrap, uninstall, and reinstall
+        env:
+          CANDIDATE_CASK: dist/homebrew/norn-cask.rb
+          PREVIOUS_CASK: ${{ runner.temp }}/previous-norn-cask.rb
+          CANDIDATE_VERSION: ${{ github.ref_name }}
+          PREVIOUS_VERSION: ${{ steps.previous.outputs.version }}
+          NORN_ARCHITECTURE: ${{ matrix.architecture }}
+          NORN_HOMEBREW_BOOTSTRAP: ${{ steps.previous.outputs.bootstrap }}
+        run: |
+          CANDIDATE_VERSION="${CANDIDATE_VERSION#v}" \
+            bash scripts/homebrew-cask-lifecycle.sh
+
+      - name: Remove desktop and formula after lifecycle test
+        if: always()
+        run: |
+          if brew list --cask norn >/dev/null 2>&1; then
+            brew uninstall --cask norn
+          fi
+          if brew list --formula norn >/dev/null 2>&1; then
+            brew uninstall --formula norn
+          fi
+
+  finalize-stable-release:
+    needs:
+      - homebrew-formula-smoke
+      - homebrew-cask-smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Promote verified candidate to stable
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release edit "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --prerelease=false --latest
+
+  publish-homebrew-tap:
+    needs: finalize-stable-release
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Download verified Homebrew formula
+        uses: actions/download-artifact@v5
+        with:
+          name: norn-homebrew-formula
+          path: dist/homebrew
+
+      - name: Download verified Homebrew cask
+        uses: actions/download-artifact@v5
+        with:
+          name: norn-homebrew-cask
+          path: dist/homebrew
+
+      - name: Checkout public Homebrew tap
+        uses: actions/checkout@v5
+        with:
+          repository: delaudio/homebrew-tap
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          path: public-tap
+
+      - name: Advance public tap
+        run: |
+          set -euo pipefail
+          install -m 0644 dist/homebrew/norn.rb public-tap/Formula/norn.rb
+          mkdir -p public-tap/Casks
+          install -m 0644 dist/homebrew/norn-cask.rb public-tap/Casks/norn.rb
+          cd public-tap
+          while IFS= read -r status_line; do
+            changed_path="${status_line:3}"
+            case "$changed_path" in
+              Formula/norn.rb|Casks/norn.rb) ;;
+              *)
+                echo "Refusing to publish unexpected tap change: ${changed_path}." >&2
+                exit 1
+                ;;
+            esac
+          done < <(git status --porcelain)
+          git add Formula/norn.rb Casks/norn.rb
+          git diff --cached --check
+          if git diff --cached --quiet; then
+            echo "Public tap already contains ${GITHUB_REF_NAME}."
+            exit 0
+          fi
+          git config user.name "norn-release-bot"
+          git config user.email "norn-release-bot@users.noreply.github.com"
+          git commit -m "norn ${GITHUB_REF_NAME} formula and cask"
+          git push origin HEAD

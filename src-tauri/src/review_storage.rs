@@ -1094,7 +1094,7 @@ fn migrate(conn: &mut Connection) -> Result<(), String> {
         .map_err(|error| error.to_string())?;
     migration.commit().map_err(|error| error.to_string())?;
 
-    migrate_shared_review_jobs_for_retries(&conn)?;
+    migrate_shared_review_jobs_for_retries(conn)?;
     conn.execute(
         "INSERT OR IGNORE INTO schema_migrations(version) VALUES (12)",
         [],

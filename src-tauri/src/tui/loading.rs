@@ -124,6 +124,10 @@ impl Loader {
         });
     }
 
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "the loader boundary carries identifiers for two coordinated asynchronous requests"
+    )]
     pub(super) fn pull_request_resources(
         &self,
         request_id: u64,

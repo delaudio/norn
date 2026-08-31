@@ -52,7 +52,8 @@ export default {
 
         if (bundle.active !== true) {
           ctx.report.violation({
-            message: 'bundle.active must be true so Tauri produces installers (including the Windows NSIS setup .exe).',
+            message:
+              "bundle.active must be true so Tauri produces installers (including the Windows NSIS setup .exe).",
             file: TAURI_CONF,
             fix: 'Set "bundle": { "active": true, ... } in tauri.conf.json.',
           });
@@ -60,7 +61,8 @@ export default {
 
         if (!targetsIncludeNsis(bundle.targets)) {
           ctx.report.violation({
-            message: 'bundle.targets must be "all" or an array that includes "nsis" so the Windows NSIS installer can be built.',
+            message:
+              'bundle.targets must be "all" or an array that includes "nsis" so the Windows NSIS installer can be built.',
             file: TAURI_CONF,
             fix: 'Set bundle.targets to "all" or include "nsis" in the targets array.',
           });
@@ -68,7 +70,8 @@ export default {
 
         if (!hasIcoIcon(bundle.icon)) {
           ctx.report.violation({
-            message: 'bundle.icon must include a Windows .ico file; the NSIS installer and Windows executable require it.',
+            message:
+              "bundle.icon must include a Windows .ico file; the NSIS installer and Windows executable require it.",
             file: TAURI_CONF,
             fix: 'Add an "icons/icon.ico" entry to bundle.icon.',
           });
@@ -76,7 +79,8 @@ export default {
 
         if (typeof conf.productName !== "string" || conf.productName.length === 0) {
           ctx.report.violation({
-            message: "productName must be set; the NSIS installer derives its product name from it.",
+            message:
+              "productName must be set; the NSIS installer derives its product name from it.",
             file: TAURI_CONF,
             fix: 'Set a non-empty "productName" (e.g. "Lachesi").',
           });
@@ -84,7 +88,8 @@ export default {
 
         if (typeof conf.identifier !== "string" || conf.identifier.length === 0) {
           ctx.report.violation({
-            message: "identifier must be set; the NSIS installer derives its upgrade identity from it.",
+            message:
+              "identifier must be set; the NSIS installer derives its upgrade identity from it.",
             file: TAURI_CONF,
             fix: 'Set a non-empty reverse-DNS "identifier" (e.g. "app.lachesi.desktop").',
           });
@@ -100,13 +105,16 @@ export default {
         // The task runner is governed by ARCH-007; only advise once it exists.
         if (!(await fileExists(ctx, JUSTFILE))) return;
 
-        const matches = await ctx.grep(JUSTFILE, /--bundles\s+nsis/);
+        const matches = await ctx.grep(
+          JUSTFILE,
+          /--bundles\s+nsis[\s\S]*--features\s+custom-protocol,desktop-bundle/,
+        );
         if (matches.length === 0) {
           ctx.report.warning({
             message:
-              "justfile has no `tauri build --bundles nsis` command. The Windows NSIS release build should be wired to the task runner (ARCH-007).",
+              "justfile has no NSIS build with production protocol and desktop launch routing. The Windows release build should be wired to the task runner (ARCH-007).",
             file: JUSTFILE,
-            fix: 'Add a recipe such as `bundle-windows:` running `pnpm tauri build --bundles nsis`.',
+            fix: "Add a recipe such as `bundle-windows:` running `pnpm tauri build --bundles nsis --features custom-protocol,desktop-bundle`.",
           });
         }
       },

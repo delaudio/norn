@@ -462,10 +462,8 @@ fn validate_request(
     if let Some(repository) = enrolled_repository {
         validate_repository_scope(repository)?;
     }
-    for (field, value) in [("organization.id", request.organization.id.as_str())] {
-        validate_identifier(field, value)
-            .map_err(|_| TeamAuthorizationError::InvalidRequest(field))?;
-    }
+    validate_identifier("organization.id", request.organization.id.as_str())
+        .map_err(|_| TeamAuthorizationError::InvalidRequest("organization.id"))?;
     if !request.operation.supports_repository_scope()
         && (request.team.is_some() || request.repository.is_some() || enrolled_repository.is_some())
     {

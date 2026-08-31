@@ -1,0 +1,19 @@
+cask "norn" do
+  arch arm: "arm64", intel: "x86_64"
+
+  version "{{VERSION}}"
+  sha256 arm:   "{{ARM64_SHA256}}",
+         intel: "{{X86_64_SHA256}}"
+
+  url "https://github.com/delaudio/norn/releases/download/v#{version}/Norn-#{version}-macos-#{arch}.dmg"
+  name "Norn"
+  desc "Local-first pull request review workspace"
+  homepage "https://github.com/delaudio/norn"
+
+  auto_updates false
+  depends_on macos: ">= :ventura"
+
+  app "Norn.app"
+
+  uninstall quit: "app.norn.desktop"
+end
