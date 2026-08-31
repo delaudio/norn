@@ -164,6 +164,21 @@ fn github_from_terminal_config(config: &TerminalConfig) -> Option<String> {
 }
 
 pub fn has_bitbucket_credential_source() -> bool {
+    let username = std::env::var("BITBUCKET_USERNAME").ok();
+    let token = std::env::var("BITBUCKET_TOKEN").ok();
+    if username.is_some_and(|username| !username.is_empty())
+        && token.is_some_and(|token| !token.is_empty())
+    {
+        return true;
+    }
+
+    let config = load_terminal_config();
+    if let Some(creds) = bitbucket_from_terminal_config(&config) {
+        if !creds.username.is_empty() && !creds.token.is_empty() {
+            return true;
+        }
+    }
+
     let mut valid_secret = false;
     for service in [SERVICE, LEGACY_SERVICE] {
         if let Some(secret) = keychain_secret_no_copy(service, ACCOUNT) {
@@ -179,27 +194,24 @@ pub fn has_bitbucket_credential_source() -> bool {
         return true;
     }
 
-    let config = load_terminal_config();
-    if let Some(creds) = bitbucket_from_terminal_config(&config) {
-        return !creds.username.is_empty() && !creds.token.is_empty();
-    }
-
-    let username = std::env::var("BITBUCKET_USERNAME").ok();
-    let token = std::env::var("BITBUCKET_TOKEN").ok();
-    username.is_some_and(|username| !username.is_empty())
-        && token.is_some_and(|token| !token.is_empty())
+    false
 }
 
 pub fn has_github_credential_source() -> bool {
+    if std::env::var("GITHUB_TOKEN").is_ok_and(|token| !token.is_empty()) {
+        return true;
+    }
+    let config = load_terminal_config();
+    if github_from_terminal_config(&config).is_some() {
+        return true;
+    }
     if keychain_secret_no_copy(SERVICE, ACCOUNT_GITHUB).is_some() {
         return true;
     }
     if keychain_secret_no_copy(LEGACY_SERVICE, ACCOUNT_GITHUB).is_some() {
         return true;
     }
-    let config = load_terminal_config();
-    github_from_terminal_config(&config).is_some()
-        || std::env::var("GITHUB_TOKEN").is_ok_and(|token| !token.is_empty())
+    false
 }
 
 /// Resolve credentials: keychain first, terminal config env refs, then

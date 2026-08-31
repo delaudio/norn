@@ -4,7 +4,7 @@ use std::process::Command;
 
 use serde::Serialize;
 
-use crate::config::{AiProvider, ReviewProvider};
+use crate::config::{AiProvider, AppConfig, ReviewProvider};
 use crate::credentials;
 use crate::headless_review::{self, HeadlessReviewRequest, ReviewScope};
 use crate::readiness;
@@ -574,6 +574,18 @@ fn build_init_proposal_output(proposal: &RepoInitProposal) -> InitProposalOutput
 fn run_setup(args: SetupArgs, stdout: &mut dyn Write, stderr: &mut dyn Write) -> i32 {
     let current = crate::config::load();
     let tools = collect_setup_tools(current.ai_provider);
+    let machine_credentials = collect_setup_credentials();
+    run_setup_with_inventory(args, stdout, stderr, current, tools, machine_credentials)
+}
+
+fn run_setup_with_inventory(
+    args: SetupArgs,
+    stdout: &mut dyn Write,
+    stderr: &mut dyn Write,
+    current: AppConfig,
+    tools: Vec<SetupToolReport>,
+    machine_credentials: Vec<SetupCredentialReport>,
+) -> i32 {
     let selected_ai_provider = select_quick_ai_provider(&tools, current.ai_provider);
     let mut notes = Vec::new();
     if !args.yes && selected_ai_provider != current.ai_provider {
@@ -590,7 +602,7 @@ fn run_setup(args: SetupArgs, stdout: &mut dyn Write, stderr: &mut dyn Write) ->
         would_apply: args.yes && !args.dry_run,
         config_path: config_path_display(),
         machine_tools: tools.clone(),
-        machine_credentials: collect_setup_credentials(),
+        machine_credentials,
         setup_notes: notes,
     };
 
@@ -1727,11 +1739,13 @@ The command exits 1 when a configured baseline regression is detected."
 #[cfg(test)]
 mod tests {
     use super::{
-        create_headless_data_dir, format_metrics_human, parse_evaluate_args, parse_init_args,
-        parse_metrics_args, parse_review_args, parse_setup_args, review_needs_headless_storage,
-        run_args, InitMode, OutputFormat, ReviewOutputFormat,
+        collect_setup_credentials, create_headless_data_dir, format_metrics_human,
+        parse_evaluate_args, parse_init_args, parse_metrics_args, parse_review_args,
+        parse_setup_args, review_needs_headless_storage, run_args, run_setup_with_inventory,
+        InitMode, OutputFormat, ReviewOutputFormat, SetupArgs, SetupCredentialReport,
+        SetupToolReport,
     };
-    use crate::config::AiProvider;
+    use crate::config::{AiProvider, AppConfig};
     use crate::headless_review::ReviewScope;
     use crate::readiness;
     use crate::review_event::PullRequestReviewEventProvider;
@@ -1744,6 +1758,28 @@ mod tests {
 
     static TEMP_REPO_COUNTER: AtomicU64 = AtomicU64::new(0);
 
+    struct EnvVarGuard {
+        name: &'static str,
+        original: Option<std::ffi::OsString>,
+    }
+
+    impl EnvVarGuard {
+        fn set(name: &'static str, value: &str) -> Self {
+            let original = std::env::var_os(name);
+            std::env::set_var(name, value);
+            Self { name, original }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            match self.original.take() {
+                Some(value) => std::env::set_var(self.name, value),
+                None => std::env::remove_var(self.name),
+            }
+        }
+    }
+
     fn temp_repo() -> PathBuf {
         let nonce = TEMP_REPO_COUNTER.fetch_add(1, Ordering::Relaxed);
         let path = std::env::temp_dir().join(format!(
@@ -1752,6 +1788,62 @@ mod tests {
         ));
         fs::create_dir_all(&path).expect("create temp repo");
         path
+    }
+
+    fn setup_tools(available: bool) -> Vec<SetupToolReport> {
+        let version = available.then(|| "test-provider 1.0.0".to_string());
+        vec![
+            SetupToolReport {
+                provider: "codex".to_string(),
+                available: false,
+                version: None,
+                required: false,
+            },
+            SetupToolReport {
+                provider: "claude".to_string(),
+                available,
+                version,
+                required: true,
+            },
+        ]
+    }
+
+    fn setup_credentials_fixture() -> Vec<SetupCredentialReport> {
+        vec![
+            SetupCredentialReport {
+                provider: "github".to_string(),
+                available: true,
+                source: "keychain or env reference".to_string(),
+            },
+            SetupCredentialReport {
+                provider: "bitbucket".to_string(),
+                available: true,
+                source: "keychain or env reference".to_string(),
+            },
+        ]
+    }
+
+    fn run_setup_for_test(
+        format: OutputFormat,
+        tool_available: bool,
+        credentials: Vec<SetupCredentialReport>,
+        stdout: &mut Vec<u8>,
+        stderr: &mut Vec<u8>,
+    ) -> i32 {
+        let tools = setup_tools(tool_available);
+
+        run_setup_with_inventory(
+            SetupArgs {
+                format,
+                dry_run: false,
+                yes: false,
+            },
+            stdout,
+            stderr,
+            AppConfig::default(),
+            tools,
+            credentials,
+        )
     }
 
     #[test]
@@ -2343,72 +2435,71 @@ token: unsafe
     }
 
     #[test]
-    fn setup_json_and_human_output_do_not_leak_credential_values() {
-        let original_github_token = std::env::var_os("GITHUB_TOKEN");
-        let original_bitbucket_token = std::env::var_os("BITBUCKET_TOKEN");
-        let original_bitbucket_user = std::env::var_os("BITBUCKET_USERNAME");
-
+    fn setup_output_reports_real_env_credential_state_without_secret_values() {
         let github_token = "ghs_live_SECRET_TOKEN_FOR_TEST_DO_NOT_LEAK";
         let bitbucket_token = "bb_secret_TOKEN_FOR_TEST_DO_NOT_LEAK";
         let bitbucket_user = "test-user-for-test";
-
-        std::env::set_var("GITHUB_TOKEN", github_token);
-        std::env::set_var("BITBUCKET_TOKEN", bitbucket_token);
-        std::env::set_var("BITBUCKET_USERNAME", bitbucket_user);
+        let _github_token = EnvVarGuard::set("GITHUB_TOKEN", github_token);
+        let _bitbucket_token = EnvVarGuard::set("BITBUCKET_TOKEN", bitbucket_token);
+        let _bitbucket_user = EnvVarGuard::set("BITBUCKET_USERNAME", bitbucket_user);
+        let credentials = collect_setup_credentials();
 
         let mut stdout = Vec::new();
         let mut stderr = Vec::new();
-        let code = run_args(
-            &["setup".to_string(), "--json".to_string()],
+        let code = run_setup_for_test(
+            OutputFormat::Json,
+            false,
+            credentials.clone(),
             &mut stdout,
             &mut stderr,
         );
 
-        assert_eq!(code, 0);
         assert!(stderr.is_empty());
-        let output = String::from_utf8(stdout.clone()).expect("setup json output");
-        assert!(!output.contains(github_token));
-        assert!(!output.contains(bitbucket_token));
-        assert!(!output.contains(bitbucket_user));
+        assert_eq!(code, 1);
+        let output: Value = serde_json::from_slice(&stdout).expect("setup json output");
+        assert_eq!(output["machineCredentials"][0]["provider"], "github");
+        assert_eq!(output["machineCredentials"][0]["available"], true);
+        assert!(output["machineCredentials"][0].get("token").is_none());
+        assert!(output["machineCredentials"][0].get("username").is_none());
+        let rendered = output.to_string();
+        assert!(!rendered.contains(github_token));
+        assert!(!rendered.contains(bitbucket_token));
+        assert!(!rendered.contains(bitbucket_user));
 
         let mut stdout = Vec::new();
         let mut stderr = Vec::new();
-        let code = run_args(&["setup".to_string()], &mut stdout, &mut stderr);
+        let code = run_setup_for_test(
+            OutputFormat::Human,
+            false,
+            credentials,
+            &mut stdout,
+            &mut stderr,
+        );
 
-        assert_eq!(code, 0);
+        assert_eq!(code, 1);
         assert!(stderr.is_empty());
         let output = String::from_utf8(stdout).expect("setup human output");
+        assert!(output.contains("- github: found (keychain or env reference)"));
         assert!(!output.contains(github_token));
         assert!(!output.contains(bitbucket_token));
         assert!(!output.contains(bitbucket_user));
-
-        match original_github_token {
-            Some(value) => std::env::set_var("GITHUB_TOKEN", value),
-            None => std::env::remove_var("GITHUB_TOKEN"),
-        }
-        match original_bitbucket_token {
-            Some(value) => std::env::set_var("BITBUCKET_TOKEN", value),
-            None => std::env::remove_var("BITBUCKET_TOKEN"),
-        }
-        match original_bitbucket_user {
-            Some(value) => std::env::set_var("BITBUCKET_USERNAME", value),
-            None => std::env::remove_var("BITBUCKET_USERNAME"),
-        }
     }
 
     #[test]
     fn setup_json_report_includes_schema_and_setup_state() {
         let mut stdout = Vec::new();
         let mut stderr = Vec::new();
-        let code = run_args(
-            &["setup".to_string(), "--json".to_string()],
+        let code = run_setup_for_test(
+            OutputFormat::Json,
+            false,
+            setup_credentials_fixture(),
             &mut stdout,
             &mut stderr,
         );
 
-        assert_eq!(code, 0);
         assert!(stderr.is_empty());
         let output: serde_json::Value = serde_json::from_slice(&stdout).expect("setup json output");
+        assert_eq!(code, 1);
         assert_eq!(output["schemaVersion"], "norn.setup.v1");
         assert_eq!(output["wouldApply"], false);
         assert!(output["machineTools"].as_array().is_some());
@@ -2418,6 +2509,26 @@ token: unsafe
             .as_array()
             .expect("machine tools")
             .is_empty());
+    }
+
+    #[test]
+    fn setup_returns_zero_when_the_selected_provider_is_available() {
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+        let code = run_setup_for_test(
+            OutputFormat::Json,
+            true,
+            setup_credentials_fixture(),
+            &mut stdout,
+            &mut stderr,
+        );
+
+        assert!(stderr.is_empty());
+        assert_eq!(code, 0);
+        let output: Value = serde_json::from_slice(&stdout).expect("setup json output");
+        assert_eq!(output["selectedAiProvider"], "claude");
+        assert_eq!(output["machineTools"][1]["available"], true);
+        assert_eq!(output["machineTools"][1]["version"], "test-provider 1.0.0");
     }
 
     #[test]

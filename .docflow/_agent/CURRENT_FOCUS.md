@@ -8,10 +8,10 @@ If status files and git disagree, git is authoritative; correct this file.
 
 ## Active state
 
-- **Branch:** `fix/release-linux-dependencies`.
-- **Active item:** recover the first governed Norn release as `v0.2.1` after
-  the `v0.2.0` verification job exposed missing Tauri system dependencies on
-  the Ubuntu runner.
+- **Branch:** `fix/setup-tests-headless-runner`.
+- **Active item:** recover the first governed Norn release as `v0.2.2` after
+  the `v0.2.1` verification job exposed environment-dependent setup tests on
+  a headless runner without Codex or Claude installed.
 - **Plan item:** `.docflow/plan/done/2026-08-31-cli-only-release-channel.md`,
   owned by implemented ADR 0014.
 - **Verification:** PR #205 shipped at `643ff6f` and its Docflow closeout at
@@ -21,14 +21,16 @@ If status files and git disagree, git is authoritative; correct this file.
   Tauri IPC smoke, build, Archgate 17/17, and bounded Norn review passed. Apple
   signing and notarization remain intentionally unavailable. The signed
   `v0.2.0` tag was retained as immutable after run `33432277406` failed before
-  creating a GitHub release or modifying the public tap.
+  creating a GitHub release or modifying the public tap. PR #210 installed the
+  Tauri Linux prerequisites; the signed `v0.2.1` tag then passed that step but
+  run `33433900934` stopped at two setup tests before release publication.
 
 ## Last shipped
 
-`1554ced` - close out the command-only release channel through PR #209.
+`9420548` - install Linux release-gate prerequisites through PR #210.
 
 ## Next item
 
-- Install the documented Tauri Linux prerequisites before the all-feature Rust
-  gate, add a workflow regression test, align version sources to `0.2.1`, and
-  publish the signed recovery tag after review and integration.
+- Merge the deterministic setup inventory tests and real env-credential
+  redaction coverage, then publish the already-aligned signed `v0.2.2`
+  recovery tag after review and integration.
