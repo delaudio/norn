@@ -28,6 +28,8 @@ adding another package manager.
 - ADR 0014 AC3-5: the formula is rendered from release artifacts, passes clean
   install and authorized bootstrap or upgrade lifecycle tests on both supported
   macOS architectures, and advances the public tap only after those tests pass.
+- ADR 0014 AC6: durable source-based developer installation is unaffected and
+  its existing verification remains green.
 - ADR 0014 AC7-8: the desktop cask and DMG assets are absent when the desktop
   channel is disabled; enabling it still requires complete signed, notarized,
   checksummed artifacts and all desktop lifecycle gates.

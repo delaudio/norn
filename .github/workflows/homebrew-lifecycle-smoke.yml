@@ -11,6 +11,7 @@ on:
   pull_request:
     paths:
       - ".github/workflows/homebrew-lifecycle-smoke.yml"
+      - ".github/workflows/release-norn-macos.yml"
       - "packaging/homebrew/norn.rb.template"
       - "packaging/homebrew/norn-cask.rb.template"
       - "docs/homebrew-distribution.md"
@@ -20,12 +21,14 @@ on:
       - "scripts/render-homebrew-cask.test.mjs"
       - "scripts/render-homebrew-formula.mjs"
       - "scripts/render-homebrew-formula.test.mjs"
+      - "scripts/release-channels.test.mjs"
       - "scripts/resolve-previous-homebrew-release.mjs"
       - "scripts/resolve-previous-homebrew-release.test.mjs"
       - "scripts/run-tooling-tests.mjs"
       - "scripts/run-with-timeout.mjs"
       - "scripts/run-with-timeout.test.mjs"
       - "scripts/validate-homebrew-manifests.mjs"
+      - "scripts/validate-release-workflow.mjs"
 
 permissions:
   contents: read
@@ -39,6 +42,7 @@ jobs:
 
       - name: Validate lifecycle tooling
         run: |
+          node scripts/validate-release-workflow.mjs
           node scripts/run-tooling-tests.mjs
           node scripts/validate-homebrew-manifests.mjs
           bash -n scripts/homebrew-cask-lifecycle.sh
@@ -86,13 +90,19 @@ jobs:
           echo "desktop_arm64_url=$base_url/Norn-$version-macos-arm64.dmg" >> "$GITHUB_OUTPUT"
           echo "desktop_x86_64_url=$base_url/Norn-$version-macos-x86_64.dmg" >> "$GITHUB_OUTPUT"
 
-      - name: Require complete stable release assets
+      - name: Require complete stable command release assets
         run: |
           set -euo pipefail
           echo "phase=asset-check version=${{ steps.release.outputs.version }} architecture=${{ matrix.architecture }}"
           curl -fsI "${{ steps.release.outputs.arm64_url }}" >/dev/null
           curl -fsI "${{ steps.release.outputs.x86_64_url }}" >/dev/null
           curl -fsI "${{ steps.release.outputs.formula_url }}" >/dev/null
+
+      - name: Require complete stable desktop release assets
+        if: vars.NORN_DESKTOP_RELEASE_ENABLED == 'true'
+        run: |
+          set -euo pipefail
+          echo "phase=desktop-asset-check version=${{ steps.release.outputs.version }} architecture=${{ matrix.architecture }}"
           curl -fsI "${{ steps.release.outputs.desktop_arm64_url }}" >/dev/null
           curl -fsI "${{ steps.release.outputs.desktop_x86_64_url }}" >/dev/null
           curl -fsI "${{ steps.release.outputs.cask_url }}" >/dev/null
@@ -131,6 +141,7 @@ jobs:
         run: bash scripts/homebrew-formula-lifecycle.sh
 
       - name: Download and validate candidate cask
+        if: vars.NORN_DESKTOP_RELEASE_ENABLED == 'true'
         run: |
           set -euo pipefail
           curl -fsSL "${{ steps.release.outputs.cask_url }}" -o "$RUNNER_TEMP/norn-cask.rb"
@@ -138,6 +149,7 @@ jobs:
           ruby -c "$RUNNER_TEMP/norn-cask.rb"
 
       - name: Resolve previous stable desktop release
+        if: vars.NORN_DESKTOP_RELEASE_ENABLED == 'true'
         id: previous-desktop
         env:
           GITHUB_TOKEN: ${{ github.token }}
@@ -147,7 +159,7 @@ jobs:
         run: node scripts/resolve-previous-homebrew-release.mjs
 
       - name: Download and validate previous stable cask
-        if: steps.previous-desktop.outputs.bootstrap != 'true'
+        if: vars.NORN_DESKTOP_RELEASE_ENABLED == 'true' && steps.previous-desktop.outputs.bootstrap != 'true'
         run: |
           set -euo pipefail
           curl -fsSL "${{ steps.previous-desktop.outputs.cask_url }}" -o "$RUNNER_TEMP/previous-norn-cask.rb"
@@ -155,6 +167,7 @@ jobs:
           ruby -c "$RUNNER_TEMP/previous-norn-cask.rb"
 
       - name: Validate desktop install, upgrade or authorized bootstrap, uninstall, and reinstall
+        if: vars.NORN_DESKTOP_RELEASE_ENABLED == 'true'
         env:
           CANDIDATE_CASK: ${{ runner.temp }}/norn-cask.rb
           PREVIOUS_CASK: ${{ runner.temp }}/previous-norn-cask.rb

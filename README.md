@@ -58,7 +58,8 @@ brew tap delaudio/tap
 brew install norn
 ```
 
-Install the signed and notarized desktop app alongside the command tools with:
+When a release includes the signed and notarized desktop channel, install it
+alongside the command tools with:
 
 ```sh
 brew install --cask norn

@@ -155,6 +155,7 @@ jobs:
           if-no-files-found: error
 
   build-macos-desktop:
+    if: vars.NORN_DESKTOP_RELEASE_ENABLED == 'true'
     needs: checks
     strategy:
       fail-fast: false
@@ -307,6 +308,7 @@ jobs:
           fi
 
   release:
+    if: ${{ always() && needs.checks.result == 'success' && needs.build-macos-artifacts.result == 'success' && (needs.build-macos-desktop.result == 'success' || needs.build-macos-desktop.result == 'skipped') }}
     needs:
       - checks
       - build-macos-artifacts
@@ -327,7 +329,7 @@ jobs:
         with:
           path: release-artifacts
 
-      - name: Render verified Homebrew manifests
+      - name: Render verified Homebrew formula
         run: |
           set -euo pipefail
           version="${GITHUB_REF_NAME#v}"
@@ -335,14 +337,19 @@ jobs:
             --version "$version" \
             --artifacts-dir release-artifacts \
             --output dist/homebrew/norn.rb
+          node scripts/validate-homebrew-manifests.mjs --formula dist/homebrew/norn.rb
+          ruby -c dist/homebrew/norn.rb
+
+      - name: Render verified Homebrew cask
+        if: vars.NORN_DESKTOP_RELEASE_ENABLED == 'true'
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
           node scripts/render-homebrew-cask.mjs \
             --version "$version" \
             --artifacts-dir release-artifacts \
             --output dist/homebrew/norn-cask.rb
-          node scripts/validate-homebrew-manifests.mjs \
-            --formula dist/homebrew/norn.rb \
-            --cask dist/homebrew/norn-cask.rb
-          ruby -c dist/homebrew/norn.rb
+          node scripts/validate-homebrew-manifests.mjs --cask dist/homebrew/norn-cask.rb
           ruby -c dist/homebrew/norn-cask.rb
 
       - name: Upload verified Homebrew formula
@@ -353,21 +360,39 @@ jobs:
           if-no-files-found: error
 
       - name: Upload verified Homebrew cask
+        if: vars.NORN_DESKTOP_RELEASE_ENABLED == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: norn-homebrew-cask
           path: dist/homebrew/norn-cask.rb
           if-no-files-found: error
 
-      - name: Attach immutable release assets
+      - name: Attach immutable command release assets
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            release-artifacts/**/*.tar.gz
-            release-artifacts/**/*.dmg
-            release-artifacts/**/*.sha256
-            release-artifacts/**/*-metadata.json
+            release-artifacts/norn-macos-arm64/*.tar.gz
+            release-artifacts/norn-macos-arm64/*.sha256
+            release-artifacts/norn-macos-arm64/*-metadata.json
+            release-artifacts/norn-macos-x86_64/*.tar.gz
+            release-artifacts/norn-macos-x86_64/*.sha256
+            release-artifacts/norn-macos-x86_64/*-metadata.json
             dist/homebrew/norn.rb
+          fail_on_unmatched_files: true
+          overwrite_files: false
+          prerelease: true
+
+      - name: Attach immutable desktop release assets
+        if: vars.NORN_DESKTOP_RELEASE_ENABLED == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            release-artifacts/norn-macos-desktop-arm64/*.dmg
+            release-artifacts/norn-macos-desktop-arm64/*.sha256
+            release-artifacts/norn-macos-desktop-arm64/*-metadata.json
+            release-artifacts/norn-macos-desktop-x86_64/*.dmg
+            release-artifacts/norn-macos-desktop-x86_64/*.sha256
+            release-artifacts/norn-macos-desktop-x86_64/*-metadata.json
             dist/homebrew/norn-cask.rb
           fail_on_unmatched_files: true
           overwrite_files: false
@@ -432,6 +457,7 @@ jobs:
           fi
 
   homebrew-cask-smoke:
+    if: vars.NORN_DESKTOP_RELEASE_ENABLED == 'true'
     needs: release
     strategy:
       fail-fast: false
@@ -506,6 +532,7 @@ jobs:
           fi
 
   finalize-stable-release:
+    if: ${{ always() && needs.homebrew-formula-smoke.result == 'success' && (needs.homebrew-cask-smoke.result == 'success' || needs.homebrew-cask-smoke.result == 'skipped') }}
     needs:
       - homebrew-formula-smoke
       - homebrew-cask-smoke
@@ -529,6 +556,7 @@ jobs:
           path: dist/homebrew
 
       - name: Download verified Homebrew cask
+        if: vars.NORN_DESKTOP_RELEASE_ENABLED == 'true'
         uses: actions/download-artifact@v5
         with:
           name: norn-homebrew-cask
@@ -542,11 +570,15 @@ jobs:
           path: public-tap
 
       - name: Advance public tap
+        env:
+          NORN_DESKTOP_RELEASE_ENABLED: ${{ vars.NORN_DESKTOP_RELEASE_ENABLED }}
         run: |
           set -euo pipefail
           install -m 0644 dist/homebrew/norn.rb public-tap/Formula/norn.rb
-          mkdir -p public-tap/Casks
-          install -m 0644 dist/homebrew/norn-cask.rb public-tap/Casks/norn.rb
+          if [ "${NORN_DESKTOP_RELEASE_ENABLED:-}" = "true" ]; then
+            mkdir -p public-tap/Casks
+            install -m 0644 dist/homebrew/norn-cask.rb public-tap/Casks/norn.rb
+          fi
           cd public-tap
           while IFS= read -r status_line; do
             changed_path="${status_line:3}"
@@ -558,7 +590,14 @@ jobs:
                 ;;
             esac
           done < <(git status --porcelain)
-          git add Formula/norn.rb Casks/norn.rb
+          git add Formula/norn.rb
+          if [ "${NORN_DESKTOP_RELEASE_ENABLED:-}" = "true" ]; then
+            git add Casks/norn.rb
+          fi
+          manifest_label="formula"
+          if ! git diff --cached --quiet -- Casks/norn.rb; then
+            manifest_label="formula and cask"
+          fi
           git diff --cached --check
           if git diff --cached --quiet; then
             echo "Public tap already contains ${GITHUB_REF_NAME}."
@@ -566,5 +605,5 @@ jobs:
           fi
           git config user.name "norn-release-bot"
           git config user.email "norn-release-bot@users.noreply.github.com"
-          git commit -m "norn ${GITHUB_REF_NAME} formula and cask"
+          git commit -m "norn ${GITHUB_REF_NAME} ${manifest_label}"
           git push origin HEAD

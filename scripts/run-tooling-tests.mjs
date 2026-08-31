@@ -7,6 +7,7 @@ const testFiles = [
   "scripts/install-local.test.mjs",
   "scripts/render-homebrew-cask.test.mjs",
   "scripts/render-homebrew-formula.test.mjs",
+  "scripts/release-channels.test.mjs",
   "scripts/resolve-previous-homebrew-release.test.mjs",
   "scripts/run-with-timeout.test.mjs",
 ];
