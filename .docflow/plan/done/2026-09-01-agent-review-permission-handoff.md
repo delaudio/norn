@@ -5,6 +5,8 @@
 - `../../adr/0007-headless-review-cli.md`
 - `../../adr/0015-managed-agent-review-skill-distribution.md`
 
+Shipped at HEAD `8975b927b89a5f569db2d776c34dc2cd500f5f9d` through PR #227.
+
 ## Scope
 
 Make agent-triggered headless review predictable across Codex and Claude Code.
