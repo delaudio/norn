@@ -1,0 +1,51 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="720" viewBox="0 0 1200 720" role="img" aria-labelledby="title description">
+  <title id="title">Norn terminal settings</title>
+  <description id="description">A sanitized Norn terminal view with the visible settings shortcut and the settings panel showing AI and credential readiness.</description>
+  <rect width="1200" height="720" rx="18" fill="#0d1117"/>
+  <rect x="1" y="1" width="1198" height="718" rx="17" fill="none" stroke="#30363d" stroke-width="2"/>
+  <g font-family="SFMono-Regular,Consolas,Liberation Mono,monospace" font-size="18">
+    <text x="32" y="42" fill="#f0a400" font-weight="700">Norn</text>
+    <text x="92" y="42" fill="#c9d1d9">terminal review workspace</text>
+    <line x1="28" y1="62" x2="1172" y2="62" stroke="#30363d"/>
+
+    <rect x="30" y="84" width="1140" height="556" fill="#111923" stroke="#f0a400" stroke-width="2"/>
+    <rect x="46" y="100" width="1108" height="62" fill="#0d1117" stroke="#30363d"/>
+    <text x="68" y="124" fill="#f0a400" font-weight="700">Norn settings</text>
+    <text x="68" y="148" fill="#8b949e" font-size="14">↑/↓ field  ←/→ preset  e edit  Enter credential  d remove  v validate  s save  Esc cancel</text>
+
+    <rect x="46" y="178" width="1108" height="382" fill="#0d1117" stroke="#30363d"/>
+    <text x="64" y="202" fill="#f0a400">Configuration</text>
+    <text x="76" y="238" fill="#58a6ff">▶</text>
+    <text x="106" y="238" fill="#c9d1d9">AI provider:</text>
+    <text x="330" y="238" fill="#ffffff">Codex</text>
+    <text x="106" y="274" fill="#c9d1d9">Claude model:</text>
+    <text x="330" y="274" fill="#ffffff">default</text>
+    <text x="106" y="310" fill="#c9d1d9">Claude effort:</text>
+    <text x="330" y="310" fill="#ffffff">high</text>
+    <text x="106" y="346" fill="#c9d1d9">Codex model:</text>
+    <text x="330" y="346" fill="#ffffff">custom-team-model</text>
+    <text x="106" y="382" fill="#c9d1d9">Codex effort:</text>
+    <text x="330" y="382" fill="#ffffff">high</text>
+    <text x="106" y="418" fill="#c9d1d9">GitHub credential:</text>
+    <text x="330" y="418" fill="#3fb950">configured (OS keychain)</text>
+    <text x="106" y="454" fill="#c9d1d9">Bitbucket credential:</text>
+    <text x="330" y="454" fill="#d29922">missing (Enter to add)</text>
+    <text x="106" y="504" fill="#8b949e">Claude Code CLI: available</text>
+    <text x="106" y="534" fill="#8b949e">Codex CLI: available</text>
+
+    <rect x="46" y="576" width="1108" height="48" fill="#0d1117" stroke="#30363d"/>
+    <text x="64" y="607" fill="#8b949e">Status:</text>
+    <text x="150" y="607" fill="#58a6ff">Provider readiness refreshed</text>
+
+    <text x="34" y="680" fill="#f0a400">q</text>
+    <text x="50" y="680" fill="#8b949e"> quit  </text>
+    <text x="118" y="680" fill="#f0a400">tab</text>
+    <text x="158" y="680" fill="#8b949e"> focus  </text>
+    <text x="236" y="680" fill="#f0a400">s</text>
+    <text x="252" y="680" fill="#ffffff" font-weight="700"> settings  </text>
+    <text x="362" y="680" fill="#f0a400">j/k</text>
+    <text x="402" y="680" fill="#8b949e"> select  </text>
+    <text x="490" y="680" fill="#f0a400">enter</text>
+    <text x="550" y="680" fill="#8b949e"> load</text>
+  </g>
+</svg>

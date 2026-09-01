@@ -32,6 +32,10 @@ test("command distributions explicitly disable desktop routing", () => {
   );
   assert.match(
     releaseWorkflow,
+    /cp -R integrations\/agent-skills\/norn-review .*share\/norn\/agent-skills\/norn-review/,
+  );
+  assert.match(
+    releaseWorkflow,
     /cargo test .*--all-targets --no-default-features --features custom-protocol/,
   );
   assert.match(releaseWorkflow, /cargo test .*--bin norn --all-features/);

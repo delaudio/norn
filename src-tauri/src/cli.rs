@@ -262,7 +262,9 @@ fn is_cli_command(args: &[String]) -> bool {
     matches!(
         args.first().map(String::as_str),
         Some(
-            "config"
+            "auth"
+                | "skills"
+                | "config"
                 | "doctor"
                 | "evaluate"
                 | "init"
@@ -319,6 +321,22 @@ fn run_args(args: &[String], stdout: &mut dyn Write, stderr: &mut dyn Write) -> 
         let _ = writeln!(stdout, "{}", doctor_usage());
         return 0;
     }
+    if args.first().map(String::as_str) == Some("auth")
+        && args
+            .iter()
+            .skip(1)
+            .any(|arg| arg == "--help" || arg == "-h")
+    {
+        return crate::terminal_auth::run(&args[1..], stdout, stderr);
+    }
+    if args.first().map(String::as_str) == Some("skills")
+        && args
+            .iter()
+            .skip(1)
+            .any(|arg| arg == "--help" || arg == "-h")
+    {
+        return crate::agent_skills::run(&args[1..], stdout, stderr);
+    }
     if args.iter().any(|arg| arg == "--help" || arg == "-h") {
         let _ = writeln!(stdout, "{}", usage());
         return 0;
@@ -351,6 +369,8 @@ fn run_args(args: &[String], stdout: &mut dyn Write, stderr: &mut dyn Write) -> 
             }
         },
         Some("service") => crate::self_hosted_service::run(&args[1..], stdout, stderr),
+        Some("auth") => crate::terminal_auth::run(&args[1..], stdout, stderr),
+        Some("skills") => crate::agent_skills::run(&args[1..], stdout, stderr),
         Some("config") if args.get(1).map(String::as_str) == Some("migrate") => {
             match parse_config_migrate_args(args) {
                 Ok(args) => run_config_migrate(args, stdout, stderr),
@@ -593,6 +613,14 @@ fn run_setup_with_inventory(
             "Quick default provider would be `{}`. Re-run with `--yes` to persist.",
             selected_ai_provider.to_display_name()
         ));
+    }
+    for credential in &machine_credentials {
+        if !credential.available {
+            notes.push(format!(
+                "Run `norn auth login {}` to store this provider credential in the OS keychain.",
+                credential.provider
+            ));
+        }
     }
 
     let has_setup_notes = !notes.is_empty();
@@ -1692,6 +1720,13 @@ Onboarding:
   norn setup [--format human|json] [--json] [--dry-run] [--yes]
   norn init [--repo-path <path>] [--quick|--guided] [--dry-run] [--yes]
               [--format human|json] [--json]
+Credentials:
+  norn auth status [--format human|json] [--json]
+  norn auth login github|bitbucket [--username <name>] [--token-stdin]
+  norn auth logout github|bitbucket
+Agent skills:
+  norn skills install|status|uninstall --agent codex|claude|all
+                                      [--force] [--format human|json] [--json]
 Doctor:
   norn doctor [--repo-path <path>] [--machine-only]
               [--format human|json] [--json]"

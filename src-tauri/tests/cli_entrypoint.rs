@@ -55,3 +55,29 @@ fn unknown_top_level_commands_fail_with_usage_guidance() {
         .expect("UTF-8 stderr")
         .contains("Use `norn --help`"));
 }
+
+#[test]
+fn auth_and_skill_commands_are_available_without_desktop_routing() {
+    let auth = norn(&["auth", "status", "--json"]);
+    assert!(auth.status.success());
+    let auth_stdout = String::from_utf8(auth.stdout).expect("auth stdout");
+    assert!(auth_stdout.contains("norn.auth.v1"));
+    assert!(!auth_stdout.contains("token"));
+
+    let skills = norn(&["skills", "status", "--agent", "all", "--json"]);
+    assert!(skills.status.success());
+    let skills_stdout = String::from_utf8(skills.stdout).expect("skills stdout");
+    assert!(skills_stdout.contains("norn.skills.v1"));
+    assert!(!skills_stdout.contains("/Users/"));
+}
+
+#[test]
+fn auth_rejects_token_command_arguments_without_echoing_the_value() {
+    let secret = "SECRET_TOKEN_MUST_NOT_APPEAR";
+    let output = norn(&["auth", "login", "github", "--token", secret]);
+
+    assert_eq!(output.status.code(), Some(2));
+    let stderr = String::from_utf8(output.stderr).expect("auth stderr");
+    assert!(stderr.contains("not accepted as command arguments"));
+    assert!(!stderr.contains(secret));
+}

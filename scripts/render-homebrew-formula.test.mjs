@@ -32,6 +32,8 @@ test("renders exact version, URLs, and verified architecture checksums", () => {
     assert.match(formula, /version "1\.2\.3"/);
     assert.match(formula, new RegExp(checksums.arm64));
     assert.match(formula, new RegExp(checksums.x86_64));
+    assert.match(formula, /pkgshare\.install "share\/norn\/agent-skills"/);
+    assert.match(formula, /norn skills status --json/);
     assert.doesNotMatch(formula, /\{\{|:no_check/);
   } finally {
     rmSync(context.directory, { recursive: true, force: true });

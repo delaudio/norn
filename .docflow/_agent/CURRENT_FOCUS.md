@@ -8,15 +8,16 @@ If status files and git disagree, git is authoritative; correct this file.
 
 ## Active state
 
-- **Branch:** `feat/terminal-onboarding-skills-settings`.
-- **Active item:** define and implement terminal-first credential onboarding,
+- **Branch:** `feat/terminal-onboarding-skills-settings-impl`.
+- **Active item:** validate and integrate terminal-first credential onboarding,
   managed Codex and Claude Code skill distribution, and complete TUI settings
   for issues #216, #217, and #218.
 - **Plan items:** `.docflow/plan/todo/0002-secure-terminal-credential-onboarding.md`,
   `.docflow/plan/todo/0003-managed-agent-review-skills.md`, and
   `.docflow/plan/todo/0005-complete-tui-settings.md`.
-- **Verification:** `v0.2.4` is the current stable command release. The working
-  tree started clean from `main` at `e89cce4`.
+- **Verification:** typecheck, lint, 104 frontend tests plus tooling suites,
+  production build, 541 Rust tests (2 ignored), 4 Tauri IPC smoke tests, Clippy,
+  Archgate 17/17, and a real temporary-home skill lifecycle pass.
 
 ## Last shipped
 
@@ -24,5 +25,5 @@ If status files and git disagree, git is authoritative; correct this file.
 
 ## Next item
 
-- Merge ADR 0015 and the three issue-backed plan items, then implement plan
-  0002, plan 0003, and plan 0005 in that order.
+- Run the bounded Norn review, commit and push the implementation, then merge
+  its pull request and ship plan items 0002, 0003, and 0005.

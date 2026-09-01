@@ -134,7 +134,13 @@ jobs:
           cargo build --locked --manifest-path src-tauri/Cargo.toml --release --target "$TARGET" --no-default-features --features custom-protocol --bin norn --bin norn-tui
 
           tarball="norn-${version}-macos-${ARCHITECTURE}.tar.gz"
-          tar -czf "$artifacts_dir/$tarball" -C "src-tauri/target/$TARGET/release" norn norn-tui
+          archive_root="$RUNNER_TEMP/norn-command-${ARCHITECTURE}"
+          mkdir -p "$archive_root/share/norn/agent-skills"
+          install -m 0755 "src-tauri/target/$TARGET/release/norn" "$archive_root/norn"
+          install -m 0755 "src-tauri/target/$TARGET/release/norn-tui" "$archive_root/norn-tui"
+          cp -R integrations/agent-skills/norn-review "$archive_root/share/norn/agent-skills/norn-review"
+          test -f "$archive_root/share/norn/agent-skills/norn-review/SKILL.md"
+          tar -czf "$artifacts_dir/$tarball" -C "$archive_root" norn norn-tui share
           checksum="$(shasum -a 256 "$artifacts_dir/$tarball" | awk '{print $1}')"
           printf '%s  %s\n' "$checksum" "$tarball" > "$artifacts_dir/$tarball.sha256"
 

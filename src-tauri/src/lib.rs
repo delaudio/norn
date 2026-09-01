@@ -1,4 +1,5 @@
 pub mod administrative_audit;
+mod agent_skills;
 pub mod bitbucket_oauth_onboarding;
 pub mod cli;
 mod commands;
@@ -29,6 +30,7 @@ mod services;
 pub mod team_authorization;
 pub mod team_credentials;
 pub mod team_oidc;
+mod terminal_auth;
 pub mod tui;
 pub mod webhook_ingress;
 

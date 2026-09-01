@@ -9,6 +9,39 @@ const ACCOUNT: &str = "bitbucket";
 const APP_DIR: &str = "norn";
 const LEGACY_APP_DIR: &str = "lachesi";
 const TERMINAL_CONFIG_FILE: &str = "config.toml";
+pub const MAX_PROVIDER_TOKEN_BYTES: usize = 32_768;
+
+#[derive(Serialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum CredentialProvider {
+    Github,
+    Bitbucket,
+}
+
+impl CredentialProvider {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Github => "github",
+            Self::Bitbucket => "bitbucket",
+        }
+    }
+}
+
+#[derive(Serialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum CredentialSource {
+    Keychain,
+    Environment,
+    None,
+}
+
+#[derive(Serialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct CredentialStatus {
+    pub provider: CredentialProvider,
+    pub available: bool,
+    pub source: CredentialSource,
+}
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct Credentials {
@@ -212,6 +245,99 @@ pub fn has_github_credential_source() -> bool {
         return true;
     }
     false
+}
+
+fn has_valid_bitbucket_keychain_secret() -> bool {
+    [SERVICE, LEGACY_SERVICE].into_iter().any(|service| {
+        keychain_secret_no_copy(service, ACCOUNT).is_some_and(|secret| {
+            serde_json::from_str::<Credentials>(&secret).is_ok_and(|credential| {
+                !credential.username.trim().is_empty() && !credential.token.trim().is_empty()
+            })
+        })
+    })
+}
+
+fn has_valid_github_keychain_secret() -> bool {
+    [SERVICE, LEGACY_SERVICE].into_iter().any(|service| {
+        keychain_secret_no_copy(service, ACCOUNT_GITHUB)
+            .is_some_and(|secret| !secret.trim().is_empty())
+    })
+}
+
+pub fn credential_status(provider: CredentialProvider) -> CredentialStatus {
+    let (keychain, environment) = match provider {
+        CredentialProvider::Github => {
+            let config = load_terminal_config();
+            (
+                has_valid_github_keychain_secret(),
+                github_from_terminal_config(&config).is_some()
+                    || std::env::var("GITHUB_TOKEN").is_ok_and(|token| !token.trim().is_empty()),
+            )
+        }
+        CredentialProvider::Bitbucket => {
+            let config = load_terminal_config();
+            let direct_env = std::env::var("BITBUCKET_USERNAME")
+                .is_ok_and(|value| !value.trim().is_empty())
+                && std::env::var("BITBUCKET_TOKEN").is_ok_and(|value| !value.trim().is_empty());
+            (
+                has_valid_bitbucket_keychain_secret(),
+                bitbucket_from_terminal_config(&config).is_some() || direct_env,
+            )
+        }
+    };
+    let source = if keychain {
+        CredentialSource::Keychain
+    } else if environment {
+        CredentialSource::Environment
+    } else {
+        CredentialSource::None
+    };
+    CredentialStatus {
+        provider,
+        available: source != CredentialSource::None,
+        source,
+    }
+}
+
+pub fn store_provider_credential(
+    provider: CredentialProvider,
+    username: Option<&str>,
+    token: &str,
+) -> Result<(), String> {
+    let token = token.trim();
+    if token.is_empty() {
+        return Err("Token cannot be empty.".to_string());
+    }
+    if token.len() > MAX_PROVIDER_TOKEN_BYTES {
+        return Err("Token exceeds the supported length.".to_string());
+    }
+    match provider {
+        CredentialProvider::Github => store_github_token(token)
+            .map_err(|_| "Failed to store GitHub credential in the OS keychain.".to_string()),
+        CredentialProvider::Bitbucket => {
+            let username = username
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .ok_or_else(|| "Bitbucket username is required.".to_string())?;
+            if username.len() > 1_024 || username.contains(['\r', '\n']) {
+                return Err("Bitbucket username is invalid.".to_string());
+            }
+            store(&Credentials {
+                username: username.to_string(),
+                token: token.to_string(),
+            })
+            .map_err(|_| "Failed to store Bitbucket credential in the OS keychain.".to_string())
+        }
+    }
+}
+
+pub fn clear_provider_credential(provider: CredentialProvider) -> Result<(), String> {
+    match provider {
+        CredentialProvider::Github => clear_github_token()
+            .map_err(|error| format!("Failed to remove GitHub keychain credential: {error}")),
+        CredentialProvider::Bitbucket => clear()
+            .map_err(|error| format!("Failed to remove Bitbucket keychain credential: {error}")),
+    }
 }
 
 /// Resolve credentials: keychain first, terminal config env refs, then
