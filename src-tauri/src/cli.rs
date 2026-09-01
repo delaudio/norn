@@ -49,6 +49,7 @@ struct ReviewArgs {
     fail_on_findings: bool,
     min_severity: Option<ReviewFindingSeverity>,
     run_analyzers: bool,
+    allow_provider_diff: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -70,6 +71,7 @@ struct SetupArgs {
     format: OutputFormat,
     dry_run: bool,
     yes: bool,
+    provider_diff_consent: Option<bool>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -125,6 +127,8 @@ struct SetupOutput {
     machine_tools: Vec<SetupToolReport>,
     machine_credentials: Vec<SetupCredentialReport>,
     setup_notes: Vec<String>,
+    provider_diff_sharing_allowed: bool,
+    proposed_provider_diff_sharing_allowed: bool,
 }
 
 #[derive(Clone, Serialize)]
@@ -435,6 +439,7 @@ fn parse_setup_args(args: &[String]) -> Result<SetupArgs, String> {
     let mut dry_run = false;
     let mut yes = false;
     let mut explicit_dry_run = false;
+    let mut provider_diff_consent = None;
     let mut index = 1;
     while index < args.len() {
         match args[index].as_str() {
@@ -458,6 +463,24 @@ fn parse_setup_args(args: &[String]) -> Result<SetupArgs, String> {
                 yes = true;
                 dry_run = false;
             }
+            "--allow-provider-diff" => {
+                if provider_diff_consent == Some(false) {
+                    return Err(
+                        "`--allow-provider-diff` and `--deny-provider-diff` are mutually exclusive for `norn setup`."
+                            .to_string(),
+                    );
+                }
+                provider_diff_consent = Some(true);
+            }
+            "--deny-provider-diff" => {
+                if provider_diff_consent == Some(true) {
+                    return Err(
+                        "`--allow-provider-diff` and `--deny-provider-diff` are mutually exclusive for `norn setup`."
+                            .to_string(),
+                    );
+                }
+                provider_diff_consent = Some(false);
+            }
             unknown => return Err(format!("Unknown option `{unknown}`.")),
         }
         index += 1;
@@ -471,6 +494,7 @@ fn parse_setup_args(args: &[String]) -> Result<SetupArgs, String> {
         format,
         dry_run,
         yes,
+        provider_diff_consent,
     })
 }
 
@@ -607,6 +631,14 @@ fn run_setup_with_inventory(
     machine_credentials: Vec<SetupCredentialReport>,
 ) -> i32 {
     let selected_ai_provider = select_quick_ai_provider(&tools, current.ai_provider);
+    let proposed_provider_diff_sharing_allowed = args
+        .provider_diff_consent
+        .unwrap_or(current.headless_ai_diff_sharing_allowed);
+    let provider_diff_sharing_allowed = if args.yes && !args.dry_run {
+        proposed_provider_diff_sharing_allowed
+    } else {
+        current.headless_ai_diff_sharing_allowed
+    };
     let mut notes = Vec::new();
     if !args.yes && selected_ai_provider != current.ai_provider {
         notes.push(format!(
@@ -622,6 +654,22 @@ fn run_setup_with_inventory(
             ));
         }
     }
+    if !provider_diff_sharing_allowed {
+        notes.push(
+            "Headless AI review will require `--allow-provider-diff` for each run until diff sharing is enabled locally."
+                .to_string(),
+        );
+    }
+    if proposed_provider_diff_sharing_allowed != provider_diff_sharing_allowed {
+        let proposed = if proposed_provider_diff_sharing_allowed {
+            "allow"
+        } else {
+            "deny"
+        };
+        notes.push(format!(
+            "Re-run with `--yes` to persist the proposed `{proposed}` headless AI diff-sharing choice locally."
+        ));
+    }
 
     let has_setup_notes = !notes.is_empty();
     let output = SetupOutput {
@@ -632,6 +680,8 @@ fn run_setup_with_inventory(
         machine_tools: tools.clone(),
         machine_credentials,
         setup_notes: notes,
+        provider_diff_sharing_allowed,
+        proposed_provider_diff_sharing_allowed,
     };
 
     if args.format == OutputFormat::Json {
@@ -667,6 +717,26 @@ fn run_setup_with_inventory(
             let status = if item.available { "found" } else { "not found" };
             let _ = writeln!(stdout, "- {}: {status} ({})", item.provider, item.source);
         }
+        let diff_sharing = if output.provider_diff_sharing_allowed {
+            "allowed"
+        } else {
+            "not allowed"
+        };
+        let _ = writeln!(
+            stdout,
+            "Headless AI diff sharing: {diff_sharing} (local setting)."
+        );
+        if output.proposed_provider_diff_sharing_allowed != output.provider_diff_sharing_allowed {
+            let proposed = if output.proposed_provider_diff_sharing_allowed {
+                "allowed"
+            } else {
+                "not allowed"
+            };
+            let _ = writeln!(
+                stdout,
+                "Proposed headless AI diff sharing: {proposed} (not persisted)."
+            );
+        }
         if output.would_apply {
             let _ = writeln!(
                 stdout,
@@ -688,9 +758,16 @@ fn run_setup_with_inventory(
         }
     }
 
-    if args.yes && !args.dry_run && selected_ai_provider != current.ai_provider {
+    let config_changed = selected_ai_provider != current.ai_provider
+        || args
+            .provider_diff_consent
+            .is_some_and(|allowed| allowed != current.headless_ai_diff_sharing_allowed);
+    if args.yes && !args.dry_run && config_changed {
         let mut updated = current;
         updated.ai_provider = selected_ai_provider;
+        if let Some(allowed) = args.provider_diff_consent {
+            updated.headless_ai_diff_sharing_allowed = allowed;
+        }
         if let Err(error) = crate::config::save(&updated) {
             let _ = writeln!(stderr, "Failed to persist setup config: {error}");
             return 7;
@@ -1053,6 +1130,7 @@ fn parse_review_args(args: &[String]) -> Result<ReviewArgs, String> {
         fail_on_findings: false,
         min_severity: None,
         run_analyzers: false,
+        allow_provider_diff: false,
     };
     let mut scope_explicit = false;
     let mut index = 1;
@@ -1118,6 +1196,7 @@ fn parse_review_args(args: &[String]) -> Result<ReviewArgs, String> {
             "--output" => parsed.output = Some(PathBuf::from(next_value(args, &mut index)?)),
             "--fail-on-findings" => parsed.fail_on_findings = true,
             "--run-analyzers" => parsed.run_analyzers = true,
+            "--allow-provider-diff" => parsed.allow_provider_diff = true,
             "--min-severity" => {
                 parsed.min_severity = Some(parse_severity(&next_value(args, &mut index)?)?);
             }
@@ -1176,6 +1255,7 @@ fn run_review(args: ReviewArgs, stdout: &mut dyn Write, stderr: &mut dyn Write) 
         model: args.model,
         effort: args.effort,
         run_analyzers: args.run_analyzers,
+        allow_provider_diff: args.allow_provider_diff,
     };
     let _ = writeln!(stderr, "Starting headless review...");
     let mut execution = match headless_review::run(request) {
@@ -1243,6 +1323,7 @@ fn write_review_failure(
         "schemaVersion": "norn.headless-review.v1",
         "status": "failed",
         "exitCode": exit_code,
+        "errorCode": error.code,
         "error": error.message,
     })
     .to_string();
@@ -1704,7 +1785,7 @@ Review:
                  [--ai-provider codex|claude] [--model <name>] [--effort <level>]
                  [--format markdown|json] [--json] [--output <path>]
                  [--fail-on-findings] [--min-severity info|low|medium|high|critical]
-                 [--run-analyzers]
+                 [--run-analyzers] [--allow-provider-diff]
 Metrics:
   norn metrics [--tenant <id>] [--provider github|bitbucket]
                   [--workspace <name>] [--repo <slug>]
@@ -1717,7 +1798,8 @@ Config migration:
   norn config migrate [--repo-path <path>] [--dry-run]
                          [--format human|json] [--json]
 Onboarding:
-  norn setup [--format human|json] [--json] [--dry-run] [--yes]
+  norn setup [--allow-provider-diff|--deny-provider-diff]
+               [--format human|json] [--json] [--dry-run] [--yes]
   norn init [--repo-path <path>] [--quick|--guided] [--dry-run] [--yes]
               [--format human|json] [--json]
 Credentials:
@@ -1749,7 +1831,7 @@ fn review_usage() -> &'static str {
                  [--ai-provider codex|claude] [--model <name>] [--effort <level>]
                  [--format markdown|json] [--json] [--output <path>]
                  [--fail-on-findings] [--min-severity info|low|medium|high|critical]
-                 [--run-analyzers]"
+                 [--run-analyzers] [--allow-provider-diff]"
 }
 
 fn metrics_usage() -> &'static str {
@@ -1777,11 +1859,11 @@ mod tests {
         collect_setup_credentials, create_headless_data_dir, format_metrics_human,
         parse_evaluate_args, parse_init_args, parse_metrics_args, parse_review_args,
         parse_setup_args, review_needs_headless_storage, run_args, run_setup_with_inventory,
-        InitMode, OutputFormat, ReviewOutputFormat, SetupArgs, SetupCredentialReport,
-        SetupToolReport,
+        write_review_failure, InitMode, OutputFormat, ReviewOutputFormat, SetupArgs,
+        SetupCredentialReport, SetupToolReport,
     };
     use crate::config::{AiProvider, AppConfig};
-    use crate::headless_review::ReviewScope;
+    use crate::headless_review::{HeadlessReviewError, ReviewScope};
     use crate::readiness;
     use crate::review_event::PullRequestReviewEventProvider;
     use crate::review_metrics::{aggregate_review_effectiveness, ReviewEffectivenessFilter};
@@ -1872,6 +1954,7 @@ mod tests {
                 format,
                 dry_run: false,
                 yes: false,
+                provider_diff_consent: None,
             },
             stdout,
             stderr,
@@ -1910,12 +1993,37 @@ mod tests {
         assert_eq!(parsed.format, OutputFormat::Json);
         assert!(!parsed.yes);
         assert!(!parsed.dry_run);
+        assert_eq!(parsed.provider_diff_consent, None);
 
         let parsed = parse_setup_args(&["setup".to_string()]).expect("setup parse");
 
         assert_eq!(parsed.format, OutputFormat::Human);
         assert!(!parsed.yes);
         assert!(!parsed.dry_run);
+        assert_eq!(parsed.provider_diff_consent, None);
+    }
+
+    #[test]
+    fn setup_args_parse_and_validate_provider_diff_consent() {
+        let allow = parse_setup_args(&[
+            "setup".to_string(),
+            "--allow-provider-diff".to_string(),
+            "--yes".to_string(),
+        ])
+        .expect("allow consent");
+        assert_eq!(allow.provider_diff_consent, Some(true));
+
+        let deny = parse_setup_args(&["setup".to_string(), "--deny-provider-diff".to_string()])
+            .expect("deny consent");
+        assert_eq!(deny.provider_diff_consent, Some(false));
+
+        let error = parse_setup_args(&[
+            "setup".to_string(),
+            "--allow-provider-diff".to_string(),
+            "--deny-provider-diff".to_string(),
+        ])
+        .expect_err("opposite choices must fail");
+        assert!(error.contains("mutually exclusive"));
     }
 
     #[test]
@@ -2540,10 +2648,42 @@ token: unsafe
         assert!(output["machineTools"].as_array().is_some());
         assert!(output["machineCredentials"].as_array().is_some());
         assert!(output["setupNotes"].is_array());
+        assert_eq!(output["providerDiffSharingAllowed"], false);
+        assert_eq!(output["proposedProviderDiffSharingAllowed"], false);
         assert!(!output["machineTools"]
             .as_array()
             .expect("machine tools")
             .is_empty());
+    }
+
+    #[test]
+    fn setup_preview_does_not_report_unpersisted_diff_consent_as_active() {
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+        let code = run_setup_with_inventory(
+            SetupArgs {
+                format: OutputFormat::Json,
+                dry_run: false,
+                yes: false,
+                provider_diff_consent: Some(true),
+            },
+            &mut stdout,
+            &mut stderr,
+            AppConfig::default(),
+            setup_tools(true),
+            setup_credentials_fixture(),
+        );
+
+        assert_eq!(code, 0);
+        assert!(stderr.is_empty());
+        let output: Value = serde_json::from_slice(&stdout).expect("setup preview JSON");
+        assert_eq!(output["providerDiffSharingAllowed"], false);
+        assert_eq!(output["proposedProviderDiffSharingAllowed"], true);
+        assert!(output["setupNotes"]
+            .as_array()
+            .is_some_and(|notes| notes.iter().any(|note| note
+                .as_str()
+                .is_some_and(|note| note.contains("Re-run with `--yes`")))));
     }
 
     #[test]
@@ -2667,6 +2807,7 @@ profiles:
         assert_eq!(args.format, ReviewOutputFormat::Markdown);
         assert_eq!(args.repo_path, None);
         assert!(!args.run_analyzers);
+        assert!(!args.allow_provider_diff);
     }
 
     #[test]
@@ -2681,6 +2822,7 @@ profiles:
             "--fail-on-findings".to_string(),
             "--min-severity".to_string(),
             "medium".to_string(),
+            "--allow-provider-diff".to_string(),
         ])
         .expect("parse review args");
 
@@ -2690,6 +2832,7 @@ profiles:
         assert_eq!(args.ai_provider, Some(AiProvider::Codex));
         assert!(args.fail_on_findings);
         assert_eq!(args.min_severity, Some(ReviewFindingSeverity::Medium));
+        assert!(args.allow_provider_diff);
     }
 
     #[test]
@@ -2785,6 +2928,29 @@ profiles:
     }
 
     #[test]
+    fn review_runtime_failures_include_a_machine_readable_code() {
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+        let code = write_review_failure(
+            HeadlessReviewError {
+                exit_code: 6,
+                code: "review.sandboxRestricted",
+                message: "Run outside the sandbox.".to_string(),
+            },
+            ReviewOutputFormat::Json,
+            None,
+            &mut stdout,
+            &mut stderr,
+        );
+
+        assert_eq!(code, 6);
+        assert!(stderr.is_empty());
+        let output: serde_json::Value =
+            serde_json::from_slice(&stdout).expect("JSON runtime failure");
+        assert_eq!(output["errorCode"], "review.sandboxRestricted");
+    }
+
+    #[test]
     fn review_usage_errors_write_json_to_requested_output() {
         let temp_dir = tempfile::tempdir().expect("output temp dir");
         let output_path = temp_dir.path().join("review.json");
@@ -2868,6 +3034,7 @@ profiles:
         assert!(output.contains("norn review"));
         assert!(output.contains("--scope working-tree|branch|pr"));
         assert!(output.contains("--run-analyzers"));
+        assert!(output.contains("--allow-provider-diff"));
         assert!(output.contains("--json"));
         assert!(!output.contains("config validate"));
     }

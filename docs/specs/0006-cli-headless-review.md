@@ -138,7 +138,8 @@ norn review \
   [--output <path>] \
   [--fail-on-findings] \
   [--min-severity info|low|medium|high|critical] \
-  [--run-analyzers]
+  [--run-analyzers] \
+  [--allow-provider-diff]
 ```
 
 Defaults:
@@ -167,6 +168,15 @@ Defaults:
 - headless review uses temporary local storage by default and removes it after
   completion; setting `NORN_DATA_DIR` explicitly opts into a chosen
   persistent location
+- a non-empty diff is sent to the configured AI provider only when local setup
+  allows headless diff sharing or `--allow-provider-diff` authorizes that run
+- the known Codex sandbox fails before provider invocation with
+  `review.sandboxRestricted`; this host approval is separate from diff-sharing
+  consent. Claude permission failures map to the same code after its managed
+  skill requests host permission up front
+- Codex and Claude provider waits default to five minutes and can be bounded
+  from 30 to 1,800 seconds with `NORN_AI_PROVIDER_TIMEOUT_SECONDS`; timeout
+  failures use `review.providerTimeout`
 
 Planned options such as custom config paths, JSONL streaming, evidence-only
 execution, per-run session instructions, and source-specific enrichment

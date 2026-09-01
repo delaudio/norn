@@ -58,6 +58,7 @@ brew tap delaudio/tap
 brew install norn
 norn auth status
 norn skills install --agent all
+norn setup --allow-provider-diff --yes
 ```
 
 When a release includes the signed and notarized desktop channel, install it
@@ -83,7 +84,7 @@ norn config validate --repo-path .
 Then start a review:
 
 ```sh
-norn review --repo-path . --scope working-tree
+norn review --repo-path . --scope working-tree --allow-provider-diff
 ```
 
 Norn expects repository policy and review defaults in `.norn.yaml`.
@@ -144,7 +145,10 @@ explicit `--force`.
 
 Invoke it explicitly with `$norn-review` in Codex or `/norn-review` in Claude
 Code. Both agents can also select it automatically when its description matches
-the current task.
+the current task. An explicit invocation authorizes only that command's selected
+diff; automatic review uses the locally persisted choice. Codex and Claude Code
+still ask for their own narrowly scoped permission to run `norn review` outside
+the agent sandbox. Norn never edits either agent's permission settings.
 
 ## CLI, App and TUI
 

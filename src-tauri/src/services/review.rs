@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::{Child, Command, ExitStatus, Stdio};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -21,6 +21,10 @@ use crate::organization_policy::{
 use crate::repo_config;
 use crate::review_event::PullRequestReviewEventProvider;
 use crate::review_storage;
+
+const DEFAULT_AI_PROVIDER_TIMEOUT_SECONDS: u64 = 300;
+const MIN_AI_PROVIDER_TIMEOUT_SECONDS: u64 = 30;
+const MAX_AI_PROVIDER_TIMEOUT_SECONDS: u64 = 1_800;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
@@ -952,6 +956,56 @@ fn should_execute_analyzers(
     run_required_policy_analyzers: bool,
 ) -> bool {
     run_analyzers && (turn_kind == AiReviewTurnKind::Initial || run_required_policy_analyzers)
+}
+
+fn ai_provider_timeout() -> Duration {
+    ai_provider_timeout_from(
+        std::env::var("NORN_AI_PROVIDER_TIMEOUT_SECONDS")
+            .ok()
+            .as_deref(),
+    )
+}
+
+fn ai_provider_timeout_from(value: Option<&str>) -> Duration {
+    let seconds = value
+        .and_then(|value| value.trim().parse::<u64>().ok())
+        .unwrap_or(DEFAULT_AI_PROVIDER_TIMEOUT_SECONDS)
+        .clamp(
+            MIN_AI_PROVIDER_TIMEOUT_SECONDS,
+            MAX_AI_PROVIDER_TIMEOUT_SECONDS,
+        );
+    Duration::from_secs(seconds)
+}
+
+fn wait_for_ai_provider(
+    child: &mut Child,
+    provider_label: &str,
+    timeout: Duration,
+) -> Result<ExitStatus, String> {
+    let started = Instant::now();
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => return Ok(status),
+            Ok(None) if started.elapsed() >= timeout => {
+                let _ = kill_process(child.id());
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(format!(
+                    "{provider_label} review timed out after {} seconds. The provider may be blocked by host sandbox or permission controls.",
+                    timeout.as_secs()
+                ));
+            }
+            Ok(None) => thread::sleep(Duration::from_millis(100)),
+            Err(error) => {
+                let _ = kill_process(child.id());
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(format!(
+                    "Failed while waiting for {provider_label}: {error}"
+                ));
+            }
+        }
+    }
 }
 
 fn run_analyzer_command(
@@ -4943,9 +4997,13 @@ fn run_inline_review_pipeline(
             let _ = kill_process(pid);
         }
 
-        let status = child
-            .wait()
-            .map_err(|e| format!("Failed while waiting for claude: {e}"))?;
+        let status = match wait_for_ai_provider(&mut child, "Claude", ai_provider_timeout()) {
+            Ok(status) => status,
+            Err(error) => {
+                clear_inline_review_pid(&store, &key, run_id);
+                return Err(error);
+            }
+        };
         let _ = stdout_thread.join();
         let _ = stderr_thread.join();
         clear_inline_review_pid(&store, &key, run_id);
@@ -5022,9 +5080,13 @@ fn run_inline_review_pipeline(
         }
 
         let started = Instant::now();
-        let status = child
-            .wait()
-            .map_err(|e| format!("Failed while waiting for codex: {e}"))?;
+        let status = match wait_for_ai_provider(&mut child, "Codex", ai_provider_timeout()) {
+            Ok(status) => status,
+            Err(error) => {
+                clear_inline_review_pid(&store, &key, run_id);
+                return Err(error);
+            }
+        };
         let duration_ms = started.elapsed().as_millis() as u64;
         let _ = stdout_thread.join();
         let _ = stderr_thread.join();
@@ -6183,7 +6245,7 @@ fn review_provider_for_repo(workspace: &str, repo: &str) -> ReviewProvider {
 #[cfg(test)]
 mod tests {
     use super::{
-        analyzer_specs_from_config, append_execution_policy_to_payloads,
+        ai_provider_timeout_from, analyzer_specs_from_config, append_execution_policy_to_payloads,
         apply_review_finding_publication_event, begin_inline_review_run, build_claude_text_command,
         build_codex_text_command, extract_review_findings, format_claude_stream_log_line,
         get_ai_review_run_state_native, human_duration, materialize_review_run,
@@ -6192,14 +6254,40 @@ mod tests {
         resolve_gui_skip_analyzers, review_analyzer_specs, review_findings_from_output,
         review_profile_for_thread, should_execute_analyzers, trim_evidence_output,
         user_installed_cli_command, validate_isolated_provider_cli,
-        validate_organization_policy_repo_path, AiReviewDraftCommentResult, AiReviewRunStatus,
-        AiReviewRunStore, AiReviewStoreData, AiReviewTurnKind, ProviderExecutionContext,
-        ReviewEvidenceArtifact, ReviewEvidenceKind, ReviewEvidenceSource, ReviewFindingCategory,
-        ReviewFindingConfidence, ReviewFindingPublication, ReviewFindingPublicationEvent,
-        ReviewFindingPublicationEventKind, ReviewFindingSeverity, ReviewProvider,
-        ReviewPublicationMode, STRUCTURED_REVIEW_SCHEMA_VERSION,
+        validate_organization_policy_repo_path, wait_for_ai_provider, AiReviewDraftCommentResult,
+        AiReviewRunStatus, AiReviewRunStore, AiReviewStoreData, AiReviewTurnKind,
+        ProviderExecutionContext, ReviewEvidenceArtifact, ReviewEvidenceKind, ReviewEvidenceSource,
+        ReviewFindingCategory, ReviewFindingConfidence, ReviewFindingPublication,
+        ReviewFindingPublicationEvent, ReviewFindingPublicationEventKind, ReviewFindingSeverity,
+        ReviewProvider, ReviewPublicationMode, STRUCTURED_REVIEW_SCHEMA_VERSION,
     };
     use serde_json::json;
+
+    #[test]
+    fn provider_timeout_defaults_and_stays_within_safe_bounds() {
+        assert_eq!(ai_provider_timeout_from(None).as_secs(), 300);
+        assert_eq!(ai_provider_timeout_from(Some("invalid")).as_secs(), 300);
+        assert_eq!(ai_provider_timeout_from(Some("1")).as_secs(), 30);
+        assert_eq!(ai_provider_timeout_from(Some("3600")).as_secs(), 1_800);
+        assert_eq!(ai_provider_timeout_from(Some("420")).as_secs(), 420);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn provider_wait_terminates_a_hung_process_at_the_deadline() {
+        let mut child = std::process::Command::new("/bin/sh")
+            .args(["-c", "sleep 30"])
+            .spawn()
+            .expect("spawn hung provider fixture");
+        let started = std::time::Instant::now();
+
+        let error =
+            wait_for_ai_provider(&mut child, "Fixture", std::time::Duration::from_millis(20))
+                .expect_err("provider should time out");
+
+        assert!(error.contains("Fixture review timed out"));
+        assert!(started.elapsed() < std::time::Duration::from_secs(2));
+    }
 
     #[test]
     fn authoritative_policy_follows_repository_controlled_evidence() {

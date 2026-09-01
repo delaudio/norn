@@ -47,6 +47,15 @@ Before first review run:
    - `norn skills install --agent codex`
    - `norn skills install --agent claude`
    - or `norn skills install --agent all`.
+5. Choose whether automated headless reviews may send their selected diff and
+   review instructions to the configured local AI provider:
+   - `norn setup --allow-provider-diff --yes` persists consent locally;
+   - `norn review --allow-provider-diff ...` authorizes one run only;
+   - `norn setup --deny-provider-diff --yes` revokes persistent consent.
+
+Diff-sharing consent does not grant Codex or Claude Code permission to bypass
+their host sandbox. The managed skill requests that narrow host permission for
+the `norn review` command before launching it.
 
 ## Upgrade
 
@@ -111,6 +120,14 @@ brew uninstall --cask norn
 - **Agent skill is unmanaged or stale:** run `norn skills status --agent all`.
   A normal install upgrades managed copies atomically; review conflicts before
   choosing `--force`.
+- **Review reports `review.diffConsentRequired`:** authorize only that run with
+  `--allow-provider-diff`, or persist the local choice through `norn setup`.
+- **Review reports `review.sandboxRestricted`:** approve the exact
+  `norn review` command outside the Codex or Claude Code sandbox. Do not grant
+  a general shell allow rule.
+- **Review reports `review.providerTimeout`:** check whether the provider CLI
+  was waiting on a host permission prompt. The default provider timeout is five
+  minutes; `NORN_AI_PROVIDER_TIMEOUT_SECONDS` can set 30 to 1,800 seconds.
 - **`brew install` is pulling build toolchain dependencies:** release artifacts are
   binary-only; if dependencies are requested, the install path is likely mis-pointing
   to a source-only tap entry.

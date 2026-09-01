@@ -39,6 +39,50 @@ Resolve `norn` from the active command `PATH`. A managed Homebrew installation
 ships the skill and executable at the same version; a source installation may
 provide its own active command path.
 
+## Consent And Host Permission
+
+Treat these as two separate boundaries:
+
+1. Diff-sharing consent authorizes Norn to send only the diff selected by the
+   command, plus its review instructions, to the configured AI provider. It
+   never includes credentials, unrelated files, or a broader repository scope.
+2. Host permission authorizes the local `norn review` process to run outside
+   the coding agent's sandbox so it can reach the selected provider CLI,
+   provider configuration, OS credential store, and network.
+
+An explicit user request to run Norn review is one-run consent for the exact
+target they selected. Add `--allow-provider-diff` to that review command. For
+automatic post-task or pre-push activation, do not infer one-run consent. Run
+without that flag and rely on the user's persistent local choice; if Norn
+returns `review.diffConsentRequired`, ask the user before retrying. The user can
+persist or revoke the local choice with:
+
+```bash
+norn setup --allow-provider-diff --yes
+norn setup --deny-provider-diff --yes
+```
+
+Always request host permission on the first Norn invocation. Do not try inside
+the sandbox first and do not interpret diff-sharing consent as host approval.
+
+### Codex
+
+Use Codex's escalated or outside-sandbox shell execution for the first
+`norn review` call. Explain that the command launches the configured local AI
+provider and sends the selected diff. When Codex offers a reusable approval,
+scope it to the `norn review` command prefix only. Do not request a general
+shell prefix or edit Codex settings.
+
+### Claude Code
+
+Use Claude Code's Bash permission request for the exact `norn review` command
+and request execution outside the Claude sandbox when sandboxing is enabled.
+If the host offers a reusable allow rule, scope it only to `norn review`
+commands. Do not edit Claude Code settings or broaden Bash permissions.
+
+If the host denies permission, report that Norn did not run. Do not retry with
+different tools, copy the diff into another command, or bypass the host policy.
+
 ## Guard
 
 If `NORN_REVIEW_CHILD=1`, stop this workflow immediately. The current agent
@@ -72,18 +116,24 @@ norn review --repo-path . --scope working-tree --format json \
   --fail-on-findings
 ```
 
+When this is an explicit user-requested review, append
+`--allow-provider-diff` as the one-run consent described above. Automatic
+post-task and pre-push review must not append it.
+
 To force a provider in this explicit workflow:
 
 ```bash
 norn review --repo-path . --scope working-tree \
-  --format json --fail-on-findings --ai-provider codex
+  --format json --fail-on-findings --allow-provider-diff \
+  --ai-provider codex
 ```
 
 or
 
 ```bash
 norn review --repo-path . --scope working-tree \
-  --format json --fail-on-findings --ai-provider claude
+  --format json --fail-on-findings --allow-provider-diff \
+  --ai-provider claude
 ```
 
 If `norn` is unavailable from `PATH`, report setup failure.
@@ -109,6 +159,15 @@ Interpret exit codes as follows:
   failure; report the failure and do not treat it as a code finding. Retry only
   when the error itself identifies a transient failure; do not begin a new
   discovery phase.
+
+For JSON failures, handle these codes directly:
+
+- `review.diffConsentRequired`: ask for one-run consent or tell the user how to
+  persist it; do not add the one-run flag without their answer.
+- `review.sandboxRestricted`: request the host's outside-sandbox permission and
+  retry the exact command once.
+- `review.providerTimeout`: report the timeout. Retry once outside the sandbox
+  only when the timed-out attempt was not already host-approved.
 
 ## Triage And Rerun
 

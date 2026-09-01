@@ -493,6 +493,23 @@ uninstall removes only Norn-managed content."
 mod tests {
     use super::*;
 
+    const PACKAGED_SKILL: &str =
+        include_str!("../../integrations/agent-skills/norn-review/SKILL.md");
+
+    #[test]
+    fn packaged_skill_covers_codex_claude_consent_and_host_permission() {
+        for required in [
+            "### Codex",
+            "### Claude Code",
+            "--allow-provider-diff",
+            "review.diffConsentRequired",
+            "review.sandboxRestricted",
+            "review.providerTimeout",
+        ] {
+            assert!(PACKAGED_SKILL.contains(required), "missing {required}");
+        }
+    }
+
     fn fixture() -> (tempfile::TempDir, SkillPaths) {
         let root = tempfile::tempdir().expect("tempdir");
         let source_root = root.path().join("packaged");

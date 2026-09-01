@@ -1652,6 +1652,7 @@ pub fn save_config(
         claude_effort,
         codex_model,
         codex_effort,
+        headless_ai_diff_sharing_allowed: config::load().headless_ai_diff_sharing_allowed,
         jira_base_url,
         automatic_sync_interval_seconds,
         menu_bar_sync_enabled,

@@ -57,11 +57,13 @@ pub struct HeadlessReviewRequest {
     pub model: Option<String>,
     pub effort: Option<String>,
     pub run_analyzers: bool,
+    pub allow_provider_diff: bool,
 }
 
 #[derive(Debug)]
 pub struct HeadlessReviewError {
     pub exit_code: i32,
+    pub code: &'static str,
     pub message: String,
 }
 
@@ -69,6 +71,7 @@ impl HeadlessReviewError {
     fn config(message: impl Into<String>) -> Self {
         Self {
             exit_code: 2,
+            code: "review.configInvalid",
             message: message.into(),
         }
     }
@@ -76,6 +79,7 @@ impl HeadlessReviewError {
     fn target(message: impl Into<String>) -> Self {
         Self {
             exit_code: 4,
+            code: "review.targetInvalid",
             message: message.into(),
         }
     }
@@ -83,6 +87,7 @@ impl HeadlessReviewError {
     fn auth(message: impl Into<String>) -> Self {
         Self {
             exit_code: 3,
+            code: "review.authFailed",
             message: message.into(),
         }
     }
@@ -90,6 +95,7 @@ impl HeadlessReviewError {
     fn model(message: impl Into<String>) -> Self {
         Self {
             exit_code: 6,
+            code: "review.providerFailed",
             message: message.into(),
         }
     }
@@ -97,6 +103,7 @@ impl HeadlessReviewError {
     fn analyzer(message: impl Into<String>) -> Self {
         Self {
             exit_code: 5,
+            code: "review.analyzerFailed",
             message: message.into(),
         }
     }
@@ -104,6 +111,7 @@ impl HeadlessReviewError {
     fn internal(message: impl Into<String>) -> Self {
         Self {
             exit_code: 7,
+            code: "review.internal",
             message: message.into(),
         }
     }
@@ -111,6 +119,32 @@ impl HeadlessReviewError {
     fn cancelled(message: impl Into<String>) -> Self {
         Self {
             exit_code: 130,
+            code: "review.cancelled",
+            message: message.into(),
+        }
+    }
+
+    fn diff_consent_required() -> Self {
+        Self {
+            exit_code: 2,
+            code: "review.diffConsentRequired",
+            message: "Headless AI review needs permission to send the selected diff and review instructions to the configured AI provider. Run `norn setup --allow-provider-diff --yes` once, or retry this review with `--allow-provider-diff` for one run. The diff has not been sent."
+                .to_string(),
+        }
+    }
+
+    fn sandbox_restricted(message: impl Into<String>) -> Self {
+        Self {
+            exit_code: 6,
+            code: "review.sandboxRestricted",
+            message: message.into(),
+        }
+    }
+
+    fn provider_timeout(message: impl Into<String>) -> Self {
+        Self {
+            exit_code: 6,
+            code: "review.providerTimeout",
             message: message.into(),
         }
     }
@@ -240,6 +274,11 @@ pub fn run(request: HeadlessReviewRequest) -> Result<HeadlessReviewExecution, He
     }
 
     let app_config = config::load();
+    validate_provider_handoff(
+        restricted_agent_host(),
+        request.allow_provider_diff,
+        app_config.headless_ai_diff_sharing_allowed,
+    )?;
     let analyzers_ran = effective_analyzers_ran(request.run_analyzers, &required_policy_analyzers);
     let ai_provider = request.ai_provider.unwrap_or(app_config.ai_provider);
     let (claude_model, claude_effort, codex_model, codex_effort) = match ai_provider {
@@ -348,9 +387,64 @@ fn strip_private_evidence_payloads(review_run: &mut ReviewRun) {
     }
 }
 
+fn restricted_agent_host() -> bool {
+    restricted_agent_host_with(|name| std::env::var_os(name))
+}
+
+fn diff_sharing_authorized(one_run: bool, persistent: bool) -> bool {
+    one_run || persistent
+}
+
+fn validate_provider_handoff(
+    restricted_host: bool,
+    one_run_consent: bool,
+    persistent_consent: bool,
+) -> Result<(), HeadlessReviewError> {
+    if restricted_host {
+        return Err(HeadlessReviewError::sandbox_restricted(
+            "Norn detected a restricted agent sandbox before starting the AI provider. Run the same `norn review` command with the host's explicit outside-sandbox permission. The diff has not been sent.",
+        ));
+    }
+    if !diff_sharing_authorized(one_run_consent, persistent_consent) {
+        return Err(HeadlessReviewError::diff_consent_required());
+    }
+    Ok(())
+}
+
+fn restricted_agent_host_with(
+    mut value_for: impl FnMut(&str) -> Option<std::ffi::OsString>,
+) -> bool {
+    // Codex outside-sandbox execution clears CODEX_SANDBOX, while other Codex
+    // environment markers remain inherited. Do not infer Claude sandbox state
+    // from undocumented environment names: the managed Claude skill requests
+    // host permission up front and provider permission failures remain mapped
+    // to review.sandboxRestricted.
+    value_for("CODEX_SANDBOX")
+        .is_some_and(|value| sandbox_marker_is_restricted(&value.to_string_lossy()))
+}
+
+fn sandbox_marker_is_restricted(value: &str) -> bool {
+    !matches!(
+        value.trim().to_ascii_lowercase().as_str(),
+        "" | "0" | "false" | "none" | "disabled" | "danger-full-access"
+    )
+}
+
 fn map_native_review_error(error: HeadlessNativeReviewError) -> HeadlessReviewError {
     match error {
         HeadlessNativeReviewError::Analyzer(message) => HeadlessReviewError::analyzer(message),
+        HeadlessNativeReviewError::Provider(message)
+            if message
+                .to_ascii_lowercase()
+                .contains("review timed out after") =>
+        {
+            HeadlessReviewError::provider_timeout(public_provider_error(&message))
+        }
+        HeadlessNativeReviewError::Provider(message)
+            if is_provider_permission_failure(&message) =>
+        {
+            HeadlessReviewError::sandbox_restricted(public_provider_error(&message))
+        }
         HeadlessNativeReviewError::Provider(message) => {
             HeadlessReviewError::model(public_provider_error(&message))
         }
@@ -361,15 +455,11 @@ fn map_native_review_error(error: HeadlessNativeReviewError) -> HeadlessReviewEr
 
 fn public_provider_error(message: &str) -> &'static str {
     let normalized = message.to_ascii_lowercase();
-    let app_server_sandbox_failure = normalized
-        .contains("failed to initialize in-process app-server client")
-        && normalized.contains("sandbox");
-    if normalized.contains("empty review response") {
+    if normalized.contains("review timed out after") {
+        "AI provider review timed out. The provider may be blocked by host sandbox or permission controls. Run Norn with explicit outside-sandbox permission and retry."
+    } else if normalized.contains("empty review response") {
         "AI provider returned an empty review response."
-    } else if normalized.contains("operation not permitted")
-        || normalized.contains("permission denied")
-        || app_server_sandbox_failure
-    {
+    } else if is_provider_permission_failure(message) {
         "AI provider CLI was blocked by filesystem or sandbox permissions. Run Norn with permission to access the provider configuration directory."
     } else if normalized.contains("structured review")
         || normalized.contains("invalid json")
@@ -384,6 +474,14 @@ fn public_provider_error(message: &str) -> &'static str {
     } else {
         "AI provider review failed."
     }
+}
+
+fn is_provider_permission_failure(message: &str) -> bool {
+    let normalized = message.to_ascii_lowercase();
+    normalized.contains("operation not permitted")
+        || normalized.contains("permission denied")
+        || (normalized.contains("failed to initialize in-process app-server client")
+            && normalized.contains("sandbox"))
 }
 
 pub fn format_markdown(execution: &HeadlessReviewExecution) -> String {
@@ -1345,12 +1443,13 @@ mod tests {
     use std::sync::atomic::{AtomicU64, Ordering};
 
     use super::{
-        branch_scope_warnings, build_review_payload, effective_analyzers_ran, ensure_config_valid,
-        format_findings_markdown, format_markdown, is_safe_synthetic_diff_path,
-        is_sensitive_untracked_path, map_native_review_error, map_provider_target_error,
-        markdown_fence, new_file_patch, public_provider_error, repo_identity_matches_target,
-        requested_repo_identity, run, strip_private_evidence_payloads, untracked_relative_path,
-        validate_empty_diff_analyzers, validate_explicit_repo_identity,
+        branch_scope_warnings, build_review_payload, diff_sharing_authorized,
+        effective_analyzers_ran, ensure_config_valid, format_findings_markdown, format_markdown,
+        is_safe_synthetic_diff_path, is_sensitive_untracked_path, map_native_review_error,
+        map_provider_target_error, markdown_fence, new_file_patch, public_provider_error,
+        repo_identity_matches_target, requested_repo_identity, restricted_agent_host_with, run,
+        sandbox_marker_is_restricted, strip_private_evidence_payloads, untracked_relative_path,
+        validate_empty_diff_analyzers, validate_explicit_repo_identity, validate_provider_handoff,
         validate_requested_identity_shape, working_tree_diff, HeadlessReviewExecution,
         HeadlessReviewRequest, HeadlessReviewTarget, ReviewScope, HEADLESS_REVIEW_BOUNDARY,
         MAX_UNTRACKED_FILE_BYTES,
@@ -1470,6 +1569,7 @@ mod tests {
                 model: None,
                 effort: None,
                 run_analyzers: false,
+                allow_provider_diff: false,
             };
 
             assert_eq!(
@@ -1504,6 +1604,7 @@ mod tests {
             model: None,
             effort: None,
             run_analyzers: false,
+            allow_provider_diff: false,
         };
 
         let error = validate_explicit_repo_identity(&repo, &request)
@@ -1529,6 +1630,7 @@ mod tests {
             model: None,
             effort: None,
             run_analyzers: false,
+            allow_provider_diff: false,
         };
 
         let error = validate_requested_identity_shape(&request)
@@ -1701,6 +1803,10 @@ mod tests {
             assert_eq!(public_message, expected);
             assert!(!public_message.contains("secret-value"));
             assert!(!public_message.contains("/Users/example"));
+            let error = map_native_review_error(HeadlessNativeReviewError::Provider(
+                message.to_string(),
+            ));
+            assert_eq!(error.code, "review.sandboxRestricted");
         }
 
         assert_eq!(
@@ -1709,6 +1815,55 @@ mod tests {
             ),
             "AI provider review failed."
         );
+    }
+
+    #[test]
+    fn diff_sharing_requires_one_run_or_persistent_authorization() {
+        assert!(!diff_sharing_authorized(false, false));
+        assert!(diff_sharing_authorized(true, false));
+        assert!(diff_sharing_authorized(false, true));
+    }
+
+    #[test]
+    fn restricted_host_is_reported_before_diff_consent() {
+        let error = validate_provider_handoff(true, false, false)
+            .expect_err("restricted host should fail before consent is requested");
+        assert_eq!(error.code, "review.sandboxRestricted");
+
+        let error = validate_provider_handoff(false, false, false)
+            .expect_err("unrestricted host should still require diff consent");
+        assert_eq!(error.code, "review.diffConsentRequired");
+        assert!(validate_provider_handoff(false, true, false).is_ok());
+        assert!(validate_provider_handoff(false, false, true).is_ok());
+    }
+
+    #[test]
+    fn detects_only_the_verified_codex_restricted_host_marker() {
+        assert!(restricted_agent_host_with(|name| {
+            (name == "CODEX_SANDBOX").then(|| std::ffi::OsString::from("seatbelt"))
+        }));
+        assert!(!restricted_agent_host_with(|name| {
+            (name == "CLAUDE_CODE_SANDBOX").then(|| std::ffi::OsString::from("enabled"))
+        }));
+        assert!(!restricted_agent_host_with(|_| None));
+        assert!(!restricted_agent_host_with(|name| {
+            (name == "CODEX_SANDBOX").then(std::ffi::OsString::new)
+        }));
+        for unrestricted in ["0", "false", "disabled", "danger-full-access"] {
+            assert!(!sandbox_marker_is_restricted(unrestricted));
+        }
+    }
+
+    #[test]
+    fn provider_timeouts_have_a_stable_sanitized_failure() {
+        let error = map_native_review_error(HeadlessNativeReviewError::Provider(
+            "Codex review timed out after 300 seconds. TOKEN=secret".to_string(),
+        ));
+
+        assert_eq!(error.exit_code, 6);
+        assert_eq!(error.code, "review.providerTimeout");
+        assert!(error.message.contains("timed out"));
+        assert!(!error.message.contains("secret"));
     }
 
     #[test]
@@ -1727,6 +1882,7 @@ mod tests {
             model: None,
             effort: None,
             run_analyzers: true,
+            allow_provider_diff: false,
         })
         .expect_err("analyzer opt-in must not silently pass without a review target");
 

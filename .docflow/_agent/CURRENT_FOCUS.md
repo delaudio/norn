@@ -8,19 +8,24 @@ If status files and git disagree, git is authoritative; correct this file.
 
 ## Active state
 
-- **Branch:** `docs/ship-tui-settings-ux`.
-- **Active item:** `.docflow/plan/done/2026-09-01-refine-tui-settings-experience.md`.
-- **Plan items:** record the completed TUI settings layout and provider
-  credential input refinement shipped through PR #224.
-- **Verification:** typecheck, lint, 104 frontend tests plus tooling suites,
-  production build, the command-distribution Rust lane (547 library tests, 2
-  ignored, plus CLI and onboarding targets), Clippy, Archgate 17/17, focused
-  normal/narrow settings rendering, masked paste, and Bitbucket back-step tests.
+- **Branch:** `fix/agent-review-permissions`.
+- **Active item:** `.docflow/plan/todo/0006-agent-review-permission-handoff.md`.
+- **Plan items:** add explicit headless diff-sharing authorization, proactive
+  Codex and Claude Code host-permission guidance, restricted-host diagnostics,
+  and bounded provider execution.
+- **Verification:** typecheck, 104 frontend tests plus tooling suites, 17/17
+  Archgate checks, Clippy, 4 Tauri IPC tests, skill validation, 101 focused Rust
+  tests, and fail-fast consent/sandbox CLI probes pass. The complete Rust suite
+  reaches the pre-existing `doctor` provider-version probes, which remain
+  unbounded and hang under concurrent execution. The implementation review
+  found one valid setup-state bug, fixed before its bounded rerun. The pre-push
+  review then found that restricted-host detection followed the consent gate;
+  host detection now runs first, with a focused regression and runtime CLI
+  probe passing. The bounded pre-push rerun is required before publication.
 
 ## Last shipped
 
-`c654019` - refine the TUI settings workspace and guided provider credential
-input through PR #224.
+`3b78900` - release Norn v0.2.6 after the TUI settings refinement.
 
 ## Next item
 
