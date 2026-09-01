@@ -274,17 +274,11 @@ pub fn run(request: HeadlessReviewRequest) -> Result<HeadlessReviewExecution, He
     }
 
     let app_config = config::load();
-    if !diff_sharing_authorized(
+    validate_provider_handoff(
+        restricted_agent_host(),
         request.allow_provider_diff,
         app_config.headless_ai_diff_sharing_allowed,
-    ) {
-        return Err(HeadlessReviewError::diff_consent_required());
-    }
-    if restricted_agent_host() {
-        return Err(HeadlessReviewError::sandbox_restricted(
-            "Norn detected a restricted agent sandbox before starting the AI provider. Run the same `norn review` command with the host's explicit outside-sandbox permission. The diff has not been sent.",
-        ));
-    }
+    )?;
     let analyzers_ran = effective_analyzers_ran(request.run_analyzers, &required_policy_analyzers);
     let ai_provider = request.ai_provider.unwrap_or(app_config.ai_provider);
     let (claude_model, claude_effort, codex_model, codex_effort) = match ai_provider {
@@ -399,6 +393,22 @@ fn restricted_agent_host() -> bool {
 
 fn diff_sharing_authorized(one_run: bool, persistent: bool) -> bool {
     one_run || persistent
+}
+
+fn validate_provider_handoff(
+    restricted_host: bool,
+    one_run_consent: bool,
+    persistent_consent: bool,
+) -> Result<(), HeadlessReviewError> {
+    if restricted_host {
+        return Err(HeadlessReviewError::sandbox_restricted(
+            "Norn detected a restricted agent sandbox before starting the AI provider. Run the same `norn review` command with the host's explicit outside-sandbox permission. The diff has not been sent.",
+        ));
+    }
+    if !diff_sharing_authorized(one_run_consent, persistent_consent) {
+        return Err(HeadlessReviewError::diff_consent_required());
+    }
+    Ok(())
 }
 
 fn restricted_agent_host_with(
@@ -1439,7 +1449,7 @@ mod tests {
         map_provider_target_error, markdown_fence, new_file_patch, public_provider_error,
         repo_identity_matches_target, requested_repo_identity, restricted_agent_host_with, run,
         sandbox_marker_is_restricted, strip_private_evidence_payloads, untracked_relative_path,
-        validate_empty_diff_analyzers, validate_explicit_repo_identity,
+        validate_empty_diff_analyzers, validate_explicit_repo_identity, validate_provider_handoff,
         validate_requested_identity_shape, working_tree_diff, HeadlessReviewExecution,
         HeadlessReviewRequest, HeadlessReviewTarget, ReviewScope, HEADLESS_REVIEW_BOUNDARY,
         MAX_UNTRACKED_FILE_BYTES,
@@ -1812,6 +1822,19 @@ mod tests {
         assert!(!diff_sharing_authorized(false, false));
         assert!(diff_sharing_authorized(true, false));
         assert!(diff_sharing_authorized(false, true));
+    }
+
+    #[test]
+    fn restricted_host_is_reported_before_diff_consent() {
+        let error = validate_provider_handoff(true, false, false)
+            .expect_err("restricted host should fail before consent is requested");
+        assert_eq!(error.code, "review.sandboxRestricted");
+
+        let error = validate_provider_handoff(false, false, false)
+            .expect_err("unrestricted host should still require diff consent");
+        assert_eq!(error.code, "review.diffConsentRequired");
+        assert!(validate_provider_handoff(false, true, false).is_ok());
+        assert!(validate_provider_handoff(false, false, true).is_ok());
     }
 
     #[test]
