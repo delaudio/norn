@@ -68,6 +68,11 @@ pub struct AppConfig {
     pub codex_model: Option<String>,
     #[serde(default)]
     pub codex_effort: Option<String>,
+    /// Local consent for headless review to send the selected diff to the
+    /// configured AI provider. Desktop and TUI review have their own explicit
+    /// user actions and do not use this automation-specific setting.
+    #[serde(default)]
+    pub headless_ai_diff_sharing_allowed: bool,
     /// Jira site base URL for issue links, e.g. https://example.atlassian.net
     #[serde(default)]
     pub jira_base_url: Option<String>,
@@ -110,6 +115,7 @@ impl Default for AppConfig {
             claude_effort: None,
             codex_model: None,
             codex_effort: None,
+            headless_ai_diff_sharing_allowed: false,
             jira_base_url: None,
             automatic_sync_interval_seconds: None,
             menu_bar_sync_enabled: true,
@@ -238,6 +244,21 @@ mod tests {
         assert_eq!(parsed.review_provider, ReviewProvider::Github);
         assert_eq!(parsed.codex_model.as_deref(), Some("gpt-5-codex"));
         assert_eq!(parsed.codex_effort.as_deref(), Some("high"));
+        assert!(!parsed.headless_ai_diff_sharing_allowed);
+    }
+
+    #[test]
+    fn serializes_headless_ai_diff_sharing_consent() {
+        let config = AppConfig {
+            headless_ai_diff_sharing_allowed: true,
+            ..AppConfig::default()
+        };
+
+        let json = serde_json::to_string(&config).expect("config should serialize");
+        assert!(json.contains(r#""headlessAiDiffSharingAllowed":true"#));
+
+        let parsed: AppConfig = serde_json::from_str(&json).expect("config should deserialize");
+        assert!(parsed.headless_ai_diff_sharing_allowed);
     }
 
     #[test]

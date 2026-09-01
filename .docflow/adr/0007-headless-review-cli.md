@@ -80,6 +80,13 @@ orchestrated safely by coding agents and CI.
    provider failure, internal failure, and cancellation.
 8. A versioned, installable Codex skill documents the review, remediation,
    rerun, publication, and recursion boundaries.
+9. A non-empty headless review sends its selected diff and review instructions
+   to the configured AI provider only after one-run authorization or an
+   explicit locally persisted setup choice. Known restricted agent hosts fail
+   before provider invocation with a stable machine-readable reason.
+10. Codex and Claude provider processes have a bounded execution time. Timeout
+    and sandbox failures expose actionable sanitized errors without provider
+    stdout, stderr, credentials, or diff content.
 
 ## Out of scope
 
@@ -118,6 +125,7 @@ orchestrated safely by coding agents and CI.
 | 2026-07-27 | r6 | default-agent | Isolated headless provider execution from the reviewed checkout. |
 | 2026-07-27 | r7 | default-agent | Marked the headless review capability implemented after PR #115 shipped. |
 | 2026-08-04 | r8 | codex | Adopted the canonical Norn CLI, data environment, and recursion marker names with legacy input compatibility. |
+| 2026-09-01 | r9 | codex | Added explicit headless diff-sharing authorization, restricted-host preflight, and bounded provider execution. |
 
 ## Approvals
 
@@ -130,3 +138,4 @@ orchestrated safely by coding agents and CI.
 | Maintainer | fdg | 2026-07-27 | approved autonomous security remediation in chat |
 | Maintainer | fdg | 2026-07-27 | approved autonomous completion and issue progression in chat |
 | Maintainer | fdg | 2026-08-04 | approved through autonomous Norn issue-completion instruction |
+| Maintainer | fdg | 2026-09-01 | approved in chat for Codex and Claude Code |
