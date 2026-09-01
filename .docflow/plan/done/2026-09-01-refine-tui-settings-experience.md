@@ -6,6 +6,10 @@
 - `../../adr/0003-credentials-keychain.md`
 - `../../adr/0012-norn-onboarding-contract.md`
 
+## Shipped
+
+Shipped at HEAD `c654019` via PR #224.
+
 ## Scope
 
 Refine the shipped Terminal UI settings experience so it reads as part of the
