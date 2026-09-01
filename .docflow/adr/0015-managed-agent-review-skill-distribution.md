@@ -53,8 +53,8 @@ both without requiring a source checkout.
    location without requiring Node.js, Rust, or a source checkout.
 3. A documented Norn command installs the managed skill for Codex, Claude Code,
    or both into their standard personal skill directories.
-4. Codex can explicitly invoke the installed skill as `$norn-review`, and
-   Claude Code can explicitly invoke it as `/norn-review`.
+4. Codex and Claude Code can explicitly invoke the installed skill using the
+   documented syntax for each supported agent version.
 5. Installed skill instructions resolve the released `norn` executable from
    the active command path when no local-source executable is available.
 6. Repeated installation and managed upgrades are idempotent and use atomic
@@ -95,9 +95,10 @@ both without requiring a source checkout.
 |------|----------|--------|--------|
 | 2026-09-01 | r1 | codex | Initial draft. |
 | 2026-09-01 | r2 | codex | Accepted the managed Codex and Claude Code skill distribution contract after guided assessment. |
+| 2026-09-01 | r3 | codex | Kept agent invocation syntax in versioned skill documentation so upstream syntax changes do not invalidate the capability contract. |
 
 ## Approvals
 
 | Role | Name | Date | Signature |
 |------|------|------|-----------|
-| Maintainer | fdg | 2026-09-01 | approved in chat |
+| Maintainer | fdg | 2026-09-01 | approved in chat; review clarification preserves the approved capability scope |

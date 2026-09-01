@@ -24,5 +24,5 @@ If status files and git disagree, git is authoritative; correct this file.
 
 ## Next item
 
-- Merge ADR 0015 and the three issue-backed plan items, then implement them in
-  dependency order.
+- Merge ADR 0015 and the three issue-backed plan items, then implement plan
+  0002, plan 0003, and plan 0005 in that order.
