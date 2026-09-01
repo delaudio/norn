@@ -48,3 +48,6 @@ synchronization, desktop settings redesign, and agent-skill installation.
 - `../../adr/0003-credentials-keychain.md`
 - `../../adr/0013-norn-readiness-probe.md`
 - GitHub issue #216
+
+Shipped at HEAD `9179adc05831efe4ddc1924551a9e0fa4a7d88c6` through
+https://github.com/delaudio/norn/pull/220.

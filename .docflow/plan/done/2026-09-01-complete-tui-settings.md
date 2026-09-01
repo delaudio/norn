@@ -43,8 +43,11 @@ the desktop settings interface, and unrelated TUI review features.
 
 ## Dependencies
 
-- `./0002-secure-terminal-credential-onboarding.md`
+- `./2026-09-01-secure-terminal-credential-onboarding.md`
 - `../../adr/0012-norn-onboarding-contract.md`
 - `../../adr/0003-credentials-keychain.md`
 - `../../adr/0006-terminal-ui.md`
 - GitHub issue #218
+
+Shipped at HEAD `9179adc05831efe4ddc1924551a9e0fa4a7d88c6` through
+https://github.com/delaudio/norn/pull/220.

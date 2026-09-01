@@ -46,3 +46,6 @@ than Homebrew.
 - `../../adr/0007-headless-review-cli.md`
 - `../../adr/0014-reproducible-release-and-upgrade-channels.md`
 - GitHub issue #217
+
+Shipped at HEAD `9179adc05831efe4ddc1924551a9e0fa4a7d88c6` through
+https://github.com/delaudio/norn/pull/220.

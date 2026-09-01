@@ -1,7 +1,7 @@
 ---
 adr: 0015
 title: Distribute managed agent review skills with installed Norn
-status: Accepted
+status: Implemented
 date: 2026-09-01
 owner: codex
 supersedes:
@@ -96,9 +96,10 @@ both without requiring a source checkout.
 | 2026-09-01 | r1 | codex | Initial draft. |
 | 2026-09-01 | r2 | codex | Accepted the managed Codex and Claude Code skill distribution contract after guided assessment. |
 | 2026-09-01 | r3 | codex | Kept agent invocation syntax in versioned skill documentation so upstream syntax changes do not invalidate the capability contract. |
+| 2026-09-01 | r4 | codex | Marked managed Codex and Claude Code skill distribution implemented after release packaging and lifecycle validation shipped. |
 
 ## Approvals
 
 | Role | Name | Date | Signature |
 |------|------|------|-----------|
-| Maintainer | fdg | 2026-09-01 | approved in chat; review clarification preserves the approved capability scope |
+| Maintainer | fdg | 2026-09-01 | approved in chat; implementation verified through PR #220 |
