@@ -19,6 +19,7 @@ use ratatui::{
     style::{Color, Style},
     widgets::{Block, Borders, Paragraph},
 };
+use zeroize::Zeroizing;
 
 use crate::config::{self, AiProvider, AppConfig, RepoRef};
 use crate::credentials::{self, CredentialProvider, CredentialSource, CredentialStatus};
@@ -293,12 +294,24 @@ impl SettingsField {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+// Intentionally omit Debug and Clone: token-bearing variants must not be
+// printable or duplicated through derived trait implementations.
+#[derive(PartialEq, Eq)]
 enum SettingsEditor {
-    Text { field: SettingsField, value: String },
-    GithubToken { token: String },
-    BitbucketUsername { username: String },
-    BitbucketToken { username: String, token: String },
+    Text {
+        field: SettingsField,
+        value: String,
+    },
+    GithubToken {
+        token: Zeroizing<String>,
+    },
+    BitbucketUsername {
+        username: String,
+    },
+    BitbucketToken {
+        username: String,
+        token: Zeroizing<String>,
+    },
 }
 
 impl SettingsEditor {
@@ -457,6 +470,23 @@ fn mask_secret(value: &str) -> String {
     "•".repeat(value.chars().count())
 }
 
+fn user_cli_available_in_path(name: &str) -> bool {
+    let executable_names: &[&str] = match name {
+        "claude" => &["claude", "claude.exe"],
+        "codex" => &["codex", "codex.exe"],
+        _ => return false,
+    };
+    std::env::var_os("PATH")
+        .map(|path| {
+            std::env::split_paths(&path).any(|directory| {
+                executable_names
+                    .iter()
+                    .any(|name| directory.join(name).is_file())
+            })
+        })
+        .unwrap_or(false)
+}
+
 fn user_cli_available(name: &str) -> bool {
     #[cfg(target_os = "macos")]
     {
@@ -474,20 +504,7 @@ fn user_cli_available(name: &str) -> bool {
 
     #[cfg(not(target_os = "macos"))]
     {
-        let executable_names: &[&str] = match name {
-            "claude" => &["claude", "claude.exe"],
-            "codex" => &["codex", "codex.exe"],
-            _ => return false,
-        };
-        std::env::var_os("PATH")
-            .map(|path| {
-                std::env::split_paths(&path).any(|directory| {
-                    executable_names
-                        .iter()
-                        .any(|name| directory.join(name).is_file())
-                })
-            })
-            .unwrap_or(false)
+        user_cli_available_in_path(name)
     }
 }
 
@@ -607,8 +624,8 @@ impl TuiApp {
             bitbucket_credential_status: credentials::credential_status(
                 CredentialProvider::Bitbucket,
             ),
-            claude_cli_available: user_cli_available("claude"),
-            codex_cli_available: user_cli_available("codex"),
+            claude_cli_available: user_cli_available_in_path("claude"),
+            codex_cli_available: user_cli_available_in_path("codex"),
             ..Self::from_repos(config.repos)
         }
     }
@@ -916,6 +933,7 @@ impl TuiApp {
         self.settings_codex_effort = self.codex_effort.clone();
         self.settings_editor = None;
         self.refresh_credential_statuses();
+        self.refresh_cli_readiness();
         self.status = "Settings opened: use arrows to navigate, e to edit, s to save".to_string();
     }
 
@@ -987,9 +1005,15 @@ impl TuiApp {
 
     fn refresh_settings_readiness(&mut self) {
         self.refresh_credential_statuses();
+        self.refresh_cli_readiness();
+        self.status = "Provider readiness refreshed".to_string();
+    }
+
+    fn refresh_cli_readiness(&mut self) {
+        // Keep the startup scan PATH-only and fast. This explicit settings action
+        // may use a login shell on macOS to discover shell-managed tool paths.
         self.claude_cli_available = user_cli_available("claude");
         self.codex_cli_available = user_cli_available("codex");
-        self.status = "Provider readiness refreshed".to_string();
     }
 
     fn open_settings_editor(&mut self) {
@@ -1011,7 +1035,7 @@ impl TuiApp {
                 value: self.settings_codex_effort.clone().unwrap_or_default(),
             }),
             SettingsField::GithubCredential => Some(SettingsEditor::GithubToken {
-                token: String::new(),
+                token: Zeroizing::new(String::new()),
             }),
             SettingsField::BitbucketCredential => Some(SettingsEditor::BitbucketUsername {
                 username: String::new(),
@@ -1062,7 +1086,7 @@ impl TuiApp {
                 } else {
                     self.settings_editor = Some(SettingsEditor::BitbucketToken {
                         username: username.trim().to_string(),
-                        token: String::new(),
+                        token: Zeroizing::new(String::new()),
                     });
                     self.status = "Enter the Bitbucket token; input is masked".to_string();
                 }
@@ -2346,7 +2370,7 @@ mod tests {
         let mut app = TuiApp::from_repos(Vec::new());
         app.settings_open = true;
         app.settings_editor = Some(SettingsEditor::GithubToken {
-            token: "SECRET_DO_NOT_RENDER".to_string(),
+            token: Zeroizing::new("SECRET_DO_NOT_RENDER".to_string()),
         });
         let backend = TestBackend::new(120, 28);
         let mut terminal = Terminal::new(backend).expect("terminal");
