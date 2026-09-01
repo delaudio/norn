@@ -19,3 +19,4 @@ metadata.
 | 0012 | Define the Norn first-run onboarding contract | Accepted | 2026-08-05 | codex | norn, onboarding, config, cli |
 | 0013 | Read-only readiness probing for machine and repository onboarding | Accepted | 2026-08-05 | codex | norn, onboarding, readiness, cli |
 | 0014 | Deliver Norn through reproducible releases and verified upgrade channels | Implemented | 2026-08-31 | codex | release, distribution, homebrew, cli, tui, desktop |
+| 0015 | Distribute managed agent review skills with installed Norn | Proposed | 2026-09-01 | codex | distribution, skills, codex, claude, cli, homebrew |
