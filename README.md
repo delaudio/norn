@@ -187,9 +187,12 @@ norn-tui --workspace
 `norn-tui --workspace` opens repository picker mode when the current directory
 is not a Git checkout with a supported remote.
 
-Press `s` in the TUI to open Settings. The panel supports provider selection,
-model and effort presets, custom values through `e`, and masked GitHub or
-Bitbucket credential entry stored in the OS keychain. The footer keeps
+Press `s` in the TUI to open Settings as a bounded overlay on the review
+workspace. AI review options, provider credentials, and CLI readiness have
+separate sections with contextual actions. Select GitHub or Bitbucket and press
+`Enter` to start a labelled credential flow; pasted and typed tokens remain
+masked and are stored in the OS keychain. Bitbucket guides you through username
+and token steps, and `Esc` returns to the previous step. The footer keeps
 `s settings` visible on both compact and wide terminals.
 
 ![Norn terminal settings with provider readiness and the visible settings shortcut](docs/images/tui-settings.svg)

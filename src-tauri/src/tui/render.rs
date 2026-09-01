@@ -2054,7 +2054,7 @@ fn loading_line(label: &str, tick: usize) -> Line<'static> {
     ])
 }
 
-fn panel_block(title: impl Into<Line<'static>>, active: bool) -> Block<'static> {
+pub(super) fn panel_block(title: impl Into<Line<'static>>, active: bool) -> Block<'static> {
     let title_style = if active {
         accent_style().add_modifier(Modifier::BOLD)
     } else {
@@ -2075,8 +2075,32 @@ fn base_style() -> Style {
     Style::default().fg(TEXT).bg(SURFACE)
 }
 
-fn panel_style() -> Style {
+pub(super) fn panel_style() -> Style {
     Style::default().fg(TEXT).bg(PANEL)
+}
+
+pub(super) fn panel_accent_style() -> Style {
+    Style::default().fg(ACCENT).bg(PANEL)
+}
+
+pub(super) fn panel_muted_style() -> Style {
+    Style::default().fg(MUTED).bg(PANEL)
+}
+
+pub(super) fn panel_text_style() -> Style {
+    Style::default().fg(TEXT).bg(PANEL)
+}
+
+pub(super) fn panel_info_style() -> Style {
+    Style::default().fg(INFO).bg(PANEL)
+}
+
+pub(super) fn panel_success_style() -> Style {
+    Style::default().fg(SUCCESS).bg(PANEL)
+}
+
+pub(super) fn panel_error_style() -> Style {
+    Style::default().fg(ERROR).bg(PANEL)
 }
 
 fn border_style() -> Style {

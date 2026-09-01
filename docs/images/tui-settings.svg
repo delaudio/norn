@@ -1,51 +1,87 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="720" viewBox="0 0 1200 720" role="img" aria-labelledby="title description">
-  <title id="title">Norn terminal settings</title>
-  <description id="description">A sanitized Norn terminal view with the visible settings shortcut and the settings panel showing AI and credential readiness.</description>
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="720" viewBox="0 0 1200 720" role="img" aria-labelledby="title" aria-describedby="description">
+  <title id="title">Norn terminal settings overlay</title>
+  <desc id="description">A sanitized Norn terminal workspace with a bounded settings overlay, grouped AI options, provider credential actions, CLI readiness, contextual help, and keyboard shortcuts.</desc>
   <rect width="1200" height="720" rx="18" fill="#0d1117"/>
-  <rect x="1" y="1" width="1198" height="718" rx="17" fill="none" stroke="#30363d" stroke-width="2"/>
-  <g font-family="SFMono-Regular,Consolas,Liberation Mono,monospace" font-size="18">
-    <text x="32" y="42" fill="#f0a400" font-weight="700">Norn</text>
-    <text x="92" y="42" fill="#c9d1d9">terminal review workspace</text>
-    <line x1="28" y1="62" x2="1172" y2="62" stroke="#30363d"/>
+  <rect x="1" y="1" width="1198" height="718" rx="17" fill="none" stroke="#526070" stroke-width="2"/>
+  <g font-family="SFMono-Regular,Consolas,Liberation Mono,monospace" font-size="16">
+    <text x="28" y="38" fill="#ffb040" font-weight="700">Norn</text>
+    <text x="82" y="38" fill="#dee4ec">terminal review workspace</text>
+    <line x1="24" y1="56" x2="1176" y2="56" stroke="#526070"/>
 
-    <rect x="30" y="84" width="1140" height="556" fill="#111923" stroke="#f0a400" stroke-width="2"/>
-    <rect x="46" y="100" width="1108" height="62" fill="#0d1117" stroke="#30363d"/>
-    <text x="68" y="124" fill="#f0a400" font-weight="700">Norn settings</text>
-    <text x="68" y="148" fill="#8b949e" font-size="14">↑/↓ field  ←/→ preset  e edit  Enter credential  d remove  v validate  s save  Esc cancel</text>
+    <rect x="24" y="76" width="300" height="556" fill="#121820" stroke="#526070"/>
+    <text x="40" y="98" fill="#8894a4">Repositories</text>
+    <text x="42" y="128" fill="#ffb040">›</text>
+    <text x="64" y="128" fill="#4ade80">github</text>
+    <text x="130" y="128" fill="#dee4ec">team/project</text>
+    <rect x="340" y="76" width="836" height="240" fill="#121820" stroke="#526070"/>
+    <text x="356" y="98" fill="#8894a4">Pull requests</text>
+    <text x="358" y="130" fill="#5ebcff">#42</text>
+    <text x="408" y="130" fill="#dee4ec">Improve review workflow</text>
+    <rect x="340" y="332" width="404" height="300" fill="#121820" stroke="#526070"/>
+    <text x="356" y="354" fill="#8894a4">Pull request</text>
+    <rect x="760" y="332" width="416" height="300" fill="#121820" stroke="#526070"/>
+    <text x="776" y="354" fill="#8894a4">AI review</text>
 
-    <rect x="46" y="178" width="1108" height="382" fill="#0d1117" stroke="#30363d"/>
-    <text x="64" y="202" fill="#f0a400">Configuration</text>
-    <text x="76" y="238" fill="#58a6ff">▶</text>
-    <text x="106" y="238" fill="#c9d1d9">AI provider:</text>
-    <text x="330" y="238" fill="#ffffff">Codex</text>
-    <text x="106" y="274" fill="#c9d1d9">Claude model:</text>
-    <text x="330" y="274" fill="#ffffff">default</text>
-    <text x="106" y="310" fill="#c9d1d9">Claude effort:</text>
-    <text x="330" y="310" fill="#ffffff">high</text>
-    <text x="106" y="346" fill="#c9d1d9">Codex model:</text>
-    <text x="330" y="346" fill="#ffffff">custom-team-model</text>
-    <text x="106" y="382" fill="#c9d1d9">Codex effort:</text>
-    <text x="330" y="382" fill="#ffffff">high</text>
-    <text x="106" y="418" fill="#c9d1d9">GitHub credential:</text>
-    <text x="330" y="418" fill="#3fb950">configured (OS keychain)</text>
-    <text x="106" y="454" fill="#c9d1d9">Bitbucket credential:</text>
-    <text x="330" y="454" fill="#d29922">missing (Enter to add)</text>
-    <text x="106" y="504" fill="#8b949e">Claude Code CLI: available</text>
-    <text x="106" y="534" fill="#8b949e">Codex CLI: available</text>
+    <rect x="0" y="0" width="1200" height="720" fill="#0d1117" opacity="0.58"/>
 
-    <rect x="46" y="576" width="1108" height="48" fill="#0d1117" stroke="#30363d"/>
-    <text x="64" y="607" fill="#8b949e">Status:</text>
-    <text x="150" y="607" fill="#58a6ff">Provider readiness refreshed</text>
+    <rect x="122" y="72" width="956" height="570" rx="4" fill="#121820" stroke="#ffb040" stroke-width="2"/>
+    <text x="146" y="101" fill="#ffb040" font-weight="700">Norn settings</text>
 
-    <text x="34" y="680" fill="#f0a400">q</text>
-    <text x="50" y="680" fill="#8b949e"> quit  </text>
-    <text x="118" y="680" fill="#f0a400">tab</text>
-    <text x="158" y="680" fill="#8b949e"> focus  </text>
-    <text x="236" y="680" fill="#f0a400">s</text>
-    <text x="252" y="680" fill="#ffffff" font-weight="700"> settings  </text>
-    <text x="362" y="680" fill="#f0a400">j/k</text>
-    <text x="402" y="680" fill="#8b949e"> select  </text>
-    <text x="490" y="680" fill="#f0a400">enter</text>
-    <text x="550" y="680" fill="#8b949e"> load</text>
+    <text x="148" y="138" fill="#ffb040" font-weight="700">AI review</text>
+    <text x="164" y="169" fill="#ffb040">›</text>
+    <text x="188" y="169" fill="#dee4ec" font-weight="700">AI provider</text>
+    <text x="410" y="169" fill="#5ebcff">Claude</text>
+    <text x="188" y="199" fill="#dee4ec">Claude model</text>
+    <text x="410" y="199" fill="#5ebcff">sonnet</text>
+    <text x="188" y="229" fill="#dee4ec">Claude effort</text>
+    <text x="410" y="229" fill="#5ebcff">medium</text>
+    <text x="188" y="259" fill="#dee4ec">Codex model</text>
+    <text x="410" y="259" fill="#5ebcff">gpt-5.5</text>
+    <text x="188" y="289" fill="#dee4ec">Codex effort</text>
+    <text x="410" y="289" fill="#5ebcff">high</text>
+
+    <text x="148" y="330" fill="#ffb040" font-weight="700">Provider credentials</text>
+    <text x="164" y="361" fill="#dee4ec">GitHub credential</text>
+    <text x="410" y="361" fill="#4ade80">Configured · OS keychain</text>
+    <text x="710" y="361" fill="#8894a4">Enter replace · d remove</text>
+    <text x="164" y="391" fill="#dee4ec">Bitbucket credential</text>
+    <text x="410" y="391" fill="#8894a4">Not configured</text>
+    <text x="710" y="391" fill="#ffb040">Enter configure</text>
+
+    <text x="148" y="432" fill="#ffb040" font-weight="700">CLI readiness</text>
+    <text x="164" y="463" fill="#dee4ec">Claude Code CLI</text>
+    <text x="410" y="463" fill="#4ade80">Available</text>
+    <text x="164" y="493" fill="#dee4ec">Codex CLI</text>
+    <text x="410" y="493" fill="#4ade80">Available</text>
+
+    <line x1="146" y1="520" x2="1054" y2="520" stroke="#526070"/>
+    <text x="148" y="548" fill="#ffb040">Hint</text>
+    <text x="220" y="548" fill="#8894a4">Enter starts secure setup; token input stays masked.</text>
+    <text x="148" y="577" fill="#ffb040">Status</text>
+    <text x="220" y="577" fill="#5ebcff">Provider readiness refreshed</text>
+
+    <text x="148" y="615" fill="#ffb040">↑/↓</text>
+    <text x="190" y="615" fill="#8894a4">navigate</text>
+    <text x="290" y="615" fill="#ffb040">←/→</text>
+    <text x="332" y="615" fill="#8894a4">preset</text>
+    <text x="420" y="615" fill="#ffb040">Enter</text>
+    <text x="478" y="615" fill="#8894a4">action</text>
+    <text x="558" y="615" fill="#ffb040">e</text>
+    <text x="576" y="615" fill="#8894a4">custom</text>
+    <text x="660" y="615" fill="#ffb040">v</text>
+    <text x="678" y="615" fill="#8894a4">validate</text>
+    <text x="774" y="615" fill="#ffb040">s</text>
+    <text x="792" y="615" fill="#8894a4">save</text>
+    <text x="858" y="615" fill="#ffb040">Esc</text>
+    <text x="896" y="615" fill="#8894a4">close</text>
+
+    <text x="28" y="683" fill="#ffb040">q</text>
+    <text x="46" y="683" fill="#8894a4">quit</text>
+    <text x="100" y="683" fill="#ffb040">tab</text>
+    <text x="138" y="683" fill="#8894a4">focus</text>
+    <text x="204" y="683" fill="#ffb040">s</text>
+    <text x="222" y="683" fill="#dee4ec" font-weight="700">settings</text>
+    <text x="308" y="683" fill="#ffb040">j/k</text>
+    <text x="348" y="683" fill="#8894a4">select</text>
   </g>
 </svg>
