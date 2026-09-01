@@ -80,6 +80,8 @@ stage_formula "$candidate_formula"
 verify_candidate() {
   local phase="$1"
   local doctor_output="$diagnostics_root/${phase}-doctor.json"
+  local skills_root="$diagnostics_root/${phase}-skills"
+  local formula_prefix
   local doctor_status=0
   echo "phase=${phase} version=${CANDIDATE_VERSION} architecture=${NORN_ARCHITECTURE} artifact=norn.rb"
   test "$(command -v norn)" = "$brew_bin/norn"
@@ -87,6 +89,20 @@ verify_candidate() {
   norn --version | grep -F "norn $CANDIDATE_VERSION"
   norn --help >/dev/null
   norn-tui --version | grep -F "$CANDIDATE_VERSION"
+  formula_prefix="$(brew --prefix "$formula_ref")"
+  test -f "$formula_prefix/share/norn/agent-skills/norn-review/SKILL.md"
+  CODEX_HOME="$skills_root/codex" CLAUDE_CONFIG_DIR="$skills_root/claude" \
+    norn skills install --agent all --format json > "$skills_root-install.json"
+  CODEX_HOME="$skills_root/codex" CLAUDE_CONFIG_DIR="$skills_root/claude" \
+    norn skills install --agent all --format json > "$skills_root-repeat.json"
+  test -f "$skills_root/codex/skills/norn-review/SKILL.md"
+  test -f "$skills_root/claude/skills/norn-review/SKILL.md"
+  grep -F '"state": "managed"' "$skills_root-repeat.json"
+  grep -F "\"packagedVersion\": \"$CANDIDATE_VERSION\"" "$skills_root-repeat.json"
+  CODEX_HOME="$skills_root/codex" CLAUDE_CONFIG_DIR="$skills_root/claude" \
+    norn skills uninstall --agent all --format json > "$skills_root-uninstall.json"
+  test ! -e "$skills_root/codex/skills/norn-review"
+  test ! -e "$skills_root/claude/skills/norn-review"
   if node scripts/run-with-timeout.mjs --timeout-ms 60000 -- \
     norn doctor --machine-only --format json > "$doctor_output"; then
     doctor_status=0

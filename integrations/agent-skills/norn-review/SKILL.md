@@ -35,15 +35,16 @@ Do not inspect package scripts, read `.norn` policy files, precompute the
 diff, or rerun repository validation. Norn resolves the repository, base,
 configuration, policy packs, and diff itself.
 
-Use `$HOME/.local/bin/norn` directly when it is executable; otherwise use
-`norn` from `PATH`.
+Resolve `norn` from the active command `PATH`. A managed Homebrew installation
+ships the skill and executable at the same version; a source installation may
+provide its own active command path.
 
 ## Guard
 
 If `NORN_REVIEW_CHILD=1`, stop this workflow immediately. The current agent
 is already the reviewer launched by Norn.
 
-If the canonical Norn executable is not executable, report setup failure instead of
+If `norn` is not executable from `PATH`, report setup failure instead of
 substituting an ad hoc review.
 
 ## Select The Target
@@ -64,29 +65,28 @@ the Norn command.
 ## Execute
 
 For a post-task working-tree review, invoke the executable selected by the
-guard above. Prefer:
+guard above:
 
 ```bash
-"$HOME/.local/bin/norn" review --repo-path . --scope working-tree --format json \
+norn review --repo-path . --scope working-tree --format json \
   --fail-on-findings
 ```
 
 To force a provider in this explicit workflow:
 
 ```bash
-"$HOME/.local/bin/norn" review --repo-path . --scope working-tree \
+norn review --repo-path . --scope working-tree \
   --format json --fail-on-findings --ai-provider codex
 ```
 
 or
 
 ```bash
-"$HOME/.local/bin/norn" review --repo-path . --scope working-tree \
+norn review --repo-path . --scope working-tree \
   --format json --fail-on-findings --ai-provider claude
 ```
 
-If `$HOME/.local/bin/norn` is not executable, use the same arguments with
-`norn` from `PATH`; if unavailable, report setup failure.
+If `norn` is unavailable from `PATH`, report setup failure.
 
 For an explicit standalone branch review where validation has already run,
 replace the scope with `branch`. The task agent owns validation before

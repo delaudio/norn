@@ -20,10 +20,12 @@ brew install norn
 norn --version
 norn --help
 norn doctor
+norn skills status --agent all
 ```
 
-The `norn` formula installs both the CLI (`norn`) and terminal UI (`norn-tui`) and
-does not require Node.js, Rust, or the source repository.
+The `norn` formula installs the CLI (`norn`), terminal UI (`norn-tui`), and
+version-matched agent skill assets. It does not require Node.js, Rust, or the
+source repository.
 
 If `norn` is not found immediately after install, restart the shell or source your
 shell startup file (`~/.zshrc`, `~/.bash_profile`, etc.).
@@ -32,12 +34,19 @@ shell startup file (`~/.zshrc`, `~/.bash_profile`, etc.).
 
 Before first review run:
 
-1. Configure required credentials from the app onboarding screens.
+1. Configure required provider credentials in the OS keychain:
+   - `norn auth login github`
+   - `norn auth login bitbucket --username <username>`
+   - use `--token-stdin` for non-interactive input.
 2. Validate provider access:
    - `norn doctor` should report configured GitHub and/or Bitbucket connectivity
      checks.
 3. Confirm local policy config presence:
    - `.norn.yaml` or migration-compatible `.lachesi.yaml` is discovered.
+4. Install the review skill for the coding agents in use:
+   - `norn skills install --agent codex`
+   - `norn skills install --agent claude`
+   - or `norn skills install --agent all`.
 
 ## Upgrade
 
@@ -52,6 +61,8 @@ After upgrade:
 norn --version
 norn doctor
 norn-tui --version
+norn skills install --agent all
+norn skills status --agent all
 ```
 
 ## Rollback and repair
@@ -94,8 +105,12 @@ brew uninstall --cask norn
 
 - **PATH still points to old binary:** ensure your shell `PATH` resolves `norn`
   from Homebrew and restart the terminal.
-- **Provider auth fails:** re-run the onboarding flow in-app and recheck env/secret
-  values.
+- **Provider auth fails:** inspect redacted state with `norn auth status`, then
+  rerun `norn auth login <provider>` or recheck the configured environment
+  reference.
+- **Agent skill is unmanaged or stale:** run `norn skills status --agent all`.
+  A normal install upgrades managed copies atomically; review conflicts before
+  choosing `--force`.
 - **`brew install` is pulling build toolchain dependencies:** release artifacts are
   binary-only; if dependencies are requested, the install path is likely mis-pointing
   to a source-only tap entry.
@@ -117,6 +132,9 @@ Before publishing each stable tag:
 - Publish immutable assets for both supported architectures:
   - `norn-<version>-macos-arm64.tar.gz`
   - `norn-<version>-macos-x86_64.tar.gz`
+- Verify each command archive contains the complete
+  `share/norn/agent-skills/norn-review` directory and that the Formula lifecycle
+  installs, repeats, and uninstalls the managed skill for Codex and Claude Code.
 - When the desktop channel is enabled, also publish:
   - `Norn-<version>-macos-arm64.dmg`
   - `Norn-<version>-macos-x86_64.dmg`

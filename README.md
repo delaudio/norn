@@ -56,6 +56,8 @@ By default, install with Homebrew:
 ```sh
 brew tap delaudio/tap
 brew install norn
+norn auth status
+norn skills install --agent all
 ```
 
 When a release includes the signed and notarized desktop channel, install it
@@ -118,25 +120,27 @@ truth: keep local config files in the repository and review commands explicit.
 
 ## Agent skills
 
-Norn includes a shared `norn-review` skill for Codex and Claude Code in
-`integrations/agent-skills/norn-review`. It runs the headless CLI as an
-independent review gate after implementation work and before a push.
-
-Install it from a Norn checkout for Codex:
+Norn ships a managed `norn-review` skill for Codex and Claude Code. It runs the
+headless CLI as an independent review gate after implementation work and before
+a push. A Homebrew installation needs no source checkout:
 
 ```sh
-mkdir -p "$HOME/.codex/skills"
-ln -s "$(pwd)/integrations/agent-skills/norn-review" \
-  "$HOME/.codex/skills/norn-review"
+norn skills install --agent codex
+norn skills install --agent claude
+# Or install both:
+norn skills install --agent all
 ```
 
-Or install the same skill for Claude Code:
+Inspect, upgrade, or remove only Norn-managed copies with:
 
 ```sh
-mkdir -p "$HOME/.claude/skills"
-ln -s "$(pwd)/integrations/agent-skills/norn-review" \
-  "$HOME/.claude/skills/norn-review"
+norn skills status --agent all
+norn skills install --agent all
+norn skills uninstall --agent all
 ```
+
+Unmanaged destination content is preserved unless `install` receives an
+explicit `--force`.
 
 Invoke it explicitly with `$norn-review` in Codex or `/norn-review` in Claude
 Code. Both agents can also select it automatically when its description matches
@@ -183,8 +187,25 @@ norn-tui --workspace
 `norn-tui --workspace` opens repository picker mode when the current directory
 is not a Git checkout with a supported remote.
 
-Credentials for terminal/headless usage can be supplied by OS keychain, or from
-environment variables referenced in `~/.config/norn/config.toml`, for example:
+Press `s` in the TUI to open Settings. The panel supports provider selection,
+model and effort presets, custom values through `e`, and masked GitHub or
+Bitbucket credential entry stored in the OS keychain. The footer keeps
+`s settings` visible on both compact and wide terminals.
+
+![Norn terminal settings with provider readiness and the visible settings shortcut](docs/images/tui-settings.svg)
+
+Configure keychain credentials without opening the desktop app:
+
+```sh
+norn auth login github
+norn auth login bitbucket --username <username>
+norn auth status --json
+```
+
+Interactive token input is masked. Scripts may pipe a token to
+`norn auth login <provider> --token-stdin`; tokens are never accepted as command
+arguments. Terminal/headless usage can alternatively resolve environment
+variables referenced in `~/.config/norn/config.toml`, for example:
 
 ```toml
 [credentials.github]

@@ -1237,40 +1237,47 @@ fn render_footer(frame: &mut Frame<'_>, area: Rect, state: TuiState<'_>) {
     } else {
         " diff  "
     };
-    let footer = Paragraph::new(Line::from(vec![
+    let compact = area.width <= 120;
+    let mut spans = vec![
         Span::styled("q", accent_style()),
         Span::styled(" quit  ", muted_style()),
         Span::styled("tab", accent_style()),
         Span::styled(" focus  ", muted_style()),
+        Span::styled("s", accent_style()),
+        Span::styled(" settings  ", muted_style()),
         Span::styled("j/k", accent_style()),
         Span::styled(" select  ", muted_style()),
         Span::styled("enter", accent_style()),
         Span::styled(" load  ", muted_style()),
-        Span::styled("c", accent_style()),
-        Span::styled(" draft  ", muted_style()),
-        Span::styled("p", accent_style()),
-        Span::styled(" publish  ", muted_style()),
-        Span::styled("x", accent_style()),
-        Span::styled(" discard  ", muted_style()),
-        Span::styled("a", accent_style()),
-        Span::styled(" ai review  ", muted_style()),
-        Span::styled("f", accent_style()),
-        Span::styled(" filter  ", muted_style()),
-        Span::styled("g", accent_style()),
-        Span::styled(diff_action, muted_style()),
-        Span::styled("u", accent_style()),
-        Span::styled(" unified/split  ", muted_style()),
-        Span::styled("v", accent_style()),
-        Span::styled(" pane  ", muted_style()),
-        Span::styled("y", accent_style()),
-        Span::styled(" copy review  ", muted_style()),
-        Span::styled("PgUp/PgDn", accent_style()),
-        Span::styled(" scroll  ", muted_style()),
-        Span::styled("r", accent_style()),
-        Span::styled(" refresh  ", muted_style()),
-        Span::styled(state.status, info_style()),
-    ]))
-    .style(base_style());
+    ];
+    if !compact {
+        spans.extend([
+            Span::styled("c", accent_style()),
+            Span::styled(" draft  ", muted_style()),
+            Span::styled("p", accent_style()),
+            Span::styled(" publish  ", muted_style()),
+            Span::styled("x", accent_style()),
+            Span::styled(" discard  ", muted_style()),
+            Span::styled("a", accent_style()),
+            Span::styled(" ai review  ", muted_style()),
+            Span::styled("f", accent_style()),
+            Span::styled(" filter  ", muted_style()),
+            Span::styled("g", accent_style()),
+            Span::styled(diff_action, muted_style()),
+            Span::styled("u", accent_style()),
+            Span::styled(" unified/split  ", muted_style()),
+            Span::styled("v", accent_style()),
+            Span::styled(" pane  ", muted_style()),
+            Span::styled("y", accent_style()),
+            Span::styled(" copy review  ", muted_style()),
+            Span::styled("PgUp/PgDn", accent_style()),
+            Span::styled(" scroll  ", muted_style()),
+            Span::styled("r", accent_style()),
+            Span::styled(" refresh  ", muted_style()),
+        ]);
+    }
+    spans.push(Span::styled(state.status, info_style()));
+    let footer = Paragraph::new(Line::from(spans)).style(base_style());
     frame.render_widget(footer, area);
 }
 
@@ -2170,6 +2177,7 @@ mod tests {
         let text = buffer_text(&terminal);
         assert!(text.contains("No repositories configured"));
         assert!(text.contains("Configure repos"));
+        assert!(text.contains("s settings"));
     }
 
     #[test]

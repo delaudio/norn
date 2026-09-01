@@ -18,10 +18,13 @@ class Norn < Formula
   def install
     bin.install "norn"
     bin.install "norn-tui"
+    pkgshare.install "share/norn/agent-skills"
   end
 
   test do
     assert_match version.to_s, shell_output("#{bin}/norn --version")
     assert_match "norn", shell_output("#{bin}/norn --help")
+    assert_predicate pkgshare/"agent-skills/norn-review/SKILL.md", :exist?
+    assert_match "norn.skills.v1", shell_output("#{bin}/norn skills status --json")
   end
 end

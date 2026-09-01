@@ -21,6 +21,7 @@ use ratatui::{
 };
 
 use crate::config::{self, AiProvider, AppConfig, RepoRef};
+use crate::credentials::{self, CredentialProvider, CredentialSource, CredentialStatus};
 use crate::readiness::{self, ReadinessIssueSeverity, ReadinessStatus};
 use crate::repo_config;
 use crate::services::bitbucket::{
@@ -48,12 +49,14 @@ const CLAUDE_MODELS: [&str; 4] = ["", "sonnet", "opus", "fable"];
 const CLAUDE_EFFORTS: [&str; 6] = ["", "low", "medium", "high", "xhigh", "max"];
 const CODEX_MODELS: [&str; 3] = ["", "gpt-5.4", "gpt-5.5"];
 const CODEX_EFFORTS: [&str; 4] = ["", "low", "medium", "high"];
-const SETTING_FIELDS: [&str; 5] = [
+const SETTING_FIELDS: [&str; 7] = [
     "AI provider",
     "Claude model",
     "Claude effort",
     "Codex model",
     "Codex effort",
+    "GitHub credential",
+    "Bitbucket credential",
 ];
 
 pub fn run_from_env() -> Result<(), String> {
@@ -260,6 +263,8 @@ enum SettingsField {
     ClaudeEffort,
     CodexModel,
     CodexEffort,
+    GithubCredential,
+    BitbucketCredential,
 }
 
 impl SettingsField {
@@ -270,16 +275,52 @@ impl SettingsField {
             Self::ClaudeEffort => 2,
             Self::CodexModel => 3,
             Self::CodexEffort => 4,
+            Self::GithubCredential => 5,
+            Self::BitbucketCredential => 6,
         }
     }
 
     fn from_index(index: usize) -> Self {
-        match index % 5 {
+        match index % SETTING_FIELDS.len() {
             0 => Self::AiProvider,
             1 => Self::ClaudeModel,
             2 => Self::ClaudeEffort,
             3 => Self::CodexModel,
-            _ => Self::CodexEffort,
+            4 => Self::CodexEffort,
+            5 => Self::GithubCredential,
+            _ => Self::BitbucketCredential,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum SettingsEditor {
+    Text { field: SettingsField, value: String },
+    GithubToken { token: String },
+    BitbucketUsername { username: String },
+    BitbucketToken { username: String, token: String },
+}
+
+impl SettingsEditor {
+    fn value_mut(&mut self) -> &mut String {
+        match self {
+            Self::Text { value, .. } => value,
+            Self::GithubToken { token } => token,
+            Self::BitbucketUsername { username } => username,
+            Self::BitbucketToken { token, .. } => token,
+        }
+    }
+
+    fn is_secret(&self) -> bool {
+        matches!(self, Self::GithubToken { .. } | Self::BitbucketToken { .. })
+    }
+
+    fn prompt(&self) -> &'static str {
+        match self {
+            Self::Text { .. } => "Custom value (empty uses provider default)",
+            Self::GithubToken { .. } => "GitHub token (input is masked)",
+            Self::BitbucketUsername { .. } => "Bitbucket username",
+            Self::BitbucketToken { .. } => "Bitbucket token (input is masked)",
         }
     }
 }
@@ -326,9 +367,9 @@ fn render_settings(frame: &mut Frame<'_>, app: &TuiApp) {
     let [header, body, footer] = *Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(3),
+            Constraint::Length(4),
             Constraint::Min(5),
-            Constraint::Length(2),
+            Constraint::Length(3),
         ])
         .split(area)
     else {
@@ -337,9 +378,9 @@ fn render_settings(frame: &mut Frame<'_>, app: &TuiApp) {
 
     let header_block = Block::default()
         .borders(Borders::ALL)
-        .title("Norn AI settings");
+        .title("Norn settings");
     let header_text = Text::from(
-        "\nUse ←/→ to change values, ↑/↓ to move between fields, Enter to save, Esc to cancel.",
+        "↑/↓ field  ←/→ preset  e edit  Enter credential\nd remove  v validate  s save  Esc cancel",
     );
     frame.render_widget(
         Paragraph::new(header_text)
@@ -348,29 +389,56 @@ fn render_settings(frame: &mut Frame<'_>, app: &TuiApp) {
         header,
     );
 
-    let body_lines = vec![
+    let mut body_lines = vec![
         app.settings_field_line(SettingsField::AiProvider),
         app.settings_field_line(SettingsField::ClaudeModel),
         app.settings_field_line(SettingsField::ClaudeEffort),
         app.settings_field_line(SettingsField::CodexModel),
         app.settings_field_line(SettingsField::CodexEffort),
+        app.settings_field_line(SettingsField::GithubCredential),
+        app.settings_field_line(SettingsField::BitbucketCredential),
         String::new(),
-        format!("Current provider: {}", app.settings_ai_provider_label()),
         format!(
-            "Active Claude model/effort: {} / {}",
-            settings_option_label(&app.settings_claude_model),
-            settings_option_label(&app.settings_claude_effort)
+            "Claude Code CLI: {}",
+            if app.claude_cli_available {
+                "available"
+            } else {
+                "missing"
+            }
         ),
         format!(
-            "Active Codex model/effort: {} / {}",
-            settings_option_label(&app.settings_codex_model),
-            settings_option_label(&app.settings_codex_effort)
+            "Codex CLI: {}",
+            if app.codex_cli_available {
+                "available"
+            } else {
+                "missing"
+            }
         ),
     ];
 
-    let body_block = Block::default()
-        .borders(Borders::ALL)
-        .title("AI configuration");
+    if let Some(editor) = app.settings_editor.as_ref() {
+        let value = editor.value();
+        let displayed = if editor.is_secret() {
+            mask_secret(value)
+        } else if value.is_empty() {
+            "<empty>".to_string()
+        } else {
+            value.to_string()
+        };
+        body_lines.push(String::new());
+        body_lines.push(format!("{}:", editor.prompt()));
+        body_lines.push(format!("> {displayed}"));
+        body_lines.push("Enter confirm  Esc cancel  Backspace delete".to_string());
+    }
+
+    let body_block =
+        Block::default()
+            .borders(Borders::ALL)
+            .title(if app.settings_editor.is_some() {
+                "Edit setting"
+            } else {
+                "Configuration"
+            });
     frame.render_widget(
         Paragraph::new(Text::from(body_lines.join("\n"))).block(body_block),
         body,
@@ -385,15 +453,62 @@ fn render_settings(frame: &mut Frame<'_>, app: &TuiApp) {
     );
 }
 
-fn settings_option_label(value: &Option<String>) -> String {
-    value.clone().unwrap_or_else(|| "default".to_string())
+fn mask_secret(value: &str) -> String {
+    "•".repeat(value.chars().count())
 }
 
-impl TuiApp {
-    fn settings_ai_provider_label(&self) -> &'static str {
-        match self.settings_ai_provider {
-            AiProvider::Claude => "Claude",
-            AiProvider::Codex => "Codex",
+fn user_cli_available(name: &str) -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        let command = match name {
+            "claude" => "command -v claude >/dev/null 2>&1",
+            "codex" => "command -v codex >/dev/null 2>&1",
+            _ => return false,
+        };
+        Command::new("/bin/zsh")
+            .arg("-lc")
+            .arg(command)
+            .status()
+            .is_ok_and(|status| status.success())
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        let executable_names: &[&str] = match name {
+            "claude" => &["claude", "claude.exe"],
+            "codex" => &["codex", "codex.exe"],
+            _ => return false,
+        };
+        std::env::var_os("PATH")
+            .map(|path| {
+                std::env::split_paths(&path).any(|directory| {
+                    executable_names
+                        .iter()
+                        .any(|name| directory.join(name).is_file())
+                })
+            })
+            .unwrap_or(false)
+    }
+}
+
+fn credential_status_label(status: CredentialStatus) -> String {
+    if !status.available {
+        return "missing (Enter to add)".to_string();
+    }
+    match status.source {
+        CredentialSource::Keychain => "configured (OS keychain)".to_string(),
+        CredentialSource::Environment => "configured (environment)".to_string(),
+        CredentialSource::None => "missing (Enter to add)".to_string(),
+    }
+}
+
+impl SettingsEditor {
+    fn value(&self) -> &str {
+        match self {
+            Self::Text { value, .. } => value,
+            Self::GithubToken { token } => token,
+            Self::BitbucketUsername { username } => username,
+            Self::BitbucketToken { token, .. } => token,
         }
     }
 }
@@ -425,6 +540,11 @@ struct TuiApp {
     settings_claude_effort: Option<String>,
     settings_codex_model: Option<String>,
     settings_codex_effort: Option<String>,
+    settings_editor: Option<SettingsEditor>,
+    github_credential_status: CredentialStatus,
+    bitbucket_credential_status: CredentialStatus,
+    claude_cli_available: bool,
+    codex_cli_available: bool,
     ai_review_store: AiReviewRunStore,
     active_ai_target: Option<(String, String, u32)>,
     ai_review_state: Option<AiReviewRunState>,
@@ -483,6 +603,12 @@ impl TuiApp {
             settings_claude_effort: claude_effort,
             settings_codex_model: codex_model,
             settings_codex_effort: codex_effort,
+            github_credential_status: credentials::credential_status(CredentialProvider::Github),
+            bitbucket_credential_status: credentials::credential_status(
+                CredentialProvider::Bitbucket,
+            ),
+            claude_cli_available: user_cli_available("claude"),
+            codex_cli_available: user_cli_available("codex"),
             ..Self::from_repos(config.repos)
         }
     }
@@ -498,6 +624,19 @@ impl TuiApp {
             settings_claude_effort: None,
             settings_codex_model: None,
             settings_codex_effort: None,
+            settings_editor: None,
+            github_credential_status: CredentialStatus {
+                provider: CredentialProvider::Github,
+                available: false,
+                source: CredentialSource::None,
+            },
+            bitbucket_credential_status: CredentialStatus {
+                provider: CredentialProvider::Bitbucket,
+                available: false,
+                source: CredentialSource::None,
+            },
+            claude_cli_available: false,
+            codex_cli_available: false,
             focus: FocusPane::Repositories,
             pull_requests: Vec::new(),
             pr_filter: PrListFilter::Open,
@@ -775,13 +914,15 @@ impl TuiApp {
         self.settings_claude_effort = self.claude_effort.clone();
         self.settings_codex_model = self.codex_model.clone();
         self.settings_codex_effort = self.codex_effort.clone();
-        self.status =
-            "Settings: ↑/↓ change field, ←/→ change value, Enter save, Esc cancel".to_string();
+        self.settings_editor = None;
+        self.refresh_credential_statuses();
+        self.status = "Settings opened: use arrows to navigate, e to edit, s to save".to_string();
     }
 
     fn close_settings(&mut self) {
         self.settings_open = false;
         self.settings_field = SettingsField::AiProvider;
+        self.settings_editor = None;
         self.status = "Ready".to_string();
     }
 
@@ -834,6 +975,136 @@ impl TuiApp {
                 self.settings_codex_effort =
                     Self::cycle_or_value(&CODEX_EFFORTS, &self.settings_codex_effort, forward);
             }
+            SettingsField::GithubCredential | SettingsField::BitbucketCredential => {}
+        }
+    }
+
+    fn refresh_credential_statuses(&mut self) {
+        self.github_credential_status = credentials::credential_status(CredentialProvider::Github);
+        self.bitbucket_credential_status =
+            credentials::credential_status(CredentialProvider::Bitbucket);
+    }
+
+    fn refresh_settings_readiness(&mut self) {
+        self.refresh_credential_statuses();
+        self.claude_cli_available = user_cli_available("claude");
+        self.codex_cli_available = user_cli_available("codex");
+        self.status = "Provider readiness refreshed".to_string();
+    }
+
+    fn open_settings_editor(&mut self) {
+        self.settings_editor = match self.settings_field {
+            SettingsField::ClaudeModel => Some(SettingsEditor::Text {
+                field: self.settings_field,
+                value: self.settings_claude_model.clone().unwrap_or_default(),
+            }),
+            SettingsField::ClaudeEffort => Some(SettingsEditor::Text {
+                field: self.settings_field,
+                value: self.settings_claude_effort.clone().unwrap_or_default(),
+            }),
+            SettingsField::CodexModel => Some(SettingsEditor::Text {
+                field: self.settings_field,
+                value: self.settings_codex_model.clone().unwrap_or_default(),
+            }),
+            SettingsField::CodexEffort => Some(SettingsEditor::Text {
+                field: self.settings_field,
+                value: self.settings_codex_effort.clone().unwrap_or_default(),
+            }),
+            SettingsField::GithubCredential => Some(SettingsEditor::GithubToken {
+                token: String::new(),
+            }),
+            SettingsField::BitbucketCredential => Some(SettingsEditor::BitbucketUsername {
+                username: String::new(),
+            }),
+            SettingsField::AiProvider => None,
+        };
+        if let Some(editor) = self.settings_editor.as_ref() {
+            self.status = editor.prompt().to_string();
+        }
+    }
+
+    fn apply_settings_editor(&mut self) {
+        let Some(editor) = self.settings_editor.take() else {
+            return;
+        };
+        match editor {
+            SettingsEditor::Text { field, value } => {
+                let value = (!value.trim().is_empty()).then(|| value.trim().to_string());
+                match field {
+                    SettingsField::ClaudeModel => self.settings_claude_model = value,
+                    SettingsField::ClaudeEffort => self.settings_claude_effort = value,
+                    SettingsField::CodexModel => self.settings_codex_model = value,
+                    SettingsField::CodexEffort => self.settings_codex_effort = value,
+                    _ => {}
+                }
+                self.status = "Custom setting updated; press s to save".to_string();
+            }
+            SettingsEditor::GithubToken { token } => {
+                match credentials::store_provider_credential(
+                    CredentialProvider::Github,
+                    None,
+                    &token,
+                ) {
+                    Ok(()) => {
+                        self.refresh_credential_statuses();
+                        self.status = "GitHub credential stored in the OS keychain".to_string();
+                    }
+                    Err(error) => {
+                        self.error = Some(error);
+                        self.status = "Failed to store GitHub credential".to_string();
+                    }
+                }
+            }
+            SettingsEditor::BitbucketUsername { username } => {
+                if username.trim().is_empty() {
+                    self.status = "Bitbucket username cannot be empty".to_string();
+                    self.settings_editor = Some(SettingsEditor::BitbucketUsername { username });
+                } else {
+                    self.settings_editor = Some(SettingsEditor::BitbucketToken {
+                        username: username.trim().to_string(),
+                        token: String::new(),
+                    });
+                    self.status = "Enter the Bitbucket token; input is masked".to_string();
+                }
+            }
+            SettingsEditor::BitbucketToken { username, token } => {
+                match credentials::store_provider_credential(
+                    CredentialProvider::Bitbucket,
+                    Some(&username),
+                    &token,
+                ) {
+                    Ok(()) => {
+                        self.refresh_credential_statuses();
+                        self.status = "Bitbucket credential stored in the OS keychain".to_string();
+                    }
+                    Err(error) => {
+                        self.error = Some(error);
+                        self.status = "Failed to store Bitbucket credential".to_string();
+                    }
+                }
+            }
+        }
+    }
+
+    fn remove_selected_credential(&mut self) {
+        let provider = match self.settings_field {
+            SettingsField::GithubCredential => CredentialProvider::Github,
+            SettingsField::BitbucketCredential => CredentialProvider::Bitbucket,
+            _ => {
+                self.status =
+                    "Select a credential field before removing a keychain entry".to_string();
+                return;
+            }
+        };
+        match credentials::clear_provider_credential(provider) {
+            Ok(()) => {
+                self.refresh_credential_statuses();
+                self.status = format!("Removed {} OS keychain credential", provider.label());
+            }
+            Err(error) => {
+                self.error = Some(error);
+                self.status = format!("Failed to remove {} credential", provider.label());
+            }
         }
     }
 
@@ -867,12 +1138,12 @@ impl TuiApp {
     fn save_settings(&mut self) {
         match self.persist_settings() {
             Ok(()) => {
-                self.status = "AI settings saved.".to_string();
                 self.close_settings();
+                self.status = "Settings saved.".to_string();
             }
             Err(error) => {
                 self.error = Some(error.clone());
-                self.status = "Failed to save AI settings".to_string();
+                self.status = "Failed to save settings".to_string();
             }
         }
     }
@@ -891,6 +1162,12 @@ impl TuiApp {
             SettingsField::ClaudeEffort => Self::option_label(&self.settings_claude_effort),
             SettingsField::CodexModel => Self::option_label(&self.settings_codex_model),
             SettingsField::CodexEffort => Self::option_label(&self.settings_codex_effort),
+            SettingsField::GithubCredential => {
+                credential_status_label(self.github_credential_status)
+            }
+            SettingsField::BitbucketCredential => {
+                credential_status_label(self.bitbucket_credential_status)
+            }
         }
     }
 
@@ -909,15 +1186,45 @@ impl TuiApp {
 
     fn handle_key(&mut self, code: KeyCode) {
         if self.settings_open {
+            if self.settings_editor.is_some() {
+                match code {
+                    KeyCode::Esc => {
+                        self.settings_editor = None;
+                        self.status = "Setting edit cancelled".to_string();
+                    }
+                    KeyCode::Enter => self.apply_settings_editor(),
+                    KeyCode::Backspace => {
+                        if let Some(editor) = self.settings_editor.as_mut() {
+                            editor.value_mut().pop();
+                        }
+                    }
+                    KeyCode::Char(character) => {
+                        if let Some(editor) = self.settings_editor.as_mut() {
+                            if editor.value().len() < 32_768
+                                && character != '\n'
+                                && character != '\r'
+                            {
+                                editor.value_mut().push(character);
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+                return;
+            }
             match code {
                 KeyCode::Esc => {
                     self.discard_settings();
                 }
-                KeyCode::Enter => self.save_settings(),
+                KeyCode::Enter => self.open_settings_editor(),
                 KeyCode::Tab | KeyCode::Down | KeyCode::Char('j') => self.next_settings_field(),
                 KeyCode::Up | KeyCode::Char('k') => self.previous_settings_field(),
                 KeyCode::Left => self.cycle_settings_value(false),
                 KeyCode::Right => self.cycle_settings_value(true),
+                KeyCode::Char('e') => self.open_settings_editor(),
+                KeyCode::Char('d') => self.remove_selected_credential(),
+                KeyCode::Char('v') => self.refresh_settings_readiness(),
+                KeyCode::Char('s') => self.save_settings(),
                 _ => {}
             }
             return;
@@ -1994,6 +2301,120 @@ mod tests {
             created_on: String::new(),
             updated_on: String::new(),
         }
+    }
+
+    #[test]
+    fn settings_are_discoverable_and_accept_custom_model_values() {
+        let mut app = TuiApp::from_repos(Vec::new());
+
+        app.handle_key(KeyCode::Char('s'));
+        assert!(app.settings_open);
+        app.settings_field = SettingsField::CodexModel;
+        app.handle_key(KeyCode::Char('e'));
+        for character in "custom-model".chars() {
+            app.handle_key(KeyCode::Char(character));
+        }
+        app.handle_key(KeyCode::Enter);
+
+        assert_eq!(app.settings_codex_model.as_deref(), Some("custom-model"));
+        assert!(app.settings_editor.is_none());
+        assert!(app.status.contains("press s to save"));
+    }
+
+    #[test]
+    fn custom_model_values_survive_open_and_confirm_without_edits() {
+        let mut app = TuiApp::from_repos(Vec::new());
+        app.settings_open = true;
+        app.settings_field = SettingsField::ClaudeModel;
+        app.settings_claude_model = Some("future-provider-model".to_string());
+
+        app.handle_key(KeyCode::Char('e'));
+        assert_eq!(
+            app.settings_editor.as_ref().map(SettingsEditor::value),
+            Some("future-provider-model")
+        );
+        app.handle_key(KeyCode::Enter);
+
+        assert_eq!(
+            app.settings_claude_model.as_deref(),
+            Some("future-provider-model")
+        );
+    }
+
+    #[test]
+    fn settings_render_masks_provider_tokens() {
+        let mut app = TuiApp::from_repos(Vec::new());
+        app.settings_open = true;
+        app.settings_editor = Some(SettingsEditor::GithubToken {
+            token: "SECRET_DO_NOT_RENDER".to_string(),
+        });
+        let backend = TestBackend::new(120, 28);
+        let mut terminal = Terminal::new(backend).expect("terminal");
+
+        terminal
+            .draw(|frame| render_settings(frame, &app))
+            .expect("draw settings");
+        let rendered = terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect::<String>();
+
+        assert!(!rendered.contains("SECRET_DO_NOT_RENDER"));
+        assert!(rendered.contains(&mask_secret("SECRET_DO_NOT_RENDER")));
+    }
+
+    #[test]
+    fn settings_cancel_keeps_active_non_secret_values_unchanged() {
+        let mut app = TuiApp::from_repos(Vec::new());
+        app.ai_provider = AiProvider::Claude;
+        app.open_settings();
+        app.settings_ai_provider = AiProvider::Codex;
+
+        app.handle_key(KeyCode::Esc);
+
+        assert!(!app.settings_open);
+        assert_eq!(app.ai_provider, AiProvider::Claude);
+        assert_eq!(app.status, "Settings cancelled");
+    }
+
+    #[test]
+    fn settings_remain_usable_on_a_narrow_terminal() {
+        let mut app = TuiApp::from_repos(Vec::new());
+        app.settings_open = true;
+        app.claude_cli_available = true;
+        app.codex_cli_available = false;
+        let backend = TestBackend::new(80, 20);
+        let mut terminal = Terminal::new(backend).expect("terminal");
+
+        terminal
+            .draw(|frame| render_settings(frame, &app))
+            .expect("draw settings");
+        let rendered = terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect::<String>();
+
+        assert!(rendered.contains("Norn settings"));
+        assert!(rendered.contains("GitHub credential"));
+        assert!(rendered.contains("Claude Code CLI: available"));
+        assert!(rendered.contains("Status: Ready"));
+    }
+
+    #[test]
+    fn credential_status_labels_reveal_only_source_state() {
+        let label = credential_status_label(CredentialStatus {
+            provider: CredentialProvider::Github,
+            available: true,
+            source: CredentialSource::Keychain,
+        });
+        assert_eq!(label, "configured (OS keychain)");
+        assert!(!label.contains('/'));
     }
 
     fn temp_repo_path(name: &str) -> std::path::PathBuf {
