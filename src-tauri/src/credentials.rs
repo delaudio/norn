@@ -9,6 +9,7 @@ const ACCOUNT: &str = "bitbucket";
 const APP_DIR: &str = "norn";
 const LEGACY_APP_DIR: &str = "lachesi";
 const TERMINAL_CONFIG_FILE: &str = "config.toml";
+pub const MAX_PROVIDER_TOKEN_BYTES: usize = 32_768;
 
 #[derive(Serialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
@@ -307,7 +308,7 @@ pub fn store_provider_credential(
     if token.is_empty() {
         return Err("Token cannot be empty.".to_string());
     }
-    if token.len() > 32_768 {
+    if token.len() > MAX_PROVIDER_TOKEN_BYTES {
         return Err("Token exceeds the supported length.".to_string());
     }
     match provider {

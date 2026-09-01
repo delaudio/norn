@@ -5,9 +5,9 @@ use std::os::fd::AsRawFd;
 
 use serde::Serialize;
 
-use crate::credentials::{self, CredentialProvider, CredentialStatus};
+use crate::credentials::{self, CredentialProvider, CredentialStatus, MAX_PROVIDER_TOKEN_BYTES};
 
-const MAX_SECRET_BYTES: u64 = 32_769;
+const MAX_SECRET_BYTES: u64 = MAX_PROVIDER_TOKEN_BYTES as u64 + 1;
 
 trait CredentialBackend {
     fn status(&self, provider: CredentialProvider) -> CredentialStatus;
@@ -102,7 +102,11 @@ fn parse_format(args: &[String]) -> Result<AuthFormat, String> {
             "--json" => format = AuthFormat::Json,
             "--format" => {
                 index += 1;
-                format = match args.get(index).map(String::as_str) {
+                format = match args
+                    .get(index)
+                    .filter(|value| !value.starts_with('-'))
+                    .map(String::as_str)
+                {
                     Some("human" | "text") => AuthFormat::Human,
                     Some("json") => AuthFormat::Json,
                     Some(_) => return Err("`--format` must be `human` or `json`.".to_string()),
@@ -195,7 +199,10 @@ fn run_login(
         match args[index].as_str() {
             "--username" => {
                 index += 1;
-                username = args.get(index).cloned();
+                username = args
+                    .get(index)
+                    .filter(|value| !value.starts_with('-'))
+                    .cloned();
                 if username.is_none() {
                     let _ = writeln!(stderr, "`--username` requires a value.");
                     return 2;
@@ -206,7 +213,7 @@ fn run_login(
             "--format" => {
                 format_args.push("--format".to_string());
                 index += 1;
-                let Some(value) = args.get(index) else {
+                let Some(value) = args.get(index).filter(|value| !value.starts_with('-')) else {
                     let _ = writeln!(stderr, "`--format` requires a value.");
                     return 2;
                 };
@@ -230,6 +237,18 @@ fn run_login(
             return 2;
         }
     };
+
+    if provider == CredentialProvider::Bitbucket
+        && token_stdin
+        && username.is_none()
+        && scripted_input.is_none()
+    {
+        let _ = writeln!(
+            stderr,
+            "`--username` is required for Bitbucket login when `--token-stdin` is used."
+        );
+        return 2;
+    }
 
     if provider == CredentialProvider::Bitbucket && username.is_none() {
         username = match scripted_input {
@@ -565,5 +584,23 @@ mod tests {
                 .and_then(|value| value.0.as_deref()),
             Some("reviewer")
         );
+    }
+
+    #[test]
+    fn noninteractive_bitbucket_login_requires_an_explicit_username() {
+        let mut backend = FakeBackend::default();
+        let (code, _, stderr) =
+            run_test(&["login", "bitbucket", "--token-stdin"], None, &mut backend);
+        assert_eq!(code, 2);
+        assert!(stderr.contains("`--username` is required"));
+        assert!(!backend.values.contains_key("bitbucket"));
+
+        let (code, _, stderr) = run_test(
+            &["login", "bitbucket", "--username", "--token-stdin"],
+            None,
+            &mut backend,
+        );
+        assert_eq!(code, 2);
+        assert!(stderr.contains("`--username` requires a value"));
     }
 }

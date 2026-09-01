@@ -57,7 +57,7 @@ struct Args {
 
 #[derive(Debug, Clone)]
 struct SkillPaths {
-    source_root: PathBuf,
+    source_root: Option<PathBuf>,
     codex_skills: PathBuf,
     claude_skills: PathBuf,
 }
@@ -123,9 +123,9 @@ impl SkillPaths {
             .unwrap_or_else(|| home.join(".claude"));
         Ok(Self {
             source_root: if require_source {
-                resolve_packaged_source()?
+                Some(resolve_packaged_source()?)
             } else {
-                resolve_packaged_source().unwrap_or_default()
+                resolve_packaged_source().ok()
             },
             codex_skills: codex_home.join("skills"),
             claude_skills: claude_home.join("skills"),
@@ -177,7 +177,11 @@ fn parse_args(args: &[String]) -> Result<Args, String> {
         match args[index].as_str() {
             "--agent" => {
                 index += 1;
-                agents = match args.get(index).map(String::as_str) {
+                agents = match args
+                    .get(index)
+                    .filter(|value| !value.starts_with('-'))
+                    .map(String::as_str)
+                {
                     Some("codex") => vec![Agent::Codex],
                     Some("claude") => vec![Agent::Claude],
                     Some("all") => vec![Agent::Codex, Agent::Claude],
@@ -191,7 +195,11 @@ fn parse_args(args: &[String]) -> Result<Args, String> {
             "--json" => format = Format::Json,
             "--format" => {
                 index += 1;
-                format = match args.get(index).map(String::as_str) {
+                format = match args
+                    .get(index)
+                    .filter(|value| !value.starts_with('-'))
+                    .map(String::as_str)
+                {
                     Some("human" | "text") => Format::Human,
                     Some("json") => Format::Json,
                     Some(_) => return Err("`--format` must be `human` or `json`.".to_string()),
@@ -222,7 +230,10 @@ fn run_with_paths(
     if args.action == Action::Install {
         for agent in &args.agents {
             let destination = paths.destination(*agent);
-            if destination.exists() && managed_marker(&destination).is_none() && !args.force {
+            if destination.exists()
+                && managed_marker_for(&destination, *agent).is_none()
+                && !args.force
+            {
                 let _ = writeln!(stderr, "The {} {} destination contains unmanaged content. Re-run with `--force` only if replacement is intended.", agent.label(), SKILL_NAME);
                 return 3;
             }
@@ -236,7 +247,7 @@ fn run_with_paths(
     } else if args.action == Action::Uninstall {
         for agent in &args.agents {
             let destination = paths.destination(*agent);
-            if destination.exists() && managed_marker(&destination).is_none() {
+            if destination.exists() && managed_marker_for(&destination, *agent).is_none() {
                 let _ = writeln!(
                     stderr,
                     "Refusing to remove unmanaged content from the {} skill destination.",
@@ -292,7 +303,7 @@ fn run_with_paths(
 
 fn status_for_agent(paths: &SkillPaths, agent: Agent) -> SkillStatus {
     let destination = paths.destination(agent);
-    let marker = managed_marker(&destination);
+    let marker = managed_marker_for(&destination, agent);
     let (state, installed_version) = if let Some(marker) = marker {
         let state = if marker.package_version == env!("CARGO_PKG_VERSION") {
             "managed"
@@ -319,8 +330,16 @@ fn managed_marker(destination: &Path) -> Option<ManagedMarker> {
     (marker.schema_version == "norn.skill.v1" && marker.skill == SKILL_NAME).then_some(marker)
 }
 
+fn managed_marker_for(destination: &Path, agent: Agent) -> Option<ManagedMarker> {
+    managed_marker(destination).filter(|marker| marker.agent == agent.label())
+}
+
 fn install_for_agent(paths: &SkillPaths, agent: Agent, force: bool) -> Result<(), String> {
-    let source = paths.source_root.join(SKILL_NAME);
+    let source = paths
+        .source_root
+        .as_ref()
+        .ok_or_else(|| "Packaged agent skill assets are missing.".to_string())?
+        .join(SKILL_NAME);
     let destination = paths.destination(agent);
     let parent = destination
         .parent()
@@ -331,7 +350,7 @@ fn install_for_agent(paths: &SkillPaths, agent: Agent, force: bool) -> Result<()
             agent.label()
         )
     })?;
-    if destination.exists() && managed_marker(&destination).is_none() && !force {
+    if destination.exists() && managed_marker_for(&destination, agent).is_none() && !force {
         return Err(format!(
             "The {} {} destination contains unmanaged content.",
             agent.label(),
@@ -397,7 +416,7 @@ fn uninstall_for_agent(paths: &SkillPaths, agent: Agent) -> Result<(), String> {
     if !destination.exists() {
         return Ok(());
     }
-    if managed_marker(&destination).is_none() {
+    if managed_marker_for(&destination, agent).is_none() {
         return Err(format!(
             "Refusing to remove unmanaged content from the {} skill destination.",
             agent.label()
@@ -482,7 +501,7 @@ mod tests {
         fs::write(skill.join("SKILL.md"), "managed skill\n").expect("skill");
         fs::write(skill.join("agents/openai.yaml"), "interface: test\n").expect("metadata");
         let paths = SkillPaths {
-            source_root,
+            source_root: Some(source_root),
             codex_skills: root.path().join("codex/skills"),
             claude_skills: root.path().join("claude/skills"),
         };

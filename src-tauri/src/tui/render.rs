@@ -1238,20 +1238,57 @@ fn render_footer(frame: &mut Frame<'_>, area: Rect, state: TuiState<'_>) {
         " diff  "
     };
     let compact = area.width <= 120;
-    let mut spans = vec![
-        Span::styled("q", accent_style()),
-        Span::styled(" quit  ", muted_style()),
-        Span::styled("tab", accent_style()),
-        Span::styled(" focus  ", muted_style()),
-        Span::styled("s", accent_style()),
-        Span::styled(" settings  ", muted_style()),
-        Span::styled("j/k", accent_style()),
-        Span::styled(" select  ", muted_style()),
-        Span::styled("enter", accent_style()),
-        Span::styled(" load  ", muted_style()),
-    ];
-    if !compact {
-        spans.extend([
+    let footer = if compact {
+        let primary = Line::from(vec![
+            Span::styled("q", accent_style()),
+            Span::styled(" quit ", muted_style()),
+            Span::styled("tab", accent_style()),
+            Span::styled(" focus ", muted_style()),
+            Span::styled("s", accent_style()),
+            Span::styled(" settings ", muted_style()),
+            Span::styled("j/k", accent_style()),
+            Span::styled(" select ", muted_style()),
+            Span::styled("enter", accent_style()),
+            Span::styled(" load | ", muted_style()),
+            Span::styled(state.status, info_style()),
+        ]);
+        let secondary = Line::from(vec![
+            Span::styled("c", accent_style()),
+            Span::styled(" draft ", muted_style()),
+            Span::styled("p", accent_style()),
+            Span::styled(" send ", muted_style()),
+            Span::styled("x", accent_style()),
+            Span::styled(" drop ", muted_style()),
+            Span::styled("a", accent_style()),
+            Span::styled(" AI ", muted_style()),
+            Span::styled("f", accent_style()),
+            Span::styled(" PRs ", muted_style()),
+            Span::styled("g", accent_style()),
+            Span::styled(" diff ", muted_style()),
+            Span::styled("u", accent_style()),
+            Span::styled(" view ", muted_style()),
+            Span::styled("i", accent_style()),
+            Span::styled(" img ", muted_style()),
+            Span::styled("v", accent_style()),
+            Span::styled(" pane ", muted_style()),
+            Span::styled("y", accent_style()),
+            Span::styled(" copy ", muted_style()),
+            Span::styled("r", accent_style()),
+            Span::styled(" reload", muted_style()),
+        ]);
+        Paragraph::new(vec![primary, secondary]).style(base_style())
+    } else {
+        let spans = vec![
+            Span::styled("q", accent_style()),
+            Span::styled(" quit  ", muted_style()),
+            Span::styled("tab", accent_style()),
+            Span::styled(" focus  ", muted_style()),
+            Span::styled("s", accent_style()),
+            Span::styled(" settings  ", muted_style()),
+            Span::styled("j/k", accent_style()),
+            Span::styled(" select  ", muted_style()),
+            Span::styled("enter", accent_style()),
+            Span::styled(" load  ", muted_style()),
             Span::styled("c", accent_style()),
             Span::styled(" draft  ", muted_style()),
             Span::styled("p", accent_style()),
@@ -1274,10 +1311,10 @@ fn render_footer(frame: &mut Frame<'_>, area: Rect, state: TuiState<'_>) {
             Span::styled(" scroll  ", muted_style()),
             Span::styled("r", accent_style()),
             Span::styled(" refresh  ", muted_style()),
-        ]);
-    }
-    spans.push(Span::styled(state.status, info_style()));
-    let footer = Paragraph::new(Line::from(spans)).style(base_style());
+            Span::styled(state.status, info_style()),
+        ];
+        Paragraph::new(Line::from(spans)).style(base_style())
+    };
     frame.render_widget(footer, area);
 }
 
@@ -2178,6 +2215,8 @@ mod tests {
         assert!(text.contains("No repositories configured"));
         assert!(text.contains("Configure repos"));
         assert!(text.contains("s settings"));
+        assert!(text.contains("c draft p send x drop a AI"));
+        assert!(text.contains("r reload"));
     }
 
     #[test]
