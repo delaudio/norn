@@ -1,7 +1,7 @@
 ---
 adr: 0012
 title: Define the Norn first-run onboarding contract
-status: Accepted
+status: Implemented
 date: 2026-08-05
 owner: codex
 supersedes: []
@@ -75,8 +75,10 @@ and non-interactive modes, and never writes secrets during proposal generation.
 | Date | Revision | Author | Change |
 |------|----------|--------|--------|
 | 2026-08-05 | r1 | codex | Initial accepted decision for onboarding contract boundaries. |
+| 2026-09-01 | r2 | codex | Marked the onboarding contract implemented after secure terminal credentials and discoverable TUI settings shipped. |
 
 ## Approvals
 
 | Role | Name | Date | Signature |
 |------|------|------|-----------|
+| Maintainer | fdg | 2026-09-01 | approved in chat; implementation verified through PR #220 |

@@ -16,7 +16,7 @@ metadata.
 | 0009 | Render bounded image diffs in supported terminals | Implemented | 2026-07-28 | default-agent | tui, diff, images, terminal |
 | 0010 | Compare modified image versions side by side in the terminal UI | Implemented | 2026-07-31 | default-agent | tui, diff, images, terminal |
 | 0011 | Adopt Norn names with a bounded Lachesi compatibility window | Accepted | 2026-08-04 | codex | norn, naming, compatibility, migration, distribution |
-| 0012 | Define the Norn first-run onboarding contract | Accepted | 2026-08-05 | codex | norn, onboarding, config, cli |
+| 0012 | Define the Norn first-run onboarding contract | Implemented | 2026-08-05 | codex | norn, onboarding, config, cli |
 | 0013 | Read-only readiness probing for machine and repository onboarding | Accepted | 2026-08-05 | codex | norn, onboarding, readiness, cli |
 | 0014 | Deliver Norn through reproducible releases and verified upgrade channels | Implemented | 2026-08-31 | codex | release, distribution, homebrew, cli, tui, desktop |
-| 0015 | Distribute managed agent review skills with installed Norn | Accepted | 2026-09-01 | codex | distribution, skills, codex, claude, cli, homebrew |
+| 0015 | Distribute managed agent review skills with installed Norn | Implemented | 2026-09-01 | codex | distribution, skills, codex, claude, cli, homebrew |
