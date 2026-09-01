@@ -14,10 +14,9 @@ use std::{
 
 use crossterm::event::{self, Event, KeyCode, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::{
-    layout::{Alignment, Constraint, Direction, Layout},
-    prelude::{Frame, Text},
-    style::{Color, Style},
-    widgets::{Block, Borders, Paragraph},
+    layout::{Constraint, Direction, Layout, Rect},
+    prelude::{Frame, Line, Modifier, Span},
+    widgets::{Clear, Paragraph},
 };
 use zeroize::Zeroizing;
 
@@ -101,10 +100,11 @@ pub fn run_from_env() -> Result<(), String> {
         app.prepare_rendered_diff(area);
         terminal
             .draw(|frame| {
+                // Settings is a bounded overlay. Drawing the pure workspace view first
+                // preserves useful context behind it without changing application state.
+                render(frame, app.view_state());
                 if app.settings_open {
                     render_settings(frame, &app);
-                } else {
-                    render(frame, app.view_state());
                 }
             })
             .map_err(|error| error.to_string())?;
@@ -120,6 +120,7 @@ pub fn run_from_env() -> Result<(), String> {
         if event::poll(TICK_RATE).map_err(|error| error.to_string())? {
             match event::read().map_err(|error| error.to_string())? {
                 Event::Key(key) => app.handle_key(key.code),
+                Event::Paste(value) => app.handle_paste(&value),
                 Event::Mouse(mouse) => {
                     if app.settings_open {
                         continue;
@@ -330,11 +331,139 @@ impl SettingsEditor {
 
     fn prompt(&self) -> &'static str {
         match self {
-            Self::Text { .. } => "Custom value (empty uses provider default)",
-            Self::GithubToken { .. } => "GitHub token (input is masked)",
-            Self::BitbucketUsername { .. } => "Bitbucket username",
-            Self::BitbucketToken { .. } => "Bitbucket token (input is masked)",
+            Self::Text { .. } => "Enter a custom value; empty restores the provider default.",
+            Self::GithubToken { .. } => {
+                "Paste or type a GitHub personal access token. Input is masked."
+            }
+            Self::BitbucketUsername { .. } => {
+                "Enter the username associated with your Bitbucket Cloud token."
+            }
+            Self::BitbucketToken { .. } => {
+                "Paste or type a Bitbucket Cloud API token. Input is masked."
+            }
         }
+    }
+
+    fn panel_title(&self) -> &'static str {
+        match self {
+            Self::Text { .. } => " Norn settings · Edit AI review ",
+            Self::GithubToken { .. } => " Norn settings · Configure GitHub ",
+            Self::BitbucketUsername { .. } | Self::BitbucketToken { .. } => {
+                " Norn settings · Configure Bitbucket "
+            }
+        }
+    }
+
+    fn step_label(&self) -> &'static str {
+        match self {
+            Self::Text { .. } => "Custom value",
+            Self::GithubToken { .. } => "GitHub · Secure credential",
+            Self::BitbucketUsername { .. } => "Bitbucket · Step 1 of 2 · Account",
+            Self::BitbucketToken { .. } => "Bitbucket · Step 2 of 2 · API token",
+        }
+    }
+
+    fn field_label(&self) -> &'static str {
+        match self {
+            Self::Text { field, .. } => SETTING_FIELDS[field.as_index()],
+            Self::GithubToken { .. } => "Personal access token",
+            Self::BitbucketUsername { .. } => "Username",
+            Self::BitbucketToken { .. } => "API token",
+        }
+    }
+
+    fn guidance_lines(&self) -> Vec<Line<'static>> {
+        match self {
+            Self::Text { .. } => vec![Line::from(Span::styled(
+                "The value is saved only when you return to Settings and press s.",
+                render::panel_muted_style(),
+            ))],
+            Self::GithubToken { .. } => vec![
+                Line::from(Span::styled(
+                    "Storage: OS keychain",
+                    render::panel_success_style(),
+                )),
+                Line::from(Span::styled(
+                    "Norn will not display or write the token to its settings file.",
+                    render::panel_muted_style(),
+                )),
+            ],
+            Self::BitbucketUsername { .. } => vec![Line::from(Span::styled(
+                "Next, Norn asks for the API token and stores both in the OS keychain.",
+                render::panel_muted_style(),
+            ))],
+            Self::BitbucketToken { username, .. } => vec![
+                Line::from(vec![
+                    Span::styled("Account  ", render::panel_accent_style()),
+                    Span::styled(username.clone(), render::panel_text_style()),
+                ]),
+                Line::from(Span::styled(
+                    "The token stays masked and is stored only in the OS keychain.",
+                    render::panel_muted_style(),
+                )),
+            ],
+        }
+    }
+
+    fn footer_lines(&self) -> Vec<Line<'static>> {
+        let action = match self {
+            Self::Text { .. } => " apply",
+            Self::GithubToken { .. } | Self::BitbucketToken { .. } => " store securely",
+            Self::BitbucketUsername { .. } => " continue",
+        };
+        let escape = if matches!(self, Self::BitbucketToken { .. }) {
+            " back"
+        } else {
+            " cancel"
+        };
+        vec![
+            Line::from(vec![
+                Span::styled("Enter", render::panel_accent_style()),
+                Span::styled(action, render::panel_muted_style()),
+                Span::styled("  Esc", render::panel_accent_style()),
+                Span::styled(escape, render::panel_muted_style()),
+                Span::styled("  Backspace", render::panel_accent_style()),
+                Span::styled(" delete", render::panel_muted_style()),
+            ]),
+            Line::from(Span::styled(
+                if self.is_secret() {
+                    "Paste is supported; pasted secrets remain masked."
+                } else {
+                    "Your other Settings changes remain pending while you edit."
+                },
+                render::panel_muted_style(),
+            )),
+        ]
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct EditorInputResult {
+    appended: usize,
+    rejected_for_size: bool,
+}
+
+fn append_editor_input(editor: &mut SettingsEditor, input: &str) -> EditorInputResult {
+    let current_bytes = editor.value().len();
+    let remaining = credentials::MAX_PROVIDER_TOKEN_BYTES.saturating_sub(current_bytes);
+    let sanitized = Zeroizing::new(
+        input
+            .chars()
+            .filter(|character| !character.is_control())
+            .collect::<String>(),
+    );
+    if sanitized.len() > remaining {
+        return EditorInputResult {
+            appended: 0,
+            rejected_for_size: true,
+        };
+    }
+
+    let appended = sanitized.chars().count();
+    editor.value_mut().push_str(&sanitized);
+    EditorInputResult {
+        appended,
+        rejected_for_size: false,
     }
 }
 
@@ -372,96 +501,201 @@ where
 }
 
 fn render_settings(frame: &mut Frame<'_>, app: &TuiApp) {
-    let area = frame.area();
-    frame.render_widget(
-        Block::default().style(Style::default().bg(Color::Rgb(13, 17, 23))),
-        area,
-    );
-    let [header, body, footer] = *Layout::default()
+    let area = settings_overlay_area(frame.area());
+    frame.render_widget(Clear, area);
+
+    let title = app
+        .settings_editor
+        .as_ref()
+        .map_or(" Norn settings ", SettingsEditor::panel_title);
+    let panel = render::panel_block(title, true);
+    let inner = panel.inner(area);
+    frame.render_widget(panel, area);
+
+    if let Some(editor) = app.settings_editor.as_ref() {
+        render_settings_editor(frame, inner, app, editor);
+    } else {
+        render_settings_overview(frame, inner, app);
+    }
+}
+
+fn settings_overlay_area(area: Rect) -> Rect {
+    let width = area.width.saturating_sub(4).min(112);
+    let height = area.height.saturating_sub(2).min(26);
+    Rect::new(
+        area.x + area.width.saturating_sub(width) / 2,
+        area.y + area.height.saturating_sub(height) / 2,
+        width,
+        height,
+    )
+}
+
+fn render_settings_overview(frame: &mut Frame<'_>, area: Rect, app: &TuiApp) {
+    let [content, context, footer] = *Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(4),
-            Constraint::Min(5),
-            Constraint::Length(3),
+            Constraint::Min(8),
+            Constraint::Length(2),
+            Constraint::Length(2),
         ])
         .split(area)
     else {
         return;
     };
 
-    let header_block = Block::default()
-        .borders(Borders::ALL)
-        .title("Norn settings");
-    let header_text = Text::from(
-        "↑/↓ field  ←/→ preset  e edit  Enter credential\nd remove  v validate  s save  Esc cancel",
-    );
-    frame.render_widget(
-        Paragraph::new(header_text)
-            .alignment(Alignment::Center)
-            .block(header_block),
-        header,
-    );
-
-    let mut body_lines = vec![
+    let lines = vec![
+        settings_section_line("AI review"),
         app.settings_field_line(SettingsField::AiProvider),
         app.settings_field_line(SettingsField::ClaudeModel),
         app.settings_field_line(SettingsField::ClaudeEffort),
         app.settings_field_line(SettingsField::CodexModel),
         app.settings_field_line(SettingsField::CodexEffort),
+        settings_section_line("Provider credentials"),
         app.settings_field_line(SettingsField::GithubCredential),
         app.settings_field_line(SettingsField::BitbucketCredential),
-        String::new(),
-        format!(
-            "Claude Code CLI: {}",
-            if app.claude_cli_available {
-                "available"
-            } else {
-                "missing"
-            }
-        ),
-        format!(
-            "Codex CLI: {}",
-            if app.codex_cli_available {
-                "available"
-            } else {
-                "missing"
-            }
-        ),
+        settings_section_line("CLI readiness"),
+        settings_readiness_line("Claude Code CLI", app.claude_cli_available),
+        settings_readiness_line("Codex CLI", app.codex_cli_available),
     ];
+    frame.render_widget(Paragraph::new(lines).style(render::panel_style()), content);
 
-    if let Some(editor) = app.settings_editor.as_ref() {
-        let value = editor.value();
-        let displayed = if editor.is_secret() {
-            mask_secret(value)
-        } else if value.is_empty() {
-            "<empty>".to_string()
-        } else {
-            value.to_string()
-        };
-        body_lines.push(String::new());
-        body_lines.push(format!("{}:", editor.prompt()));
-        body_lines.push(format!("> {displayed}"));
-        body_lines.push("Enter confirm  Esc cancel  Backspace delete".to_string());
-    }
-
-    let body_block =
-        Block::default()
-            .borders(Borders::ALL)
-            .title(if app.settings_editor.is_some() {
-                "Edit setting"
-            } else {
-                "Configuration"
-            });
+    let context_lines = vec![
+        Line::from(vec![
+            Span::styled("Hint  ", render::panel_accent_style()),
+            Span::styled(app.settings_context_help(), render::panel_muted_style()),
+        ]),
+        Line::from(vec![
+            Span::styled("Status  ", render::panel_accent_style()),
+            Span::styled(app.status.clone(), render::panel_info_style()),
+        ]),
+    ];
     frame.render_widget(
-        Paragraph::new(Text::from(body_lines.join("\n"))).block(body_block),
-        body,
+        Paragraph::new(context_lines).style(render::panel_style()),
+        context,
     );
 
-    let footer_block = Block::default().borders(Borders::ALL);
     frame.render_widget(
-        Paragraph::new(format!("Status: {}", app.status))
-            .alignment(Alignment::Left)
-            .block(footer_block),
+        Paragraph::new(vec![
+            Line::from(vec![
+                Span::styled("↑/↓", render::panel_accent_style()),
+                Span::styled(" navigate  ", render::panel_muted_style()),
+                Span::styled("←/→", render::panel_accent_style()),
+                Span::styled(" preset  ", render::panel_muted_style()),
+                Span::styled("Enter", render::panel_accent_style()),
+                Span::styled(" action  ", render::panel_muted_style()),
+                Span::styled("e", render::panel_accent_style()),
+                Span::styled(" custom", render::panel_muted_style()),
+            ]),
+            Line::from(vec![
+                Span::styled("d", render::panel_accent_style()),
+                Span::styled(" remove  ", render::panel_muted_style()),
+                Span::styled("v", render::panel_accent_style()),
+                Span::styled(" validate  ", render::panel_muted_style()),
+                Span::styled("s", render::panel_accent_style()),
+                Span::styled(" save  ", render::panel_muted_style()),
+                Span::styled("Esc", render::panel_accent_style()),
+                Span::styled(" close", render::panel_muted_style()),
+            ]),
+        ])
+        .style(render::panel_style()),
+        footer,
+    );
+}
+
+fn settings_section_line(title: &'static str) -> Line<'static> {
+    Line::from(Span::styled(
+        title,
+        render::panel_accent_style().add_modifier(Modifier::BOLD),
+    ))
+}
+
+fn settings_readiness_line(label: &'static str, available: bool) -> Line<'static> {
+    Line::from(vec![
+        Span::styled(format!("  {label:<20}"), render::panel_text_style()),
+        Span::styled(
+            if available { "Available" } else { "Missing" },
+            if available {
+                render::panel_success_style()
+            } else {
+                render::panel_error_style()
+            },
+        ),
+    ])
+}
+
+fn render_settings_editor(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    app: &TuiApp,
+    editor: &SettingsEditor,
+) {
+    let [heading, input, guidance, status, footer] = *Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(2),
+            Constraint::Length(3),
+            Constraint::Min(2),
+            Constraint::Length(1),
+            Constraint::Length(2),
+        ])
+        .split(area)
+    else {
+        return;
+    };
+
+    frame.render_widget(
+        Paragraph::new(vec![
+            Line::from(Span::styled(
+                editor.step_label(),
+                render::panel_accent_style().add_modifier(Modifier::BOLD),
+            )),
+            Line::from(Span::styled(editor.prompt(), render::panel_muted_style())),
+        ])
+        .style(render::panel_style()),
+        heading,
+    );
+
+    let value = editor.value();
+    let displayed = if value.is_empty() {
+        if editor.is_secret() {
+            "Start typing or paste; input stays hidden".to_string()
+        } else {
+            "Type a value".to_string()
+        }
+    } else if editor.is_secret() {
+        mask_secret(value)
+    } else {
+        value.to_string()
+    };
+    let input_style = if value.is_empty() {
+        render::panel_muted_style()
+    } else {
+        render::panel_text_style()
+    };
+    frame.render_widget(
+        Paragraph::new(Line::from(vec![
+            Span::styled("> ", render::panel_accent_style()),
+            Span::styled(displayed, input_style),
+        ]))
+        .style(render::panel_style())
+        .block(render::panel_block(editor.field_label(), false)),
+        input,
+    );
+
+    frame.render_widget(
+        Paragraph::new(editor.guidance_lines()).style(render::panel_style()),
+        guidance,
+    );
+    frame.render_widget(
+        Paragraph::new(Line::from(vec![
+            Span::styled("Status  ", render::panel_accent_style()),
+            Span::styled(app.status.clone(), render::panel_info_style()),
+        ]))
+        .style(render::panel_style()),
+        status,
+    );
+    frame.render_widget(
+        Paragraph::new(editor.footer_lines()).style(render::panel_style()),
         footer,
     );
 }
@@ -510,12 +744,20 @@ fn user_cli_available(name: &str) -> bool {
 
 fn credential_status_label(status: CredentialStatus) -> String {
     if !status.available {
-        return "missing (Enter to add)".to_string();
+        return "Not configured".to_string();
     }
     match status.source {
-        CredentialSource::Keychain => "configured (OS keychain)".to_string(),
-        CredentialSource::Environment => "configured (environment)".to_string(),
-        CredentialSource::None => "missing (Enter to add)".to_string(),
+        CredentialSource::Keychain => "Configured · OS keychain".to_string(),
+        CredentialSource::Environment => "Available · environment".to_string(),
+        CredentialSource::None => "Not configured".to_string(),
+    }
+}
+
+fn credential_action_label(status: CredentialStatus) -> &'static str {
+    match (status.available, status.source) {
+        (true, CredentialSource::Keychain) => "Enter replace · d remove",
+        (true, CredentialSource::Environment) => "Enter configure keychain",
+        _ => "Enter configure",
     }
 }
 
@@ -1017,6 +1259,7 @@ impl TuiApp {
     }
 
     fn open_settings_editor(&mut self) {
+        self.error = None;
         self.settings_editor = match self.settings_field {
             SettingsField::ClaudeModel => Some(SettingsEditor::Text {
                 field: self.settings_field,
@@ -1047,6 +1290,21 @@ impl TuiApp {
         }
     }
 
+    fn cancel_settings_editor(&mut self) {
+        let Some(editor) = self.settings_editor.take() else {
+            return;
+        };
+        match editor {
+            SettingsEditor::BitbucketToken { username, .. } => {
+                self.settings_editor = Some(SettingsEditor::BitbucketUsername { username });
+                self.status = "Back to Bitbucket username".to_string();
+            }
+            _ => {
+                self.status = "Setting edit cancelled".to_string();
+            }
+        }
+    }
+
     fn apply_settings_editor(&mut self) {
         let Some(editor) = self.settings_editor.take() else {
             return;
@@ -1070,12 +1328,14 @@ impl TuiApp {
                     &token,
                 ) {
                     Ok(()) => {
+                        self.error = None;
                         self.refresh_credential_statuses();
                         self.status = "GitHub credential stored in the OS keychain".to_string();
                     }
                     Err(error) => {
                         self.error = Some(error);
                         self.status = "Failed to store GitHub credential".to_string();
+                        self.settings_editor = Some(SettingsEditor::GithubToken { token });
                     }
                 }
             }
@@ -1098,12 +1358,15 @@ impl TuiApp {
                     &token,
                 ) {
                     Ok(()) => {
+                        self.error = None;
                         self.refresh_credential_statuses();
                         self.status = "Bitbucket credential stored in the OS keychain".to_string();
                     }
                     Err(error) => {
                         self.error = Some(error);
                         self.status = "Failed to store Bitbucket credential".to_string();
+                        self.settings_editor =
+                            Some(SettingsEditor::BitbucketToken { username, token });
                     }
                 }
             }
@@ -1120,6 +1383,19 @@ impl TuiApp {
                 return;
             }
         };
+        let status = match provider {
+            CredentialProvider::Github => self.github_credential_status,
+            CredentialProvider::Bitbucket => self.bitbucket_credential_status,
+        };
+        if status.source != CredentialSource::Keychain || !status.available {
+            self.status = match status.source {
+                CredentialSource::Environment if status.available => {
+                    "Environment credentials cannot be removed from Norn".to_string()
+                }
+                _ => "No OS keychain credential to remove".to_string(),
+            };
+            return;
+        }
         match credentials::clear_provider_credential(provider) {
             Ok(()) => {
                 self.refresh_credential_statuses();
@@ -1195,27 +1471,104 @@ impl TuiApp {
         }
     }
 
-    fn settings_field_line(&self, field: SettingsField) -> String {
-        format!(
-            "{} {}: {}",
-            if self.settings_field == field {
-                "▶"
+    fn settings_field_line(&self, field: SettingsField) -> Line<'static> {
+        let selected = self.settings_field == field;
+        let mut spans = vec![
+            Span::styled(
+                if selected { "› " } else { "  " },
+                if selected {
+                    render::panel_accent_style()
+                } else {
+                    render::panel_muted_style()
+                },
+            ),
+            Span::styled(
+                format!("{:<22}", SETTING_FIELDS[field.as_index()]),
+                if selected {
+                    render::panel_text_style().add_modifier(Modifier::BOLD)
+                } else {
+                    render::panel_text_style()
+                },
+            ),
+            Span::styled(
+                self.render_settings_field_value(field),
+                if matches!(
+                    field,
+                    SettingsField::GithubCredential | SettingsField::BitbucketCredential
+                ) {
+                    let status = if field == SettingsField::GithubCredential {
+                        self.github_credential_status
+                    } else {
+                        self.bitbucket_credential_status
+                    };
+                    if status.available {
+                        render::panel_success_style()
+                    } else {
+                        render::panel_muted_style()
+                    }
+                } else {
+                    render::panel_info_style()
+                },
+            ),
+        ];
+        if matches!(
+            field,
+            SettingsField::GithubCredential | SettingsField::BitbucketCredential
+        ) {
+            let status = if field == SettingsField::GithubCredential {
+                self.github_credential_status
             } else {
-                " "
-            },
-            SETTING_FIELDS[field.as_index()],
-            self.render_settings_field_value(field),
-        )
+                self.bitbucket_credential_status
+            };
+            spans.push(Span::styled("  ", render::panel_text_style()));
+            spans.push(Span::styled(
+                credential_action_label(status),
+                if selected {
+                    render::panel_accent_style()
+                } else {
+                    render::panel_muted_style()
+                },
+            ));
+        }
+        Line::from(spans)
+    }
+
+    fn settings_context_help(&self) -> String {
+        match self.settings_field {
+            SettingsField::AiProvider => {
+                "Choose the assistant used for new TUI reviews.".to_string()
+            }
+            SettingsField::ClaudeModel
+            | SettingsField::ClaudeEffort
+            | SettingsField::CodexModel
+            | SettingsField::CodexEffort => {
+                "Use ←/→ for presets or e to enter a custom value.".to_string()
+            }
+            SettingsField::GithubCredential | SettingsField::BitbucketCredential => {
+                let status = if self.settings_field == SettingsField::GithubCredential {
+                    self.github_credential_status
+                } else {
+                    self.bitbucket_credential_status
+                };
+                match status.source {
+                    CredentialSource::Keychain if status.available => {
+                        "Enter replaces the keychain credential; d removes it.".to_string()
+                    }
+                    CredentialSource::Environment if status.available => {
+                        "Environment credential is active; Enter configures the keychain."
+                            .to_string()
+                    }
+                    _ => "Enter starts secure setup; token input stays masked.".to_string(),
+                }
+            }
+        }
     }
 
     fn handle_key(&mut self, code: KeyCode) {
         if self.settings_open {
             if self.settings_editor.is_some() {
                 match code {
-                    KeyCode::Esc => {
-                        self.settings_editor = None;
-                        self.status = "Setting edit cancelled".to_string();
-                    }
+                    KeyCode::Esc => self.cancel_settings_editor(),
                     KeyCode::Enter => self.apply_settings_editor(),
                     KeyCode::Backspace => {
                         if let Some(editor) = self.settings_editor.as_mut() {
@@ -1224,11 +1577,10 @@ impl TuiApp {
                     }
                     KeyCode::Char(character) => {
                         if let Some(editor) = self.settings_editor.as_mut() {
-                            if editor.value().len() < 32_768
-                                && character != '\n'
-                                && character != '\r'
-                            {
-                                editor.value_mut().push(character);
+                            let field = editor.field_label();
+                            let result = append_editor_input(editor, &character.to_string());
+                            if result.rejected_for_size {
+                                self.status = format!("{field} reached the input size limit");
                             }
                         }
                     }
@@ -1280,6 +1632,27 @@ impl TuiApp {
             KeyCode::Up | KeyCode::Char('k') => self.select_previous(),
             _ => {}
         }
+    }
+
+    fn handle_paste(&mut self, value: &str) {
+        if !self.settings_open {
+            return;
+        }
+        let Some(editor) = self.settings_editor.as_mut() else {
+            return;
+        };
+        let is_secret = editor.is_secret();
+        let field = editor.field_label();
+        let result = append_editor_input(editor, value);
+        self.status = if result.rejected_for_size {
+            format!("{field} was not pasted because it exceeds the input size limit")
+        } else if result.appended == 0 {
+            format!("Nothing pasted into {field}")
+        } else if is_secret {
+            format!("Pasted into {field}; secret remains masked")
+        } else {
+            format!("Pasted into {field}")
+        };
     }
 
     fn handle_mouse(&mut self, mouse: MouseEvent, area: ratatui::layout::Rect) {
@@ -2391,6 +2764,148 @@ mod tests {
     }
 
     #[test]
+    fn settings_render_sections_and_contextual_credential_actions() {
+        let mut app = TuiApp::from_repos(Vec::new());
+        app.settings_open = true;
+        app.settings_field = SettingsField::GithubCredential;
+        app.github_credential_status = CredentialStatus {
+            provider: CredentialProvider::Github,
+            available: false,
+            source: CredentialSource::None,
+        };
+        let backend = TestBackend::new(120, 28);
+        let mut terminal = Terminal::new(backend).expect("terminal");
+
+        terminal
+            .draw(|frame| render_settings(frame, &app))
+            .expect("draw settings");
+        let rendered = terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect::<String>();
+
+        assert!(rendered.contains("AI review"));
+        assert!(rendered.contains("Provider credentials"));
+        assert!(rendered.contains("CLI readiness"));
+        assert!(rendered.contains("Not configured"));
+        assert!(rendered.contains("Enter configure"));
+        assert!(rendered.contains("token input stays masked"));
+    }
+
+    #[test]
+    fn settings_paste_filters_control_characters_and_keeps_secret_masked() {
+        let mut app = TuiApp::from_repos(Vec::new());
+        app.settings_open = true;
+        app.settings_field = SettingsField::GithubCredential;
+        app.open_settings_editor();
+
+        app.handle_paste("TEST_SECRET\nVALUE\r");
+
+        assert_eq!(
+            app.settings_editor.as_ref().map(SettingsEditor::value),
+            Some("TEST_SECRETVALUE")
+        );
+        assert!(app.status.contains("secret remains masked"));
+
+        let backend = TestBackend::new(120, 28);
+        let mut terminal = Terminal::new(backend).expect("terminal");
+        terminal
+            .draw(|frame| render_settings(frame, &app))
+            .expect("draw settings");
+        let rendered = terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect::<String>();
+        assert!(!rendered.contains("TEST_SECRETVALUE"));
+        assert!(rendered.contains(&mask_secret("TEST_SECRETVALUE")));
+    }
+
+    #[test]
+    fn settings_reject_oversized_paste_without_partial_secret_input() {
+        let mut app = TuiApp::from_repos(Vec::new());
+        app.settings_open = true;
+        app.settings_field = SettingsField::GithubCredential;
+        app.open_settings_editor();
+        let oversized = "x".repeat(credentials::MAX_PROVIDER_TOKEN_BYTES + 1);
+
+        app.handle_paste(&oversized);
+
+        assert_eq!(
+            app.settings_editor.as_ref().map(SettingsEditor::value),
+            Some("")
+        );
+        assert!(app.status.contains("exceeds the input size limit"));
+        assert!(!app.status.contains(&oversized));
+    }
+
+    #[test]
+    fn settings_report_when_typed_input_reaches_the_size_limit() {
+        let mut app = TuiApp::from_repos(Vec::new());
+        app.settings_open = true;
+        app.settings_field = SettingsField::GithubCredential;
+        app.open_settings_editor();
+        let maximum = "x".repeat(credentials::MAX_PROVIDER_TOKEN_BYTES);
+        app.handle_paste(&maximum);
+
+        app.handle_key(KeyCode::Char('y'));
+
+        assert_eq!(
+            app.settings_editor
+                .as_ref()
+                .map(SettingsEditor::value)
+                .map(str::len),
+            Some(credentials::MAX_PROVIDER_TOKEN_BYTES)
+        );
+        assert!(app.status.contains("reached the input size limit"));
+        assert!(!app.status.contains(&maximum));
+    }
+
+    #[test]
+    fn bitbucket_token_escape_returns_to_the_username_step() {
+        let mut app = TuiApp::from_repos(Vec::new());
+        app.settings_open = true;
+        app.settings_field = SettingsField::BitbucketCredential;
+        app.open_settings_editor();
+        app.handle_paste("reviewer@example.test");
+        app.handle_key(KeyCode::Enter);
+        app.handle_paste("TEST_SECRET_VALUE");
+
+        app.handle_key(KeyCode::Esc);
+
+        assert!(matches!(
+            app.settings_editor.as_ref(),
+            Some(SettingsEditor::BitbucketUsername { username })
+                if username == "reviewer@example.test"
+        ));
+        assert_eq!(app.status, "Back to Bitbucket username");
+    }
+
+    #[test]
+    fn settings_do_not_offer_to_remove_environment_credentials() {
+        let mut app = TuiApp::from_repos(Vec::new());
+        app.settings_open = true;
+        app.settings_field = SettingsField::GithubCredential;
+        app.github_credential_status = CredentialStatus {
+            provider: CredentialProvider::Github,
+            available: true,
+            source: CredentialSource::Environment,
+        };
+
+        app.handle_key(KeyCode::Char('d'));
+
+        assert_eq!(
+            app.status,
+            "Environment credentials cannot be removed from Norn"
+        );
+    }
+
+    #[test]
     fn settings_cancel_keeps_active_non_secret_values_unchanged() {
         let mut app = TuiApp::from_repos(Vec::new());
         app.ai_provider = AiProvider::Claude;
@@ -2426,8 +2941,38 @@ mod tests {
 
         assert!(rendered.contains("Norn settings"));
         assert!(rendered.contains("GitHub credential"));
-        assert!(rendered.contains("Claude Code CLI: available"));
-        assert!(rendered.contains("Status: Ready"));
+        assert!(rendered.contains("Claude Code CLI"));
+        assert!(rendered.contains("Available"));
+        assert!(rendered.contains("Status"));
+        assert!(rendered.contains("Ready"));
+    }
+
+    #[test]
+    fn credential_editor_remains_explicit_on_a_narrow_terminal() {
+        let mut app = TuiApp::from_repos(Vec::new());
+        app.settings_open = true;
+        app.settings_field = SettingsField::GithubCredential;
+        app.open_settings_editor();
+        let backend = TestBackend::new(80, 20);
+        let mut terminal = Terminal::new(backend).expect("terminal");
+
+        terminal
+            .draw(|frame| render_settings(frame, &app))
+            .expect("draw settings");
+        let rendered = terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect::<String>();
+
+        assert!(rendered.contains("Configure GitHub"));
+        assert!(rendered.contains("Personal access token"));
+        assert!(rendered.contains("input stays hidden"));
+        assert!(rendered.contains("OS keychain"));
+        assert!(rendered.contains("Enter"));
+        assert!(!rendered.contains("TEST_SECRET"));
     }
 
     #[test]
@@ -2437,7 +2982,7 @@ mod tests {
             available: true,
             source: CredentialSource::Keychain,
         });
-        assert_eq!(label, "configured (OS keychain)");
+        assert_eq!(label, "Configured · OS keychain");
         assert!(!label.contains('/'));
     }
 

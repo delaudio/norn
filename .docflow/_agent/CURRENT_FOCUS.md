@@ -12,7 +12,10 @@ If status files and git disagree, git is authoritative; correct this file.
 - **Active item:** `.docflow/plan/todo/0005-refine-tui-settings-experience.md`.
 - **Plan items:** refine the TUI settings layout and provider credential input
   flow from confirmed user feedback.
-- **Verification:** pending.
+- **Verification:** typecheck, lint, 104 frontend tests plus tooling suites,
+  production build, the command-distribution Rust lane (547 library tests, 2
+  ignored, plus CLI and onboarding targets), Clippy, Archgate 17/17, focused
+  normal/narrow settings rendering, masked paste, and Bitbucket back-step tests.
 
 ## Last shipped
 
