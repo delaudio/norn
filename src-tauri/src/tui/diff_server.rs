@@ -1,7 +1,7 @@
 use std::{
     io::{Read, Write},
     net::{TcpListener, TcpStream},
-    process::Command,
+    process::{Command, ExitStatus},
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc, Mutex, RwLock,
@@ -141,34 +141,33 @@ impl Drop for WebDiffServer {
 pub fn open_browser_url(url: &str) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     {
-        Command::new("open")
-            .arg(url)
-            .status()
-            .map_err(|e| format!("Failed to open browser: {e}"))?;
-        Ok(())
+        browser_open_result(Command::new("open").arg(url).status())
     }
 
     #[cfg(target_os = "linux")]
     {
-        Command::new("xdg-open")
-            .arg(url)
-            .status()
-            .map_err(|e| format!("Failed to open browser: {e}"))?;
-        Ok(())
+        browser_open_result(Command::new("xdg-open").arg(url).status())
     }
 
     #[cfg(target_os = "windows")]
     {
-        Command::new("cmd")
-            .args(["/c", "start", url])
-            .status()
-            .map_err(|e| format!("Failed to open browser: {e}"))?;
-        Ok(())
+        browser_open_result(Command::new("cmd").args(["/c", "start", url]).status())
     }
 
     #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
     {
         Err("Unsupported operating system for opening browser".to_string())
+    }
+}
+
+fn browser_open_result(result: std::io::Result<ExitStatus>) -> Result<(), String> {
+    let status = result.map_err(|error| format!("Failed to open browser: {error}"))?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(format!(
+            "Failed to open browser: opener exited with {status}"
+        ))
     }
 }
 
@@ -1079,6 +1078,11 @@ const HTML_PAGE: &str = r#"<!DOCTYPE html>
       color: var(--text-muted);
     }
 
+    .image-preview-empty {
+      padding: 20px;
+      color: var(--text-dim);
+    }
+
     .empty-state {
       padding: 80px 20px;
       text-align: center;
@@ -1260,7 +1264,7 @@ const HTML_PAGE: &str = r#"<!DOCTYPE html>
     function isImageFile(path) {
       if (!path) return false;
       const lower = path.toLowerCase();
-      return ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.ico'].some(ext => lower.endsWith(ext));
+      return ['.png', '.jpg', '.jpeg', '.gif', '.webp'].some(ext => lower.endsWith(ext));
     }
 
     function parseUnifiedDiff(raw) {
@@ -1489,18 +1493,27 @@ const HTML_PAGE: &str = r#"<!DOCTYPE html>
             ${file.status !== 'added' ? `
               <div class="image-card">
                 <div class="image-card-title">Base (Old)</div>
-                <img src="${oldUrl}" onerror="this.parentElement.innerHTML='<div style=padding:20px;color:var(--text-dim)>No preview available</div>'" alt="Old version" />
+                <img src="${oldUrl}" onerror="handleImagePreviewError(this)" alt="Old version" />
               </div>
             ` : ''}
             ${normalizeStatus(file.status) !== 'removed' ? `
               <div class="image-card">
                 <div class="image-card-title">Changed (New)</div>
-                <img src="${newUrl}" onerror="this.parentElement.innerHTML='<div style=padding:20px;color:var(--text-dim)>No preview available</div>'" alt="New version" />
+                <img src="${newUrl}" onerror="handleImagePreviewError(this)" alt="New version" />
               </div>
             ` : ''}
           </div>
         </div>
       `;
+    }
+
+    function handleImagePreviewError(image) {
+      const parent = image.parentElement;
+      if (!parent) return;
+      const fallback = document.createElement('div');
+      fallback.className = 'image-preview-empty';
+      fallback.textContent = 'No preview available';
+      parent.replaceChildren(fallback);
     }
 
     function renderUnifiedDiff(file) {
@@ -1778,6 +1791,18 @@ mod tests {
     fn decodes_url_encoding() {
         assert_eq!(url_decode("hello%20world%2Bfoo"), "hello world+foo");
         assert_eq!(url_decode("caf%C3%A9.png"), "café.png");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn browser_open_result_rejects_nonzero_exit_status() {
+        use std::os::unix::process::ExitStatusExt;
+
+        assert!(browser_open_result(Ok(ExitStatus::from_raw(0))).is_ok());
+        let error = browser_open_result(Ok(ExitStatus::from_raw(7 << 8)))
+            .expect_err("non-zero opener status should fail");
+        assert!(error.contains("Failed to open browser"));
+        assert!(error.contains('7'));
     }
 
     #[test]
