@@ -33,6 +33,8 @@ test("renders exact version, URLs, and verified architecture checksums", () => {
     assert.match(formula, new RegExp(checksums.arm64));
     assert.match(formula, new RegExp(checksums.x86_64));
     assert.match(formula, /pkgshare\.install "share\/norn\/agent-skills"/);
+    assert.match(formula, /pkgshare\.install "share\/norn\/browser-diff"/);
+    assert.match(formula, /browser-diff\/browser-diff\.html/);
     assert.match(formula, /norn skills status --json/);
     assert.doesNotMatch(formula, /\{\{|:no_check/);
   } finally {

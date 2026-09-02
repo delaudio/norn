@@ -1,6 +1,14 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { chmodSync, lstatSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  lstatSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -16,11 +24,15 @@ function fixture(version = "1.0.0") {
   const root = mkdtempSync(join(tmpdir(), "norn-install-"));
   const sourceDirectory = join(root, "build");
   const prefix = join(root, "prefix");
+  const browserAssetsDirectory = join(root, "browser-diff");
   mkdirSync(sourceDirectory);
+  mkdirSync(join(browserAssetsDirectory, "assets"), { recursive: true });
+  writeFileSync(join(browserAssetsDirectory, "browser-diff.html"), '<div id="root"></div>');
+  writeFileSync(join(browserAssetsDirectory, "assets", "viewer.js"), "export {};");
   for (const name of ["norn", "norn-tui", "norn-app", "lachesi", "lac"]) {
     command(join(sourceDirectory, name), `${name} ${version}`);
   }
-  return { root, sourceDirectory, prefix };
+  return { root, sourceDirectory, browserAssetsDirectory, prefix };
 }
 
 test("installs durable executable files and upgrades every selected command", () => {
@@ -28,6 +40,13 @@ test("installs durable executable files and upgrades every selected command", ()
   try {
     const first = installLocal(context);
     assert.deepEqual(first.commands, ["norn", "norn-tui", "norn-app", "lachesi", "lac"]);
+    assert.equal(
+      readFileSync(
+        join(context.prefix, "share", "norn", "browser-diff", "browser-diff.html"),
+        "utf8",
+      ),
+      '<div id="root"></div>',
+    );
     rmSync(context.sourceDirectory, { recursive: true });
     for (const name of first.commands) {
       const installed = join(context.prefix, "bin", name);
@@ -39,6 +58,10 @@ test("installs durable executable files and upgrades every selected command", ()
     for (const name of first.commands) {
       command(join(context.sourceDirectory, name), `${name} 2.0.0`);
     }
+    writeFileSync(
+      join(context.browserAssetsDirectory, "browser-diff.html"),
+      '<div id="root">version 2</div>',
+    );
     installLocal(context);
     for (const name of first.commands) {
       assert.match(
@@ -48,6 +71,13 @@ test("installs durable executable files and upgrades every selected command", ()
         /2\.0\.0/,
       );
     }
+    assert.equal(
+      readFileSync(
+        join(context.prefix, "share", "norn", "browser-diff", "browser-diff.html"),
+        "utf8",
+      ),
+      '<div id="root">version 2</div>',
+    );
   } finally {
     rmSync(context.root, { recursive: true, force: true });
   }
@@ -75,6 +105,13 @@ test("leaves the previous installation intact when staging verification fails", 
         encoding: "utf8",
       }),
       /1\.0\.0/,
+    );
+    assert.equal(
+      readFileSync(
+        join(context.prefix, "share", "norn", "browser-diff", "browser-diff.html"),
+        "utf8",
+      ),
+      '<div id="root"></div>',
     );
   } finally {
     rmSync(context.root, { recursive: true, force: true });

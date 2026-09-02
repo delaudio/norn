@@ -91,6 +91,7 @@ verify_candidate() {
   norn-tui --version | grep -F "$CANDIDATE_VERSION"
   formula_prefix="$(brew --prefix "$formula_ref")"
   test -f "$formula_prefix/share/norn/agent-skills/norn-review/SKILL.md"
+  test -f "$formula_prefix/share/norn/browser-diff/browser-diff.html"
   CODEX_HOME="$skills_root/codex" CLAUDE_CONFIG_DIR="$skills_root/claude" \
     norn skills install --agent all --format json > "$skills_root-install.json"
   CODEX_HOME="$skills_root/codex" CLAUDE_CONFIG_DIR="$skills_root/claude" \

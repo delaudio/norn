@@ -4,6 +4,7 @@ import { spawnSync } from "node:child_process";
 import {
   chmodSync,
   copyFileSync,
+  cpSync,
   existsSync,
   lstatSync,
   mkdirSync,
@@ -23,6 +24,7 @@ const commandGroups = {
   "tui-compat": ["lac"],
 };
 const defaultComponents = Object.keys(commandGroups);
+const scriptDirectory = dirname(fileURLToPath(import.meta.url));
 
 function executableName(command, platform) {
   return platform === "win32" ? `${command}.exe` : command;
@@ -51,6 +53,7 @@ function selectedCommands(components) {
 export function installLocal({
   prefix,
   sourceDirectory,
+  browserAssetsDirectory = resolve(scriptDirectory, "../dist/browser-diff"),
   components = defaultComponents,
   platform = process.platform,
 }) {
@@ -58,6 +61,9 @@ export function installLocal({
     throw new Error("Install prefix must be an absolute path.");
   }
   const commands = selectedCommands(components);
+  const installsBrowserViewer = components.some((component) =>
+    ["tui", "tui-compat"].includes(component),
+  );
   if (commands.length === 0) {
     throw new Error("At least one install component is required.");
   }
@@ -65,10 +71,31 @@ export function installLocal({
   const binDirectory = join(prefix, "bin");
   mkdirSync(binDirectory, { recursive: true, mode: 0o755 });
   const stagingDirectory = mkdtempSync(join(binDirectory, ".norn-install-"));
+  const browserAssetsTarget = join(prefix, "share", "norn", "browser-diff");
+  const browserAssetsParent = dirname(browserAssetsTarget);
+  let browserAssetsStagingDirectory = null;
   const staged = [];
   const replacements = [];
+  let browserAssetsReplacement = null;
 
   try {
+    if (installsBrowserViewer) {
+      const browserEntry = join(browserAssetsDirectory, "browser-diff.html");
+      if (!existsSync(browserEntry) || !lstatSync(browserEntry).isFile()) {
+        throw new Error(
+          "Required browser diff assets are missing. Run `pnpm run browser-diff:build` first.",
+        );
+      }
+      mkdirSync(browserAssetsParent, { recursive: true, mode: 0o755 });
+      browserAssetsStagingDirectory = mkdtempSync(
+        join(browserAssetsParent, ".browser-diff-install-"),
+      );
+      cpSync(browserAssetsDirectory, join(browserAssetsStagingDirectory, "browser-diff"), {
+        recursive: true,
+        errorOnExist: true,
+      });
+    }
+
     for (const command of commands) {
       const name = executableName(command, platform);
       const source = join(sourceDirectory, name);
@@ -96,7 +123,31 @@ export function installLocal({
       renameSync(entry.path, target);
       replacement.installed = true;
     }
+
+    if (browserAssetsStagingDirectory) {
+      const stagedAssets = join(browserAssetsStagingDirectory, "browser-diff");
+      const backup = join(browserAssetsStagingDirectory, "browser-diff.previous");
+      browserAssetsReplacement = {
+        target: browserAssetsTarget,
+        backup,
+        hadPrevious: existsSync(browserAssetsTarget),
+        installed: false,
+      };
+      if (browserAssetsReplacement.hadPrevious) {
+        renameSync(browserAssetsTarget, backup);
+      }
+      renameSync(stagedAssets, browserAssetsTarget);
+      browserAssetsReplacement.installed = true;
+    }
   } catch (error) {
+    if (browserAssetsReplacement) {
+      if (browserAssetsReplacement.installed && existsSync(browserAssetsReplacement.target)) {
+        rmSync(browserAssetsReplacement.target, { recursive: true, force: true });
+      }
+      if (browserAssetsReplacement.hadPrevious && existsSync(browserAssetsReplacement.backup)) {
+        renameSync(browserAssetsReplacement.backup, browserAssetsReplacement.target);
+      }
+    }
     for (const replacement of replacements.reverse()) {
       if (replacement.installed && existsSync(replacement.target)) {
         rmSync(replacement.target, { force: true });
@@ -108,6 +159,9 @@ export function installLocal({
     throw error;
   } finally {
     rmSync(stagingDirectory, { recursive: true, force: true });
+    if (browserAssetsStagingDirectory) {
+      rmSync(browserAssetsStagingDirectory, { recursive: true, force: true });
+    }
   }
 
   return {
@@ -141,6 +195,9 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
         process.env.NORN_BUILD_DIR ??
         join(dirname(fileURLToPath(import.meta.url)), "../src-tauri/target/release"),
     );
+    const browserAssetsDirectory = resolve(
+      args.get("browser-assets-dir") ?? join(scriptDirectory, "../dist/browser-diff"),
+    );
     const components = args.has("components")
       ? args
           .get("components")
@@ -148,7 +205,12 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
           .map((component) => component.trim())
           .filter(Boolean)
       : defaultComponents;
-    const result = installLocal({ prefix, sourceDirectory, components });
+    const result = installLocal({
+      prefix,
+      sourceDirectory,
+      browserAssetsDirectory,
+      components,
+    });
     console.log(`Installed ${result.commands.join(", ")} into ${result.binDirectory}.`);
   } catch (error) {
     console.error(error instanceof Error ? error.message : String(error));
