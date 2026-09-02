@@ -841,14 +841,14 @@ pub struct PullRequestReviewSnapshot {
     pub diff: String,
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DiffstatEntry {
-    status: String,
-    lines_added: u32,
-    lines_removed: u32,
-    old_path: Option<String>,
-    new_path: Option<String>,
+    pub status: String,
+    pub lines_added: u32,
+    pub lines_removed: u32,
+    pub old_path: Option<String>,
+    pub new_path: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -1001,11 +1001,23 @@ fn map_pr_summary(p: BbPrSummary) -> PullRequestSummary {
 
 fn map_diffstat(d: BbDiffstat) -> DiffstatEntry {
     DiffstatEntry {
-        status: d.status,
+        status: normalize_diffstat_status(&d.status).to_string(),
         lines_added: d.lines_added,
         lines_removed: d.lines_removed,
         old_path: d.old.map(|f| f.path),
         new_path: d.new.map(|f| f.path),
+    }
+}
+
+fn normalize_diffstat_status(status: &str) -> &'static str {
+    if status.eq_ignore_ascii_case("added") {
+        "added"
+    } else if status.eq_ignore_ascii_case("removed") || status.eq_ignore_ascii_case("deleted") {
+        "removed"
+    } else if status.eq_ignore_ascii_case("renamed") {
+        "renamed"
+    } else {
+        "modified"
     }
 }
 
@@ -1141,14 +1153,8 @@ fn map_gh_pr_detail(pr: GhPullRequest) -> PullRequestDetail {
 }
 
 fn map_gh_file(file: GhFile) -> DiffstatEntry {
-    let status = match file.status.as_str() {
-        "removed" => "removed",
-        "renamed" => "renamed",
-        "added" => "added",
-        _ => "modified",
-    };
     DiffstatEntry {
-        status: status.to_string(),
+        status: normalize_diffstat_status(&file.status).to_string(),
         lines_added: file.additions,
         lines_removed: file.deletions,
         old_path: file.previous_filename,
@@ -2038,6 +2044,24 @@ pub async fn get_branch_status(
     .await
 }
 
+pub fn get_diffstat_native(
+    provider: Option<ReviewProvider>,
+    workspace: &str,
+    repo: &str,
+    id: u32,
+) -> Result<Vec<DiffstatEntry>, String> {
+    match provider_for(provider, workspace, repo) {
+        ReviewProvider::Bitbucket => {
+            let client = BitbucketClient::from_stored()?;
+            fetch_diffstat_entries(&client, workspace, repo, id)
+        }
+        ReviewProvider::Github => {
+            let client = GithubClient::from_stored()?;
+            fetch_github_diffstat_entries(&client, workspace, repo, id)
+        }
+    }
+}
+
 #[tauri::command]
 pub async fn get_diffstat(
     provider: Option<ReviewProvider>,
@@ -2045,17 +2069,7 @@ pub async fn get_diffstat(
     repo: String,
     id: u32,
 ) -> Result<Vec<DiffstatEntry>, String> {
-    run(move || match provider_for(provider, &workspace, &repo) {
-        ReviewProvider::Bitbucket => {
-            let client = BitbucketClient::from_stored()?;
-            fetch_diffstat_entries(&client, &workspace, &repo, id)
-        }
-        ReviewProvider::Github => {
-            let client = GithubClient::from_stored()?;
-            fetch_github_diffstat_entries(&client, &workspace, &repo, id)
-        }
-    })
-    .await
+    run(move || get_diffstat_native(provider, &workspace, &repo, id)).await
 }
 
 #[tauri::command]
@@ -3227,6 +3241,16 @@ mod tests {
     use std::sync::atomic::{AtomicU64, Ordering};
 
     static TEMP_REPO_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+    #[test]
+    fn diffstat_statuses_are_normalized_to_the_public_contract() {
+        assert_eq!(normalize_diffstat_status("added"), "added");
+        assert_eq!(normalize_diffstat_status("REMOVED"), "removed");
+        assert_eq!(normalize_diffstat_status("deleted"), "removed");
+        assert_eq!(normalize_diffstat_status("renamed"), "renamed");
+        assert_eq!(normalize_diffstat_status("<script>"), "modified");
+        assert_eq!(normalize_diffstat_status(""), "modified");
+    }
 
     #[test]
     fn image_preview_reader_enforces_the_byte_limit() {

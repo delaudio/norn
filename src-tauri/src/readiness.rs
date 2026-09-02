@@ -35,6 +35,58 @@ const LEGACY_SCAN_SKIP_DIRS: &[&str] = &[
     ".idea",
     "coverage",
     ".parcel-cache",
+    ".archgate",
+    ".docflow",
+    ".claude",
+    ".gemini",
+    ".cursor",
+    ".vscode",
+    ".storybook",
+];
+
+// These files implement or document the bounded compatibility contract in this
+// repository. The exception is enabled only when the scanned root is the Norn
+// source tree, so similarly named files in user repositories remain checked.
+const NORN_SOURCE_LEGACY_COMPATIBILITY_FILES: &[&str] = &[
+    "AGENTS.md",
+    "Dockerfile.service",
+    "LICENSE",
+    "Makefile",
+    "compose.self-hosted.yaml",
+    "docs/local-source-installation.md",
+    "docs/self-hosting.md",
+    "docs/specs/0006-cli-headless-review.md",
+    "docs/specs/0007-signed-organization-policy.md",
+    "docs/strategy/open-core-boundary.md",
+    "justfile",
+    "package.json",
+    "scripts/homebrew-formula-lifecycle.sh",
+    "scripts/install-local.mjs",
+    "scripts/install-local.test.mjs",
+    "src-tauri/Cargo.toml",
+    "src-tauri/src/bin/lachesi.rs",
+    "src-tauri/src/bitbucket_oauth_onboarding.rs",
+    "src-tauri/src/config.rs",
+    "src-tauri/src/credentials.rs",
+    "src-tauri/src/github_app_onboarding.rs",
+    "src-tauri/src/lib.rs",
+    "src-tauri/src/local_repo.rs",
+    "src-tauri/src/readiness.rs",
+    "src-tauri/src/review_evaluation.rs",
+    "src-tauri/src/runtime_identity.rs",
+    "src-tauri/src/self_hosted_service.rs",
+    "src/components/pr-sidebar/PrSidebar.tsx",
+    "src/hooks/useDraftComments.ts",
+    "src/hooks/useTheme.ts",
+    "src/lib/aiReviewPromptDisplay.test.ts",
+    "src/lib/aiReviewPromptDisplay.ts",
+    "src/lib/menuBarPrSnapshotStorage.ts",
+    "src/lib/reviewPrompt.test.ts",
+    "src/lib/reviewPrompt.ts",
+    "src/lib/reviewReferencesStorage.ts",
+    "src/lib/reviewService.test.ts",
+    "src/lib/viewedFilesStorage.ts",
+    "src/styles/brand.css",
 ];
 
 const LEGACY_ALLOWLIST_TEXT: &[&str] = &[
@@ -1006,6 +1058,7 @@ fn find_unapproved_legacy_references(repo_path: &Path) -> Vec<String> {
     let mut scan_stack = vec![(repo_path.to_path_buf(), 0usize)];
     let mut matches = Vec::new();
     let mut scanned_files = 0usize;
+    let is_norn_source = is_norn_source_repository(repo_path);
 
     while let Some((path, depth)) = scan_stack.pop() {
         if depth > MAX_EVIDENCE_SCAN_DEPTH {
@@ -1029,8 +1082,11 @@ fn find_unapproved_legacy_references(repo_path: &Path) -> Vec<String> {
                 .unwrap_or(&entry_path)
                 .to_string_lossy()
                 .to_string();
+            let is_compatibility_file = is_norn_source
+                && NORN_SOURCE_LEGACY_COMPATIBILITY_FILES.contains(&relative.as_str());
 
             if path_contains_legacy_reference(&entry_path)
+                && !is_compatibility_file
                 && !is_legacy_reference_allowed(&relative)
             {
                 matches.push(relative.clone());
@@ -1048,6 +1104,9 @@ fn find_unapproved_legacy_references(repo_path: &Path) -> Vec<String> {
             }
             scanned_files += 1;
 
+            if is_compatibility_file {
+                continue;
+            }
             for line in scan_lines_for_unapproved_legacy_references(&entry_path) {
                 matches.push(format!("{relative}:{line}"));
             }
@@ -1057,6 +1116,41 @@ fn find_unapproved_legacy_references(repo_path: &Path) -> Vec<String> {
     matches.sort();
     matches.dedup();
     matches
+}
+
+fn is_norn_source_repository(repo_path: &Path) -> bool {
+    let package = match fs::read_to_string(repo_path.join("package.json")) {
+        Ok(package) => package,
+        Err(_) => return false,
+    };
+    let package_matches = serde_json::from_str::<serde_json::Value>(&package)
+        .ok()
+        .and_then(|package| {
+            package
+                .get("name")
+                .and_then(|name| name.as_str())
+                .map(str::to_owned)
+        })
+        .as_deref()
+        == Some("norn");
+    if !package_matches {
+        return false;
+    }
+
+    let tauri_config = match fs::read_to_string(repo_path.join("src-tauri/tauri.conf.json")) {
+        Ok(config) => config,
+        Err(_) => return false,
+    };
+    serde_json::from_str::<serde_json::Value>(&tauri_config)
+        .ok()
+        .and_then(|config| {
+            config
+                .get("identifier")
+                .and_then(|identifier| identifier.as_str())
+                .map(str::to_owned)
+        })
+        .as_deref()
+        == Some("app.norn.desktop")
 }
 
 fn path_contains_legacy_reference(path: &Path) -> bool {
@@ -1522,7 +1616,10 @@ fn format_readiness_human(report: &DoctorReport) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{collect_report, parse_doctor_args, run_doctor, DoctorArgs, DoctorFormat};
+    use super::{
+        collect_report, find_unapproved_legacy_references, parse_doctor_args, run_doctor,
+        DoctorArgs, DoctorFormat,
+    };
     use std::fs;
     use std::path::PathBuf;
     use std::process;
@@ -1791,6 +1888,39 @@ mod tests {
             .issues
             .iter()
             .all(|issue| issue.code != "repository.legacyNameNotAllowed"));
+    }
+
+    #[test]
+    fn doctor_allows_declared_compatibility_files_only_in_the_norn_source_tree() {
+        let repo = temp_repo();
+        init_git_repo(&repo);
+        fs::write(repo.join("package.json"), r#"{"name":"norn"}"#).expect("write package");
+        fs::write(
+            repo.join("AGENTS.md"),
+            "The legacy Lachesi name remains migration input only.\n",
+        )
+        .expect("write instructions");
+        fs::write(
+            repo.join("unexpected.md"),
+            "The current product is Lachesi.\n",
+        )
+        .expect("write unexpected reference");
+
+        let name_collision_hits = find_unapproved_legacy_references(&repo);
+        assert!(name_collision_hits
+            .iter()
+            .any(|hit| hit.starts_with("AGENTS.md:")));
+
+        fs::create_dir_all(repo.join("src-tauri")).expect("create tauri directory");
+        fs::write(
+            repo.join("src-tauri/tauri.conf.json"),
+            r#"{"identifier":"app.norn.desktop"}"#,
+        )
+        .expect("write Tauri config");
+        let hits = find_unapproved_legacy_references(&repo);
+
+        assert!(hits.iter().all(|hit| !hit.starts_with("AGENTS.md:")));
+        assert!(hits.iter().any(|hit| hit.starts_with("unexpected.md:")));
     }
 
     #[test]

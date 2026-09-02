@@ -8,15 +8,13 @@ If status files and git disagree, git is authoritative; correct this file.
 
 ## Active state
 
-- **Branch:** `docs/ship-agent-review-permissions`.
-- **Active item:** close the completed agent review permission handoff after
-  PR #227 merged to `main`.
-- **Plan items:** move the shipped plan entry to `done`, record the completion
-  event, and return the live snapshot to the remaining queue.
-- **Verification:** PR #227 merged at `8975b92`; typecheck, 104 frontend tests
-  plus tooling suites, and Archgate 17/17 pass on merged `main`. The focused
-  Rust coverage, runtime consent/sandbox probes, Clippy, Tauri IPC tests, skill
-  validation, and bounded Norn review also passed before integration.
+- **Branch:** `feat/tui-browser-diff-viewer`.
+- **Active item:** complete and harden the authenticated browser diff viewer.
+- **Plan items:** `.docflow/plan/todo/0011-browser-diff-viewer.md`.
+- **Verification:** build, typecheck, lint, 104 frontend tests plus tooling
+  suites, 579 passing Rust library tests (2 ignored), Clippy, and Archgate
+  17/17 pass after browser viewer review remediation. The final Norn
+  working-tree review returned no findings.
 
 ## Last shipped
 

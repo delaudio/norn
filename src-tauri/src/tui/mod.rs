@@ -1,3 +1,4 @@
+mod diff_server;
 mod image_diff;
 mod loading;
 mod render;
@@ -9,8 +10,11 @@ use std::{
     io::Write,
     path::Path,
     process::{Command, Stdio},
+    sync::{Arc, RwLock},
     time::Duration,
 };
+
+use diff_server::{open_browser_url, WebDiffServer, WebDiffState};
 
 use crossterm::event::{self, Event, KeyCode, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::{
@@ -834,6 +838,9 @@ struct TuiApp {
     ai_poll_tick: usize,
     error: Option<String>,
     status: String,
+    diff_prompt_open: bool,
+    web_diff_server: Option<WebDiffServer>,
+    web_diff_state: Arc<RwLock<WebDiffState>>,
     should_quit: bool,
 }
 
@@ -943,6 +950,9 @@ impl TuiApp {
             ai_poll_tick: 0,
             error: None,
             status: "Ready".to_string(),
+            diff_prompt_open: false,
+            web_diff_server: None,
+            web_diff_state: Arc::new(RwLock::new(WebDiffState::default())),
             should_quit: false,
         }
     }
@@ -1605,6 +1615,24 @@ impl TuiApp {
             }
             return;
         }
+        if self.diff_prompt_open {
+            match code {
+                KeyCode::Char('g') => {
+                    self.diff_prompt_open = false;
+                    self.open_diff_view();
+                }
+                KeyCode::Char('b') => {
+                    self.diff_prompt_open = false;
+                    self.open_browser_diff();
+                }
+                KeyCode::Esc | KeyCode::Char('q') => {
+                    self.diff_prompt_open = false;
+                    self.status = "Diff view cancelled".to_string();
+                }
+                _ => {}
+            }
+            return;
+        }
         if self.composer.is_some() {
             self.handle_composer_key(code);
             return;
@@ -1618,7 +1646,8 @@ impl TuiApp {
             KeyCode::Char('x') => self.discard_drafts(),
             KeyCode::Char('a') => self.start_ai_review(),
             KeyCode::Char('f') => self.cycle_pr_filter(),
-            KeyCode::Char('g') => self.open_diff_view(),
+            KeyCode::Char('g') => self.prompt_or_toggle_diff(),
+            KeyCode::Char('b') => self.open_browser_diff(),
             KeyCode::Char('u') => self.toggle_diff_view_mode(),
             KeyCode::Char('i') => self.toggle_image_side(),
             KeyCode::Char('v') => self.toggle_detail_view(),
@@ -2298,6 +2327,92 @@ impl TuiApp {
         });
     }
 
+    fn prompt_or_toggle_diff(&mut self) {
+        if self.detail_view == DetailView::Diff {
+            self.detail_view = DetailView::PullRequest;
+            self.focus = FocusPane::PullRequests;
+            self.status = "Closed PR diff".to_string();
+            return;
+        }
+        if self.repos.is_empty() || self.pull_requests.is_empty() {
+            self.status = "Select a pull request first".to_string();
+            return;
+        }
+        self.diff_prompt_open = true;
+        self.status = "Open diff: [g] Native TUI · [b] Browser · [Esc] Cancel".to_string();
+    }
+
+    fn open_browser_diff(&mut self) {
+        let Some(web_state) = self.selected_web_diff_state() else {
+            self.status = "Select a pull request first".to_string();
+            return;
+        };
+        let pr_id = web_state.pr_id;
+
+        if self.web_diff_server.is_none() {
+            match WebDiffServer::start(Arc::clone(&self.web_diff_state)) {
+                Ok(server) => self.web_diff_server = Some(server),
+                Err(error) => {
+                    self.status = format!("Failed to start diff server: {error}");
+                    return;
+                }
+            }
+        }
+
+        if let Some(server) = self.web_diff_server.as_ref() {
+            server.update_pr(web_state);
+            let url = server.url();
+            match open_browser_url(&url) {
+                Ok(()) => {
+                    self.status = format!("Opened PR #{pr_id} diff in browser");
+                }
+                Err(error) => {
+                    self.status =
+                        format!("Browser open failed: {error}. Open the diff manually at {url}");
+                }
+            }
+        }
+    }
+
+    fn selected_web_diff_state(&self) -> Option<WebDiffState> {
+        let repo = self.repos.get(self.selected_repo)?;
+        let pr = self.pull_requests.get(self.selected_pr)?;
+        let target = (repo.workspace.clone(), repo.repo.clone(), pr.id);
+        let selected_pr_is_loaded = self.active_ai_target.as_ref() == Some(&target);
+        let detail = if selected_pr_is_loaded {
+            self.detail.as_ref()
+        } else {
+            None
+        };
+
+        Some(WebDiffState {
+            version: 0,
+            provider: Some(repo.provider),
+            workspace: repo.workspace.clone(),
+            repo: repo.repo.clone(),
+            pr_id: pr.id,
+            pr_title: detail
+                .map(|loaded| loaded.title.clone())
+                .unwrap_or_else(|| pr.title.clone()),
+            pr_author: detail
+                .map(|loaded| loaded.author_display_name.clone())
+                .unwrap_or_else(|| pr.author_display_name.clone()),
+            source_branch: detail
+                .map(|loaded| loaded.source_branch.clone())
+                .unwrap_or_default(),
+            target_branch: detail
+                .map(|loaded| loaded.destination_branch.clone())
+                .unwrap_or_default(),
+            diff: if selected_pr_is_loaded {
+                self.diff.clone()
+            } else {
+                None
+            },
+            diffstat: None,
+            population_failed: false,
+        })
+    }
+
     fn open_diff_view(&mut self) {
         if self.detail_view == DetailView::Diff {
             self.detail_view = DetailView::PullRequest;
@@ -2558,6 +2673,7 @@ impl TuiApp {
             },
             error: self.error.as_deref(),
             status: self.status.as_str(),
+            diff_prompt_open: self.diff_prompt_open,
         }
     }
 }
@@ -3365,14 +3481,66 @@ review:
     #[test]
     fn diff_view_toggle_opens_and_closes_full_page() {
         let mut app = TuiApp::from_repos(vec![repo("delaudio", "norn")]);
+        app.pull_requests = vec![pr(1, "Test PR")];
 
+        // First press 'g' opens prompt
         app.handle_key(KeyCode::Char('g'));
+        assert!(app.diff_prompt_open);
+
+        // Second press 'g' selects native diff
+        app.handle_key(KeyCode::Char('g'));
+        assert!(!app.diff_prompt_open);
         assert_eq!(app.detail_view, DetailView::Diff);
         assert_eq!(app.focus, FocusPane::Diff);
 
+        // Press 'g' while in diff view toggles back to PR view
         app.handle_key(KeyCode::Char('g'));
         assert_eq!(app.detail_view, DetailView::PullRequest);
         assert_eq!(app.focus, FocusPane::PullRequests);
+    }
+
+    #[test]
+    fn diff_choice_prompt_browser_selection_updates_web_state() {
+        let mut app = TuiApp::from_repos(vec![repo("delaudio", "norn")]);
+        app.pull_requests = vec![pr(42, "Support web diff")];
+
+        app.handle_key(KeyCode::Char('g'));
+        assert!(app.diff_prompt_open);
+
+        app.handle_key(KeyCode::Char('b'));
+        assert!(!app.diff_prompt_open);
+
+        let web_state = app.web_diff_state.read().unwrap();
+        assert_eq!(web_state.pr_id, 42);
+        assert_eq!(web_state.pr_title, "Support web diff");
+    }
+
+    #[test]
+    fn browser_diff_does_not_reuse_loaded_diff_for_another_selected_pr() {
+        let mut app = TuiApp::from_repos(vec![repo("delaudio", "norn")]);
+        app.pull_requests = vec![pr(41, "Loaded PR"), pr(42, "Selected PR")];
+        app.active_ai_target = Some(("delaudio".to_string(), "norn".to_string(), 41));
+        app.diff = Some("diff for PR 41".to_string());
+        app.selected_pr = 1;
+
+        let web_state = app.selected_web_diff_state().expect("selected PR state");
+
+        assert_eq!(web_state.pr_id, 42);
+        assert_eq!(web_state.pr_title, "Selected PR");
+        assert_eq!(web_state.diff, None);
+    }
+
+    #[test]
+    fn diff_choice_prompt_escape_cancels_prompt() {
+        let mut app = TuiApp::from_repos(vec![repo("delaudio", "norn")]);
+        app.pull_requests = vec![pr(1, "Test PR")];
+
+        app.handle_key(KeyCode::Char('g'));
+        assert!(app.diff_prompt_open);
+
+        app.handle_key(KeyCode::Esc);
+        assert!(!app.diff_prompt_open);
+        assert_eq!(app.status, "Diff view cancelled");
     }
 
     #[test]

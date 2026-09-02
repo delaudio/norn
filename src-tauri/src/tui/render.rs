@@ -4,7 +4,8 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     prelude::{Color, Frame, Line, Modifier, Span, Style},
     widgets::{
-        Block, Borders, List, ListItem, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState,
+        Block, Borders, Clear, List, ListItem, Paragraph, Scrollbar, ScrollbarOrientation,
+        ScrollbarState,
     },
 };
 use ratatui_image::Image as TerminalImage;
@@ -45,6 +46,7 @@ pub struct TuiState<'a> {
     pub loading: LoadingView<'a>,
     pub error: Option<&'a str>,
     pub status: &'a str,
+    pub diff_prompt_open: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -185,6 +187,9 @@ pub fn render(frame: &mut Frame<'_>, state: TuiState<'_>) {
     if state.detail_view == DetailView::Diff {
         render_diff_page(frame, body, state);
         render_footer(frame, footer, state);
+        if state.diff_prompt_open {
+            render_diff_choice_modal(frame, area);
+        }
         return;
     }
 
@@ -195,6 +200,10 @@ pub fn render(frame: &mut Frame<'_>, state: TuiState<'_>) {
     render_left_panel(frame, left, state);
     render_review(frame, review, state);
     render_footer(frame, footer, state);
+
+    if state.diff_prompt_open {
+        render_diff_choice_modal(frame, area);
+    }
 }
 
 pub fn mouse_target(area: Rect, x: u16, y: u16, state: TuiState<'_>) -> Option<MouseTarget> {
@@ -1232,6 +1241,20 @@ impl DiffFileSection<'_> {
 }
 
 fn render_footer(frame: &mut Frame<'_>, area: Rect, state: TuiState<'_>) {
+    if state.diff_prompt_open {
+        let spans = vec![
+            Span::styled("Open diff in: ", panel_muted_style()),
+            Span::styled("g", accent_style().add_modifier(Modifier::BOLD)),
+            Span::styled(" native TUI  ", muted_style()),
+            Span::styled("b", accent_style().add_modifier(Modifier::BOLD)),
+            Span::styled(" browser  ", muted_style()),
+            Span::styled("Esc", accent_style()),
+            Span::styled(" cancel  |  ", muted_style()),
+            Span::styled(state.status, info_style()),
+        ];
+        frame.render_widget(Paragraph::new(Line::from(spans)).style(base_style()), area);
+        return;
+    }
     let diff_action = if state.detail_view == DetailView::Diff {
         " close diff  "
     } else {
@@ -1316,6 +1339,51 @@ fn render_footer(frame: &mut Frame<'_>, area: Rect, state: TuiState<'_>) {
         Paragraph::new(Line::from(spans)).style(base_style())
     };
     frame.render_widget(footer, area);
+}
+
+pub fn render_diff_choice_modal(frame: &mut Frame<'_>, area: Rect) {
+    let width = 58.min(area.width.saturating_sub(4));
+    let height = 9.min(area.height.saturating_sub(2));
+    let modal_area = Rect::new(
+        area.x + area.width.saturating_sub(width) / 2,
+        area.y + area.height.saturating_sub(height) / 2,
+        width,
+        height,
+    );
+    frame.render_widget(Clear, modal_area);
+    let block = panel_block(" Open PR Diff ", true);
+    let inner = block.inner(modal_area);
+    frame.render_widget(block, modal_area);
+
+    let lines = vec![
+        Line::from(Span::styled(
+            "Choose how you want to view the diff:",
+            panel_muted_style(),
+        )),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("  [g] ", panel_accent_style().add_modifier(Modifier::BOLD)),
+            Span::styled(
+                "Native TUI diff ",
+                panel_text_style().add_modifier(Modifier::BOLD),
+            ),
+            Span::styled("(in-terminal viewer)", panel_muted_style()),
+        ]),
+        Line::from(vec![
+            Span::styled("  [b] ", panel_accent_style().add_modifier(Modifier::BOLD)),
+            Span::styled(
+                "Browser diff ",
+                panel_text_style().add_modifier(Modifier::BOLD),
+            ),
+            Span::styled("(rich interactive web viewer)", panel_muted_style()),
+        ]),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("  [Esc] ", panel_accent_style()),
+            Span::styled("Cancel", panel_muted_style()),
+        ]),
+    ];
+    frame.render_widget(Paragraph::new(lines).style(panel_style()), inner);
 }
 
 fn append_draft_preview(lines: &mut Vec<Line<'_>>, drafts: &[DraftComment]) {
@@ -2230,6 +2298,7 @@ mod tests {
                         loading: LoadingView::idle(),
                         error: None,
                         status: "Ready",
+                        diff_prompt_open: false,
                     },
                 );
             })
@@ -2300,6 +2369,7 @@ mod tests {
                         loading: LoadingView::idle(),
                         error: None,
                         status: "Ready",
+                        diff_prompt_open: false,
                     },
                 );
             })
@@ -2395,6 +2465,7 @@ mod tests {
                         loading: LoadingView::idle(),
                         error: None,
                         status: "Ready",
+                        diff_prompt_open: false,
                     },
                 );
             })
@@ -2471,6 +2542,7 @@ mod tests {
                         loading: LoadingView::idle(),
                         error: None,
                         status: "Loaded",
+                        diff_prompt_open: false,
                     },
                 );
             })
@@ -2521,6 +2593,7 @@ mod tests {
                         loading: LoadingView::idle(),
                         error: None,
                         status: "Composing",
+                        diff_prompt_open: false,
                     },
                 );
             })
@@ -2604,6 +2677,7 @@ mod tests {
             loading: LoadingView::idle(),
             error: None,
             status: "Ready",
+            diff_prompt_open: false,
         };
 
         assert_eq!(
@@ -2646,6 +2720,7 @@ mod tests {
             loading: LoadingView::idle(),
             error: None,
             status: "Ready",
+            diff_prompt_open: false,
         };
 
         assert_eq!(
@@ -2760,6 +2835,7 @@ mod tests {
                         loading: LoadingView::idle(),
                         error: None,
                         status: "Loaded",
+                        diff_prompt_open: false,
                     },
                 );
             })
@@ -2826,6 +2902,7 @@ mod tests {
                         loading: LoadingView::idle(),
                         error: None,
                         status: "Loaded",
+                        diff_prompt_open: false,
                     },
                 );
             })
@@ -2893,6 +2970,7 @@ mod tests {
                         loading: LoadingView::idle(),
                         error: None,
                         status: "Loaded",
+                        diff_prompt_open: false,
                     },
                 );
             })
@@ -2961,6 +3039,7 @@ mod tests {
                         loading: LoadingView::idle(),
                         error: None,
                         status: "Loaded",
+                        diff_prompt_open: false,
                     },
                 );
             })
@@ -3035,6 +3114,7 @@ mod tests {
                         loading: LoadingView::idle(),
                         error: None,
                         status: "Loaded",
+                        diff_prompt_open: false,
                     },
                 );
             })
@@ -3099,6 +3179,7 @@ mod tests {
                         loading: LoadingView::idle(),
                         error: None,
                         status: "Loaded",
+                        diff_prompt_open: false,
                     },
                 );
             })
@@ -3166,6 +3247,7 @@ mod tests {
                         loading: LoadingView::idle(),
                         error: None,
                         status: "Loaded",
+                        diff_prompt_open: false,
                     },
                 );
             })
@@ -3232,6 +3314,7 @@ mod tests {
                         loading: LoadingView::idle(),
                         error: None,
                         status: "Loaded",
+                        diff_prompt_open: false,
                     },
                 );
             })
@@ -3312,6 +3395,7 @@ mod tests {
                         loading: LoadingView::idle(),
                         error: None,
                         status: "Loaded",
+                        diff_prompt_open: false,
                     },
                 );
             })
