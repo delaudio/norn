@@ -39,3 +39,8 @@ browser sessions, or changing provider credential handling.
 ## Dependencies
 
 - `../../adr/0016-browser-diff-viewer.md`
+
+## Shipped
+
+Shipped at HEAD `3497fc85ba160dd82794611431b3fdd059a47ea9` through
+[PR #236](https://github.com/delaudio/norn/pull/236).
