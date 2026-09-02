@@ -27,6 +27,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run && pnpm run test:tooling",
     "test:tooling": "node scripts/run-tooling-tests.mjs",
+    "test:rust:cli": "pnpm run build && cargo test --locked --manifest-path src-tauri/Cargo.toml --no-default-features --features custom-protocol --test onboarding_e2e",
     "test:tauri": "cargo test --manifest-path src-tauri/Cargo.toml tauri_ipc_smoke -- --nocapture",
     "evaluate": "cargo run --manifest-path src-tauri/Cargo.toml --bin norn -- evaluate",
     "test:watch": "vitest",

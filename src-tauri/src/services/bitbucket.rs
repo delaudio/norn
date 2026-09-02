@@ -841,14 +841,14 @@ pub struct PullRequestReviewSnapshot {
     pub diff: String,
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DiffstatEntry {
-    status: String,
-    lines_added: u32,
-    lines_removed: u32,
-    old_path: Option<String>,
-    new_path: Option<String>,
+    pub status: String,
+    pub lines_added: u32,
+    pub lines_removed: u32,
+    pub old_path: Option<String>,
+    pub new_path: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -2038,6 +2038,24 @@ pub async fn get_branch_status(
     .await
 }
 
+pub fn get_diffstat_native(
+    provider: Option<ReviewProvider>,
+    workspace: &str,
+    repo: &str,
+    id: u32,
+) -> Result<Vec<DiffstatEntry>, String> {
+    match provider_for(provider, workspace, repo) {
+        ReviewProvider::Bitbucket => {
+            let client = BitbucketClient::from_stored()?;
+            fetch_diffstat_entries(&client, workspace, repo, id)
+        }
+        ReviewProvider::Github => {
+            let client = GithubClient::from_stored()?;
+            fetch_github_diffstat_entries(&client, workspace, repo, id)
+        }
+    }
+}
+
 #[tauri::command]
 pub async fn get_diffstat(
     provider: Option<ReviewProvider>,
@@ -2045,17 +2063,7 @@ pub async fn get_diffstat(
     repo: String,
     id: u32,
 ) -> Result<Vec<DiffstatEntry>, String> {
-    run(move || match provider_for(provider, &workspace, &repo) {
-        ReviewProvider::Bitbucket => {
-            let client = BitbucketClient::from_stored()?;
-            fetch_diffstat_entries(&client, &workspace, &repo, id)
-        }
-        ReviewProvider::Github => {
-            let client = GithubClient::from_stored()?;
-            fetch_github_diffstat_entries(&client, &workspace, &repo, id)
-        }
-    })
-    .await
+    run(move || get_diffstat_native(provider, &workspace, &repo, id)).await
 }
 
 #[tauri::command]

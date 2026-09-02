@@ -3,6 +3,7 @@
 import { spawnSync } from "node:child_process";
 
 const testFiles = [
+  "scripts/ci-workflow.test.mjs",
   "scripts/distribution-modes.test.mjs",
   "scripts/install-local.test.mjs",
   "scripts/render-homebrew-cask.test.mjs",

@@ -41,3 +41,8 @@ test("command distributions explicitly disable desktop routing", () => {
   assert.match(releaseWorkflow, /cargo test .*--bin norn --all-features/);
   assert.doesNotMatch(releaseWorkflow, /cargo test .*--all-targets --all-features/);
 });
+
+test("development TUI keeps readiness enabled by default", () => {
+  assert.match(packageManifest.scripts.tui, /--bin norn-tui/);
+  assert.doesNotMatch(packageManifest.scripts.tui, /--skip-readiness/);
+});
