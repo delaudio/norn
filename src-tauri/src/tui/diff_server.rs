@@ -1,6 +1,9 @@
 use std::{
+    collections::HashMap,
+    fs,
     io::{Read, Write},
     net::{TcpListener, TcpStream},
+    path::{Path, PathBuf},
     process::{Command, ExitStatus},
     sync::{
         atomic::{AtomicBool, AtomicUsize, Ordering},
@@ -22,7 +25,181 @@ use crate::{
 
 const MAX_REQUEST_HEAD_BYTES: usize = 16 * 1024;
 const MAX_ACTIVE_CONNECTIONS: usize = 16;
+const MAX_BROWSER_ASSET_BYTES: u64 = 16 * 1024 * 1024;
+const MAX_BROWSER_ASSET_TOTAL_BYTES: u64 = 32 * 1024 * 1024;
+const MAX_BROWSER_ASSET_FILES: usize = 128;
 const SESSION_TOKEN_BYTES: usize = 32;
+const SECURITY_HEADERS: &str = "Content-Security-Policy: default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'\r\nReferrer-Policy: no-referrer\r\nX-Content-Type-Options: nosniff\r\nX-Frame-Options: DENY\r\n";
+
+#[derive(Clone)]
+struct BrowserAsset {
+    content_type: &'static str,
+    body: Arc<[u8]>,
+}
+
+struct BrowserAssets {
+    files: HashMap<String, BrowserAsset>,
+}
+
+impl BrowserAssets {
+    #[cfg(not(test))]
+    fn load_default() -> Result<Self, String> {
+        let root = resolve_browser_asset_root()?;
+        Self::load_from(&root)
+    }
+
+    fn load_from(root: &Path) -> Result<Self, String> {
+        let root = root
+            .canonicalize()
+            .map_err(|error| format!("Failed to resolve packaged browser diff assets: {error}"))?;
+        let mut files = HashMap::new();
+        let mut total_bytes = 0;
+        collect_browser_assets(&root, &root, &mut files, &mut total_bytes)?;
+        if !files.contains_key("/browser-diff.html") {
+            return Err("Browser diff assets do not contain browser-diff.html.".to_string());
+        }
+        Ok(Self { files })
+    }
+
+    fn get(&self, route: &str) -> Option<&BrowserAsset> {
+        let route = match route {
+            "/" | "/index.html" => "/browser-diff.html",
+            route => route,
+        };
+        self.files.get(route)
+    }
+
+    #[cfg(test)]
+    fn fixture() -> Self {
+        Self {
+            files: HashMap::from([
+                (
+                    "/browser-diff.html".to_string(),
+                    BrowserAsset {
+                        content_type: "text/html; charset=utf-8",
+                        body: Arc::from(
+                            b"<!doctype html><div id=\"root\"></div><script type=\"module\" src=\"./assets/viewer.js\"></script>"
+                                .as_slice(),
+                        ),
+                    },
+                ),
+                (
+                    "/assets/viewer.js".to_string(),
+                    BrowserAsset {
+                        content_type: "text/javascript; charset=utf-8",
+                        body: Arc::from(b"document.title = 'Norn';".as_slice()),
+                    },
+                ),
+            ]),
+        }
+    }
+}
+
+#[cfg(not(test))]
+fn resolve_browser_asset_root() -> Result<std::path::PathBuf, String> {
+    let mut candidates = Vec::new();
+    if let Ok(executable) = std::env::current_exe() {
+        candidates.extend(installed_browser_asset_candidates(&executable));
+    }
+    candidates
+        .push(std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../dist/browser-diff"));
+
+    candidates
+        .iter()
+        .find(|candidate| candidate.is_dir())
+        .cloned()
+        .ok_or_else(|| {
+            "Browser diff viewer assets are missing. Reinstall or upgrade Norn, or run `pnpm run browser-diff:build` from a source checkout."
+                .to_string()
+        })
+}
+
+fn installed_browser_asset_candidates(executable: &Path) -> Vec<PathBuf> {
+    let Some(executable_dir) = executable.parent() else {
+        return Vec::new();
+    };
+    if executable_dir.file_name().is_some_and(|name| name == "bin") {
+        return executable_dir
+            .parent()
+            .map(|prefix| vec![prefix.join("share/norn/browser-diff")])
+            .unwrap_or_default();
+    }
+    vec![executable_dir.join("share/norn/browser-diff")]
+}
+
+fn collect_browser_assets(
+    root: &Path,
+    directory: &Path,
+    files: &mut HashMap<String, BrowserAsset>,
+    total_bytes: &mut u64,
+) -> Result<(), String> {
+    let entries = fs::read_dir(directory)
+        .map_err(|error| format!("Failed to read browser diff assets: {error}"))?;
+    for entry in entries {
+        let entry = entry.map_err(|error| format!("Failed to read browser diff asset: {error}"))?;
+        let path = entry.path();
+        let file_type = entry
+            .file_type()
+            .map_err(|error| format!("Failed to inspect browser diff asset: {error}"))?;
+        if file_type.is_symlink() {
+            return Err("Browser diff assets must not contain symbolic links.".to_string());
+        }
+        if file_type.is_dir() {
+            collect_browser_assets(root, &path, files, total_bytes)?;
+            continue;
+        }
+        if !file_type.is_file() {
+            continue;
+        }
+        if files.len() >= MAX_BROWSER_ASSET_FILES {
+            return Err("Browser diff asset count exceeds the configured limit.".to_string());
+        }
+        let metadata = entry
+            .metadata()
+            .map_err(|error| format!("Failed to inspect browser diff asset: {error}"))?;
+        if metadata.len() > MAX_BROWSER_ASSET_BYTES {
+            return Err("A browser diff asset exceeds the configured size limit.".to_string());
+        }
+        *total_bytes = total_bytes.saturating_add(metadata.len());
+        if *total_bytes > MAX_BROWSER_ASSET_TOTAL_BYTES {
+            return Err("Browser diff assets exceed the configured total size limit.".to_string());
+        }
+        let content_type = browser_asset_content_type(&path)
+            .ok_or_else(|| "A browser diff asset has an unsupported file type.".to_string())?;
+        let relative = path
+            .strip_prefix(root)
+            .map_err(|_| "Browser diff asset escaped its root directory.".to_string())?;
+        let route = browser_asset_route(relative)?;
+        let body = fs::read(&path)
+            .map_err(|error| format!("Failed to read a packaged browser diff asset: {error}"))?;
+        files.insert(
+            route,
+            BrowserAsset {
+                content_type,
+                body: Arc::from(body),
+            },
+        );
+    }
+    Ok(())
+}
+
+fn browser_asset_route(relative: &Path) -> Result<String, String> {
+    let relative = relative
+        .to_str()
+        .ok_or_else(|| "Browser diff asset paths must be valid UTF-8.".to_string())?;
+    Ok(format!("/{}", relative.replace('\\', "/")))
+}
+
+fn browser_asset_content_type(path: &Path) -> Option<&'static str> {
+    match path.extension().and_then(|extension| extension.to_str())? {
+        "html" => Some("text/html; charset=utf-8"),
+        "css" => Some("text/css; charset=utf-8"),
+        "js" => Some("text/javascript; charset=utf-8"),
+        "woff" => Some("font/woff"),
+        "woff2" => Some("font/woff2"),
+        _ => None,
+    }
+}
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -50,6 +227,23 @@ pub struct WebDiffServer {
 
 impl WebDiffServer {
     pub fn start(state: Arc<RwLock<WebDiffState>>) -> Result<Self, String> {
+        let browser_assets = {
+            #[cfg(test)]
+            {
+                Arc::new(BrowserAssets::fixture())
+            }
+            #[cfg(not(test))]
+            {
+                Arc::new(BrowserAssets::load_default()?)
+            }
+        };
+        Self::start_with_assets(state, browser_assets)
+    }
+
+    fn start_with_assets(
+        state: Arc<RwLock<WebDiffState>>,
+        browser_assets: Arc<BrowserAssets>,
+    ) -> Result<Self, String> {
         let listener = TcpListener::bind("127.0.0.1:0")
             .map_err(|e| format!("Failed to bind web diff server: {e}"))?;
 
@@ -80,10 +274,11 @@ impl WebDiffServer {
                         let st = Arc::clone(&thread_state);
                         let token = Arc::clone(&thread_token);
                         let fetch_lock = Arc::clone(&populate_lock);
+                        let assets = Arc::clone(&browser_assets);
                         let slot = ConnectionSlot::new(Arc::clone(&available_connection_slots));
                         thread::spawn(move || {
                             let _slot = slot;
-                            let _ = handle_connection(stream, st, &token, fetch_lock);
+                            let _ = handle_connection(stream, st, &token, fetch_lock, assets);
                         });
                     }
                     Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
@@ -216,6 +411,7 @@ fn handle_connection(
     state: Arc<RwLock<WebDiffState>>,
     session_token: &str,
     populate_lock: Arc<Mutex<()>>,
+    browser_assets: Arc<BrowserAssets>,
 ) -> std::io::Result<()> {
     let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
     let request_head = match read_request_head(&mut stream) {
@@ -255,18 +451,32 @@ fn handle_connection(
     let Some(route) = authenticated_route(path, session_token) else {
         return write_empty_response(&mut stream, "404 Not Found");
     };
+    if route == "/" && !path.ends_with('/') {
+        return write_session_redirect(&mut stream, session_token);
+    }
     if head_only && matches!(route, "/api/state" | "/api/diff" | "/api/file-preview") {
         return write_empty_response(&mut stream, "405 Method Not Allowed");
+    }
+
+    if let Some(asset) = browser_assets.get(route) {
+        return write_response(
+            &mut stream,
+            "200 OK",
+            asset.content_type,
+            "no-store",
+            &asset.body,
+            head_only,
+        );
     }
 
     match route {
         "/" | "/index.html" => {
             write_response(
                 &mut stream,
-                "200 OK",
-                "text/html; charset=utf-8",
+                "500 Internal Server Error",
+                "text/plain; charset=utf-8",
                 "no-store",
-                HTML_PAGE.as_bytes(),
+                b"Browser diff viewer assets are unavailable.",
                 head_only,
             )?;
         }
@@ -483,6 +693,13 @@ fn write_empty_response(stream: &mut TcpStream, status: &str) -> std::io::Result
     )
 }
 
+fn write_session_redirect(stream: &mut TcpStream, session_token: &str) -> std::io::Result<()> {
+    let headers = format!(
+        "HTTP/1.1 307 Temporary Redirect\r\nLocation: /session/{session_token}/\r\nContent-Length: 0\r\nCache-Control: no-store\r\n{SECURITY_HEADERS}Connection: close\r\n\r\n"
+    );
+    stream.write_all(headers.as_bytes())
+}
+
 fn write_response(
     stream: &mut TcpStream,
     status: &str,
@@ -492,7 +709,7 @@ fn write_response(
     head_only: bool,
 ) -> std::io::Result<()> {
     let headers = format!(
-        "HTTP/1.1 {status}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nCache-Control: {cache_control}\r\nContent-Security-Policy: default-src 'self'; img-src 'self' data:; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'\r\nReferrer-Policy: no-referrer\r\nX-Content-Type-Options: nosniff\r\nX-Frame-Options: DENY\r\nConnection: close\r\n\r\n",
+        "HTTP/1.1 {status}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nCache-Control: {cache_control}\r\n{SECURITY_HEADERS}Connection: close\r\n\r\n",
         body.len()
     );
     stream.write_all(headers.as_bytes())?;
@@ -696,1159 +913,6 @@ fn hex_value(byte: u8) -> Option<u8> {
     }
 }
 
-const HTML_PAGE: &str = r#"<!DOCTYPE html>
-<html lang="en" data-theme="dark">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Norn · Web Diff Viewer</title>
-  <style>
-    :root {
-      --bg: #09090b;
-      --bg-card: #121215;
-      --bg-card-header: #18181b;
-      --bg-sidebar: #0f0f12;
-      --bg-hover: #1f1f23;
-      --border: #27272a;
-      --border-subtle: #1e1e24;
-      --text: #f4f4f5;
-      --text-muted: #a1a1aa;
-      --text-dim: #71717a;
-      --accent: #06b6d4;
-      --accent-glow: rgba(6, 182, 212, 0.15);
-      --add-bg: rgba(34, 197, 94, 0.12);
-      --add-text: #4ade80;
-      --add-gutter: rgba(34, 197, 94, 0.25);
-      --add-word: rgba(34, 197, 94, 0.35);
-      --del-bg: rgba(239, 68, 68, 0.12);
-      --del-text: #f87171;
-      --del-gutter: rgba(239, 68, 68, 0.25);
-      --del-word: rgba(239, 68, 68, 0.35);
-      --hunk-bg: #1e1b4b;
-      --hunk-text: #a5b4fc;
-      --badge-bg: #27272a;
-      --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-      --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
-    }
-
-    [data-theme="light"] {
-      --bg: #f8fafc;
-      --bg-card: #ffffff;
-      --bg-card-header: #f1f5f9;
-      --bg-sidebar: #ffffff;
-      --bg-hover: #e2e8f0;
-      --border: #cbd5e1;
-      --border-subtle: #e2e8f0;
-      --text: #0f172a;
-      --text-muted: #475569;
-      --text-dim: #94a3b8;
-      --accent: #0284c7;
-      --accent-glow: rgba(2, 132, 199, 0.15);
-      --add-bg: #f0fdf4;
-      --add-text: #15803d;
-      --add-gutter: #bbf7d0;
-      --add-word: #86efac;
-      --del-bg: #fef2f2;
-      --del-text: #b91c1c;
-      --del-gutter: #fecaca;
-      --del-word: #fca5a5;
-      --hunk-bg: #e0e7ff;
-      --hunk-text: #4338ca;
-      --badge-bg: #e2e8f0;
-    }
-
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    body {
-      background: var(--bg);
-      color: var(--text);
-      font-family: var(--font-sans);
-      font-size: 14px;
-      line-height: 1.5;
-      display: flex;
-      flex-direction: column;
-      height: 100vh;
-      overflow: hidden;
-    }
-
-    header {
-      background: var(--bg-card);
-      border-bottom: 1px solid var(--border);
-      padding: 10px 20px;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      flex-shrink: 0;
-      gap: 16px;
-      z-index: 20;
-    }
-
-    .brand-section {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      min-width: 0;
-    }
-
-    .norn-badge {
-      background: linear-gradient(135deg, #06b6d4, #3b82f6);
-      color: #000;
-      font-weight: 800;
-      font-size: 11px;
-      letter-spacing: 0.5px;
-      padding: 3px 8px;
-      border-radius: 6px;
-      flex-shrink: 0;
-    }
-
-    .pr-title-group {
-      display: flex;
-      flex-direction: column;
-      min-width: 0;
-    }
-
-    .pr-title {
-      font-weight: 600;
-      font-size: 15px;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
-
-    .pr-number {
-      color: var(--accent);
-    }
-
-    .pr-meta {
-      font-size: 12px;
-      color: var(--text-muted);
-      display: flex;
-      gap: 10px;
-      align-items: center;
-    }
-
-    .controls-section {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      flex-shrink: 0;
-    }
-
-    .btn-group {
-      display: flex;
-      background: var(--bg);
-      border: 1px solid var(--border);
-      border-radius: 6px;
-      padding: 2px;
-    }
-
-    .btn {
-      background: transparent;
-      border: none;
-      color: var(--text-muted);
-      padding: 5px 12px;
-      font-size: 12px;
-      font-weight: 500;
-      border-radius: 4px;
-      cursor: pointer;
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      transition: all 0.15s ease;
-    }
-
-    .btn:hover {
-      color: var(--text);
-      background: var(--bg-hover);
-    }
-
-    .btn.active {
-      background: var(--accent);
-      color: #000;
-      font-weight: 600;
-    }
-
-    .btn-icon {
-      padding: 6px 10px;
-      background: var(--bg-card);
-      border: 1px solid var(--border);
-      border-radius: 6px;
-      color: var(--text);
-    }
-
-    .live-dot {
-      display: inline-block;
-      width: 8px;
-      height: 8px;
-      border-radius: 50%;
-      background: #22c55e;
-      box-shadow: 0 0 8px #22c55e;
-    }
-
-    main {
-      display: flex;
-      flex: 1;
-      overflow: hidden;
-    }
-
-    aside {
-      width: 320px;
-      background: var(--bg-sidebar);
-      border-right: 1px solid var(--border);
-      display: flex;
-      flex-direction: column;
-      flex-shrink: 0;
-      overflow: hidden;
-    }
-
-    .sidebar-header {
-      padding: 12px 14px;
-      border-bottom: 1px solid var(--border);
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
-    }
-
-    .search-input {
-      width: 100%;
-      background: var(--bg);
-      border: 1px solid var(--border);
-      border-radius: 6px;
-      padding: 6px 10px;
-      font-size: 12px;
-      color: var(--text);
-      outline: none;
-    }
-
-    .search-input:focus {
-      border-color: var(--accent);
-    }
-
-    .file-list {
-      flex: 1;
-      overflow-y: auto;
-      padding: 6px 0;
-      list-style: none;
-    }
-
-    .file-item {
-      padding: 6px 14px;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 8px;
-      font-size: 12px;
-      cursor: pointer;
-      color: var(--text-muted);
-      border-left: 2px solid transparent;
-      user-select: none;
-    }
-
-    .file-item:hover {
-      background: var(--bg-hover);
-      color: var(--text);
-    }
-
-    .file-item.active {
-      background: var(--bg-hover);
-      color: var(--text);
-      border-left-color: var(--accent);
-      font-weight: 500;
-    }
-
-    .file-item-name {
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-      flex: 1;
-    }
-
-    .file-item-dir {
-      color: var(--text-dim);
-      font-size: 11px;
-    }
-
-    .status-badge {
-      font-size: 10px;
-      font-weight: 700;
-      padding: 1px 5px;
-      border-radius: 4px;
-      text-transform: uppercase;
-    }
-
-    .status-badge.added { background: rgba(34, 197, 94, 0.2); color: #4ade80; }
-    .status-badge.modified { background: rgba(234, 179, 8, 0.2); color: #facc15; }
-    .status-badge.removed { background: rgba(239, 68, 68, 0.2); color: #f87171; }
-    .status-badge.renamed { background: rgba(59, 130, 246, 0.2); color: #60a5fa; }
-
-    .diff-container {
-      flex: 1;
-      overflow-y: auto;
-      padding: 20px;
-      display: flex;
-      flex-direction: column;
-      gap: 24px;
-    }
-
-    .file-diff-card {
-      background: var(--bg-card);
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      overflow: hidden;
-      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
-    }
-
-    .file-diff-header {
-      background: var(--bg-card-header);
-      border-bottom: 1px solid var(--border);
-      padding: 8px 14px;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 12px;
-      font-size: 13px;
-      font-weight: 600;
-      position: sticky;
-      top: 0;
-      z-index: 10;
-    }
-
-    .file-diff-path {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      font-family: var(--font-mono);
-      font-size: 12px;
-      color: var(--text);
-    }
-
-    .copy-btn {
-      background: transparent;
-      border: none;
-      color: var(--text-dim);
-      cursor: pointer;
-      font-size: 11px;
-      padding: 2px 6px;
-      border-radius: 4px;
-    }
-
-    .copy-btn:hover {
-      background: var(--bg-hover);
-      color: var(--text);
-    }
-
-    /* Diff table */
-    .diff-table {
-      width: 100%;
-      border-collapse: collapse;
-      font-family: var(--font-mono);
-      font-size: 12px;
-      line-height: 1.45;
-    }
-
-    .diff-line {
-      display: flex;
-      width: 100%;
-    }
-
-    .gutter {
-      width: 44px;
-      min-width: 44px;
-      padding: 1px 8px;
-      text-align: right;
-      color: var(--text-dim);
-      user-select: none;
-      background: var(--bg-card);
-      border-right: 1px solid var(--border-subtle);
-      font-size: 11px;
-    }
-
-    .sign {
-      width: 20px;
-      min-width: 20px;
-      text-align: center;
-      user-select: none;
-      color: var(--text-dim);
-    }
-
-    .code {
-      flex: 1;
-      padding: 1px 8px;
-      white-space: pre-wrap;
-      word-break: break-all;
-    }
-
-    .diff-row-hunk {
-      background: var(--hunk-bg);
-      color: var(--hunk-text);
-      font-style: italic;
-      padding: 4px 12px;
-      font-size: 11px;
-      border-top: 1px solid var(--border-subtle);
-      border-bottom: 1px solid var(--border-subtle);
-    }
-
-    .diff-row-add {
-      background: var(--add-bg);
-      color: var(--add-text);
-    }
-    .diff-row-add .gutter { background: var(--add-gutter); color: var(--add-text); }
-    .diff-row-add .sign { color: var(--add-text); }
-
-    .diff-row-del {
-      background: var(--del-bg);
-      color: var(--del-text);
-    }
-    .diff-row-del .gutter { background: var(--del-gutter); color: var(--del-text); }
-    .diff-row-del .sign { color: var(--del-text); }
-
-    .diff-word-del {
-      background: var(--del-word);
-      border-radius: 2px;
-      padding: 0 1px;
-    }
-
-    .diff-word-add {
-      background: var(--add-word);
-      border-radius: 2px;
-      padding: 0 1px;
-    }
-
-    /* Split / Side-by-side mode */
-    .split-table {
-      width: 100%;
-      display: flex;
-      flex-direction: column;
-    }
-
-    .split-row {
-      display: flex;
-      width: 100%;
-      border-bottom: 1px solid transparent;
-    }
-
-    .split-pane {
-      width: 50%;
-      display: flex;
-      overflow: hidden;
-    }
-
-    .split-pane:first-child {
-      border-right: 1px solid var(--border);
-    }
-
-    /* Image diff preview */
-    .image-diff-wrapper {
-      padding: 24px;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      gap: 16px;
-      background: #000;
-      background-image: linear-gradient(45deg, #18181b 25%, transparent 25%), linear-gradient(-45deg, #18181b 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #18181b 75%), linear-gradient(-45deg, transparent 75%, #18181b 75%);
-      background-size: 20px 20px;
-      background-position: 0 0, 0 10px, 10px -10px, -10px 0px;
-    }
-
-    .image-diff-2up {
-      display: flex;
-      gap: 24px;
-      justify-content: center;
-      width: 100%;
-      flex-wrap: wrap;
-    }
-
-    .image-card {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      background: rgba(15, 23, 42, 0.8);
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      padding: 12px;
-      max-width: 48%;
-    }
-
-    .image-card img {
-      max-width: 100%;
-      max-height: 400px;
-      object-fit: contain;
-      border-radius: 4px;
-    }
-
-    .image-card-title {
-      font-size: 11px;
-      font-weight: 700;
-      text-transform: uppercase;
-      margin-bottom: 8px;
-      color: var(--text-muted);
-    }
-
-    .image-preview-empty {
-      padding: 20px;
-      color: var(--text-dim);
-    }
-
-    .empty-state {
-      padding: 80px 20px;
-      text-align: center;
-      color: var(--text-muted);
-    }
-  </style>
-</head>
-<body>
-  <header>
-    <div class="brand-section">
-      <span class="norn-badge">NORN DIFF</span>
-      <div class="pr-title-group">
-        <div class="pr-title">
-          <span id="pr-number" class="pr-number">#...</span>
-          <span id="pr-title-text">Loading pull request...</span>
-        </div>
-        <div class="pr-meta">
-          <span id="pr-repo">...</span>
-          <span>•</span>
-          <span id="pr-branches">...</span>
-          <span>•</span>
-          <span id="pr-stats">0 files</span>
-        </div>
-      </div>
-    </div>
-
-    <div class="controls-section">
-      <div class="btn-group">
-        <button id="mode-split" class="btn active" onclick="setViewMode('split')">Split</button>
-        <button id="mode-unified" class="btn" onclick="setViewMode('unified')">Unified</button>
-      </div>
-      <button class="btn btn-icon" onclick="toggleCollapseAll()" title="Expand/Collapse all files">⇕ Files</button>
-      <button class="btn btn-icon" onclick="toggleTheme()" title="Toggle Theme">🌓</button>
-      <div title="Connected to Norn local server" style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--text-dim);margin-left:6px;">
-        <span class="live-dot"></span>
-        <span>Live</span>
-      </div>
-    </div>
-  </header>
-
-  <main>
-    <aside>
-      <div class="sidebar-header">
-        <input id="file-search" class="search-input" type="text" placeholder="Filter files (e.g. .rs, src/)..." oninput="filterFiles(this.value)">
-      </div>
-      <ul id="file-list" class="file-list"></ul>
-    </aside>
-
-    <div id="diff-container" class="diff-container">
-      <div class="empty-state">Loading diff...</div>
-    </div>
-  </main>
-
-  <script>
-    const sessionBase = window.location.pathname.replace(/\/+$/, '');
-
-    function apiUrl(path, params = {}) {
-      const url = new URL(sessionBase + path, window.location.origin);
-      for (const [key, value] of Object.entries(params)) {
-        url.searchParams.set(key, value);
-      }
-      return url.pathname + url.search;
-    }
-
-    let state = {
-      version: -1,
-      prId: 0,
-      diff: '',
-      diffstat: [],
-      files: [],
-      viewMode: 'split',
-      theme: 'dark',
-      filterQuery: '',
-      collapsedFiles: new Set()
-    };
-
-    function escapeHtml(str) {
-      if (!str) return '';
-      return str
-        .replace(/&/g, "&amp;")
-        .replace(/</g, "&lt;")
-        .replace(/>/g, "&gt;")
-        .replace(/"/g, "&quot;")
-        .replace(/'/g, "&#039;");
-    }
-
-    function normalizeStatus(status) {
-      if (status === 'added' || status === 'removed' || status === 'renamed') return status;
-      return 'modified';
-    }
-
-    function decodeGitPathToken(token) {
-      if (!token.startsWith('"') || !token.endsWith('"')) return token;
-      const bytes = [];
-      const encoder = new TextEncoder();
-      const escapes = {
-        a: 7,
-        b: 8,
-        t: 9,
-        n: 10,
-        v: 11,
-        f: 12,
-        r: 13,
-        '"': 34,
-        '\\': 92
-      };
-
-      for (let index = 1; index < token.length - 1; index++) {
-        const current = token[index];
-        if (current !== '\\') {
-          bytes.push(...encoder.encode(current));
-          continue;
-        }
-
-        const escaped = token[++index];
-        if (escaped === undefined) break;
-        if (/^[0-7]$/.test(escaped)) {
-          let octal = escaped;
-          while (octal.length < 3 && /^[0-7]$/.test(token[index + 1] || '')) {
-            octal += token[++index];
-          }
-          bytes.push(parseInt(octal, 8));
-        } else if (Object.prototype.hasOwnProperty.call(escapes, escaped)) {
-          bytes.push(escapes[escaped]);
-        } else {
-          bytes.push(...encoder.encode(escaped));
-        }
-      }
-
-      return new TextDecoder().decode(new Uint8Array(bytes));
-    }
-
-    function readQuotedGitToken(input) {
-      if (!input.startsWith('"')) return null;
-      let escaped = false;
-      for (let index = 1; index < input.length; index++) {
-        const current = input[index];
-        if (escaped) {
-          escaped = false;
-        } else if (current === '\\') {
-          escaped = true;
-        } else if (current === '"') {
-          return { token: input.slice(0, index + 1), rest: input.slice(index + 1) };
-        }
-      }
-      return null;
-    }
-
-    function stripGitSidePrefix(token, prefix) {
-      const path = decodeGitPathToken(token);
-      return path.startsWith(prefix) ? path.slice(prefix.length) : '';
-    }
-
-    function parseDiffGitHeader(line) {
-      const payload = line.slice('diff --git '.length);
-      let oldToken = '';
-      let newToken = '';
-
-      if (payload.startsWith('"')) {
-        const oldPart = readQuotedGitToken(payload);
-        if (!oldPart) return { oldPath: '', newPath: '' };
-        oldToken = oldPart.token;
-        const remaining = oldPart.rest.trimStart();
-        const newPart = readQuotedGitToken(remaining);
-        newToken = newPart ? newPart.token : remaining;
-      } else {
-        const separator = Math.max(payload.lastIndexOf(' b/'), payload.lastIndexOf(' "b/'));
-        if (separator < 0) return { oldPath: '', newPath: '' };
-        oldToken = payload.slice(0, separator);
-        newToken = payload.slice(separator + 1);
-      }
-
-      return {
-        oldPath: stripGitSidePrefix(oldToken, 'a/'),
-        newPath: stripGitSidePrefix(newToken, 'b/')
-      };
-    }
-
-    function isImageFile(path) {
-      if (!path) return false;
-      const lower = path.toLowerCase();
-      return ['.png', '.jpg', '.jpeg', '.gif', '.webp'].some(ext => lower.endsWith(ext));
-    }
-
-    function parseUnifiedDiff(raw) {
-      const files = [];
-      if (!raw) return files;
-      const lines = raw.split('\n');
-      let currentFile = null;
-      let currentHunk = null;
-
-      for (let i = 0; i < lines.length; i++) {
-        const line = lines[i];
-        if (line.startsWith('diff --git ')) {
-          const { oldPath, newPath } = parseDiffGitHeader(line);
-          currentFile = {
-            oldPath,
-            newPath,
-            path: newPath || oldPath,
-            status: 'modified',
-            hunks: [],
-            linesAdded: 0,
-            linesRemoved: 0,
-            isBinary: false
-          };
-          files.push(currentFile);
-          currentHunk = null;
-        } else if (currentFile) {
-          if (line.startsWith('new file mode ')) {
-            currentFile.status = 'added';
-          } else if (line.startsWith('deleted file mode ')) {
-            currentFile.status = 'removed';
-          } else if (line.startsWith('rename from ') || line.startsWith('similarity index ')) {
-            currentFile.status = 'renamed';
-          } else if (line.startsWith('Binary files ') || line.includes('GIT binary patch')) {
-            currentFile.isBinary = true;
-          } else if (line.startsWith('@@ ')) {
-            const match = line.match(/^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@(.*)$/);
-            if (match) {
-              const oldStart = parseInt(match[1], 10);
-              const oldCount = match[2] !== undefined ? parseInt(match[2], 10) : 1;
-              const newStart = parseInt(match[3], 10);
-              const newCount = match[4] !== undefined ? parseInt(match[4], 10) : 1;
-              currentHunk = {
-                header: line,
-                oldStart,
-                oldCount,
-                newStart,
-                newCount,
-                context: match[5] || '',
-                lines: []
-              };
-              currentFile.hunks.push(currentHunk);
-            }
-          } else if (currentHunk) {
-            if (line.startsWith('+')) {
-              currentFile.linesAdded++;
-              currentHunk.lines.push({ type: 'add', content: line.slice(1) });
-            } else if (line.startsWith('-')) {
-              currentFile.linesRemoved++;
-              currentHunk.lines.push({ type: 'delete', content: line.slice(1) });
-            } else if (line.startsWith(' ')) {
-              currentHunk.lines.push({ type: 'context', content: line.slice(1) });
-            } else if (line.startsWith('\\')) {
-              currentHunk.lines.push({ type: 'meta', content: line });
-            }
-          }
-        }
-      }
-      return files;
-    }
-
-    function mergeDiffWithDiffstat(parsedFiles, diffstat) {
-      const merged = [...parsedFiles];
-      if (!diffstat || diffstat.length === 0) return merged;
-
-      for (const entry of diffstat) {
-        const path = entry.newPath || entry.oldPath;
-        let existing = merged.find(f => (entry.newPath && f.newPath === entry.newPath) || (entry.oldPath && f.oldPath === entry.oldPath));
-        if (existing) {
-          existing.status = normalizeStatus(entry.status || existing.status);
-          if (Number.isFinite(entry.linesAdded)) existing.linesAdded = entry.linesAdded;
-          if (Number.isFinite(entry.linesRemoved)) existing.linesRemoved = entry.linesRemoved;
-        } else {
-          merged.push({
-            oldPath: entry.oldPath || '',
-            newPath: entry.newPath || '',
-            path: path || '',
-            status: normalizeStatus(entry.status),
-            hunks: [],
-            linesAdded: entry.linesAdded || 0,
-            linesRemoved: entry.linesRemoved || 0,
-            isBinary: isImageFile(path)
-          });
-        }
-      }
-      return merged;
-    }
-
-    async function pollState() {
-      try {
-        const res = await fetch(apiUrl('/api/state', { version: state.version }), {
-          credentials: 'same-origin',
-          cache: 'no-store'
-        });
-        if (res.status === 204) return;
-        if (res.ok) {
-          const data = await res.json();
-          if (data.version !== state.version || data.prId !== state.prId) {
-            state.version = data.version;
-            state.prId = data.prId;
-            state.pr = data;
-            state.diff = data.diff || '';
-            state.diffstat = data.diffstat || [];
-
-            const parsed = parseUnifiedDiff(state.diff);
-            state.files = mergeDiffWithDiffstat(parsed, state.diffstat);
-
-            renderHeader(data);
-            renderSidebar();
-            renderDiff();
-          }
-        }
-      } catch (e) {}
-    }
-
-    function renderHeader(pr) {
-      document.getElementById('pr-number').innerText = '#' + (pr.prId || '');
-      document.getElementById('pr-title-text').innerText = pr.prTitle || 'Pull Request';
-      document.getElementById('pr-repo').innerText = (pr.workspace ? pr.workspace + '/' : '') + (pr.repo || '');
-      document.getElementById('pr-branches').innerText = (pr.sourceBranch || 'source') + ' → ' + (pr.targetBranch || 'target');
-
-      const totalAdded = state.files.reduce((acc, f) => acc + (f.linesAdded || 0), 0);
-      const totalRemoved = state.files.reduce((acc, f) => acc + (f.linesRemoved || 0), 0);
-      document.getElementById('pr-stats').innerHTML =
-        `<b>${state.files.length}</b> files changed (<span style="color:var(--add-text)">+${totalAdded}</span> <span style="color:var(--del-text)">-${totalRemoved}</span>)`;
-    }
-
-    function renderSidebar() {
-      const list = document.getElementById('file-list');
-      const query = state.filterQuery.toLowerCase();
-
-      const items = state.files.filter(f => !query || f.path.toLowerCase().includes(query)).map((file, idx) => {
-        const parts = file.path.split('/');
-        const filename = parts.pop();
-        const dir = parts.join('/');
-        const statusClass = normalizeStatus(file.status);
-        const statusLetter = statusClass === 'added' ? 'A' : statusClass === 'removed' ? 'D' : statusClass === 'renamed' ? 'R' : 'M';
-
-        return `
-          <li class="file-item" data-scroll-path="${escapeHtml(file.path)}">
-            <span class="status-badge ${statusClass}">${statusLetter}</span>
-            <div class="file-item-name">
-              ${dir ? `<span class="file-item-dir">${escapeHtml(dir)}/</span>` : ''}
-              <span>${escapeHtml(filename)}</span>
-            </div>
-            <div style="font-size:11px; font-family:var(--font-mono); display:flex; gap:4px;">
-              ${file.linesAdded > 0 ? `<span style="color:var(--add-text)">+${file.linesAdded}</span>` : ''}
-              ${file.linesRemoved > 0 ? `<span style="color:var(--del-text)">-${file.linesRemoved}</span>` : ''}
-            </div>
-          </li>
-        `;
-      }).join('');
-
-      list.innerHTML = items || '<div style="padding:16px;color:var(--text-dim);font-size:12px;">No matching files</div>';
-    }
-
-    function renderDiff() {
-      const container = document.getElementById('diff-container');
-      const query = state.filterQuery.toLowerCase();
-      const filesToRender = state.files.filter(f => !query || f.path.toLowerCase().includes(query));
-      const loadWarning = state.pr && state.pr.populationFailed
-        ? '<div style="padding:12px 16px;color:var(--del-text);border-bottom:1px solid var(--border);">Some diff data could not be loaded. Return to Norn and open the browser diff again to retry.</div>'
-        : '';
-
-      if (state.pr && state.pr.populationFailed && filesToRender.length === 0) {
-        container.innerHTML = '<div class="empty-state">Could not load diff data. Return to Norn and open the browser diff again to retry.</div>';
-        return;
-      }
-
-      if (filesToRender.length === 0) {
-        container.innerHTML = '<div class="empty-state">No files to display</div>';
-        return;
-      }
-
-      container.innerHTML = loadWarning + filesToRender.map(file => {
-        const isCollapsed = state.collapsedFiles.has(file.path);
-        const isImage = isImageFile(file.path) || file.isBinary;
-        const anchorId = 'file-' + file.path.replace(/[^a-zA-Z0-9_-]/g, '_');
-
-        return `
-          <div id="${anchorId}" class="file-diff-card">
-            <div class="file-diff-header">
-              <div class="file-diff-path" data-toggle-path="${escapeHtml(file.path)}">
-                <span style="cursor:pointer;">${isCollapsed ? '▶' : '▼'}</span>
-                <span class="status-badge ${normalizeStatus(file.status)}">${normalizeStatus(file.status)}</span>
-                <span>${escapeHtml(file.path)}</span>
-                <button class="copy-btn" data-copy-path="${escapeHtml(file.path)}">Copy</button>
-              </div>
-              <div style="font-size:12px; font-family:var(--font-mono);">
-                <span style="color:var(--add-text)">+${file.linesAdded}</span>
-                <span style="color:var(--del-text)">-${file.linesRemoved}</span>
-              </div>
-            </div>
-            ${isCollapsed ? '' : renderFileContent(file, isImage)}
-          </div>
-        `;
-      }).join('');
-    }
-
-    function renderFileContent(file, isImage) {
-      if (isImage) {
-        return renderImageDiff(file);
-      }
-      if (state.viewMode === 'split') {
-        return renderSplitDiff(file);
-      }
-      return renderUnifiedDiff(file);
-    }
-
-    function renderImageDiff(file) {
-      const oldUrl = apiUrl('/api/file-preview', { path: file.oldPath || file.path, side: 'old' });
-      const newUrl = apiUrl('/api/file-preview', { path: file.newPath || file.path, side: 'new' });
-
-      return `
-        <div class="image-diff-wrapper">
-          <div class="image-diff-2up">
-            ${file.status !== 'added' ? `
-              <div class="image-card">
-                <div class="image-card-title">Base (Old)</div>
-                <img src="${oldUrl}" onerror="handleImagePreviewError(this)" alt="Old version" />
-              </div>
-            ` : ''}
-            ${normalizeStatus(file.status) !== 'removed' ? `
-              <div class="image-card">
-                <div class="image-card-title">Changed (New)</div>
-                <img src="${newUrl}" onerror="handleImagePreviewError(this)" alt="New version" />
-              </div>
-            ` : ''}
-          </div>
-        </div>
-      `;
-    }
-
-    function handleImagePreviewError(image) {
-      const parent = image.parentElement;
-      if (!parent) return;
-      const fallback = document.createElement('div');
-      fallback.className = 'image-preview-empty';
-      fallback.textContent = 'No preview available';
-      parent.replaceChildren(fallback);
-    }
-
-    function renderUnifiedDiff(file) {
-      if (!file.hunks || file.hunks.length === 0) {
-        return '<div style="padding:16px;color:var(--text-dim);font-family:var(--font-mono);font-size:12px;">No text changes or binary file</div>';
-      }
-
-      let html = '<div class="diff-table">';
-      for (const hunk of file.hunks) {
-        html += `<div class="diff-row-hunk">${escapeHtml(hunk.header)}</div>`;
-        let oldLine = hunk.oldStart;
-        let newLine = hunk.newStart;
-
-        for (const line of hunk.lines) {
-          if (line.type === 'add') {
-            html += `
-              <div class="diff-line diff-row-add">
-                <div class="gutter"></div>
-                <div class="gutter">${newLine++}</div>
-                <div class="sign">+</div>
-                <div class="code">${escapeHtml(line.content)}</div>
-              </div>
-            `;
-          } else if (line.type === 'delete') {
-            html += `
-              <div class="diff-line diff-row-del">
-                <div class="gutter">${oldLine++}</div>
-                <div class="gutter"></div>
-                <div class="sign">-</div>
-                <div class="code">${escapeHtml(line.content)}</div>
-              </div>
-            `;
-          } else if (line.type === 'context') {
-            html += `
-              <div class="diff-line">
-                <div class="gutter">${oldLine++}</div>
-                <div class="gutter">${newLine++}</div>
-                <div class="sign"> </div>
-                <div class="code">${escapeHtml(line.content)}</div>
-              </div>
-            `;
-          }
-        }
-      }
-      html += '</div>';
-      return html;
-    }
-
-    function renderSplitDiff(file) {
-      if (!file.hunks || file.hunks.length === 0) {
-        return '<div style="padding:16px;color:var(--text-dim);font-family:var(--font-mono);font-size:12px;">No text changes or binary file</div>';
-      }
-
-      let html = '<div class="split-table">';
-      for (const hunk of file.hunks) {
-        html += `<div class="diff-row-hunk">${escapeHtml(hunk.header)}</div>`;
-        let oldLine = hunk.oldStart;
-        let newLine = hunk.newStart;
-
-        let i = 0;
-        while (i < hunk.lines.length) {
-          const current = hunk.lines[i];
-          if (current.type === 'context') {
-            html += `
-              <div class="split-row">
-                <div class="split-pane">
-                  <div class="gutter">${oldLine++}</div>
-                  <div class="sign"> </div>
-                  <div class="code">${escapeHtml(current.content)}</div>
-                </div>
-                <div class="split-pane">
-                  <div class="gutter">${newLine++}</div>
-                  <div class="sign"> </div>
-                  <div class="code">${escapeHtml(current.content)}</div>
-                </div>
-              </div>
-            `;
-            i++;
-          } else {
-            const dels = [];
-            const adds = [];
-            while (i < hunk.lines.length && hunk.lines[i].type === 'delete') {
-              dels.push(hunk.lines[i]);
-              i++;
-            }
-            while (i < hunk.lines.length && hunk.lines[i].type === 'add') {
-              adds.push(hunk.lines[i]);
-              i++;
-            }
-
-            const maxLen = Math.max(dels.length, adds.length);
-            for (let k = 0; k < maxLen; k++) {
-              const del = dels[k];
-              const add = adds[k];
-
-              html += '<div class="split-row">';
-              if (del) {
-                html += `
-                  <div class="split-pane diff-row-del">
-                    <div class="gutter">${oldLine++}</div>
-                    <div class="sign">-</div>
-                    <div class="code">${escapeHtml(del.content)}</div>
-                  </div>
-                `;
-              } else {
-                html += `
-                  <div class="split-pane">
-                    <div class="gutter"></div>
-                    <div class="sign"></div>
-                    <div class="code"></div>
-                  </div>
-                `;
-              }
-
-              if (add) {
-                html += `
-                  <div class="split-pane diff-row-add">
-                    <div class="gutter">${newLine++}</div>
-                    <div class="sign">+</div>
-                    <div class="code">${escapeHtml(add.content)}</div>
-                  </div>
-                `;
-              } else {
-                html += `
-                  <div class="split-pane">
-                    <div class="gutter"></div>
-                    <div class="sign"></div>
-                    <div class="code"></div>
-                  </div>
-                `;
-              }
-              html += '</div>';
-            }
-          }
-        }
-      }
-      html += '</div>';
-      return html;
-    }
-
-    function setViewMode(mode) {
-      state.viewMode = mode;
-      document.getElementById('mode-split').classList.toggle('active', mode === 'split');
-      document.getElementById('mode-unified').classList.toggle('active', mode === 'unified');
-      renderDiff();
-    }
-
-    function toggleTheme() {
-      state.theme = state.theme === 'dark' ? 'light' : 'dark';
-      document.documentElement.setAttribute('data-theme', state.theme);
-    }
-
-    function toggleCollapseAll() {
-      if (state.collapsedFiles.size === state.files.length) {
-        state.collapsedFiles.clear();
-      } else {
-        state.files.forEach(f => state.collapsedFiles.add(f.path));
-      }
-      renderDiff();
-    }
-
-    function toggleFileCollapse(path) {
-      if (state.collapsedFiles.has(path)) {
-        state.collapsedFiles.delete(path);
-      } else {
-        state.collapsedFiles.add(path);
-      }
-      renderDiff();
-    }
-
-    function filterFiles(query) {
-      state.filterQuery = query;
-      renderSidebar();
-      renderDiff();
-    }
-
-    function scrollToFile(path) {
-      const anchorId = 'file-' + path.replace(/[^a-zA-Z0-9_-]/g, '_');
-      const el = document.getElementById(anchorId);
-      if (el) {
-        el.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      }
-    }
-
-    function copyPath(path) {
-      navigator.clipboard.writeText(path).then(() => {
-        // Feedback
-      });
-    }
-
-    document.addEventListener('click', (event) => {
-      if (!(event.target instanceof Element)) return;
-      const copyTarget = event.target.closest('[data-copy-path]');
-      if (copyTarget) {
-        event.stopPropagation();
-        copyPath(copyTarget.dataset.copyPath);
-        return;
-      }
-      const toggleTarget = event.target.closest('[data-toggle-path]');
-      if (toggleTarget) {
-        toggleFileCollapse(toggleTarget.dataset.togglePath);
-        return;
-      }
-      const scrollTarget = event.target.closest('[data-scroll-path]');
-      if (scrollTarget) {
-        scrollToFile(scrollTarget.dataset.scrollPath);
-      }
-    });
-
-    // Keyboard shortcuts
-    window.addEventListener('keydown', (e) => {
-      if (e.target.tagName === 'INPUT') return;
-      if (e.key === 'u') setViewMode(state.viewMode === 'split' ? 'unified' : 'split');
-      if (e.key === 't') toggleTheme();
-      if (e.key === 'f') {
-        e.preventDefault();
-        document.getElementById('file-search').focus();
-      }
-    });
-
-    setInterval(pollState, 1200);
-    pollState();
-  </script>
-</body>
-</html>
-"#;
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1920,6 +984,108 @@ mod tests {
         assert!(!try_acquire_connection_slot(&available));
         drop(ConnectionSlot::new(Arc::clone(&available)));
         assert!(try_acquire_connection_slot(&available));
+    }
+
+    #[test]
+    fn browser_assets_require_a_built_entry_point_and_supported_files() {
+        let directory = tempfile::tempdir().expect("temporary asset directory");
+        let missing = BrowserAssets::load_from(directory.path())
+            .err()
+            .expect("missing entry point should fail");
+        assert!(missing.contains("browser-diff.html"));
+
+        fs::create_dir(directory.path().join("assets")).expect("create assets directory");
+        fs::write(
+            directory.path().join("browser-diff.html"),
+            b"<div id=\"root\"></div>",
+        )
+        .expect("write browser entry point");
+        fs::write(directory.path().join("assets/viewer.js"), b"export {};")
+            .expect("write browser script");
+        let assets = BrowserAssets::load_from(directory.path()).expect("load browser assets");
+        assert_eq!(
+            assets.get("/").map(|asset| asset.content_type),
+            Some("text/html; charset=utf-8")
+        );
+        assert_eq!(
+            assets
+                .get("/assets/viewer.js")
+                .map(|asset| asset.content_type),
+            Some("text/javascript; charset=utf-8")
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn browser_assets_reject_non_utf8_routes() {
+        use std::{ffi::OsString, os::unix::ffi::OsStringExt};
+
+        let path = PathBuf::from(OsString::from_vec(vec![0xff, b'.', b'j', b's']));
+        let error = browser_asset_route(&path).expect_err("non-UTF-8 route should fail");
+        assert!(error.contains("valid UTF-8"));
+    }
+
+    #[test]
+    fn browser_asset_candidates_match_prefix_and_archive_layouts() {
+        assert_eq!(
+            installed_browser_asset_candidates(Path::new("/opt/norn/bin/norn-tui")),
+            vec![PathBuf::from("/opt/norn/share/norn/browser-diff")]
+        );
+        assert_eq!(
+            installed_browser_asset_candidates(Path::new("/tmp/norn-archive/norn-tui")),
+            vec![PathBuf::from("/tmp/norn-archive/share/norn/browser-diff")]
+        );
+    }
+
+    #[test]
+    fn browser_server_serves_shared_ui_assets_only_inside_the_session() {
+        let server = WebDiffServer::start(Arc::new(RwLock::new(WebDiffState::default())))
+            .expect("server should start");
+        let document = request(
+            server.port,
+            &format!(
+                "GET /session/{}/ HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n",
+                server.session_token
+            ),
+        );
+        assert!(document.starts_with("HTTP/1.1 200 OK"));
+        assert!(document.contains("./assets/viewer.js"));
+        assert!(document.contains("script-src 'self'"));
+        assert!(!document.contains("script-src 'unsafe-inline'"));
+
+        let script = request(
+            server.port,
+            &format!(
+                "GET /session/{}/assets/viewer.js HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n",
+                server.session_token
+            ),
+        );
+        assert!(script.starts_with("HTTP/1.1 200 OK"));
+        assert!(script.contains("Content-Type: text/javascript; charset=utf-8"));
+        assert!(script.ends_with("document.title = 'Norn';"));
+
+        let unauthenticated = request(
+            server.port,
+            "GET /assets/viewer.js HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n",
+        );
+        assert!(unauthenticated.starts_with("HTTP/1.1 404 Not Found"));
+    }
+
+    #[test]
+    fn browser_server_redirects_the_session_root_to_a_trailing_slash() {
+        let server = WebDiffServer::start(Arc::new(RwLock::new(WebDiffState::default())))
+            .expect("server should start");
+        let response = request(
+            server.port,
+            &format!(
+                "GET /session/{} HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n",
+                server.session_token
+            ),
+        );
+
+        assert!(response.starts_with("HTTP/1.1 307 Temporary Redirect"));
+        assert!(response.contains(&format!("Location: /session/{}/\r\n", server.session_token)));
+        assert!(response.contains("Content-Length: 0"));
     }
 
     #[test]
@@ -2184,6 +1350,34 @@ mod tests {
         });
 
         assert_eq!(state.read().unwrap().version, initial_version + 1);
+    }
+
+    #[test]
+    fn pull_request_changes_advance_the_session_version() {
+        let state = Arc::new(RwLock::new(WebDiffState::default()));
+        let server = WebDiffServer::start(Arc::clone(&state)).expect("server should start");
+        let settled = |pr_id, title: &str| WebDiffState {
+            provider: None,
+            workspace: "workspace".to_string(),
+            repo: "repo".to_string(),
+            pr_id,
+            pr_title: title.to_string(),
+            diff: Some(String::new()),
+            diffstat: Some(Vec::new()),
+            ..WebDiffState::default()
+        };
+
+        server.update_pr(settled(7, "First"));
+        let first_version = state.read().unwrap().version;
+        server.update_pr(settled(8, "Second"));
+
+        let current = state.read().unwrap();
+        assert_eq!(current.pr_id, 8);
+        assert_eq!(current.version, first_version + 1);
+        assert!(!state_is_unchanged_and_settled(
+            &current,
+            Some(first_version)
+        ));
     }
 
     #[test]

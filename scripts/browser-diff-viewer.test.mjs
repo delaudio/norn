@@ -1,127 +1,35 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import vm from "node:vm";
 
-const source = readFileSync("src-tauri/src/tui/diff_server.rs", "utf8");
+const serverSource = readFileSync("src-tauri/src/tui/diff_server.rs", "utf8");
+const browserSource = readFileSync("src/browser-diff/BrowserDiffApp.tsx", "utf8");
+const browserHtml = readFileSync("browser-diff.html", "utf8");
+const browserViteConfig = readFileSync("vite.browser-diff.config.ts", "utf8");
 
-function embeddedFunction(name) {
-  const start = source.indexOf(`    function ${name}(`);
-  assert.notEqual(start, -1, `missing embedded browser function: ${name}`);
-  const end = source.indexOf("\n\n    function ", start + 1);
-  assert.notEqual(end, -1, `could not find end of embedded browser function: ${name}`);
-  return source.slice(start, end);
-}
+test("browser viewer reuses the maintained desktop diff implementation", () => {
+  assert.match(browserSource, /import \{ DiffViewer \} from "@\/components\/diff\/DiffViewer"/);
+  assert.match(browserSource, /parseUnifiedDiff\(remoteState\.diff \?\? ""\)/);
+  assert.match(browserSource, /mergeImageDiffstat\(/);
+  assert.match(browserSource, /<DiffViewer/);
 
-const context = {
-  TextDecoder,
-  TextEncoder,
-  Uint8Array,
-  document: {
-    createElement(tagName) {
-      return { tagName, className: "", textContent: "" };
-    },
-  },
-};
-const functions = [
-  "normalizeStatus",
-  "decodeGitPathToken",
-  "readQuotedGitToken",
-  "stripGitSidePrefix",
-  "parseDiffGitHeader",
-  "parseUnifiedDiff",
-  "mergeDiffWithDiffstat",
-  "isImageFile",
-  "handleImagePreviewError",
-]
-  .map(embeddedFunction)
-  .join("\n\n");
-vm.runInNewContext(
-  `${functions}\nthis.browserDiff = { normalizeStatus, parseUnifiedDiff, mergeDiffWithDiffstat, isImageFile, handleImagePreviewError };`,
-  context,
-);
-
-test("embedded diff parser decodes quoted and unquoted Git paths", () => {
-  const raw = String.raw`diff --git "a/docs/caf\303\251.md" "b/docs/caf\303\251.md"
---- "a/docs/caf\303\251.md"
-+++ "b/docs/caf\303\251.md"
-@@ -1 +1 @@
--old
-+new
-diff --git a/docs/hello world.md b/docs/hello world.md
---- a/docs/hello world.md
-+++ b/docs/hello world.md
-@@ -1 +1 @@
--before
-+after
-diff --git "a/docs/quote\"name.md" "b/docs/quote\"name.md"
---- "a/docs/quote\"name.md"
-+++ "b/docs/quote\"name.md"
-@@ -1 +1 @@
--left
-+right`;
-
-  const parsed = context.browserDiff.parseUnifiedDiff(raw);
-  assert.deepEqual(
-    Array.from(parsed, (file) => file.path),
-    ["docs/café.md", "docs/hello world.md", 'docs/quote"name.md'],
-  );
+  assert.doesNotMatch(serverSource, /const HTML_PAGE/);
+  assert.doesNotMatch(serverSource, /function parseUnifiedDiff/);
+  assert.doesNotMatch(serverSource, /function renderSplitDiff/);
 });
 
-test("embedded viewer accepts only canonical provider statuses", () => {
-  assert.equal(context.browserDiff.normalizeStatus("removed"), "removed");
-  assert.equal(context.browserDiff.normalizeStatus("added"), "added");
-  assert.equal(context.browserDiff.normalizeStatus("<img onerror=alert(1)>"), "modified");
+test("browser bundle is isolated, relative, and suitable for authenticated session routes", () => {
+  assert.match(browserHtml, /src="\/src\/browser-diff\/main\.tsx"/);
+  assert.match(browserViteConfig, /base: "\.\/"/);
+  assert.match(browserViteConfig, /publicDir: false/);
+  assert.match(browserViteConfig, /outDir: "dist\/browser-diff"/);
+  assert.match(browserViteConfig, /emptyOutDir: true/);
 });
 
-test("diffstat zero counts replace parser-derived line counts", () => {
-  const merged = context.browserDiff.mergeDiffWithDiffstat(
-    [
-      {
-        path: "asset.bin",
-        oldPath: "asset.bin",
-        newPath: "asset.bin",
-        status: "modified",
-        linesAdded: 4,
-        linesRemoved: 3,
-      },
-    ],
-    [
-      {
-        oldPath: "asset.bin",
-        newPath: "asset.bin",
-        status: "modified",
-        linesAdded: 0,
-        linesRemoved: 0,
-      },
-    ],
-  );
-
-  assert.equal(merged[0].linesAdded, 0);
-  assert.equal(merged[0].linesRemoved, 0);
-});
-
-test("embedded viewer detects only image formats allowed by the preview server", () => {
-  for (const path of ["logo.png", "photo.JPG", "clip.gif", "asset.webp"]) {
-    assert.equal(context.browserDiff.isImageFile(path), true, path);
-  }
-  for (const path of ["icon.ico", "bitmap.bmp", "vector.svg", "notes.txt"]) {
-    assert.equal(context.browserDiff.isImageFile(path), false, path);
-  }
-});
-
-test("image preview failures replace the card content through DOM APIs", () => {
-  const parent = {
-    children: [],
-    replaceChildren(...children) {
-      this.children = children;
-    },
-  };
-
-  context.browserDiff.handleImagePreviewError({ parentElement: parent });
-
-  assert.equal(parent.children.length, 1);
-  assert.equal(parent.children[0].tagName, "div");
-  assert.equal(parent.children[0].className, "image-preview-empty");
-  assert.equal(parent.children[0].textContent, "No preview available");
+test("server authenticates and constrains every browser bundle asset", () => {
+  assert.match(serverSource, /browser_assets\.get\(route\)/);
+  assert.match(serverSource, /MAX_BROWSER_ASSET_BYTES/);
+  assert.match(serverSource, /MAX_BROWSER_ASSET_TOTAL_BYTES/);
+  assert.match(serverSource, /Browser diff assets must not contain symbolic links/);
+  assert.match(serverSource, /script-src 'self'/);
 });

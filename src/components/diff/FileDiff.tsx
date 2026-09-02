@@ -68,7 +68,9 @@ function ImagePreviewPanel({ image }: { image: ImageDiffMetadata }) {
       <div className="mb-3 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
         <Badge variant="outline">{image.mimeType}</Badge>
         <span>{image.previewSide === "old" ? "base image" : "new image"}</span>
-        {image.preview.status === "ready" && <span>{formatBytes(image.preview.preview.size)}</span>}
+        {image.preview.status === "ready" && image.preview.preview.size > 0 && (
+          <span>{formatBytes(image.preview.preview.size)}</span>
+        )}
       </div>
       {image.preview.status === "loading" ? (
         <div className="rounded-md border border-dashed border-border bg-muted/30 px-4 py-8 text-center text-sm text-muted-foreground">
