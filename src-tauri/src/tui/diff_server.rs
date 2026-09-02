@@ -215,6 +215,9 @@ fn handle_connection(
     let Some(route) = authenticated_route(path, session_token) else {
         return write_empty_response(&mut stream, "404 Not Found");
     };
+    if head_only && matches!(route, "/api/state" | "/api/diff" | "/api/file-preview") {
+        return write_empty_response(&mut stream, "405 Method Not Allowed");
+    }
 
     match route {
         "/" | "/index.html" => {
@@ -252,22 +255,34 @@ fn handle_connection(
                 .get("side")
                 .cloned()
                 .unwrap_or_else(|| "new".to_string());
-            let state_data = get_or_populate_state(&state, &populate_lock, None)
-                .expect("requests without a known version always return state");
-
-            if state_data.workspace.is_empty()
-                || state_data.repo.is_empty()
-                || state_data.pr_id == 0
-                || file_path.is_empty()
-                || (side != "old" && side != "new")
-            {
+            if file_path.is_empty() || (side != "old" && side != "new") {
                 return write_empty_response(&mut stream, "400 Bad Request");
-            }
-            if !is_allowed_preview_path(state_data.diffstat.as_deref(), &file_path, &side) {
-                return write_empty_response(&mut stream, "404 Not Found");
             }
             if !is_raster_preview_path(&file_path) {
                 return write_empty_response(&mut stream, "415 Unsupported Media Type");
+            }
+            let initial_state = state
+                .read()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .clone();
+            if initial_state.workspace.is_empty()
+                || initial_state.repo.is_empty()
+                || initial_state.pr_id == 0
+            {
+                return write_empty_response(&mut stream, "400 Bad Request");
+            }
+            if initial_state.diffstat.is_some()
+                && !is_allowed_preview_path(initial_state.diffstat.as_deref(), &file_path, &side)
+            {
+                return write_empty_response(&mut stream, "404 Not Found");
+            }
+            let state_data = if initial_state.diffstat.is_some() {
+                initial_state
+            } else {
+                get_or_populate_diffstat(&state, &populate_lock)
+            };
+            if !is_allowed_preview_path(state_data.diffstat.as_deref(), &file_path, &side) {
+                return write_empty_response(&mut stream, "404 Not Found");
             }
 
             match get_pr_file_preview_native(
@@ -358,7 +373,8 @@ fn read_request_head<R: Read>(reader: &mut R) -> std::io::Result<Option<Vec<u8>>
             ));
         }
         request.extend_from_slice(&chunk[..bytes_read]);
-        if request.windows(4).any(|window| window == b"\r\n\r\n") {
+        if let Some(terminator) = request.windows(4).position(|window| window == b"\r\n\r\n") {
+            request.truncate(terminator + 4);
             return Ok(Some(request));
         }
     }
@@ -454,6 +470,48 @@ fn is_allowed_preview_path(diffstat: Option<&[DiffstatEntry]>, path: &str, side:
             _ => false,
         })
     })
+}
+
+fn get_or_populate_diffstat(
+    state: &Arc<RwLock<WebDiffState>>,
+    populate_lock: &Arc<Mutex<()>>,
+) -> WebDiffState {
+    let snapshot = state
+        .read()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .clone();
+    if snapshot.diffstat.is_some() || snapshot.population_failed || !needs_population(&snapshot) {
+        return snapshot;
+    }
+
+    let _guard = populate_lock
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let snapshot = state
+        .read()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .clone();
+    if snapshot.diffstat.is_some() || snapshot.population_failed || !needs_population(&snapshot) {
+        return snapshot;
+    }
+
+    let diffstat_result = get_diffstat_native(
+        snapshot.provider,
+        &snapshot.workspace,
+        &snapshot.repo,
+        snapshot.pr_id,
+    );
+    let mut lock = state
+        .write()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if same_pull_request(&lock, &snapshot) {
+        match diffstat_result {
+            Ok(diffstat) => lock.diffstat = Some(diffstat),
+            Err(_) => lock.population_failed = true,
+        }
+        lock.version += 1;
+    }
+    lock.clone()
 }
 
 fn get_or_populate_state(
@@ -1828,6 +1886,17 @@ mod tests {
     }
 
     #[test]
+    fn request_headers_exclude_bytes_after_the_first_terminator() {
+        let mut reader = Cursor::new(
+            b"GET / HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\nGET /next HTTP/1.1\r\n\r\n".to_vec(),
+        );
+        let request = read_request_head(&mut reader)
+            .expect("request should parse")
+            .expect("request should be present");
+        assert_eq!(request, b"GET / HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n");
+    }
+
+    #[test]
     fn rejects_request_headers_over_the_bound() {
         let mut reader = Cursor::new(vec![b'a'; MAX_REQUEST_HEAD_BYTES + 1]);
         let error = read_request_head(&mut reader).expect_err("oversized headers should fail");
@@ -1973,6 +2042,60 @@ mod tests {
         };
 
         assert!(!state_is_unchanged_and_settled(&state, Some(9)));
+    }
+
+    #[test]
+    fn head_state_requests_never_populate_provider_data() {
+        let state = Arc::new(RwLock::new(WebDiffState {
+            version: 4,
+            workspace: "workspace".to_string(),
+            repo: "repo".to_string(),
+            pr_id: 42,
+            ..WebDiffState::default()
+        }));
+        let server = WebDiffServer::start(Arc::clone(&state)).expect("server should start");
+
+        let response = request(
+            server.port,
+            &format!(
+                "HEAD /session/{}/api/state HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n",
+                server.session_token
+            ),
+        );
+
+        assert!(response.starts_with("HTTP/1.1 405 Method Not Allowed"));
+        let state = state.read().unwrap();
+        assert_eq!(state.version, 4);
+        assert!(state.diff.is_none());
+        assert!(state.diffstat.is_none());
+        assert!(!state.population_failed);
+    }
+
+    #[test]
+    fn invalid_preview_requests_never_populate_provider_data() {
+        let state = Arc::new(RwLock::new(WebDiffState {
+            version: 5,
+            workspace: "workspace".to_string(),
+            repo: "repo".to_string(),
+            pr_id: 42,
+            ..WebDiffState::default()
+        }));
+        let server = WebDiffServer::start(Arc::clone(&state)).expect("server should start");
+
+        let response = request(
+            server.port,
+            &format!(
+                "GET /session/{}/api/file-preview?path=&side=new HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n",
+                server.session_token
+            ),
+        );
+
+        assert!(response.starts_with("HTTP/1.1 400 Bad Request"));
+        let state = state.read().unwrap();
+        assert_eq!(state.version, 5);
+        assert!(state.diff.is_none());
+        assert!(state.diffstat.is_none());
+        assert!(!state.population_failed);
     }
 
     #[test]

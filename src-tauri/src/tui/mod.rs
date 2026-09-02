@@ -810,6 +810,7 @@ struct TuiApp {
     codex_cli_available: bool,
     ai_review_store: AiReviewRunStore,
     active_ai_target: Option<(String, String, u32)>,
+    pr_resource_target: Option<(String, String, u32)>,
     ai_review_state: Option<AiReviewRunState>,
     ai_review_output: Option<String>,
     detail_view: DetailView,
@@ -923,6 +924,7 @@ impl TuiApp {
             codex_effort: None,
             ai_review_store: AiReviewRunStore::default(),
             active_ai_target: None,
+            pr_resource_target: None,
             ai_review_state: None,
             ai_review_output: None,
             detail_view: DetailView::PullRequest,
@@ -1033,6 +1035,7 @@ impl TuiApp {
                         self.drafts.clear();
                         self.composer = None;
                         self.active_ai_target = None;
+                        self.pr_resource_target = None;
                         self.ai_review_state = None;
                         self.ai_review_output = None;
                         self.detail_view = DetailView::PullRequest;
@@ -1166,7 +1169,7 @@ impl TuiApp {
         {
             return;
         }
-        if let Some((_, _, pr_id)) = self.active_ai_target.as_ref() {
+        if let Some((_, _, pr_id)) = self.pr_resource_target.as_ref() {
             self.status = match self.ai_review_state.as_ref() {
                 Some(state) if state.status == AiReviewRunStatus::Running => format!(
                     "AI review running: {}",
@@ -1917,6 +1920,7 @@ impl TuiApp {
         self.comments.clear();
         self.diff = None;
         self.active_ai_target = None;
+        self.pr_resource_target = None;
         self.ai_review_state = None;
         self.ai_review_output = None;
         self.drafts.clear();
@@ -1948,6 +1952,7 @@ impl TuiApp {
             self.diff = None;
             self.drafts.clear();
             self.composer = None;
+            self.pr_resource_target = None;
             return;
         };
         let provider = repo.provider;
@@ -1959,7 +1964,7 @@ impl TuiApp {
             self.status = "The selected pull request is already loading".to_string();
             return;
         }
-        let target_changed = self.active_ai_target.as_ref() != Some(&target);
+        let target_changed = self.pr_resource_target.as_ref() != Some(&target);
         if target_changed {
             self.detail = None;
             self.comments.clear();
@@ -1980,6 +1985,7 @@ impl TuiApp {
         self.error = None;
         self.drafts.clear();
         self.composer = None;
+        self.pr_resource_target = Some(target);
         self.active_ai_target = Some((workspace.clone(), repo_name.clone(), pr_id));
         self.detail_view = target_view;
         self.reset_detail_scrolls();
@@ -1995,7 +2001,7 @@ impl TuiApp {
     }
 
     fn pr_load_in_flight_for(&self, target: &(String, String, u32)) -> bool {
-        self.active_ai_target.as_ref() == Some(target)
+        self.pr_resource_target.as_ref() == Some(target)
             && [&self.detail_load, &self.comments_load, &self.diff_load]
                 .into_iter()
                 .any(LoadState::is_loading)
@@ -2380,8 +2386,8 @@ impl TuiApp {
         let repo = self.repos.get(self.selected_repo)?;
         let pr = self.pull_requests.get(self.selected_pr)?;
         let target = (repo.workspace.clone(), repo.repo.clone(), pr.id);
-        let selected_pr_is_loaded = self.active_ai_target.as_ref() == Some(&target);
-        let detail = if selected_pr_is_loaded {
+        let selected_pr_is_loaded = self.pr_resource_target.as_ref() == Some(&target);
+        let detail = if selected_pr_is_loaded && matches!(self.detail_load, LoadState::Ready) {
             self.detail.as_ref()
         } else {
             None
@@ -2405,7 +2411,7 @@ impl TuiApp {
             target_branch: detail
                 .map(|loaded| loaded.destination_branch.clone())
                 .unwrap_or_default(),
-            diff: if selected_pr_is_loaded {
+            diff: if selected_pr_is_loaded && matches!(self.diff_load, LoadState::Ready) {
                 self.diff.clone()
             } else {
                 None
@@ -3328,7 +3334,7 @@ review:
         app.pull_requests = vec![pr(7, "Loading")];
         app.pr_list_load = LoadState::Ready;
         app.detail_load = LoadState::Loading;
-        app.active_ai_target = Some(("current".to_string(), "repo".to_string(), 7));
+        app.pr_resource_target = Some(("current".to_string(), "repo".to_string(), 7));
 
         app.load_selected_pr_for_view(DetailView::PullRequest);
 
@@ -3343,7 +3349,7 @@ review:
         app.selected_pr = 1;
         app.pr_list_load = LoadState::Ready;
         app.detail_load = LoadState::Loading;
-        app.active_ai_target = Some(("current".to_string(), "repo".to_string(), 7));
+        app.pr_resource_target = Some(("current".to_string(), "repo".to_string(), 7));
 
         assert!(!app.pr_load_in_flight_for(&("current".to_string(), "repo".to_string(), 8)));
     }
@@ -3522,7 +3528,7 @@ review:
     fn browser_diff_does_not_reuse_loaded_diff_for_another_selected_pr() {
         let mut app = TuiApp::from_repos(vec![repo("delaudio", "norn")]);
         app.pull_requests = vec![pr(41, "Loaded PR"), pr(42, "Selected PR")];
-        app.active_ai_target = Some(("delaudio".to_string(), "norn".to_string(), 41));
+        app.pr_resource_target = Some(("delaudio".to_string(), "norn".to_string(), 41));
         app.diff = Some("diff for PR 41".to_string());
         app.selected_pr = 1;
 
@@ -3531,6 +3537,23 @@ review:
         assert_eq!(web_state.pr_id, 42);
         assert_eq!(web_state.pr_title, "Selected PR");
         assert_eq!(web_state.diff, None);
+    }
+
+    #[test]
+    fn browser_diff_reuses_ready_resources_independently_of_ai_target() {
+        let mut app = TuiApp::from_repos(vec![repo("delaudio", "norn")]);
+        app.pull_requests = vec![pr(42, "Selected PR")];
+        app.pr_resource_target = Some(("delaudio".to_string(), "norn".to_string(), 42));
+        app.active_ai_target = Some(("delaudio".to_string(), "norn".to_string(), 41));
+        app.detail = Some(detail(42, "Selected PR"));
+        app.diff = Some("diff for PR 42".to_string());
+        app.detail_load = LoadState::Ready;
+        app.diff_load = LoadState::Ready;
+
+        let web_state = app.selected_web_diff_state().expect("selected PR state");
+
+        assert_eq!(web_state.pr_id, 42);
+        assert_eq!(web_state.diff.as_deref(), Some("diff for PR 42"));
     }
 
     #[test]
