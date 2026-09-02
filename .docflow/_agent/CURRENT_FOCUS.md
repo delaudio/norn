@@ -8,16 +8,17 @@ If status files and git disagree, git is authoritative; correct this file.
 
 ## Active state
 
-- **Branch:** `main`.
-- **Active item:** prepare and verify the Norn v0.2.9 release.
+- **Branch:** `main` (post-release snapshot; no work branch remains active).
+- **Active item:** none.
 - **Plan items:** none.
-- **Verification:** browser diff shared UI shipped through PR #236 after local
-  gates, CI, React Doctor, and bounded Norn review passed.
+- **Verification:** Norn v0.2.9 is stable; command artifacts, Intel and Apple
+  Silicon Homebrew lifecycle checks, and public tap publication passed in
+  workflow run `33686264305`.
 
 ## Last shipped
 
-`3497fc8` - ship the shared desktop/browser diff UI through PR #236.
+`1e08045` - release Norn v0.2.9 with the shared desktop/browser diff UI.
 
 ## Next item
 
-- Prepare, publish, and verify Norn v0.2.9.
+- Select the next queued item when the maintainer starts a new work session.
