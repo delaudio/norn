@@ -8,17 +8,16 @@ If status files and git disagree, git is authoritative; correct this file.
 
 ## Active state
 
-- **Branch:** `fix/browser-diff-shared-ui`.
-- **Active item:** replace the browser viewer's duplicated renderer with the
-  shared React diff UI.
-- **Plan items:** `.docflow/plan/todo/0012-browser-diff-shared-ui.md`.
-- **Verification:** pending implementation; Norn v0.2.8 is the clean release
-  baseline at `a361c77`.
+- **Branch:** `main`.
+- **Active item:** prepare and verify the Norn v0.2.9 release.
+- **Plan items:** none.
+- **Verification:** browser diff shared UI shipped through PR #236 after local
+  gates, CI, React Doctor, and bounded Norn review passed.
 
 ## Last shipped
 
-`a361c77` - release the bounded browser viewer in Norn v0.2.8.
+`3497fc8` - ship the shared desktop/browser diff UI through PR #236.
 
 ## Next item
 
-- Implement and verify the shared React browser diff entry point.
+- Prepare, publish, and verify Norn v0.2.9.
