@@ -230,6 +230,12 @@ fn handle_connection(
         }
         "/api/state" | "/api/diff" => {
             let state_data = get_or_populate_state(&state, &populate_lock);
+            let known_version = parse_query(query)
+                .get("version")
+                .and_then(|version| version.parse::<usize>().ok());
+            if known_version == Some(state_data.version) {
+                return write_empty_response(&mut stream, "204 No Content");
+            }
             let json = serde_json::to_string(&state_data).unwrap_or_else(|_| "{}".to_string());
             write_response(
                 &mut stream,
@@ -1252,10 +1258,11 @@ const HTML_PAGE: &str = r#"<!DOCTYPE html>
 
     async function pollState() {
       try {
-        const res = await fetch(apiUrl('/api/state'), {
+        const res = await fetch(apiUrl('/api/state', { version: state.version }), {
           credentials: 'same-origin',
           cache: 'no-store'
         });
+        if (res.status === 204) return;
         if (res.ok) {
           const data = await res.json();
           if (data.version !== state.version || data.prId !== state.prId) {
@@ -1780,6 +1787,32 @@ mod tests {
         let lock = state.read().unwrap();
         assert_eq!(lock.pr_id, 42);
         assert_eq!(lock.pr_title, "feat: add server");
+    }
+
+    #[test]
+    fn unchanged_state_returns_no_content_without_serializing_the_diff() {
+        let state = Arc::new(RwLock::new(WebDiffState {
+            version: 9,
+            workspace: "workspace".to_string(),
+            repo: "repo".to_string(),
+            pr_id: 42,
+            diff: Some("large diff body".to_string()),
+            diffstat: Some(Vec::new()),
+            ..WebDiffState::default()
+        }));
+        let server = WebDiffServer::start(state).expect("server should start");
+
+        let response = request(
+            server.port,
+            &format!(
+                "GET /session/{}/api/state?version=9 HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n",
+                server.session_token
+            ),
+        );
+
+        assert!(response.starts_with("HTTP/1.1 204 No Content"));
+        assert!(!response.contains("large diff body"));
+        assert!(response.contains("Content-Length: 0"));
     }
 
     #[test]

@@ -1123,7 +1123,7 @@ fn is_norn_source_repository(repo_path: &Path) -> bool {
         Ok(package) => package,
         Err(_) => return false,
     };
-    serde_json::from_str::<serde_json::Value>(&package)
+    let package_matches = serde_json::from_str::<serde_json::Value>(&package)
         .ok()
         .and_then(|package| {
             package
@@ -1132,7 +1132,25 @@ fn is_norn_source_repository(repo_path: &Path) -> bool {
                 .map(str::to_owned)
         })
         .as_deref()
-        == Some("norn")
+        == Some("norn");
+    if !package_matches {
+        return false;
+    }
+
+    let tauri_config = match fs::read_to_string(repo_path.join("src-tauri/tauri.conf.json")) {
+        Ok(config) => config,
+        Err(_) => return false,
+    };
+    serde_json::from_str::<serde_json::Value>(&tauri_config)
+        .ok()
+        .and_then(|config| {
+            config
+                .get("identifier")
+                .and_then(|identifier| identifier.as_str())
+                .map(str::to_owned)
+        })
+        .as_deref()
+        == Some("app.norn.desktop")
 }
 
 fn path_contains_legacy_reference(path: &Path) -> bool {
@@ -1888,6 +1906,17 @@ mod tests {
         )
         .expect("write unexpected reference");
 
+        let name_collision_hits = find_unapproved_legacy_references(&repo);
+        assert!(name_collision_hits
+            .iter()
+            .any(|hit| hit.starts_with("AGENTS.md:")));
+
+        fs::create_dir_all(repo.join("src-tauri")).expect("create tauri directory");
+        fs::write(
+            repo.join("src-tauri/tauri.conf.json"),
+            r#"{"identifier":"app.norn.desktop"}"#,
+        )
+        .expect("write Tauri config");
         let hits = find_unapproved_legacy_references(&repo);
 
         assert!(hits.iter().all(|hit| !hit.starts_with("AGENTS.md:")));
