@@ -1001,11 +1001,23 @@ fn map_pr_summary(p: BbPrSummary) -> PullRequestSummary {
 
 fn map_diffstat(d: BbDiffstat) -> DiffstatEntry {
     DiffstatEntry {
-        status: d.status,
+        status: normalize_diffstat_status(&d.status).to_string(),
         lines_added: d.lines_added,
         lines_removed: d.lines_removed,
         old_path: d.old.map(|f| f.path),
         new_path: d.new.map(|f| f.path),
+    }
+}
+
+fn normalize_diffstat_status(status: &str) -> &'static str {
+    if status.eq_ignore_ascii_case("added") {
+        "added"
+    } else if status.eq_ignore_ascii_case("removed") || status.eq_ignore_ascii_case("deleted") {
+        "removed"
+    } else if status.eq_ignore_ascii_case("renamed") {
+        "renamed"
+    } else {
+        "modified"
     }
 }
 
@@ -1141,14 +1153,8 @@ fn map_gh_pr_detail(pr: GhPullRequest) -> PullRequestDetail {
 }
 
 fn map_gh_file(file: GhFile) -> DiffstatEntry {
-    let status = match file.status.as_str() {
-        "removed" => "removed",
-        "renamed" => "renamed",
-        "added" => "added",
-        _ => "modified",
-    };
     DiffstatEntry {
-        status: status.to_string(),
+        status: normalize_diffstat_status(&file.status).to_string(),
         lines_added: file.additions,
         lines_removed: file.deletions,
         old_path: file.previous_filename,
@@ -3235,6 +3241,16 @@ mod tests {
     use std::sync::atomic::{AtomicU64, Ordering};
 
     static TEMP_REPO_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+    #[test]
+    fn diffstat_statuses_are_normalized_to_the_public_contract() {
+        assert_eq!(normalize_diffstat_status("added"), "added");
+        assert_eq!(normalize_diffstat_status("REMOVED"), "removed");
+        assert_eq!(normalize_diffstat_status("deleted"), "removed");
+        assert_eq!(normalize_diffstat_status("renamed"), "renamed");
+        assert_eq!(normalize_diffstat_status("<script>"), "modified");
+        assert_eq!(normalize_diffstat_status(""), "modified");
+    }
 
     #[test]
     fn image_preview_reader_enforces_the_byte_limit() {

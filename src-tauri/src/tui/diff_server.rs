@@ -229,13 +229,13 @@ fn handle_connection(
             )?;
         }
         "/api/state" | "/api/diff" => {
-            let state_data = get_or_populate_state(&state, &populate_lock);
             let known_version = parse_query(query)
                 .get("version")
                 .and_then(|version| version.parse::<usize>().ok());
-            if known_version == Some(state_data.version) {
+            let Some(state_data) = get_or_populate_state(&state, &populate_lock, known_version)
+            else {
                 return write_empty_response(&mut stream, "204 No Content");
-            }
+            };
             let json = serde_json::to_string(&state_data).unwrap_or_else(|_| "{}".to_string());
             write_response(
                 &mut stream,
@@ -253,7 +253,8 @@ fn handle_connection(
                 .get("side")
                 .cloned()
                 .unwrap_or_else(|| "new".to_string());
-            let state_data = get_or_populate_state(&state, &populate_lock);
+            let state_data = get_or_populate_state(&state, &populate_lock, None)
+                .expect("requests without a known version always return state");
 
             if state_data.workspace.is_empty()
                 || state_data.repo.is_empty()
@@ -449,10 +450,17 @@ fn is_allowed_preview_path(diffstat: Option<&[DiffstatEntry]>, path: &str, side:
 fn get_or_populate_state(
     state: &Arc<RwLock<WebDiffState>>,
     populate_lock: &Arc<Mutex<()>>,
-) -> WebDiffState {
-    let snapshot = state.read().unwrap().clone();
+    known_version: Option<usize>,
+) -> Option<WebDiffState> {
+    let snapshot = {
+        let lock = state.read().unwrap();
+        if state_is_unchanged_and_settled(&lock, known_version) {
+            return None;
+        }
+        lock.clone()
+    };
     if !needs_population(&snapshot) {
-        return snapshot;
+        return Some(snapshot);
     }
 
     let _guard = populate_lock
@@ -460,7 +468,7 @@ fn get_or_populate_state(
         .unwrap_or_else(|poisoned| poisoned.into_inner());
     let snapshot = state.read().unwrap().clone();
     if !needs_population(&snapshot) {
-        return snapshot;
+        return Some(snapshot);
     }
 
     let diff_result = snapshot.diff.is_none().then(|| {
@@ -513,7 +521,7 @@ fn get_or_populate_state(
             lock.version += 1;
         }
     }
-    lock.clone()
+    Some(lock.clone())
 }
 
 fn needs_population(state: &WebDiffState) -> bool {
@@ -522,6 +530,10 @@ fn needs_population(state: &WebDiffState) -> bool {
         && state.pr_id > 0
         && !state.population_failed
         && (state.diff.is_none() || state.diffstat.is_none())
+}
+
+fn state_is_unchanged_and_settled(state: &WebDiffState, known_version: Option<usize>) -> bool {
+    known_version == Some(state.version) && !needs_population(state)
 }
 
 fn same_pull_request(current: &WebDiffState, snapshot: &WebDiffState) -> bool {
@@ -861,7 +873,7 @@ const HTML_PAGE: &str = r#"<!DOCTYPE html>
 
     .status-badge.added { background: rgba(34, 197, 94, 0.2); color: #4ade80; }
     .status-badge.modified { background: rgba(234, 179, 8, 0.2); color: #facc15; }
-    .status-badge.deleted { background: rgba(239, 68, 68, 0.2); color: #f87171; }
+    .status-badge.removed { background: rgba(239, 68, 68, 0.2); color: #f87171; }
     .status-badge.renamed { background: rgba(59, 130, 246, 0.2); color: #60a5fa; }
 
     .diff-container {
@@ -1153,6 +1165,98 @@ const HTML_PAGE: &str = r#"<!DOCTYPE html>
         .replace(/'/g, "&#039;");
     }
 
+    function normalizeStatus(status) {
+      if (status === 'added' || status === 'removed' || status === 'renamed') return status;
+      return 'modified';
+    }
+
+    function decodeGitPathToken(token) {
+      if (!token.startsWith('"') || !token.endsWith('"')) return token;
+      const bytes = [];
+      const encoder = new TextEncoder();
+      const escapes = {
+        a: 7,
+        b: 8,
+        t: 9,
+        n: 10,
+        v: 11,
+        f: 12,
+        r: 13,
+        '"': 34,
+        '\\': 92
+      };
+
+      for (let index = 1; index < token.length - 1; index++) {
+        const current = token[index];
+        if (current !== '\\') {
+          bytes.push(...encoder.encode(current));
+          continue;
+        }
+
+        const escaped = token[++index];
+        if (escaped === undefined) break;
+        if (/^[0-7]$/.test(escaped)) {
+          let octal = escaped;
+          while (octal.length < 3 && /^[0-7]$/.test(token[index + 1] || '')) {
+            octal += token[++index];
+          }
+          bytes.push(parseInt(octal, 8));
+        } else if (Object.prototype.hasOwnProperty.call(escapes, escaped)) {
+          bytes.push(escapes[escaped]);
+        } else {
+          bytes.push(...encoder.encode(escaped));
+        }
+      }
+
+      return new TextDecoder().decode(new Uint8Array(bytes));
+    }
+
+    function readQuotedGitToken(input) {
+      if (!input.startsWith('"')) return null;
+      let escaped = false;
+      for (let index = 1; index < input.length; index++) {
+        const current = input[index];
+        if (escaped) {
+          escaped = false;
+        } else if (current === '\\') {
+          escaped = true;
+        } else if (current === '"') {
+          return { token: input.slice(0, index + 1), rest: input.slice(index + 1) };
+        }
+      }
+      return null;
+    }
+
+    function stripGitSidePrefix(token, prefix) {
+      const path = decodeGitPathToken(token);
+      return path.startsWith(prefix) ? path.slice(prefix.length) : '';
+    }
+
+    function parseDiffGitHeader(line) {
+      const payload = line.slice('diff --git '.length);
+      let oldToken = '';
+      let newToken = '';
+
+      if (payload.startsWith('"')) {
+        const oldPart = readQuotedGitToken(payload);
+        if (!oldPart) return { oldPath: '', newPath: '' };
+        oldToken = oldPart.token;
+        const remaining = oldPart.rest.trimStart();
+        const newPart = readQuotedGitToken(remaining);
+        newToken = newPart ? newPart.token : remaining;
+      } else {
+        const separator = Math.max(payload.lastIndexOf(' b/'), payload.lastIndexOf(' "b/'));
+        if (separator < 0) return { oldPath: '', newPath: '' };
+        oldToken = payload.slice(0, separator);
+        newToken = payload.slice(separator + 1);
+      }
+
+      return {
+        oldPath: stripGitSidePrefix(oldToken, 'a/'),
+        newPath: stripGitSidePrefix(newToken, 'b/')
+      };
+    }
+
     function isImageFile(path) {
       if (!path) return false;
       const lower = path.toLowerCase();
@@ -1169,9 +1273,7 @@ const HTML_PAGE: &str = r#"<!DOCTYPE html>
       for (let i = 0; i < lines.length; i++) {
         const line = lines[i];
         if (line.startsWith('diff --git ')) {
-          const match = line.match(/^diff --git a\/(.*) b\/(.*)$/);
-          const oldPath = match ? match[1] : '';
-          const newPath = match ? match[2] : '';
+          const { oldPath, newPath } = parseDiffGitHeader(line);
           currentFile = {
             oldPath,
             newPath,
@@ -1188,7 +1290,7 @@ const HTML_PAGE: &str = r#"<!DOCTYPE html>
           if (line.startsWith('new file mode ')) {
             currentFile.status = 'added';
           } else if (line.startsWith('deleted file mode ')) {
-            currentFile.status = 'deleted';
+            currentFile.status = 'removed';
           } else if (line.startsWith('rename from ') || line.startsWith('similarity index ')) {
             currentFile.status = 'renamed';
           } else if (line.startsWith('Binary files ') || line.includes('GIT binary patch')) {
@@ -1237,7 +1339,7 @@ const HTML_PAGE: &str = r#"<!DOCTYPE html>
         const path = entry.newPath || entry.oldPath;
         let existing = merged.find(f => (entry.newPath && f.newPath === entry.newPath) || (entry.oldPath && f.oldPath === entry.oldPath));
         if (existing) {
-          existing.status = entry.status || existing.status;
+          existing.status = normalizeStatus(entry.status || existing.status);
           if (entry.linesAdded) existing.linesAdded = entry.linesAdded;
           if (entry.linesRemoved) existing.linesRemoved = entry.linesRemoved;
         } else {
@@ -1245,7 +1347,7 @@ const HTML_PAGE: &str = r#"<!DOCTYPE html>
             oldPath: entry.oldPath || '',
             newPath: entry.newPath || '',
             path: path || '',
-            status: entry.status || 'modified',
+            status: normalizeStatus(entry.status),
             hunks: [],
             linesAdded: entry.linesAdded || 0,
             linesRemoved: entry.linesRemoved || 0,
@@ -1303,8 +1405,8 @@ const HTML_PAGE: &str = r#"<!DOCTYPE html>
         const parts = file.path.split('/');
         const filename = parts.pop();
         const dir = parts.join('/');
-        const statusClass = file.status.toLowerCase();
-        const statusLetter = file.status === 'added' ? 'A' : file.status === 'deleted' ? 'D' : file.status === 'renamed' ? 'R' : 'M';
+        const statusClass = normalizeStatus(file.status);
+        const statusLetter = statusClass === 'added' ? 'A' : statusClass === 'removed' ? 'D' : statusClass === 'renamed' ? 'R' : 'M';
 
         return `
           <li class="file-item" data-scroll-path="${escapeHtml(file.path)}">
@@ -1352,7 +1454,7 @@ const HTML_PAGE: &str = r#"<!DOCTYPE html>
             <div class="file-diff-header">
               <div class="file-diff-path" data-toggle-path="${escapeHtml(file.path)}">
                 <span style="cursor:pointer;">${isCollapsed ? '▶' : '▼'}</span>
-                <span class="status-badge ${file.status.toLowerCase()}">${file.status}</span>
+                <span class="status-badge ${normalizeStatus(file.status)}">${normalizeStatus(file.status)}</span>
                 <span>${escapeHtml(file.path)}</span>
                 <button class="copy-btn" data-copy-path="${escapeHtml(file.path)}">Copy</button>
               </div>
@@ -1390,7 +1492,7 @@ const HTML_PAGE: &str = r#"<!DOCTYPE html>
                 <img src="${oldUrl}" onerror="this.parentElement.innerHTML='<div style=padding:20px;color:var(--text-dim)>No preview available</div>'" alt="Old version" />
               </div>
             ` : ''}
-            ${file.status !== 'deleted' ? `
+            ${normalizeStatus(file.status) !== 'removed' ? `
               <div class="image-card">
                 <div class="image-card-title">Changed (New)</div>
                 <img src="${newUrl}" onerror="this.parentElement.innerHTML='<div style=padding:20px;color:var(--text-dim)>No preview available</div>'" alt="New version" />
@@ -1790,7 +1892,7 @@ mod tests {
     }
 
     #[test]
-    fn unchanged_state_returns_no_content_without_serializing_the_diff() {
+    fn unchanged_populated_state_short_circuits_without_cloning_or_serializing_the_diff() {
         let state = Arc::new(RwLock::new(WebDiffState {
             version: 9,
             workspace: "workspace".to_string(),
@@ -1813,6 +1915,19 @@ mod tests {
         assert!(response.starts_with("HTTP/1.1 204 No Content"));
         assert!(!response.contains("large diff body"));
         assert!(response.contains("Content-Length: 0"));
+    }
+
+    #[test]
+    fn unchanged_state_still_populates_missing_provider_data() {
+        let state = WebDiffState {
+            version: 9,
+            workspace: "workspace".to_string(),
+            repo: "repo".to_string(),
+            pr_id: 42,
+            ..WebDiffState::default()
+        };
+
+        assert!(!state_is_unchanged_and_settled(&state, Some(9)));
     }
 
     #[test]
