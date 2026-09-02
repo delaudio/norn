@@ -266,6 +266,9 @@ fn handle_connection(
             if !is_allowed_preview_path(state_data.diffstat.as_deref(), &file_path, &side) {
                 return write_empty_response(&mut stream, "404 Not Found");
             }
+            if !is_raster_preview_path(&file_path) {
+                return write_empty_response(&mut stream, "415 Unsupported Media Type");
+            }
 
             match get_pr_file_preview_native(
                 state_data.provider,
@@ -276,32 +279,27 @@ fn handle_connection(
                 &side,
             ) {
                 Ok(preview) => {
-                    if let Some((mime_part, base64_data)) = preview.data_url.split_once(',') {
-                        let mime_type = mime_part
-                            .strip_prefix("data:")
-                            .and_then(|p| p.strip_suffix(";base64"))
-                            .unwrap_or(&preview.mime_type);
-
-                        if let Ok(bytes) = STANDARD.decode(base64_data.trim()) {
-                            write_response(
-                                &mut stream,
-                                "200 OK",
-                                safe_preview_mime_type(mime_type, &preview.mime_type),
-                                "private, max-age=3600",
-                                &bytes,
-                                head_only,
-                            )?;
-                            return Ok(());
-                        }
-                    }
-
-                    let json = serde_json::to_string(&preview).unwrap_or_else(|_| "{}".to_string());
+                    let Some((mime_part, base64_data)) = preview.data_url.split_once(',') else {
+                        return write_empty_response(&mut stream, "415 Unsupported Media Type");
+                    };
+                    let mime_type = mime_part
+                        .strip_prefix("data:")
+                        .and_then(|p| p.strip_suffix(";base64"))
+                        .unwrap_or(&preview.mime_type);
+                    let Some(safe_mime_type) =
+                        safe_preview_mime_type(mime_type, &preview.mime_type)
+                    else {
+                        return write_empty_response(&mut stream, "415 Unsupported Media Type");
+                    };
+                    let Ok(bytes) = STANDARD.decode(base64_data.trim()) else {
+                        return write_empty_response(&mut stream, "415 Unsupported Media Type");
+                    };
                     write_response(
                         &mut stream,
                         "200 OK",
-                        "application/json; charset=utf-8",
+                        safe_mime_type,
                         "no-store",
-                        json.as_bytes(),
+                        &bytes,
                         head_only,
                     )?;
                 }
@@ -393,17 +391,29 @@ fn constant_time_token_eq(candidate: &str, expected: &str) -> bool {
     std::hint::black_box(difference) == 0
 }
 
-fn safe_preview_mime_type(candidate: &str, fallback: &str) -> &'static str {
+fn safe_preview_mime_type(candidate: &str, fallback: &str) -> Option<&'static str> {
     for mime_type in [candidate, fallback] {
         match mime_type {
-            "image/png" => return "image/png",
-            "image/jpeg" => return "image/jpeg",
-            "image/gif" => return "image/gif",
-            "image/webp" => return "image/webp",
+            "image/png" => return Some("image/png"),
+            "image/jpeg" => return Some("image/jpeg"),
+            "image/gif" => return Some("image/gif"),
+            "image/webp" => return Some("image/webp"),
             _ => {}
         }
     }
-    "application/octet-stream"
+    None
+}
+
+fn is_raster_preview_path(path: &str) -> bool {
+    std::path::Path::new(path)
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| {
+            matches!(
+                extension.to_ascii_lowercase().as_str(),
+                "png" | "jpg" | "jpeg" | "gif" | "webp"
+            )
+        })
 }
 
 fn write_empty_response(stream: &mut TcpStream, status: &str) -> std::io::Result<()> {
@@ -1846,20 +1856,30 @@ mod tests {
     fn preview_mime_types_are_allowlisted_before_header_rendering() {
         assert_eq!(
             safe_preview_mime_type("image/png", "application/octet-stream"),
-            "image/png"
+            Some("image/png")
         );
         assert_eq!(
             safe_preview_mime_type("bad\r\nX-Injected: yes", "image/webp"),
-            "image/webp"
+            Some("image/webp")
         );
         assert_eq!(
             safe_preview_mime_type("bad\r\nX-Injected: yes", "also-invalid"),
-            "application/octet-stream"
+            None
         );
         assert_eq!(
             safe_preview_mime_type("image/svg+xml", "image/svg+xml"),
-            "application/octet-stream"
+            None
         );
+    }
+
+    #[test]
+    fn preview_paths_allow_only_bounded_raster_extensions() {
+        for path in ["logo.png", "photo.JPG", "clip.gif", "asset.webp"] {
+            assert!(is_raster_preview_path(path), "{path}");
+        }
+        for path in ["icon.ico", "bitmap.bmp", "vector.svg", "notes.txt"] {
+            assert!(!is_raster_preview_path(path), "{path}");
+        }
     }
 
     #[test]

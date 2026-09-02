@@ -1077,11 +1077,8 @@ fn find_unapproved_legacy_references(repo_path: &Path) -> Vec<String> {
                 continue;
             }
 
-            let relative = entry_path
-                .strip_prefix(repo_path)
-                .unwrap_or(&entry_path)
-                .to_string_lossy()
-                .to_string();
+            let relative =
+                normalize_relative_path(entry_path.strip_prefix(repo_path).unwrap_or(&entry_path));
             let is_compatibility_file = is_norn_source
                 && NORN_SOURCE_LEGACY_COMPATIBILITY_FILES.contains(&relative.as_str());
 
@@ -1116,6 +1113,10 @@ fn find_unapproved_legacy_references(repo_path: &Path) -> Vec<String> {
     matches.sort();
     matches.dedup();
     matches
+}
+
+fn normalize_relative_path(path: &Path) -> String {
+    path.to_string_lossy().replace('\\', "/")
 }
 
 fn is_norn_source_repository(repo_path: &Path) -> bool {
@@ -1617,11 +1618,11 @@ fn format_readiness_human(report: &DoctorReport) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        collect_report, find_unapproved_legacy_references, parse_doctor_args, run_doctor,
-        DoctorArgs, DoctorFormat,
+        collect_report, find_unapproved_legacy_references, normalize_relative_path,
+        parse_doctor_args, run_doctor, DoctorArgs, DoctorFormat,
     };
     use std::fs;
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
     use std::process;
     use std::sync::atomic::{AtomicU64, Ordering};
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -1888,6 +1889,14 @@ mod tests {
             .issues
             .iter()
             .all(|issue| issue.code != "repository.legacyNameNotAllowed"));
+    }
+
+    #[test]
+    fn legacy_compatibility_paths_use_portable_separators() {
+        assert_eq!(
+            normalize_relative_path(Path::new(r"src-tauri\src\config.rs")),
+            "src-tauri/src/config.rs"
+        );
     }
 
     #[test]
