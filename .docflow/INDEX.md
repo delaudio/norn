@@ -20,4 +20,4 @@ metadata.
 | 0013 | Read-only readiness probing for machine and repository onboarding | Accepted | 2026-08-05 | codex | norn, onboarding, readiness, cli |
 | 0014 | Deliver Norn through reproducible releases and verified upgrade channels | Implemented | 2026-08-31 | codex | release, distribution, homebrew, cli, tui, desktop |
 | 0015 | Distribute managed agent review skills with installed Norn | Implemented | 2026-09-01 | codex | distribution, skills, codex, claude, cli, homebrew |
-| 0016 | Offer an authenticated browser diff viewer from the terminal UI | Proposed | 2026-09-02 | default-agent | tui, diff, browser, security, rust |
+| 0016 | Offer an authenticated browser diff viewer from the terminal UI | Accepted | 2026-09-02 | default-agent | tui, diff, browser, security, rust |

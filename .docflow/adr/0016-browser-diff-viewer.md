@@ -1,7 +1,7 @@
 ---
 adr: 0016
 title: Offer an authenticated browser diff viewer from the terminal UI
-status: Proposed
+status: Accepted
 date: 2026-09-02
 owner: default-agent
 supersedes:
@@ -69,8 +69,7 @@ and repeated provider loads.
 
 ## Open questions
 
-- Whether to accept the browser viewer and its local security boundary for
-  implementation.
+- None.
 
 ## References
 
@@ -84,8 +83,10 @@ and repeated provider loads.
 | Date | Revision | Author | Change |
 |------|----------|--------|--------|
 | 2026-09-02 | r1 | default-agent | Proposed an authenticated browser diff viewer and its security boundaries. |
+| 2026-09-02 | r2 | default-agent | Accepted the browser viewer after maintainer review. |
 
 ## Approvals
 
 | Role | Name | Date | Signature |
 |------|------|------|-----------|
+| Maintainer | delaudio | 2026-09-02 | approved remediation and implementation in chat |
