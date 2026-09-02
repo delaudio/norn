@@ -8,17 +8,17 @@ If status files and git disagree, git is authoritative; correct this file.
 
 ## Active state
 
-- **Branch:** `feat/tui-browser-diff-viewer`.
-- **Active item:** complete and harden the authenticated browser diff viewer.
-- **Plan items:** `.docflow/plan/todo/0011-browser-diff-viewer.md`.
-- **Verification:** build, typecheck, lint, 104 frontend tests plus tooling
-  suites, 579 passing Rust library tests (2 ignored), Clippy, and Archgate
-  17/17 pass after browser viewer review remediation. The final Norn
-  working-tree review returned no findings.
+- **Branch:** `main`.
+- **Active item:** prepare the command-only Norn v0.2.8 release.
+- **Plan items:** none; release execution follows the implemented distribution
+  contract.
+- **Verification:** PR #230 merged at `32c51e6`; typecheck, 104 frontend tests
+  plus tooling suites, Archgate 17/17, general CI, and the Homebrew contract
+  pass after browser viewer delivery.
 
 ## Last shipped
 
-`3b78900` - release Norn v0.2.6 after the TUI settings refinement.
+`32c51e6` - ship the authenticated browser diff viewer through PR #230.
 
 ## Next item
 

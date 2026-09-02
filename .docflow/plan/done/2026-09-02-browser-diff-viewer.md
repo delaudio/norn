@@ -38,3 +38,8 @@ an explicit command-distribution test script.
 
 - `../../adr/0016-browser-diff-viewer.md`
 - `../../adr/0006-terminal-ui.md`
+
+## Shipped
+
+Shipped at HEAD `32c51e633ba10a5bdbefd6fedf1a3aef7df4a10e` through
+[PR #230](https://github.com/delaudio/norn/pull/230).
