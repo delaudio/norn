@@ -841,6 +841,7 @@ struct TuiApp {
     diff_prompt_open: bool,
     web_diff_server: Option<WebDiffServer>,
     web_diff_state: Arc<RwLock<WebDiffState>>,
+    browser_opener: fn(&str) -> Result<(), String>,
     should_quit: bool,
 }
 
@@ -953,6 +954,7 @@ impl TuiApp {
             diff_prompt_open: false,
             web_diff_server: None,
             web_diff_state: Arc::new(RwLock::new(WebDiffState::default())),
+            browser_opener: open_browser_url,
             should_quit: false,
         }
     }
@@ -2362,7 +2364,7 @@ impl TuiApp {
         if let Some(server) = self.web_diff_server.as_ref() {
             server.update_pr(web_state);
             let url = server.url();
-            match open_browser_url(&url) {
+            match (self.browser_opener)(&url) {
                 Ok(()) => {
                     self.status = format!("Opened PR #{pr_id} diff in browser");
                 }
@@ -3503,6 +3505,7 @@ review:
     fn diff_choice_prompt_browser_selection_updates_web_state() {
         let mut app = TuiApp::from_repos(vec![repo("delaudio", "norn")]);
         app.pull_requests = vec![pr(42, "Support web diff")];
+        app.browser_opener = |_| Ok(());
 
         app.handle_key(KeyCode::Char('g'));
         assert!(app.diff_prompt_open);
