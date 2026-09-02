@@ -3,7 +3,7 @@ use std::{
     net::{TcpListener, TcpStream},
     process::{Command, ExitStatus},
     sync::{
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
         Arc, Mutex, RwLock,
     },
     thread,
@@ -21,6 +21,7 @@ use crate::{
 };
 
 const MAX_REQUEST_HEAD_BYTES: usize = 16 * 1024;
+const MAX_ACTIVE_CONNECTIONS: usize = 16;
 const SESSION_TOKEN_BYTES: usize = 32;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -63,16 +64,25 @@ impl WebDiffServer {
         let thread_state = Arc::clone(&state);
         let thread_token: Arc<str> = Arc::from(session_token.as_str());
         let populate_lock = Arc::new(Mutex::new(()));
+        let available_connection_slots = Arc::new(AtomicUsize::new(MAX_ACTIVE_CONNECTIONS));
 
         thread::spawn(move || {
             let _ = listener.set_nonblocking(true);
             while !thread_shutdown.load(Ordering::Relaxed) {
                 match listener.accept() {
                     Ok((stream, _)) => {
+                        if !try_acquire_connection_slot(&available_connection_slots) {
+                            let mut stream = stream;
+                            let _ = stream.set_write_timeout(Some(Duration::from_secs(1)));
+                            let _ = write_empty_response(&mut stream, "503 Service Unavailable");
+                            continue;
+                        }
                         let st = Arc::clone(&thread_state);
                         let token = Arc::clone(&thread_token);
                         let fetch_lock = Arc::clone(&populate_lock);
+                        let slot = ConnectionSlot::new(Arc::clone(&available_connection_slots));
                         thread::spawn(move || {
+                            let _slot = slot;
                             let _ = handle_connection(stream, st, &token, fetch_lock);
                         });
                     }
@@ -122,6 +132,36 @@ impl WebDiffServer {
             "http://127.0.0.1:{}/session/{}/",
             self.port, self.session_token
         )
+    }
+}
+
+struct ConnectionSlot {
+    available: Arc<AtomicUsize>,
+}
+
+impl ConnectionSlot {
+    fn new(available: Arc<AtomicUsize>) -> Self {
+        Self { available }
+    }
+}
+
+impl Drop for ConnectionSlot {
+    fn drop(&mut self) {
+        self.available.fetch_add(1, Ordering::Release);
+    }
+}
+
+fn try_acquire_connection_slot(available: &AtomicUsize) -> bool {
+    let mut slots = available.load(Ordering::Acquire);
+    loop {
+        if slots == 0 {
+            return false;
+        }
+        match available.compare_exchange_weak(slots, slots - 1, Ordering::AcqRel, Ordering::Acquire)
+        {
+            Ok(_) => return true,
+            Err(current) => slots = current,
+        }
     }
 }
 
@@ -1412,8 +1452,8 @@ const HTML_PAGE: &str = r#"<!DOCTYPE html>
         let existing = merged.find(f => (entry.newPath && f.newPath === entry.newPath) || (entry.oldPath && f.oldPath === entry.oldPath));
         if (existing) {
           existing.status = normalizeStatus(entry.status || existing.status);
-          if (entry.linesAdded) existing.linesAdded = entry.linesAdded;
-          if (entry.linesRemoved) existing.linesRemoved = entry.linesRemoved;
+          if (Number.isFinite(entry.linesAdded)) existing.linesAdded = entry.linesAdded;
+          if (Number.isFinite(entry.linesRemoved)) existing.linesRemoved = entry.linesRemoved;
         } else {
           merged.push({
             oldPath: entry.oldPath || '',
@@ -1871,6 +1911,15 @@ mod tests {
             .expect_err("non-zero opener status should fail");
         assert!(error.contains("Failed to open browser"));
         assert!(error.contains('7'));
+    }
+
+    #[test]
+    fn browser_server_connection_slots_are_bounded_and_reusable() {
+        let available = Arc::new(AtomicUsize::new(1));
+        assert!(try_acquire_connection_slot(&available));
+        assert!(!try_acquire_connection_slot(&available));
+        drop(ConnectionSlot::new(Arc::clone(&available)));
+        assert!(try_acquire_connection_slot(&available));
     }
 
     #[test]

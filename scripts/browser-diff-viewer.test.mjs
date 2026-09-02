@@ -30,13 +30,14 @@ const functions = [
   "stripGitSidePrefix",
   "parseDiffGitHeader",
   "parseUnifiedDiff",
+  "mergeDiffWithDiffstat",
   "isImageFile",
   "handleImagePreviewError",
 ]
   .map(embeddedFunction)
   .join("\n\n");
 vm.runInNewContext(
-  `${functions}\nthis.browserDiff = { normalizeStatus, parseUnifiedDiff, isImageFile, handleImagePreviewError };`,
+  `${functions}\nthis.browserDiff = { normalizeStatus, parseUnifiedDiff, mergeDiffWithDiffstat, isImageFile, handleImagePreviewError };`,
   context,
 );
 
@@ -71,6 +72,16 @@ test("embedded viewer accepts only canonical provider statuses", () => {
   assert.equal(context.browserDiff.normalizeStatus("removed"), "removed");
   assert.equal(context.browserDiff.normalizeStatus("added"), "added");
   assert.equal(context.browserDiff.normalizeStatus("<img onerror=alert(1)>"), "modified");
+});
+
+test("diffstat zero counts replace parser-derived line counts", () => {
+  const merged = context.browserDiff.mergeDiffWithDiffstat(
+    [{ path: "asset.bin", oldPath: "asset.bin", newPath: "asset.bin", status: "modified", linesAdded: 4, linesRemoved: 3 }],
+    [{ oldPath: "asset.bin", newPath: "asset.bin", status: "modified", linesAdded: 0, linesRemoved: 0 }],
+  );
+
+  assert.equal(merged[0].linesAdded, 0);
+  assert.equal(merged[0].linesRemoved, 0);
 });
 
 test("embedded viewer detects only image formats allowed by the preview server", () => {
