@@ -12,8 +12,8 @@ If status files and git disagree, git is authoritative; correct this file.
 - **Active item:** `.docflow/plan/todo/0013-local-review-target-tui.md`.
 - **Plan items:** implement the shared local snapshot and TUI first, then
   `.docflow/plan/todo/0014-local-review-target-desktop.md`.
-- **Verification:** focused native snapshot, TUI, browser-diff, and TypeScript
-  checks are in progress.
+- **Verification:** 609 Rust tests, 110 frontend tests plus tooling, Clippy,
+  typecheck, lint, and Archgate 17/17 pass after the Norn remediation.
 
 ## Last shipped
 
