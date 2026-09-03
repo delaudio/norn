@@ -12,9 +12,9 @@ If status files and git disagree, git is authoritative; correct this file.
 - **Active item:** `.docflow/plan/todo/0013-local-review-target-tui.md`.
 - **Plan items:** implement the shared local snapshot and TUI first, then
   `.docflow/plan/todo/0014-local-review-target-desktop.md`.
-- **Verification:** 613 Rust tests, 110 frontend tests plus tooling, Clippy,
+- **Verification:** 615 Rust tests, 110 frontend tests plus tooling, Clippy,
   typecheck, lint, and Archgate 17/17 pass after all Norn findings were
-  remediated; the new pre-push Norn review is pending.
+  remediated; the bounded pre-push Norn rerun is pending.
 
 ## Last shipped
 
