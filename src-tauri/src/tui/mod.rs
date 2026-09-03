@@ -35,7 +35,8 @@ use crate::services::bitbucket::{
     PullRequestDetail, PullRequestSummary,
 };
 use crate::services::review::{
-    start_inline_review_native, AiReviewRunState, AiReviewRunStatus, AiReviewRunStore,
+    start_inline_review_native, start_local_inline_review_native, AiReviewRunState,
+    AiReviewRunStatus, AiReviewRunStore,
 };
 
 use image_diff::{image_candidate_from_patch, ImageDiffState, TerminalImageSupport};
@@ -995,13 +996,29 @@ impl TuiApp {
                 let request_id = self.next_request();
                 self.ai_request_id = request_id;
                 self.ai_review_load = LoadState::Loading;
-                self.loader.ai_review(
-                    request_id,
-                    workspace,
-                    repo,
-                    pr_id,
-                    self.ai_review_store.clone(),
-                );
+                if let Some(snapshot_sha256) = self
+                    .local_snapshot
+                    .as_ref()
+                    .filter(|_| self.pr_filter == PrListFilter::Local)
+                    .map(|snapshot| snapshot.snapshot_sha256.clone())
+                {
+                    self.loader.ai_review_for_snapshot(
+                        request_id,
+                        workspace,
+                        repo,
+                        pr_id,
+                        self.ai_review_store.clone(),
+                        snapshot_sha256,
+                    );
+                } else {
+                    self.loader.ai_review(
+                        request_id,
+                        workspace,
+                        repo,
+                        pr_id,
+                        self.ai_review_store.clone(),
+                    );
+                }
             }
         }
     }
@@ -2300,19 +2317,18 @@ impl TuiApp {
         let title = format!("Local changes on {}", snapshot.current_branch);
         let payload = build_local_review_payload(&prompt, &snapshot);
         self.diff = Some(snapshot.diff.clone());
-        match start_inline_review_native(
+        match start_local_inline_review_native(
             self.ai_review_store.clone(),
             snapshot.workspace.clone(),
             snapshot.repo.clone(),
             snapshot.review_id,
+            snapshot.snapshot_sha256.clone(),
             title,
             snapshot.current_branch.clone(),
             destination,
             Some(snapshot.base_sha.clone()),
-            Some(snapshot.snapshot_sha256.clone()),
             payload,
             Some("Review these unpublished local changes from the terminal UI.".to_string()),
-            Some("Local review".to_string()),
             Some("Local changes".to_string()),
             TUI_SKIP_AI_REVIEW_ANALYZERS,
             self.ai_provider,
@@ -2355,13 +2371,29 @@ impl TuiApp {
                 let request_id = self.next_request();
                 self.ai_request_id = request_id;
                 self.ai_review_load = LoadState::Loading;
-                self.loader.ai_review(
-                    request_id,
-                    workspace,
-                    repo,
-                    pr_id,
-                    self.ai_review_store.clone(),
-                );
+                if let Some(snapshot_sha256) = self
+                    .local_snapshot
+                    .as_ref()
+                    .filter(|_| self.pr_filter == PrListFilter::Local)
+                    .map(|snapshot| snapshot.snapshot_sha256.clone())
+                {
+                    self.loader.ai_review_for_snapshot(
+                        request_id,
+                        workspace,
+                        repo,
+                        pr_id,
+                        self.ai_review_store.clone(),
+                        snapshot_sha256,
+                    );
+                } else {
+                    self.loader.ai_review(
+                        request_id,
+                        workspace,
+                        repo,
+                        pr_id,
+                        self.ai_review_store.clone(),
+                    );
+                }
             }
             self.status = "Showing AI review output".to_string();
         } else if self.detail_view == DetailView::Diff {
@@ -3676,7 +3708,6 @@ review:
         let previous_ai_request = app.ai_request_id;
 
         let mut refreshed = local_snapshot("feature/second");
-        refreshed.review_id = 0x8000_0043;
         refreshed.snapshot_sha256 =
             "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb".to_string();
         refreshed.diff.push_str("+refreshed\n");
@@ -3698,7 +3729,7 @@ review:
 
         assert_eq!(
             app.active_ai_target,
-            Some(("delaudio".into(), "norn".into(), 0x8000_0043))
+            Some(("delaudio".into(), "norn".into(), 0x8000_0042))
         );
         assert!(app.ai_review_output.is_none());
     }

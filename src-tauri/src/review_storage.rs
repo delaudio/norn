@@ -1952,6 +1952,7 @@ pub fn review_effectiveness_metrics(
             SELECT tenant_id, workspace, repo, pr_id, store_json
             FROM ai_review_stores
             WHERE tenant_id = ?1
+              AND review_key NOT LIKE 'local:%'
               AND (?2 IS NULL OR workspace = ?2)
               AND (?3 IS NULL OR repo = ?3)
             ORDER BY workspace ASC, repo ASC, pr_id ASC
@@ -3925,16 +3926,8 @@ fn shared_job_conversion_error(column: usize, message: impl Into<String>) -> rus
 }
 
 pub fn load_review_json(workspace: &str, repo: &str, id: u32) -> Result<Option<String>, String> {
-    let conn = open()?;
     let key = review_key(workspace, repo, id);
-    let db_json = conn
-        .query_row(
-            "SELECT store_json FROM ai_review_stores WHERE tenant_id = 'local' AND review_key = ?1",
-            params![key],
-            |row| row.get::<_, String>(0),
-        )
-        .optional()
-        .map_err(|e| e.to_string())?;
+    let db_json = load_review_json_by_key(&key)?;
     if db_json.is_some() {
         return Ok(db_json);
     }
@@ -3950,6 +3943,53 @@ pub fn load_review_json(workspace: &str, repo: &str, id: u32) -> Result<Option<S
 
 pub fn save_review_json(workspace: &str, repo: &str, id: u32, json: &str) -> Result<(), String> {
     save_review_json_for_tenant("local", workspace, repo, id, json, false)
+}
+
+pub fn load_local_review_json(
+    workspace: &str,
+    repo: &str,
+    snapshot_sha256: &str,
+) -> Result<Option<String>, String> {
+    load_review_json_by_key(&local_review_key(workspace, repo, snapshot_sha256)?)
+}
+
+pub fn save_local_review_json(
+    workspace: &str,
+    repo: &str,
+    legacy_id: u32,
+    snapshot_sha256: &str,
+    json: &str,
+) -> Result<(), String> {
+    let key = local_review_key(workspace, repo, snapshot_sha256)?;
+    save_review_json_for_key("local", &key, workspace, repo, legacy_id, json, false)
+}
+
+fn load_review_json_by_key(key: &str) -> Result<Option<String>, String> {
+    let conn = open()?;
+    conn.query_row(
+        "SELECT store_json FROM ai_review_stores WHERE tenant_id = 'local' AND review_key = ?1",
+        params![key],
+        |row| row.get::<_, String>(0),
+    )
+    .optional()
+    .map_err(|error| error.to_string())
+}
+
+fn local_review_key(workspace: &str, repo: &str, snapshot_sha256: &str) -> Result<String, String> {
+    if snapshot_sha256.len() != 64
+        || !snapshot_sha256
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+    {
+        return Err(
+            "Local review snapshot identity must be a lowercase SHA-256 value.".to_string(),
+        );
+    }
+    Ok(format!(
+        "local:{}:{workspace}:{}:{repo}:{snapshot_sha256}",
+        workspace.len(),
+        repo.len()
+    ))
 }
 
 fn save_review_json_with_migration_flag(
@@ -3970,9 +4010,30 @@ fn save_review_json_for_tenant(
     json: &str,
     migrated_from_json: bool,
 ) -> Result<(), String> {
+    let key = review_key(workspace, repo, id);
+    save_review_json_for_key(
+        tenant_id,
+        &key,
+        workspace,
+        repo,
+        id,
+        json,
+        migrated_from_json,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn save_review_json_for_key(
+    tenant_id: &str,
+    key: &str,
+    workspace: &str,
+    repo: &str,
+    id: u32,
+    json: &str,
+    migrated_from_json: bool,
+) -> Result<(), String> {
     validate_audit_identifier("tenantId", tenant_id).map_err(|error| error.to_string())?;
     let conn = open()?;
-    let key = review_key(workspace, repo, id);
     let now = now_ms();
     conn.execute(
         r#"
@@ -4364,6 +4425,7 @@ pub fn list_recent_review_jobs(limit: u32) -> Result<Vec<ReviewJob>, String> {
             SELECT review_key, workspace, repo, pr_id, store_json, created_at, updated_at
             FROM ai_review_stores
             WHERE tenant_id = 'local'
+              AND review_key NOT LIKE 'local:%'
             ORDER BY CAST(updated_at AS INTEGER) DESC
             LIMIT ?1
             "#,
@@ -5122,6 +5184,33 @@ mod tests {
             assert!(dir.join(DB_FILE).exists());
             let loaded = load_review_json("workspace", "repo", 123).expect("load review");
             assert_eq!(loaded.as_deref(), Some(r#"{"threads":[]}"#));
+        });
+    }
+
+    #[test]
+    fn local_snapshot_store_is_isolated_from_a_colliding_pull_request_id() {
+        with_test_data_dir("local-snapshot-key", |_| {
+            let snapshot_sha256 = "a".repeat(64);
+            save_review_json("workspace", "repo", 42, r#"{"kind":"pull-request"}"#)
+                .expect("save pull request store");
+            save_local_review_json(
+                "workspace",
+                "repo",
+                42,
+                &snapshot_sha256,
+                r#"{"kind":"local"}"#,
+            )
+            .expect("save local snapshot store");
+
+            assert_eq!(
+                load_review_json("workspace", "repo", 42).expect("load pull request store"),
+                Some(r#"{"kind":"pull-request"}"#.to_string())
+            );
+            assert_eq!(
+                load_local_review_json("workspace", "repo", &snapshot_sha256)
+                    .expect("load local snapshot store"),
+                Some(r#"{"kind":"local"}"#.to_string())
+            );
         });
     }
 

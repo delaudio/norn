@@ -1,13 +1,16 @@
 use std::collections::BTreeMap;
 use std::ffi::OsStr;
-use std::fs::{self, File, OpenOptions};
+use std::fs::{self, File};
 use std::io::{self, Read, Write};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::{Command, Stdio};
 use std::thread;
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+
+use cap_fs_ext::{FollowSymlinks, OpenOptionsFollowExt};
+use cap_std::{ambient_authority, fs::Dir};
 
 use crate::config::ReviewProvider;
 use crate::local_repo::resolve_local_repo_for_provider;
@@ -19,6 +22,8 @@ const MAX_UNTRACKED_CANDIDATES: usize = 2_000;
 const MAX_LOCAL_DIFF_BYTES: usize = 16 * 1024 * 1024;
 const MAX_LOCAL_CHANGED_FILES: usize = 2_000;
 const MAX_GIT_METADATA_BYTES: usize = 8 * 1024 * 1024;
+const MAX_LOCAL_PREVIEW_CANDIDATES: usize = 64;
+const MAX_LOCAL_PREVIEW_TOTAL_BYTES: u64 = 64 * 1024 * 1024;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -133,7 +138,11 @@ pub(crate) fn local_review_snapshot_for_path(
         ));
     }
 
-    let collected = collect_local_diff(repo_path, &base_sha)?;
+    let mut collected = collect_local_diff(repo_path, &base_sha)?;
+    let (preview_sha256, preview_warnings) =
+        collect_preview_hashes(repo_path, &collected.diffstat)?;
+    collected.preview_sha256 = preview_sha256;
+    collected.warnings.extend(preview_warnings);
     warnings.extend(collected.warnings.clone());
 
     let ending_status = git_bytes_limited(
@@ -170,10 +179,7 @@ pub(crate) fn local_review_snapshot_for_path(
         );
     }
     let verification = collect_local_diff(repo_path, &base_sha)?;
-    if collected.diff != verification.diff
-        || collected.diffstat != verification.diffstat
-        || collected.preview_sha256 != verification.preview_sha256
-    {
+    if collected.diff != verification.diff || collected.diffstat != verification.diffstat {
         return Err(
             "Local changes changed while Norn was loading them. Refresh and try again.".to_string(),
         );
@@ -308,11 +314,10 @@ fn collect_local_diff(repo_path: &Path, base_sha: &str) -> Result<CollectedLocal
             MAX_LOCAL_DIFF_BYTES / (1024 * 1024)
         ));
     }
-    let preview_sha256 = collect_preview_hashes(repo_path, &diffstat)?;
     Ok(CollectedLocalDiff {
         diff,
         diffstat,
-        preview_sha256,
+        preview_sha256: BTreeMap::new(),
         warnings,
     })
 }
@@ -366,18 +371,19 @@ fn local_file_preview_for_path(
             "Image preview",
         )?
     } else {
-        let root = repo_path
-            .canonicalize()
-            .map_err(|error| format!("Failed to resolve local repository: {error}"))?;
-        let candidate = root.join(path);
-        let resolved = candidate
-            .canonicalize()
-            .map_err(|error| format!("Failed to resolve local image preview: {error}"))?;
-        if !resolved.starts_with(&root) {
-            return Err("Local image preview escaped the repository root.".to_string());
-        }
-        let file = open_untracked_file(&resolved)
+        let root = open_repo_dir(repo_path)?;
+        let file = open_repo_file(&root, Path::new(path))
             .map_err(|error| format!("Failed to open local image preview: {error}"))?;
+        let metadata = file
+            .metadata()
+            .map_err(|error| format!("Failed to inspect local image preview: {error}"))?;
+        if has_multiple_hard_links(&file, &metadata)
+            .map_err(|error| format!("Failed to inspect local image preview links: {error}"))?
+        {
+            return Err(
+                "Local image previews cannot use files with multiple hard links.".to_string(),
+            );
+        }
         let bytes = read_bounded(file, MAX_PR_IMAGE_PREVIEW_BYTES)?;
         let expected = expected_new_sha256.ok_or_else(|| {
             "The local image preview is unavailable for this snapshot; refresh and try again."
@@ -516,34 +522,103 @@ fn parse_numstat_count(raw: Option<&[u8]>) -> Result<u32, String> {
 fn collect_preview_hashes(
     repo_path: &Path,
     diffstat: &[DiffstatEntry],
-) -> Result<BTreeMap<String, String>, String> {
-    let root = repo_path
-        .canonicalize()
-        .map_err(|error| format!("Failed to resolve local repository: {error}"))?;
+) -> Result<(BTreeMap<String, String>, Vec<String>), String> {
+    collect_preview_hashes_with_limits(
+        repo_path,
+        diffstat,
+        MAX_LOCAL_PREVIEW_CANDIDATES,
+        MAX_LOCAL_PREVIEW_TOTAL_BYTES,
+        MAX_PR_IMAGE_PREVIEW_BYTES as u64,
+    )
+}
+
+fn collect_preview_hashes_with_limits(
+    repo_path: &Path,
+    diffstat: &[DiffstatEntry],
+    candidate_limit: usize,
+    total_byte_limit: u64,
+    file_byte_limit: u64,
+) -> Result<(BTreeMap<String, String>, Vec<String>), String> {
+    let root = open_repo_dir(repo_path)?;
     let mut hashes = BTreeMap::new();
-    for path in diffstat
+    let mut warnings = Vec::new();
+    let mut total_bytes = 0_u64;
+    for (candidate_index, path) in diffstat
         .iter()
         .filter_map(|entry| entry.new_path.as_deref())
+        .filter(|path| raster_mime_type(path).is_some())
+        .enumerate()
     {
-        if raster_mime_type(path).is_none() || validate_repo_relative_path(path).is_err() {
+        if candidate_index >= candidate_limit {
+            warnings.push(format!(
+                "Skipped additional image previews because the {candidate_limit}-file preview limit was reached."
+            ));
+            break;
+        }
+        if validate_repo_relative_path(path).is_err() {
+            warnings.push(format!(
+                "Skipped image preview with an unsafe repository path `{}`.",
+                path.escape_default()
+            ));
             continue;
         }
-        let candidate = root.join(path);
-        let Ok(resolved) = candidate.canonicalize() else {
+        let Ok(file) = open_repo_file(&root, Path::new(path)) else {
+            warnings.push(format!(
+                "Skipped image preview that could not be opened safely `{}`.",
+                path.escape_default()
+            ));
             continue;
         };
-        if !resolved.starts_with(&root) {
+        let metadata = match file.metadata() {
+            Ok(metadata) => metadata,
+            Err(_) => {
+                warnings.push(format!(
+                    "Skipped image preview that could not be inspected `{}`.",
+                    path.escape_default()
+                ));
+                continue;
+            }
+        };
+        if has_multiple_hard_links(&file, &metadata).unwrap_or(true) {
+            warnings.push(format!(
+                "Skipped image preview with unsafe link metadata `{}`.",
+                path.escape_default()
+            ));
             continue;
         }
-        let Ok(file) = open_untracked_file(&resolved) else {
+        if !metadata.is_file() || metadata.len() > file_byte_limit {
+            warnings.push(format!(
+                "Skipped oversized image preview `{}`.",
+                path.escape_default()
+            ));
             continue;
-        };
-        let Ok(bytes) = read_bounded(file, MAX_PR_IMAGE_PREVIEW_BYTES) else {
+        }
+        let remaining = total_byte_limit.saturating_sub(total_bytes);
+        if metadata.len() > remaining {
+            warnings.push(format!(
+                "Skipped additional image previews starting with `{}` because the total preview byte limit was reached.",
+                path.escape_default()
+            ));
+            break;
+        }
+        let mut bytes = Vec::new();
+        if file.take(metadata.len()).read_to_end(&mut bytes).is_err() {
+            warnings.push(format!(
+                "Skipped image preview that could not be read `{}`.",
+                path.escape_default()
+            ));
             continue;
-        };
+        }
+        total_bytes = total_bytes.saturating_add(bytes.len() as u64);
+        if bytes.len() as u64 != metadata.len() {
+            return Err(format!(
+                "Local image `{}` changed while Norn was loading it. Refresh and try again.",
+                path.escape_default()
+            ));
+        }
         hashes.insert(path.to_string(), sha256_hex(&bytes));
     }
-    Ok(hashes)
+    Ok((hashes, warnings))
 }
 
 fn sha256_hex(bytes: &[u8]) -> String {
@@ -599,6 +674,7 @@ pub(crate) fn append_untracked_files(
         MAX_GIT_METADATA_BYTES,
         "Untracked file metadata",
     )?;
+    let root = open_repo_dir(repo_path)?;
     let mut scanned_bytes = 0_u64;
     for (candidate_index, raw_path) in output
         .split(|byte| *byte == 0)
@@ -628,22 +704,19 @@ pub(crate) fn append_untracked_files(
             ));
             continue;
         }
-        let path = repo_path.join(untracked_relative_path(raw_path));
-        match fs::symlink_metadata(&path) {
-            Ok(metadata) if metadata.is_file() => metadata,
-            Ok(metadata) if metadata.file_type().is_symlink() => {
-                warnings.push(format!("Skipped untracked symlink `{display_relative}`."));
-                continue;
-            }
-            _ => continue,
-        };
-        let file = match open_untracked_file(&path) {
+        let file = match open_repo_file(&root, Path::new(&relative)) {
             Ok(file) => file,
-            Err(_)
-                if fs::symlink_metadata(&path)
-                    .is_ok_and(|metadata| metadata.file_type().is_symlink()) =>
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    io::ErrorKind::NotFound
+                        | io::ErrorKind::PermissionDenied
+                        | io::ErrorKind::InvalidInput
+                ) =>
             {
-                warnings.push(format!("Skipped untracked symlink `{display_relative}`."));
+                warnings.push(format!(
+                    "Skipped untracked file that could not be resolved safely `{display_relative}`."
+                ));
                 continue;
             }
             Err(error) => {
@@ -823,38 +896,22 @@ fn validate_repo_relative_path(path: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn open_untracked_file(path: &Path) -> io::Result<File> {
-    let mut options = OpenOptions::new();
-    options.read(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        options.custom_flags(libc::O_NOFOLLOW);
-    }
-    #[cfg(windows)]
-    {
-        use std::os::windows::fs::OpenOptionsExt;
-        options.custom_flags(0x0020_0000);
-    }
-    options.open(path)
+fn open_repo_dir(repo_path: &Path) -> Result<Dir, String> {
+    Dir::open_ambient_dir(repo_path, ambient_authority())
+        .map_err(|error| format!("Failed to open local repository safely: {error}"))
+}
+
+fn open_repo_file(root: &Dir, relative: &Path) -> io::Result<File> {
+    let mut options = cap_std::fs::OpenOptions::new();
+    options.read(true).follow(FollowSymlinks::No);
+    root.open_with(relative, &options)
+        .map(|file| file.into_std())
 }
 
 pub(crate) fn is_safe_synthetic_diff_path(relative: &str) -> bool {
     !relative
         .chars()
         .any(|character| character.is_control() || matches!(character, '"' | '\\'))
-}
-
-fn untracked_relative_path(raw_path: &[u8]) -> PathBuf {
-    #[cfg(unix)]
-    {
-        use std::os::unix::ffi::OsStrExt;
-        PathBuf::from(OsStr::from_bytes(raw_path))
-    }
-    #[cfg(not(unix))]
-    {
-        PathBuf::from(String::from_utf8_lossy(raw_path).as_ref())
-    }
 }
 
 fn append_diff(diff: &mut String, patch: &str) {
@@ -1114,6 +1171,7 @@ fn git_error(stderr: &[u8], status: String) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
     use std::sync::atomic::{AtomicU64, Ordering};
     use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -1338,8 +1396,9 @@ mod tests {
 
     #[test]
     fn numstat_preserves_counts_for_normal_binary_and_renamed_paths() {
-        let parsed = parse_numstat(b"3\t2\tsrc/lib.rs\0-\t-\timage.png\05\t1\t\0old.rs\0new.rs\0")
-            .expect("parse numstat");
+        let parsed =
+            parse_numstat(b"3\t2\tsrc/lib.rs\0-\t-\timage.png\x005\t1\t\0old.rs\0new.rs\0")
+                .expect("parse numstat");
 
         assert_eq!(parsed[0], ("src/lib.rs".to_string(), 3, 2));
         assert_eq!(parsed[1], ("image.png".to_string(), 0, 0));
@@ -1409,6 +1468,58 @@ mod tests {
         .expect_err("path outside snapshot");
 
         assert!(error.contains("not part of this local review snapshot"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn capability_open_rejects_intermediate_symlinks_that_escape_the_repository() {
+        use std::os::unix::fs::symlink;
+
+        let fixture = Fixture::new("intermediate-link");
+        let external = tempfile::tempdir().expect("external directory");
+        fs::write(external.path().join("secret.txt"), "private\n").expect("external secret");
+        symlink(external.path(), fixture.path.join("redirect")).expect("directory symlink");
+        let root = open_repo_dir(&fixture.path).expect("repository capability");
+
+        let error = open_repo_file(&root, Path::new("redirect/secret.txt"))
+            .expect_err("outside path must be rejected");
+
+        assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
+    }
+
+    #[test]
+    fn preview_hashing_enforces_cumulative_byte_and_candidate_limits() {
+        let fixture = Fixture::new("preview-budget");
+        let paths = ["a.png", "b.png", "c.png"];
+        for path in paths {
+            fixture.write(path, "1234");
+        }
+        let diffstat = paths
+            .into_iter()
+            .map(|path| DiffstatEntry {
+                status: "added".to_string(),
+                lines_added: 0,
+                lines_removed: 0,
+                old_path: None,
+                new_path: Some(path.to_string()),
+            })
+            .collect::<Vec<_>>();
+
+        let (byte_limited, byte_warnings) =
+            collect_preview_hashes_with_limits(&fixture.path, &diffstat, 3, 8, 4)
+                .expect("byte-limited previews");
+        let (candidate_limited, candidate_warnings) =
+            collect_preview_hashes_with_limits(&fixture.path, &diffstat, 1, 64, 4)
+                .expect("candidate-limited previews");
+
+        assert_eq!(byte_limited.len(), 2);
+        assert!(byte_warnings
+            .iter()
+            .any(|warning| warning.contains("total preview byte limit")));
+        assert_eq!(candidate_limited.len(), 1);
+        assert!(candidate_warnings
+            .iter()
+            .any(|warning| warning.contains("1-file preview limit")));
     }
 
     #[test]

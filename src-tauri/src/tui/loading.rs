@@ -14,7 +14,8 @@ use crate::{
             PullRequestSummary,
         },
         review::{
-            get_ai_review_run_state_native, load_ai_review_store_native, AiReviewRunState,
+            get_ai_review_run_state_native, get_local_ai_review_run_state_native,
+            load_ai_review_store_native, load_local_ai_review_store_native, AiReviewRunState,
             AiReviewRunStatus, AiReviewRunStore,
         },
     },
@@ -241,14 +242,24 @@ impl Loader {
     ) {
         let sender = self.sender.clone();
         thread::spawn(move || {
-            let state =
-                get_ai_review_run_state_native(&store, &workspace, &repo, pr_id).filter(|state| {
-                    reviewed_head_matches(
-                        state.reviewed_head_sha.as_deref(),
-                        expected_head_sha.as_deref(),
-                    )
-                });
-            let output = load_ai_review_store_native(&workspace, &repo, pr_id).map(|store| {
+            let state = if let Some(snapshot_sha256) = expected_head_sha.as_deref() {
+                get_local_ai_review_run_state_native(&store, &workspace, &repo, snapshot_sha256)
+                    .unwrap_or(None)
+            } else {
+                get_ai_review_run_state_native(&store, &workspace, &repo, pr_id)
+            }
+            .filter(|state| {
+                reviewed_head_matches(
+                    state.reviewed_head_sha.as_deref(),
+                    expected_head_sha.as_deref(),
+                )
+            });
+            let loaded_store = if let Some(snapshot_sha256) = expected_head_sha.as_deref() {
+                load_local_ai_review_store_native(&workspace, &repo, snapshot_sha256)
+            } else {
+                load_ai_review_store_native(&workspace, &repo, pr_id)
+            };
+            let output = loaded_store.map(|store| {
                 store.and_then(|store| {
                     store.review_runs.iter().rev().find_map(|run| {
                         reviewed_head_matches(
