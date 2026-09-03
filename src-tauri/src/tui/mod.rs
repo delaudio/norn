@@ -1084,6 +1084,7 @@ impl TuiApp {
                         let changed_files = snapshot.diffstat.len();
                         let commits_ahead = snapshot.commits_ahead;
                         let review_id = snapshot.review_id;
+                        let snapshot_sha256 = snapshot.snapshot_sha256.clone();
                         let review_workspace = snapshot.workspace.clone();
                         let review_repo = snapshot.repo.clone();
                         self.diff = Some(snapshot.diff.clone());
@@ -1097,12 +1098,13 @@ impl TuiApp {
                         let ai_request_id = self.next_request();
                         self.ai_request_id = ai_request_id;
                         self.ai_review_load = LoadState::Loading;
-                        self.loader.ai_review(
+                        self.loader.ai_review_for_snapshot(
                             ai_request_id,
                             review_workspace,
                             review_repo,
                             review_id,
                             self.ai_review_store.clone(),
+                            snapshot_sha256,
                         );
                         self.reset_diff_state();
                         self.error = None;
@@ -2307,7 +2309,7 @@ impl TuiApp {
             snapshot.current_branch.clone(),
             destination,
             Some(snapshot.base_sha.clone()),
-            None,
+            Some(snapshot.snapshot_sha256.clone()),
             payload,
             Some("Review these unpublished local changes from the terminal UI.".to_string()),
             Some("Local review".to_string()),
@@ -2639,6 +2641,7 @@ impl TuiApp {
                 diff: Some(snapshot.diff.clone()),
                 diffstat: Some(snapshot.diffstat.clone()),
                 local_preview_sha256: snapshot.preview_sha256.clone(),
+                local_snapshot_sha256: Some(snapshot.snapshot_sha256.clone()),
                 population_failed: false,
             });
         }
@@ -2678,6 +2681,7 @@ impl TuiApp {
             },
             diffstat: None,
             local_preview_sha256: Default::default(),
+            local_snapshot_sha256: None,
             population_failed: false,
         })
     }
@@ -3136,6 +3140,8 @@ mod tests {
             commits_behind: 0,
             head_sha: Some("1111111111111111111111111111111111111111".to_string()),
             base_sha: "0000000000000000000000000000000000000000".to_string(),
+            snapshot_sha256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                .to_string(),
             review_id: 0x8000_0042,
             diff: "diff --git a/src/a.rs b/src/a.rs\n--- a/src/a.rs\n+++ b/src/a.rs\n@@ -1 +1 @@\n-old\n+new\n".to_string(),
             diffstat: vec![],
@@ -3670,6 +3676,8 @@ review:
 
         let mut refreshed = local_snapshot("feature/second");
         refreshed.review_id = 0x8000_0043;
+        refreshed.snapshot_sha256 =
+            "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb".to_string();
         refreshed.diff.push_str("+refreshed\n");
         app.repo_request_id = 2;
         app.apply_load_event(LoadEvent::LocalSnapshot {

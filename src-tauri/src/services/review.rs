@@ -413,6 +413,8 @@ pub enum AiReviewRunStatus {
 pub struct AiReviewRunState {
     pub pr_key: String,
     pub pr_title: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reviewed_head_sha: Option<String>,
     pub thread_id: Option<String>,
     pub turn_kind: Option<AiReviewTurnKind>,
     pub status: AiReviewRunStatus,
@@ -2298,6 +2300,7 @@ fn begin_inline_review_run(
     thread_id: String,
     turn_kind: AiReviewTurnKind,
     review_kind: Option<&str>,
+    reviewed_head_sha: Option<&str>,
 ) -> Result<(AiReviewRunState, u64), String> {
     with_review_run_store(store, |inner| {
         if matches!(
@@ -2315,6 +2318,7 @@ fn begin_inline_review_run(
         session.public = AiReviewRunState {
             pr_key: key.to_string(),
             pr_title: Some(title.clone()),
+            reviewed_head_sha: reviewed_head_sha.map(ToOwned::to_owned),
             thread_id: Some(thread_id.clone()),
             turn_kind: Some(turn_kind),
             status: AiReviewRunStatus::Running,
@@ -5316,6 +5320,7 @@ pub fn start_inline_review_native(
         thread_id.clone(),
         AiReviewTurnKind::Initial,
         review_kind.as_deref(),
+        reviewed_head_sha.as_deref(),
     )?;
     let started_at = initial.started_at.clone().unwrap_or_else(now_ms);
     let created_at = now_ms();
@@ -5429,6 +5434,7 @@ pub fn run_headless_review_native(
         thread_id.clone(),
         AiReviewTurnKind::Initial,
         Some("headless"),
+        reviewed_head_sha.as_deref(),
     )
     .map_err(HeadlessNativeReviewError::Internal)?;
     let started_at = initial.started_at.clone().unwrap_or_else(now_ms);
@@ -5741,6 +5747,7 @@ pub async fn reply_inline_review(
         thread_id.clone(),
         AiReviewTurnKind::Reply,
         None,
+        reviewed_head_sha.as_deref(),
     )?;
     let started_at = initial.started_at.clone().unwrap_or_else(now_ms);
     let thread = find_review_thread_mut(&mut review_store, &thread_id)?;
@@ -6669,6 +6676,7 @@ mod tests {
             "thread-1".to_string(),
             AiReviewTurnKind::Initial,
             None,
+            None,
         )
         .expect("first review should start");
         let (second, second_run_id) = begin_inline_review_run(
@@ -6677,6 +6685,7 @@ mod tests {
             "Second".to_string(),
             "thread-2".to_string(),
             AiReviewTurnKind::Initial,
+            None,
             None,
         )
         .expect("second PR review should start concurrently");
@@ -6709,6 +6718,7 @@ mod tests {
             "thread-1".to_string(),
             AiReviewTurnKind::Initial,
             None,
+            None,
         )
         .expect("first review should start");
         let error = begin_inline_review_run(
@@ -6717,6 +6727,7 @@ mod tests {
             "Duplicate".to_string(),
             "thread-2".to_string(),
             AiReviewTurnKind::Initial,
+            None,
             None,
         )
         .expect_err("same PR should still be locked");

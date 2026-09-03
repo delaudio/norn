@@ -31,6 +31,7 @@ pub struct LocalReviewSnapshot {
     pub commits_behind: u32,
     pub head_sha: Option<String>,
     pub base_sha: String,
+    pub snapshot_sha256: String,
     pub review_id: u32,
     pub diff: String,
     pub diffstat: Vec<DiffstatEntry>,
@@ -161,7 +162,7 @@ pub(crate) fn local_review_snapshot_for_path(
             "Local changes changed while Norn was loading them. Refresh and try again.".to_string(),
         );
     }
-    let review_id = local_review_id(
+    let (snapshot_sha256, review_id) = local_review_identity(
         provider,
         workspace,
         repo,
@@ -182,6 +183,7 @@ pub(crate) fn local_review_snapshot_for_path(
         commits_behind,
         head_sha,
         base_sha,
+        snapshot_sha256,
         review_id,
         diff: collected.diff,
         diffstat: collected.diffstat,
@@ -211,7 +213,7 @@ fn ahead_behind(repo_path: &Path, upstream: &str) -> Result<(u32, u32), String> 
 }
 
 #[allow(clippy::too_many_arguments)]
-fn local_review_id(
+fn local_review_identity(
     provider: ReviewProvider,
     workspace: &str,
     repo: &str,
@@ -220,7 +222,7 @@ fn local_review_id(
     head_sha: Option<&str>,
     base_sha: &str,
     diff: &str,
-) -> u32 {
+) -> (String, u32) {
     let mut hasher = Sha256::new();
     for part in [
         match provider {
@@ -239,7 +241,8 @@ fn local_review_id(
         hasher.update(part.as_bytes());
     }
     let digest = hasher.finalize();
-    u32::from_be_bytes([digest[0], digest[1], digest[2], digest[3]]) | 0x8000_0000
+    let review_id = u32::from_be_bytes([digest[0], digest[1], digest[2], digest[3]]) | 0x8000_0000;
+    (hex::encode(digest), review_id)
 }
 
 fn collect_local_diff(repo_path: &Path, base_sha: &str) -> Result<CollectedLocalDiff, String> {
@@ -1296,7 +1299,7 @@ mod tests {
 
     #[test]
     fn review_identity_changes_with_the_loaded_diff() {
-        let first = local_review_id(
+        let (first_hash, first_id) = local_review_identity(
             ReviewProvider::Github,
             "acme",
             "demo",
@@ -1306,7 +1309,7 @@ mod tests {
             "0000000000000000000000000000000000000000",
             "+first",
         );
-        let second = local_review_id(
+        let (second_hash, second_id) = local_review_identity(
             ReviewProvider::Github,
             "acme",
             "demo",
@@ -1317,8 +1320,11 @@ mod tests {
             "+second",
         );
 
-        assert_ne!(first, second);
-        assert_ne!(first, 0);
-        assert_ne!(second, 0);
+        assert_ne!(first_hash, second_hash);
+        assert_ne!(first_id, second_id);
+        assert_eq!(first_hash.len(), 64);
+        assert_eq!(second_hash.len(), 64);
+        assert_ne!(first_id, 0);
+        assert_ne!(second_id, 0);
     }
 }

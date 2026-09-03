@@ -1291,6 +1291,7 @@ export const mockHandlers: Record<string, Handler> = {
       commitsBehind: 0,
       headSha: "6f52c9a1cf5cd075762f13d0b0f8bf8d0f4f3f7d",
       baseSha: "75f1fc8355b2743b06a30c4bb413f513b45e8af0",
+      snapshotSha256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       reviewId: 2147483649,
       diff: mockRawDiff,
       diffstat: mockDiffstat,

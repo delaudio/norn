@@ -233,6 +233,7 @@ export interface AiReviewStore {
 export interface AiReviewRunState {
   prKey: string;
   prTitle: string | null;
+  reviewedHeadSha?: string | null;
   threadId: string | null;
   turnKind: AiReviewTurnKind | null;
   status: AiReviewRunStatus;
@@ -551,6 +552,7 @@ export interface LocalReviewSnapshot {
   commitsBehind: number;
   headSha: string | null;
   baseSha: string;
+  snapshotSha256: string;
   reviewId: number;
   diff: string;
   diffstat: DiffstatEntry[];

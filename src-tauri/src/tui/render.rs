@@ -2447,6 +2447,8 @@ mod tests {
             commits_behind: 0,
             head_sha: Some("1111111111111111111111111111111111111111".to_string()),
             base_sha: "0000000000000000000000000000000000000000".to_string(),
+            snapshot_sha256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                .to_string(),
             review_id: 0x8000_0042,
             diff: "diff --git a/src/a.rs b/src/a.rs\n--- a/src/a.rs\n+++ b/src/a.rs\n@@ -1 +1 @@\n-old\n+new\n".to_string(),
             diffstat: vec![],

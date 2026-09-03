@@ -229,6 +229,8 @@ pub struct WebDiffState {
     pub diffstat: Option<Vec<DiffstatEntry>>,
     #[serde(skip)]
     pub local_preview_sha256: BTreeMap<String, String>,
+    #[serde(skip)]
+    pub local_snapshot_sha256: Option<String>,
     pub population_failed: bool,
 }
 
@@ -327,7 +329,8 @@ impl WebDiffServer {
                 || lock.source_branch != next.source_branch
                 || lock.target_branch != next.target_branch
                 || lock.base_sha != next.base_sha
-                || lock.local_preview_sha256 != next.local_preview_sha256;
+                || lock.local_preview_sha256 != next.local_preview_sha256
+                || lock.local_snapshot_sha256 != next.local_snapshot_sha256;
             if !content_changed && next.diffstat.is_none() {
                 next.diffstat = lock.diffstat.clone();
             }
@@ -914,6 +917,7 @@ fn same_pull_request(current: &WebDiffState, snapshot: &WebDiffState) -> bool {
         && current.pr_id == snapshot.pr_id
         && current.base_sha == snapshot.base_sha
         && current.local_preview_sha256 == snapshot.local_preview_sha256
+        && current.local_snapshot_sha256 == snapshot.local_snapshot_sha256
 }
 
 fn parse_query(query: &str) -> std::collections::HashMap<String, String> {
@@ -1263,6 +1267,7 @@ mod tests {
             diff: Some("diff --git a/a b/a".to_string()),
             diffstat: None,
             local_preview_sha256: Default::default(),
+            local_snapshot_sha256: None,
             population_failed: false,
         });
 
@@ -1407,6 +1412,7 @@ mod tests {
             diff: diff.clone(),
             diffstat: None,
             local_preview_sha256: Default::default(),
+            local_snapshot_sha256: None,
             population_failed: false,
         });
         let initial_version = state.read().unwrap().version;
@@ -1425,10 +1431,36 @@ mod tests {
             diff,
             diffstat: Some(vec![diffstat(Some("a.png"), Some("a.png"))]),
             local_preview_sha256: Default::default(),
+            local_snapshot_sha256: None,
             population_failed: false,
         });
 
         assert_eq!(state.read().unwrap().version, initial_version + 1);
+    }
+
+    #[test]
+    fn local_snapshot_changes_increment_the_state_version() {
+        let state = Arc::new(RwLock::new(WebDiffState::default()));
+        let server = WebDiffServer::start(Arc::clone(&state)).expect("server should start");
+        let local = |snapshot_sha256: &str, diff: &str| WebDiffState {
+            provider: Some(ReviewProvider::Github),
+            target_kind: WebDiffTargetKind::Local,
+            workspace: "workspace".to_string(),
+            repo: "repo".to_string(),
+            pr_id: 0,
+            diff: Some(diff.to_string()),
+            diffstat: Some(Vec::new()),
+            local_snapshot_sha256: Some(snapshot_sha256.to_string()),
+            ..WebDiffState::default()
+        };
+
+        server.update_pr(local("first", "+first"));
+        let first_version = state.read().unwrap().version;
+        server.update_pr(local("second", "+second"));
+
+        let current = state.read().unwrap();
+        assert_eq!(current.version, first_version + 1);
+        assert_eq!(current.diff.as_deref(), Some("+second"));
     }
 
     #[test]

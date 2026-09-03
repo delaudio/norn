@@ -208,16 +208,56 @@ impl Loader {
         pr_id: u32,
         store: AiReviewRunStore,
     ) {
+        self.ai_review_matching(request_id, workspace, repo, pr_id, store, None);
+    }
+
+    pub(super) fn ai_review_for_snapshot(
+        &self,
+        request_id: u64,
+        workspace: String,
+        repo: String,
+        pr_id: u32,
+        store: AiReviewRunStore,
+        snapshot_sha256: String,
+    ) {
+        self.ai_review_matching(
+            request_id,
+            workspace,
+            repo,
+            pr_id,
+            store,
+            Some(snapshot_sha256),
+        );
+    }
+
+    fn ai_review_matching(
+        &self,
+        request_id: u64,
+        workspace: String,
+        repo: String,
+        pr_id: u32,
+        store: AiReviewRunStore,
+        expected_head_sha: Option<String>,
+    ) {
         let sender = self.sender.clone();
         thread::spawn(move || {
-            let state = get_ai_review_run_state_native(&store, &workspace, &repo, pr_id);
+            let state =
+                get_ai_review_run_state_native(&store, &workspace, &repo, pr_id).filter(|state| {
+                    reviewed_head_matches(
+                        state.reviewed_head_sha.as_deref(),
+                        expected_head_sha.as_deref(),
+                    )
+                });
             let output = load_ai_review_store_native(&workspace, &repo, pr_id).map(|store| {
                 store.and_then(|store| {
-                    store
-                        .review_runs
-                        .iter()
-                        .rev()
-                        .find_map(|run| run.summary_markdown.clone())
+                    store.review_runs.iter().rev().find_map(|run| {
+                        reviewed_head_matches(
+                            run.reviewed_head_sha.as_deref(),
+                            expected_head_sha.as_deref(),
+                        )
+                        .then(|| run.summary_markdown.clone())
+                        .flatten()
+                    })
                 })
             });
             let _ = sender.send(LoadEvent::AiReview {
@@ -264,5 +304,22 @@ impl Loader {
                 running,
             });
         });
+    }
+}
+
+fn reviewed_head_matches(actual: Option<&str>, expected: Option<&str>) -> bool {
+    expected.is_none_or(|expected| actual == Some(expected))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::reviewed_head_matches;
+
+    #[test]
+    fn local_review_state_requires_the_full_snapshot_identity() {
+        assert!(reviewed_head_matches(Some("current"), Some("current")));
+        assert!(!reviewed_head_matches(Some("previous"), Some("current")));
+        assert!(!reviewed_head_matches(None, Some("current")));
+        assert!(reviewed_head_matches(Some("provider-head"), None));
     }
 }
