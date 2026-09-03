@@ -2494,6 +2494,7 @@ impl TuiApp {
                         &workspace,
                         &repo,
                         &base_sha,
+                        &snapshot.diffstat,
                         snapshot.preview_sha256.get(path).map(String::as_str),
                         path,
                         side.provider_value(),

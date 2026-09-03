@@ -15,6 +15,7 @@ use crate::services::bitbucket::{DiffstatEntry, PrFilePreview, MAX_PR_IMAGE_PREV
 
 pub(crate) const MAX_UNTRACKED_FILE_BYTES: u64 = 512 * 1024;
 pub(crate) const MAX_UNTRACKED_TOTAL_BYTES: u64 = 2 * 1024 * 1024;
+const MAX_UNTRACKED_CANDIDATES: usize = 2_000;
 const MAX_LOCAL_DIFF_BYTES: usize = 16 * 1024 * 1024;
 const MAX_LOCAL_CHANGED_FILES: usize = 2_000;
 const MAX_GIT_METADATA_BYTES: usize = 8 * 1024 * 1024;
@@ -171,6 +172,7 @@ pub(crate) fn local_review_snapshot_for_path(
         head_sha.as_deref(),
         &base_sha,
         &collected.diff,
+        &collected.preview_sha256,
     );
 
     Ok(LocalReviewSnapshot {
@@ -222,6 +224,7 @@ fn local_review_identity(
     head_sha: Option<&str>,
     base_sha: &str,
     diff: &str,
+    preview_sha256: &BTreeMap<String, String>,
 ) -> (String, u32) {
     let mut hasher = Sha256::new();
     for part in [
@@ -239,6 +242,13 @@ fn local_review_identity(
     ] {
         hasher.update((part.len() as u64).to_be_bytes());
         hasher.update(part.as_bytes());
+    }
+    hasher.update((preview_sha256.len() as u64).to_be_bytes());
+    for (path, sha256) in preview_sha256 {
+        for part in [path.as_str(), sha256.as_str()] {
+            hasher.update((part.len() as u64).to_be_bytes());
+            hasher.update(part.as_bytes());
+        }
     }
     let digest = hasher.finalize();
     let review_id = u32::from_be_bytes([digest[0], digest[1], digest[2], digest[3]]) | 0x8000_0000;
@@ -292,11 +302,13 @@ fn collect_local_diff(repo_path: &Path, base_sha: &str) -> Result<CollectedLocal
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn get_local_file_preview_native(
     provider: ReviewProvider,
     workspace: &str,
     repo: &str,
     base_sha: &str,
+    diffstat: &[DiffstatEntry],
     expected_new_sha256: Option<&str>,
     path: &str,
     side: &str,
@@ -304,6 +316,7 @@ pub fn get_local_file_preview_native(
     if side != "old" && side != "new" {
         return Err("Image preview side must be old or new.".to_string());
     }
+    ensure_snapshot_preview_path(diffstat, path, side)?;
     validate_repo_relative_path(path)?;
     let mime_type = raster_mime_type(path)
         .ok_or_else(|| "Only PNG, JPEG, WebP, and GIF previews are supported.".to_string())?;
@@ -311,6 +324,7 @@ pub fn get_local_file_preview_native(
     local_file_preview_for_path(
         &repo_path,
         base_sha,
+        diffstat,
         expected_new_sha256,
         path,
         side,
@@ -321,11 +335,13 @@ pub fn get_local_file_preview_native(
 fn local_file_preview_for_path(
     repo_path: &Path,
     base_sha: &str,
+    diffstat: &[DiffstatEntry],
     expected_new_sha256: Option<&str>,
     path: &str,
     side: &str,
     mime_type: &str,
 ) -> Result<PrFilePreview, String> {
+    ensure_snapshot_preview_path(diffstat, path, side)?;
     let bytes = if side == "old" {
         let object = format!("{base_sha}:{path}");
         git_bytes_limited(
@@ -367,6 +383,23 @@ fn local_file_preview_for_path(
         data_url: format!("data:{mime_type};base64,{encoded}"),
         size: bytes.len(),
     })
+}
+
+fn ensure_snapshot_preview_path(
+    diffstat: &[DiffstatEntry],
+    path: &str,
+    side: &str,
+) -> Result<(), String> {
+    let allowed = diffstat.iter().any(|entry| match side {
+        "old" => entry.old_path.as_deref() == Some(path),
+        "new" => entry.new_path.as_deref() == Some(path),
+        _ => false,
+    });
+    if allowed {
+        Ok(())
+    } else {
+        Err("Image preview is not part of this local review snapshot.".to_string())
+    }
 }
 
 fn ensure_git_repository(repo_path: &Path) -> Result<(), String> {
@@ -551,12 +584,19 @@ pub(crate) fn append_untracked_files(
         MAX_GIT_METADATA_BYTES,
         "Untracked file metadata",
     )?;
-    let mut included_bytes = 0_u64;
-    let mut warned_total_limit = false;
-    for raw_path in output
+    let mut scanned_bytes = 0_u64;
+    for (candidate_index, raw_path) in output
         .split(|byte| *byte == 0)
         .filter(|path| !path.is_empty())
+        .enumerate()
     {
+        if candidate_index >= MAX_UNTRACKED_CANDIDATES {
+            warnings.push(format!(
+                "Skipped additional untracked files because the {}-file scan limit was reached.",
+                MAX_UNTRACKED_CANDIDATES
+            ));
+            break;
+        }
         let Some(relative) = utf8_untracked_path(raw_path, warnings) else {
             continue;
         };
@@ -613,37 +653,36 @@ pub(crate) fn append_untracked_files(
                 continue;
             }
         }
-        if included_bytes >= MAX_UNTRACKED_TOTAL_BYTES {
-            if !warned_total_limit {
-                warnings.push(format!(
-                    "Skipped additional untracked files starting with `{display_relative}` because the total untracked-file byte limit was reached."
-                ));
-                warned_total_limit = true;
-            }
+        if opened_metadata.len() > MAX_UNTRACKED_FILE_BYTES {
+            warnings.push(format!(
+                "Skipped large untracked file `{display_relative}`."
+            ));
             continue;
         }
-        let remaining = MAX_UNTRACKED_TOTAL_BYTES.saturating_sub(included_bytes);
-        let allowed = MAX_UNTRACKED_FILE_BYTES.min(remaining);
+        if scanned_bytes >= MAX_UNTRACKED_TOTAL_BYTES {
+            warnings.push(format!(
+                "Skipped additional untracked files starting with `{display_relative}` because the total untracked-file byte limit was reached."
+            ));
+            break;
+        }
+        let remaining = MAX_UNTRACKED_TOTAL_BYTES.saturating_sub(scanned_bytes);
+        if opened_metadata.len() > remaining {
+            warnings.push(format!(
+                "Skipped additional untracked files starting with `{display_relative}` because the total untracked-file byte limit was reached."
+            ));
+            break;
+        }
         let mut contents = Vec::new();
-        file.take(allowed.saturating_add(1))
+        file.take(opened_metadata.len())
             .read_to_end(&mut contents)
             .map_err(|error| {
                 format!("Failed to read untracked file `{display_relative}`: {error}")
             })?;
-        if contents.len() as u64 > allowed {
-            if allowed < MAX_UNTRACKED_FILE_BYTES {
-                if !warned_total_limit {
-                    warnings.push(format!(
-                        "Skipped additional untracked files starting with `{display_relative}` because the total untracked-file byte limit was reached."
-                    ));
-                    warned_total_limit = true;
-                }
-            } else {
-                warnings.push(format!(
-                    "Skipped large untracked file `{display_relative}`."
-                ));
-            }
-            continue;
+        scanned_bytes = scanned_bytes.saturating_add(contents.len() as u64);
+        if contents.len() as u64 != opened_metadata.len() {
+            return Err(format!(
+                "Untracked file `{display_relative}` changed while Norn was loading it. Refresh and try again."
+            ));
         }
         if contents.contains(&0) {
             warnings.push(format!(
@@ -668,7 +707,6 @@ pub(crate) fn append_untracked_files(
             old_path: None,
             new_path: Some(relative),
         });
-        included_bytes = included_bytes.saturating_add(contents.len() as u64);
     }
     Ok(())
 }
@@ -1256,6 +1294,7 @@ mod tests {
         let preview = local_file_preview_for_path(
             &fixture.path,
             &snapshot.base_sha,
+            &snapshot.diffstat,
             Some(expected),
             "preview.png",
             "new",
@@ -1268,6 +1307,7 @@ mod tests {
         let error = local_file_preview_for_path(
             &fixture.path,
             &snapshot.base_sha,
+            &snapshot.diffstat,
             Some(expected),
             "preview.png",
             "new",
@@ -1275,6 +1315,55 @@ mod tests {
         )
         .expect_err("drifted preview");
         assert!(error.contains("changed after this snapshot"));
+    }
+
+    #[test]
+    fn image_preview_rejects_paths_outside_the_snapshot_diffstat() {
+        let fixture = Fixture::new("image-allowlist");
+        fixture.write("changed.png", "base-changed");
+        fixture.write("unrelated.png", "base-unrelated");
+        fixture.commit_all("base images");
+        fixture.write("changed.png", "updated");
+        let snapshot =
+            local_review_snapshot_for_path(ReviewProvider::Github, "acme", "demo", &fixture.path)
+                .expect("snapshot");
+
+        let error = local_file_preview_for_path(
+            &fixture.path,
+            &snapshot.base_sha,
+            &snapshot.diffstat,
+            None,
+            "unrelated.png",
+            "old",
+            "image/png",
+        )
+        .expect_err("path outside snapshot");
+
+        assert!(error.contains("not part of this local review snapshot"));
+    }
+
+    #[test]
+    fn skipped_binary_untracked_files_consume_the_total_scan_budget() {
+        let fixture = Fixture::new("untracked-scan-budget");
+        fixture.write("README.md", "base\n");
+        fixture.commit_all("base");
+        let binary = "\0".repeat(400_000);
+        for index in 0..6 {
+            fixture.write(&format!("a{index}.bin"), &binary);
+        }
+        fixture.write("z-safe.txt", "must not be scanned\n");
+        let mut diff = String::new();
+        let mut warnings = Vec::new();
+        let mut diffstat = Vec::new();
+
+        append_untracked_files(&fixture.path, &mut diff, &mut warnings, &mut diffstat)
+            .expect("bounded scan");
+
+        assert!(!diff.contains("z-safe.txt"));
+        assert!(diffstat.is_empty());
+        assert!(warnings
+            .iter()
+            .any(|warning| warning.contains("total untracked-file byte limit")));
     }
 
     #[test]
@@ -1299,6 +1388,7 @@ mod tests {
 
     #[test]
     fn review_identity_changes_with_the_loaded_diff() {
+        let previews = BTreeMap::new();
         let (first_hash, first_id) = local_review_identity(
             ReviewProvider::Github,
             "acme",
@@ -1308,6 +1398,7 @@ mod tests {
             Some("1111111111111111111111111111111111111111"),
             "0000000000000000000000000000000000000000",
             "+first",
+            &previews,
         );
         let (second_hash, second_id) = local_review_identity(
             ReviewProvider::Github,
@@ -1318,6 +1409,7 @@ mod tests {
             Some("1111111111111111111111111111111111111111"),
             "0000000000000000000000000000000000000000",
             "+second",
+            &previews,
         );
 
         assert_ne!(first_hash, second_hash);
@@ -1326,5 +1418,36 @@ mod tests {
         assert_eq!(second_hash.len(), 64);
         assert_ne!(first_id, 0);
         assert_ne!(second_id, 0);
+    }
+
+    #[test]
+    fn review_identity_changes_with_binary_preview_content() {
+        let first_previews = BTreeMap::from([("preview.png".to_string(), "first".to_string())]);
+        let second_previews = BTreeMap::from([("preview.png".to_string(), "second".to_string())]);
+
+        let first = local_review_identity(
+            ReviewProvider::Github,
+            "acme",
+            "demo",
+            "feature/local",
+            Some("origin/main"),
+            Some("1111111111111111111111111111111111111111"),
+            "0000000000000000000000000000000000000000",
+            "binary diff marker",
+            &first_previews,
+        );
+        let second = local_review_identity(
+            ReviewProvider::Github,
+            "acme",
+            "demo",
+            "feature/local",
+            Some("origin/main"),
+            Some("1111111111111111111111111111111111111111"),
+            "0000000000000000000000000000000000000000",
+            "binary diff marker",
+            &second_previews,
+        );
+
+        assert_ne!(first, second);
     }
 }

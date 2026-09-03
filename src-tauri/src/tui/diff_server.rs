@@ -579,6 +579,7 @@ fn handle_connection(
                                     &state_data.workspace,
                                     &state_data.repo,
                                     base_sha,
+                                    state_data.diffstat.as_deref().unwrap_or(&[]),
                                     state_data
                                         .local_preview_sha256
                                         .get(&file_path)
