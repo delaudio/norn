@@ -14,6 +14,7 @@ use unicode_segmentation::UnicodeSegmentation;
 use super::image_diff::{ImageDiffState, ImageVersionState};
 use super::loading::LoadState;
 use crate::config::{RepoRef, ReviewProvider};
+use crate::local_review::LocalReviewSnapshot;
 use crate::services::bitbucket::{PrComment, PullRequestDetail, PullRequestSummary};
 use crate::services::review::{AiReviewRunState, AiReviewRunStatus};
 
@@ -23,6 +24,7 @@ pub struct TuiState<'a> {
     pub selected_repo: usize,
     pub focus: FocusPane,
     pub pull_requests: &'a [PullRequestSummary],
+    pub local_snapshot: Option<&'a LocalReviewSnapshot>,
     pub pr_filter: PrListFilter,
     pub selected_pr: usize,
     pub detail: Option<&'a PullRequestDetail>,
@@ -123,6 +125,7 @@ pub enum PrListFilter {
     Open,
     Draft,
     Merged,
+    Local,
 }
 
 impl PrListFilter {
@@ -130,7 +133,8 @@ impl PrListFilter {
         match self {
             Self::Open => Self::Draft,
             Self::Draft => Self::Merged,
-            Self::Merged => Self::Open,
+            Self::Merged => Self::Local,
+            Self::Local => Self::Open,
         }
     }
 
@@ -139,6 +143,7 @@ impl PrListFilter {
             Self::Open => "open",
             Self::Draft => "draft",
             Self::Merged => "merged",
+            Self::Local => "local",
         }
     }
 
@@ -146,6 +151,7 @@ impl PrListFilter {
         match self {
             Self::Open | Self::Draft => "OPEN",
             Self::Merged => "MERGED",
+            Self::Local => "OPEN",
         }
     }
 
@@ -153,6 +159,7 @@ impl PrListFilter {
         match self {
             Self::Open | Self::Merged => true,
             Self::Draft => pr.draft,
+            Self::Local => false,
         }
     }
 }
@@ -188,7 +195,7 @@ pub fn render(frame: &mut Frame<'_>, state: TuiState<'_>) {
         render_diff_page(frame, body, state);
         render_footer(frame, footer, state);
         if state.diff_prompt_open {
-            render_diff_choice_modal(frame, area);
+            render_diff_choice_modal(frame, area, state.pr_filter == PrListFilter::Local);
         }
         return;
     }
@@ -202,7 +209,7 @@ pub fn render(frame: &mut Frame<'_>, state: TuiState<'_>) {
     render_footer(frame, footer, state);
 
     if state.diff_prompt_open {
-        render_diff_choice_modal(frame, area);
+        render_diff_choice_modal(frame, area, state.pr_filter == PrListFilter::Local);
     }
 }
 
@@ -236,7 +243,12 @@ pub fn mouse_target(area: Rect, x: u16, y: u16, state: TuiState<'_>) -> Option<M
     let [pr_list, _] = *review_areas().split(review) else {
         return None;
     };
-    list_index_at(pr_list, x, y, state.pull_requests.len()).map(MouseTarget::PullRequest)
+    let target_count = if state.pr_filter == PrListFilter::Local {
+        usize::from(state.local_snapshot.is_some())
+    } else {
+        state.pull_requests.len()
+    };
+    list_index_at(pr_list, x, y, target_count).map(MouseTarget::PullRequest)
 }
 
 pub fn detail_view_target(area: Rect, x: u16, y: u16, side_view: DetailView) -> Option<DetailView> {
@@ -357,11 +369,12 @@ fn pr_filter_at(area: Rect, x: u16, y: u16) -> Option<PrListFilter> {
     }
     let width = inner_x_end.saturating_sub(inner_x_start).max(1);
     let relative_x = x.saturating_sub(inner_x_start);
-    let segment = (u32::from(relative_x) * 3 / u32::from(width)).min(2);
+    let segment = (u32::from(relative_x) * 4 / u32::from(width)).min(3);
     match segment {
         0 => Some(PrListFilter::Open),
         1 => Some(PrListFilter::Draft),
-        _ => Some(PrListFilter::Merged),
+        2 => Some(PrListFilter::Merged),
+        _ => Some(PrListFilter::Local),
     }
 }
 
@@ -448,6 +461,7 @@ fn render_pr_filters(frame: &mut Frame<'_>, area: Rect, selected_filter: PrListF
         (PrListFilter::Open, "Open"),
         (PrListFilter::Draft, "Draft"),
         (PrListFilter::Merged, "Merged"),
+        (PrListFilter::Local, "Local"),
     ];
     let mut spans = Vec::new();
     for (index, (filter, label)) in filters.into_iter().enumerate() {
@@ -562,7 +576,27 @@ fn render_diff_file(
         ]));
         lines.push(Line::from(""));
     }
-    if let Some(detail) = state.detail {
+    if let Some(snapshot) = state
+        .local_snapshot
+        .filter(|_| state.pr_filter == PrListFilter::Local)
+    {
+        lines.push(Line::from(vec![
+            Span::styled("LOCAL ", accent_style().add_modifier(Modifier::BOLD)),
+            Span::styled(
+                format!("{}/{}", snapshot.workspace, snapshot.repo),
+                text_style().add_modifier(Modifier::BOLD),
+            ),
+        ]));
+        lines.push(Line::from(vec![
+            Span::styled(snapshot.current_branch.clone(), branch_style()),
+            Span::styled(" -> ", muted_style()),
+            Span::styled(
+                snapshot.upstream.as_deref().unwrap_or("no upstream"),
+                branch_style(),
+            ),
+        ]));
+        lines.push(Line::from(""));
+    } else if let Some(detail) = state.detail {
         lines.push(Line::from(vec![
             Span::styled(
                 format!("#{} ", detail.id),
@@ -610,7 +644,7 @@ fn render_diff_file(
         }
     } else {
         lines.push(Line::from(Span::styled(
-            "Load a pull request to view its diff.",
+            "Load a review target to view its diff.",
             muted_style(),
         )));
     }
@@ -642,7 +676,27 @@ fn render_image_diff_file(
     frame.render_widget(block, area);
     let (metadata_area, image_area) = image_render_areas(area, state.detail.is_some());
     let mut lines = Vec::new();
-    if let Some(detail) = state.detail {
+    if let Some(snapshot) = state
+        .local_snapshot
+        .filter(|_| state.pr_filter == PrListFilter::Local)
+    {
+        lines.push(Line::from(vec![
+            Span::styled("LOCAL ", accent_style().add_modifier(Modifier::BOLD)),
+            Span::styled(
+                format!("{}/{}", snapshot.workspace, snapshot.repo),
+                text_style().add_modifier(Modifier::BOLD),
+            ),
+        ]));
+        lines.push(Line::from(vec![
+            Span::styled(snapshot.current_branch.clone(), branch_style()),
+            Span::styled(" -> ", muted_style()),
+            Span::styled(
+                snapshot.upstream.as_deref().unwrap_or("no upstream"),
+                branch_style(),
+            ),
+        ]));
+        lines.push(Line::from(""));
+    } else if let Some(detail) = state.detail {
         lines.push(Line::from(vec![
             Span::styled(
                 format!("#{} ", detail.id),
@@ -847,7 +901,48 @@ fn format_bytes(size: usize) -> String {
 
 fn render_pull_requests(frame: &mut Frame<'_>, area: Rect, state: TuiState<'_>) {
     let loading = state.loading.pull_requests.is_loading();
-    let items = if state.pull_requests.is_empty() && loading {
+    let items = if state.pr_filter == PrListFilter::Local {
+        if loading {
+            vec![ListItem::new(loading_line(
+                "Loading local changes",
+                state.loading.tick,
+            ))]
+        } else if let Some(error) = state.loading.pull_requests.error() {
+            vec![ListItem::new(Line::from(vec![
+                Span::styled("Could not load local changes: ", error_style()),
+                Span::styled(error.to_string(), muted_style()),
+            ]))]
+        } else if let Some(snapshot) = state.local_snapshot {
+            let selected = state.focus == FocusPane::PullRequests;
+            let marker = if selected { ">" } else { " " };
+            let upstream = snapshot.upstream.as_deref().unwrap_or("no upstream");
+            vec![ListItem::new(Line::from(vec![
+                Span::styled(
+                    marker,
+                    if selected {
+                        accent_style()
+                    } else {
+                        muted_style()
+                    },
+                ),
+                Span::raw(" "),
+                Span::styled("LOCAL ", accent_style().add_modifier(Modifier::BOLD)),
+                Span::styled(snapshot.current_branch.clone(), branch_style()),
+                Span::styled(" -> ", muted_style()),
+                Span::styled(upstream.to_string(), branch_style()),
+                Span::styled(
+                    format!(
+                        "  {} file(s), {} unpushed commit(s)",
+                        snapshot.diffstat.len(),
+                        snapshot.commits_ahead
+                    ),
+                    text_style(),
+                ),
+            ]))]
+        } else {
+            vec![ListItem::new("No local review target loaded")]
+        }
+    } else if state.pull_requests.is_empty() && loading {
         vec![ListItem::new(loading_line(
             "Loading pull requests",
             state.loading.tick,
@@ -907,13 +1002,18 @@ fn render_pull_requests(frame: &mut Frame<'_>, area: Rect, state: TuiState<'_>) 
             })
             .collect()
     };
-    let title = if state.focus == FocusPane::PullRequests {
-        "Pull requests *"
+    let base_title = if state.pr_filter == PrListFilter::Local {
+        "Local changes"
     } else {
         "Pull requests"
     };
+    let title = if state.focus == FocusPane::PullRequests {
+        format!("{base_title} *")
+    } else {
+        base_title.to_string()
+    };
     let list = List::new(items).style(panel_style()).block(panel_block(
-        loading_title(title, state.loading.pull_requests),
+        loading_title(&title, state.loading.pull_requests),
         state.focus == FocusPane::PullRequests,
     ));
     frame.render_widget(list, area);
@@ -936,7 +1036,14 @@ fn render_pull_request_detail(frame: &mut Frame<'_>, area: Rect, state: TuiState
     let loading = state.loading.detail.is_loading() || state.loading.pull_requests.is_loading();
 
     if loading {
-        lines.push(loading_line("Loading pull request", state.loading.tick));
+        lines.push(loading_line(
+            if state.pr_filter == PrListFilter::Local {
+                "Loading local changes"
+            } else {
+                "Loading pull request"
+            },
+            state.loading.tick,
+        ));
         lines.push(Line::from(""));
     }
     if let Some(error) = state.loading.detail.error() {
@@ -962,78 +1069,117 @@ fn render_pull_request_detail(frame: &mut Frame<'_>, area: Rect, state: TuiState
         lines.push(Line::from(""));
     }
 
-    match state.detail {
-        Some(detail) => {
+    if state.pr_filter == PrListFilter::Local {
+        if let Some(snapshot) = state.local_snapshot {
             lines.push(Line::from(vec![
+                Span::styled("LOCAL ", accent_style().add_modifier(Modifier::BOLD)),
                 Span::styled(
-                    format!("#{} ", detail.id),
-                    info_style().add_modifier(Modifier::BOLD),
-                ),
-                Span::styled(
-                    detail.title.as_str(),
+                    format!("{}/{}", snapshot.workspace, snapshot.repo),
                     text_style().add_modifier(Modifier::BOLD),
                 ),
             ]));
             lines.push(Line::from(vec![
-                Span::styled(detail.source_branch.as_str(), branch_style()),
+                Span::styled(snapshot.current_branch.as_str(), branch_style()),
                 Span::styled(" -> ", muted_style()),
-                Span::styled(detail.destination_branch.as_str(), branch_style()),
-                Span::styled(" | ", muted_style()),
-                Span::styled(detail.state.as_str(), status_style(detail.state.as_str())),
-                Span::styled(" | ", muted_style()),
                 Span::styled(
-                    if state.loading.comments.is_loading() {
-                        format!("{} comments (updating)", state.comments.len())
-                    } else {
-                        format!("{} comments", state.comments.len())
-                    },
-                    text_style(),
+                    snapshot.upstream.as_deref().unwrap_or("no upstream"),
+                    branch_style(),
                 ),
             ]));
             lines.push(Line::from(vec![
-                Span::styled("Author: ", muted_style()),
-                Span::styled(
-                    author_label(detail.author_display_name.as_str()),
-                    text_style(),
-                ),
+                Span::styled("Unpushed commits: ", muted_style()),
+                Span::styled(snapshot.commits_ahead.to_string(), text_style()),
+                Span::styled(" | Changed files: ", muted_style()),
+                Span::styled(snapshot.diffstat.len().to_string(), text_style()),
             ]));
-            lines.push(Line::from(vec![
-                Span::styled("Drafts: ", muted_style()),
-                Span::styled(format!("{} pending", state.drafts.len()), text_style()),
-            ]));
-            lines.push(Line::from(""));
-            append_description_lines(
-                &mut lines,
-                detail.description_raw.as_str(),
-                content_width(area),
-            );
+            for warning in &snapshot.warnings {
+                lines.push(Line::from(vec![
+                    Span::styled("Warning: ", accent_style()),
+                    Span::styled(warning.as_str(), muted_style()),
+                ]));
+            }
             lines.push(Line::from(""));
             lines.push(Line::from(diff_preview(state.diff)));
-            append_draft_preview(&mut lines, state.drafts);
+            lines.push(Line::from(""));
+            lines.push(Line::from(Span::styled(
+                "Provider comments and approval are unavailable for local changes.",
+                muted_style(),
+            )));
         }
-        None => match state.repos.get(state.selected_repo) {
-            Some(repo) => {
+    } else {
+        match state.detail {
+            Some(detail) => {
                 lines.push(Line::from(vec![
-                    Span::styled("Provider: ", accent_style().add_modifier(Modifier::BOLD)),
-                    Span::styled(provider_label(repo.provider), provider_style(repo.provider)),
-                ]));
-                lines.push(Line::from(vec![
-                    Span::styled("Repository: ", accent_style().add_modifier(Modifier::BOLD)),
-                    Span::styled(format!("{}/{}", repo.workspace, repo.repo), text_style()),
-                ]));
-                lines.push(Line::from(vec![
-                    Span::styled("Local path: ", accent_style().add_modifier(Modifier::BOLD)),
                     Span::styled(
-                        repo.local_path.as_deref().unwrap_or("not configured"),
+                        format!("#{} ", detail.id),
+                        info_style().add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(
+                        detail.title.as_str(),
+                        text_style().add_modifier(Modifier::BOLD),
+                    ),
+                ]));
+                lines.push(Line::from(vec![
+                    Span::styled(detail.source_branch.as_str(), branch_style()),
+                    Span::styled(" -> ", muted_style()),
+                    Span::styled(detail.destination_branch.as_str(), branch_style()),
+                    Span::styled(" | ", muted_style()),
+                    Span::styled(detail.state.as_str(), status_style(detail.state.as_str())),
+                    Span::styled(" | ", muted_style()),
+                    Span::styled(
+                        if state.loading.comments.is_loading() {
+                            format!("{} comments (updating)", state.comments.len())
+                        } else {
+                            format!("{} comments", state.comments.len())
+                        },
                         text_style(),
                     ),
                 ]));
+                lines.push(Line::from(vec![
+                    Span::styled("Author: ", muted_style()),
+                    Span::styled(
+                        author_label(detail.author_display_name.as_str()),
+                        text_style(),
+                    ),
+                ]));
+                lines.push(Line::from(vec![
+                    Span::styled("Drafts: ", muted_style()),
+                    Span::styled(format!("{} pending", state.drafts.len()), text_style()),
+                ]));
+                lines.push(Line::from(""));
+                append_description_lines(
+                    &mut lines,
+                    detail.description_raw.as_str(),
+                    content_width(area),
+                );
+                lines.push(Line::from(""));
+                lines.push(Line::from(diff_preview(state.diff)));
+                append_draft_preview(&mut lines, state.drafts);
             }
-            None => {
-                lines.push(Line::from("Configure repos in Norn settings."));
-                lines.push(Line::from("TUI uses the desktop app settings file."));
-            }
-        },
+            None => match state.repos.get(state.selected_repo) {
+                Some(repo) => {
+                    lines.push(Line::from(vec![
+                        Span::styled("Provider: ", accent_style().add_modifier(Modifier::BOLD)),
+                        Span::styled(provider_label(repo.provider), provider_style(repo.provider)),
+                    ]));
+                    lines.push(Line::from(vec![
+                        Span::styled("Repository: ", accent_style().add_modifier(Modifier::BOLD)),
+                        Span::styled(format!("{}/{}", repo.workspace, repo.repo), text_style()),
+                    ]));
+                    lines.push(Line::from(vec![
+                        Span::styled("Local path: ", accent_style().add_modifier(Modifier::BOLD)),
+                        Span::styled(
+                            repo.local_path.as_deref().unwrap_or("not configured"),
+                            text_style(),
+                        ),
+                    ]));
+                }
+                None => {
+                    lines.push(Line::from("Configure repos in Norn settings."));
+                    lines.push(Line::from("TUI uses the desktop app settings file."));
+                }
+            },
+        }
     }
 
     if let Some(composer) = state.composer {
@@ -1046,10 +1192,15 @@ fn render_pull_request_detail(frame: &mut Frame<'_>, area: Rect, state: TuiState
 
     let content_len = lines.len();
     let scroll = clamped_scroll(content_len, area.height, state.detail_scroll);
-    let title = if state.detail_view == DetailView::PullRequest {
-        "Pull request *"
+    let target_title = if state.pr_filter == PrListFilter::Local {
+        "Local changes"
     } else {
         "Pull request"
+    };
+    let title = if state.detail_view == DetailView::PullRequest {
+        format!("{target_title} *")
+    } else {
+        target_title.to_string()
     };
     let detail = Paragraph::new(lines)
         .scroll((scroll as u16, 0))
@@ -1062,7 +1213,7 @@ fn render_pull_request_detail(frame: &mut Frame<'_>, area: Rect, state: TuiState
             if loading {
                 format!("{title} ↻")
             } else {
-                title.to_string()
+                title
             },
             state.detail_view == DetailView::PullRequest,
         ));
@@ -1168,7 +1319,7 @@ fn render_diff_detail(frame: &mut Frame<'_>, area: Rect, state: TuiState<'_>) {
         lines.push(Line::from(""));
     } else {
         lines.push(Line::from(Span::styled(
-            "Load a pull request to view its diff.",
+            "Load a review target to view its diff.",
             muted_style(),
         )));
         lines.push(Line::from(""));
@@ -1275,17 +1426,22 @@ fn render_footer(frame: &mut Frame<'_>, area: Rect, state: TuiState<'_>) {
             Span::styled(" load | ", muted_style()),
             Span::styled(state.status, info_style()),
         ]);
-        let secondary = Line::from(vec![
-            Span::styled("c", accent_style()),
-            Span::styled(" draft ", muted_style()),
-            Span::styled("p", accent_style()),
-            Span::styled(" send ", muted_style()),
-            Span::styled("x", accent_style()),
-            Span::styled(" drop ", muted_style()),
+        let mut secondary_spans = Vec::new();
+        if state.pr_filter != PrListFilter::Local {
+            secondary_spans.extend([
+                Span::styled("c", accent_style()),
+                Span::styled(" draft ", muted_style()),
+                Span::styled("p", accent_style()),
+                Span::styled(" send ", muted_style()),
+                Span::styled("x", accent_style()),
+                Span::styled(" drop ", muted_style()),
+            ]);
+        }
+        secondary_spans.extend([
             Span::styled("a", accent_style()),
             Span::styled(" AI ", muted_style()),
             Span::styled("f", accent_style()),
-            Span::styled(" PRs ", muted_style()),
+            Span::styled(" filter ", muted_style()),
             Span::styled("g", accent_style()),
             Span::styled(" diff ", muted_style()),
             Span::styled("u", accent_style()),
@@ -1299,9 +1455,10 @@ fn render_footer(frame: &mut Frame<'_>, area: Rect, state: TuiState<'_>) {
             Span::styled("r", accent_style()),
             Span::styled(" reload", muted_style()),
         ]);
+        let secondary = Line::from(secondary_spans);
         Paragraph::new(vec![primary, secondary]).style(base_style())
     } else {
-        let spans = vec![
+        let mut spans = vec![
             Span::styled("q", accent_style()),
             Span::styled(" quit  ", muted_style()),
             Span::styled("tab", accent_style()),
@@ -1312,12 +1469,18 @@ fn render_footer(frame: &mut Frame<'_>, area: Rect, state: TuiState<'_>) {
             Span::styled(" select  ", muted_style()),
             Span::styled("enter", accent_style()),
             Span::styled(" load  ", muted_style()),
-            Span::styled("c", accent_style()),
-            Span::styled(" draft  ", muted_style()),
-            Span::styled("p", accent_style()),
-            Span::styled(" publish  ", muted_style()),
-            Span::styled("x", accent_style()),
-            Span::styled(" discard  ", muted_style()),
+        ];
+        if state.pr_filter != PrListFilter::Local {
+            spans.extend([
+                Span::styled("c", accent_style()),
+                Span::styled(" draft  ", muted_style()),
+                Span::styled("p", accent_style()),
+                Span::styled(" publish  ", muted_style()),
+                Span::styled("x", accent_style()),
+                Span::styled(" discard  ", muted_style()),
+            ]);
+        }
+        spans.extend([
             Span::styled("a", accent_style()),
             Span::styled(" ai review  ", muted_style()),
             Span::styled("f", accent_style()),
@@ -1335,13 +1498,13 @@ fn render_footer(frame: &mut Frame<'_>, area: Rect, state: TuiState<'_>) {
             Span::styled("r", accent_style()),
             Span::styled(" refresh  ", muted_style()),
             Span::styled(state.status, info_style()),
-        ];
+        ]);
         Paragraph::new(Line::from(spans)).style(base_style())
     };
     frame.render_widget(footer, area);
 }
 
-pub fn render_diff_choice_modal(frame: &mut Frame<'_>, area: Rect) {
+pub fn render_diff_choice_modal(frame: &mut Frame<'_>, area: Rect, local: bool) {
     let width = 58.min(area.width.saturating_sub(4));
     let height = 9.min(area.height.saturating_sub(2));
     let modal_area = Rect::new(
@@ -1351,7 +1514,14 @@ pub fn render_diff_choice_modal(frame: &mut Frame<'_>, area: Rect) {
         height,
     );
     frame.render_widget(Clear, modal_area);
-    let block = panel_block(" Open PR Diff ", true);
+    let block = panel_block(
+        if local {
+            " Open Local Diff "
+        } else {
+            " Open PR Diff "
+        },
+        true,
+    );
     let inner = block.inner(modal_area);
     frame.render_widget(block, modal_area);
 
@@ -2261,6 +2431,83 @@ mod tests {
             .collect::<String>()
     }
 
+    fn local_snapshot() -> LocalReviewSnapshot {
+        LocalReviewSnapshot {
+            provider: ReviewProvider::Github,
+            workspace: "delaudio".to_string(),
+            repo: "norn".to_string(),
+            current_branch: "feature/local-review".to_string(),
+            upstream: Some("origin/main".to_string()),
+            commits_ahead: 2,
+            head_sha: Some("1111111111111111111111111111111111111111".to_string()),
+            base_sha: "0000000000000000000000000000000000000000".to_string(),
+            diff: "diff --git a/src/a.rs b/src/a.rs\n--- a/src/a.rs\n+++ b/src/a.rs\n@@ -1 +1 @@\n-old\n+new\n".to_string(),
+            diffstat: vec![],
+            warnings: vec![],
+        }
+    }
+
+    #[test]
+    fn renders_local_target_without_provider_pull_request_actions() {
+        let backend = TestBackend::new(140, 24);
+        let mut terminal = Terminal::new(backend).expect("terminal");
+        let repos = vec![RepoRef {
+            provider: ReviewProvider::Github,
+            workspace: "delaudio".to_string(),
+            repo: "norn".to_string(),
+            local_path: Some("/tmp/norn".to_string()),
+        }];
+        let snapshot = local_snapshot();
+
+        terminal
+            .draw(|frame| {
+                render(
+                    frame,
+                    TuiState {
+                        repos: &repos,
+                        selected_repo: 0,
+                        focus: FocusPane::PullRequests,
+                        pull_requests: &[],
+                        local_snapshot: Some(&snapshot),
+                        pr_filter: PrListFilter::Local,
+                        selected_pr: 0,
+                        detail: None,
+                        comments: &[],
+                        ai_reviewed_pr_ids: &[],
+                        ai_review_running_pr_ids: &[],
+                        diff: Some(&snapshot.diff),
+                        drafts: &[],
+                        composer: None,
+                        ai_review: None,
+                        ai_review_output: None,
+                        detail_view: DetailView::PullRequest,
+                        detail_scroll: 0,
+                        ai_review_scroll: 0,
+                        diff_scroll: 0,
+                        selected_diff_file: 0,
+                        diff_view_mode: DiffViewMode::Unified,
+                        rendered_diff_output: None,
+                        image_diff: None,
+                        image_protocol: "unsupported",
+                        loading: LoadingView::idle(),
+                        error: None,
+                        status: "Loaded local changes",
+                        diff_prompt_open: false,
+                    },
+                );
+            })
+            .expect("draw");
+
+        let text = buffer_text(&terminal);
+        assert!(text.contains("[Local]"));
+        assert!(text.contains("LOCAL feature/local-review -> origin/main"));
+        assert!(text.contains("Unpushed commits: 2"));
+        assert!(!text.contains("#0"));
+        assert!(!text.contains("c draft"));
+        assert!(!text.contains("p publish"));
+        assert!(text.contains("a ai review"));
+    }
+
     #[test]
     fn renders_empty_repository_state() {
         let backend = TestBackend::new(120, 20);
@@ -2275,6 +2522,7 @@ mod tests {
                         selected_repo: 0,
                         focus: FocusPane::Repositories,
                         pull_requests: &[],
+                        local_snapshot: None,
                         pr_filter: PrListFilter::Open,
                         selected_pr: 0,
                         detail: None,
@@ -2346,6 +2594,7 @@ mod tests {
                         selected_repo: 0,
                         focus: FocusPane::PullRequests,
                         pull_requests: &pull_requests,
+                        local_snapshot: None,
                         pr_filter: PrListFilter::Open,
                         selected_pr: 0,
                         detail: None,
@@ -2442,6 +2691,7 @@ mod tests {
                         selected_repo: 0,
                         focus: FocusPane::PullRequests,
                         pull_requests: &pull_requests,
+                        local_snapshot: None,
                         pr_filter: PrListFilter::Open,
                         selected_pr: 0,
                         detail: None,
@@ -2516,6 +2766,7 @@ mod tests {
                         selected_repo: 0,
                         focus: FocusPane::PullRequests,
                         pull_requests: &[],
+                        local_snapshot: None,
                         pr_filter: PrListFilter::Open,
                         selected_pr: 0,
                         detail: Some(&detail),
@@ -2570,6 +2821,7 @@ mod tests {
                         selected_repo: 0,
                         focus: FocusPane::PullRequests,
                         pull_requests: &[],
+                        local_snapshot: None,
                         pr_filter: PrListFilter::Open,
                         selected_pr: 0,
                         detail: None,
@@ -2654,6 +2906,7 @@ mod tests {
             selected_repo: 0,
             focus: FocusPane::Repositories,
             pull_requests: &pull_requests,
+            local_snapshot: None,
             pr_filter: PrListFilter::Open,
             selected_pr: 0,
             detail: None,
@@ -2697,6 +2950,7 @@ mod tests {
             selected_repo: 0,
             focus: FocusPane::Repositories,
             pull_requests: &[],
+            local_snapshot: None,
             pr_filter: PrListFilter::Open,
             selected_pr: 0,
             detail: None,
@@ -2728,12 +2982,16 @@ mod tests {
             Some(MouseTarget::PrFilter(PrListFilter::Open))
         );
         assert_eq!(
-            mouse_target(Rect::new(0, 0, 100, 24), 14, 19, state),
+            mouse_target(Rect::new(0, 0, 100, 24), 8, 19, state),
             Some(MouseTarget::PrFilter(PrListFilter::Draft))
         );
         assert_eq!(
-            mouse_target(Rect::new(0, 0, 100, 24), 26, 19, state),
+            mouse_target(Rect::new(0, 0, 100, 24), 15, 19, state),
             Some(MouseTarget::PrFilter(PrListFilter::Merged))
+        );
+        assert_eq!(
+            mouse_target(Rect::new(0, 0, 100, 24), 22, 19, state),
+            Some(MouseTarget::PrFilter(PrListFilter::Local))
         );
     }
 
@@ -2812,6 +3070,7 @@ mod tests {
                         selected_repo: 0,
                         focus: FocusPane::PullRequests,
                         pull_requests: &[],
+                        local_snapshot: None,
                         pr_filter: PrListFilter::Open,
                         selected_pr: 0,
                         detail: Some(&detail),
@@ -2877,6 +3136,7 @@ mod tests {
                         selected_repo: 0,
                         focus: FocusPane::Diff,
                         pull_requests: &[],
+                        local_snapshot: None,
                         pr_filter: PrListFilter::Open,
                         selected_pr: 0,
                         detail: Some(&detail),
@@ -2945,6 +3205,7 @@ mod tests {
                         selected_repo: 0,
                         focus: FocusPane::Diff,
                         pull_requests: &[],
+                        local_snapshot: None,
                         pr_filter: PrListFilter::Open,
                         selected_pr: 0,
                         detail: Some(&detail),
@@ -3012,6 +3273,7 @@ mod tests {
                         selected_repo: 0,
                         focus: FocusPane::Diff,
                         pull_requests: &[],
+                        local_snapshot: None,
                         pr_filter: PrListFilter::Open,
                         selected_pr: 0,
                         detail: Some(&detail),
@@ -3091,6 +3353,7 @@ mod tests {
                         selected_repo: 0,
                         focus: FocusPane::PullRequests,
                         pull_requests: &[],
+                        local_snapshot: None,
                         pr_filter: PrListFilter::Open,
                         selected_pr: 0,
                         detail: Some(&detail),
@@ -3156,6 +3419,7 @@ mod tests {
                         selected_repo: 0,
                         focus: FocusPane::PullRequests,
                         pull_requests: &[],
+                        local_snapshot: None,
                         pr_filter: PrListFilter::Open,
                         selected_pr: 0,
                         detail: Some(&detail),
@@ -3224,6 +3488,7 @@ mod tests {
                         selected_repo: 0,
                         focus: FocusPane::PullRequests,
                         pull_requests: &[],
+                        local_snapshot: None,
                         pr_filter: PrListFilter::Open,
                         selected_pr: 0,
                         detail: Some(&detail),
@@ -3291,6 +3556,7 @@ mod tests {
                         selected_repo: 0,
                         focus: FocusPane::Diff,
                         pull_requests: &[],
+                        local_snapshot: None,
                         pr_filter: PrListFilter::Open,
                         selected_pr: 0,
                         detail: None,
@@ -3372,6 +3638,7 @@ mod tests {
                         selected_repo: 0,
                         focus: FocusPane::Diff,
                         pull_requests: &[],
+                        local_snapshot: None,
                         pr_filter: PrListFilter::Open,
                         selected_pr: 0,
                         detail: None,

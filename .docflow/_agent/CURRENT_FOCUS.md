@@ -8,12 +8,12 @@ If status files and git disagree, git is authoritative; correct this file.
 
 ## Active state
 
-- **Branch:** `feat/local-review-targets`.
+- **Branch:** `feat/local-review-tui`.
 - **Active item:** `.docflow/plan/todo/0013-local-review-target-tui.md`.
 - **Plan items:** implement the shared local snapshot and TUI first, then
   `.docflow/plan/todo/0014-local-review-target-desktop.md`.
-- **Verification:** ADR 0017 is accepted; implementation verification has not
-  started.
+- **Verification:** focused native snapshot, TUI, browser-diff, and TypeScript
+  checks are in progress.
 
 ## Last shipped
 

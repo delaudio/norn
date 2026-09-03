@@ -27,6 +27,7 @@ export interface DiffViewerProps {
   onViewModeChange: (mode: DiffViewMode) => void;
   loading?: boolean;
   error?: string | null;
+  emptyMessage?: string;
   /** Per-file changeKey → widget map (comments / composer), keyed by fileKey. */
   widgetsByFile?: Record<string, Record<string, ReactNode>>;
   /** Per-file file-level comment block, keyed by fileKey. */
@@ -45,6 +46,7 @@ export function DiffViewer({
   onViewModeChange,
   loading,
   error,
+  emptyMessage = "No changes in this pull request.",
   widgetsByFile,
   fileWidgets,
   viewedFileKeys,
@@ -154,9 +156,7 @@ export function DiffViewer({
     return <div className="p-6 text-sm text-destructive">{error}</div>;
   }
   if (files.length === 0) {
-    return (
-      <div className="p-6 text-sm text-muted-foreground">No changes in this pull request.</div>
-    );
+    return <div className="p-6 text-sm text-muted-foreground">{emptyMessage}</div>;
   }
 
   const totals = files.reduce(

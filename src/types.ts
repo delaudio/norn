@@ -541,6 +541,20 @@ export interface DiffstatEntry {
   newPath: string | null;
 }
 
+export interface LocalReviewSnapshot {
+  provider: ReviewProvider;
+  workspace: string;
+  repo: string;
+  currentBranch: string;
+  upstream: string | null;
+  commitsAhead: number;
+  headSha: string | null;
+  baseSha: string;
+  diff: string;
+  diffstat: DiffstatEntry[];
+  warnings: string[];
+}
+
 export interface PrFilePreview {
   path: string;
   mimeType: string;

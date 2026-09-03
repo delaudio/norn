@@ -18,6 +18,7 @@ function stateResponse(title: string, version: number, overrides: Partial<Browse
   return new Response(
     JSON.stringify({
       version,
+      targetKind: "pullRequest",
       workspace: "workspace",
       repo: "repository",
       prId: 42,
@@ -25,6 +26,7 @@ function stateResponse(title: string, version: number, overrides: Partial<Browse
       prAuthor: "Reviewer",
       sourceBranch: "feature/shared-viewer",
       targetBranch: "main",
+      baseSha: "1".repeat(40),
       diff: rawDiff,
       diffstat: [
         {
@@ -72,6 +74,25 @@ describe("BrowserDiffApp", () => {
     await waitFor(() =>
       expect(screen.getByRole("main")).toHaveTextContent('export const value = "after";'),
     );
+  });
+
+  it("labels local review targets without presenting a pull request id", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        stateResponse("Local changes on feature/local", 1, {
+          targetKind: "local",
+          prId: 0,
+          sourceBranch: "feature/local",
+          targetBranch: "origin/feature/local",
+        }),
+      ),
+    );
+
+    render(<BrowserDiffApp />);
+
+    expect(await screen.findByText("LOCAL")).toBeInTheDocument();
+    expect(screen.queryByText("#0")).not.toBeInTheDocument();
   });
 
   it("ignores a stale polling response after StrictMode aborts the first effect", async () => {

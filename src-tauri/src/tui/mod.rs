@@ -14,7 +14,7 @@ use std::{
     time::Duration,
 };
 
-use diff_server::{open_browser_url, WebDiffServer, WebDiffState};
+use diff_server::{open_browser_url, WebDiffServer, WebDiffState, WebDiffTargetKind};
 
 use crossterm::event::{self, Event, KeyCode, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::{
@@ -26,6 +26,7 @@ use zeroize::Zeroizing;
 
 use crate::config::{self, AiProvider, AppConfig, RepoRef};
 use crate::credentials::{self, CredentialProvider, CredentialSource, CredentialStatus};
+use crate::local_review::{get_local_file_preview_native, LocalReviewSnapshot};
 use crate::readiness::{self, ReadinessIssueSeverity, ReadinessStatus};
 use crate::repo_config;
 use crate::services::bitbucket::{
@@ -781,6 +782,7 @@ struct TuiApp {
     selected_repo: usize,
     focus: FocusPane,
     pull_requests: Vec<PullRequestSummary>,
+    local_snapshot: Option<LocalReviewSnapshot>,
     pr_filter: PrListFilter,
     selected_pr: usize,
     detail: Option<PullRequestDetail>,
@@ -907,6 +909,7 @@ impl TuiApp {
             codex_cli_available: false,
             focus: FocusPane::Repositories,
             pull_requests: Vec::new(),
+            local_snapshot: None,
             pr_filter: PrListFilter::Open,
             selected_pr: 0,
             detail: None,
@@ -1073,6 +1076,38 @@ impl TuiApp {
                     }
                 }
             }
+            LoadEvent::LocalSnapshot { request_id, result }
+                if request_id == self.repo_request_id && self.pr_filter == PrListFilter::Local =>
+            {
+                match result {
+                    Ok(snapshot) => {
+                        let changed_files = snapshot.diffstat.len();
+                        let commits_ahead = snapshot.commits_ahead;
+                        self.diff = Some(snapshot.diff.clone());
+                        self.active_ai_target =
+                            Some((snapshot.workspace.clone(), snapshot.repo.clone(), 0));
+                        self.local_snapshot = Some(snapshot);
+                        self.pr_list_load = LoadState::Ready;
+                        self.detail_load = LoadState::Ready;
+                        self.comments_load = LoadState::Ready;
+                        self.diff_load = LoadState::Ready;
+                        self.reset_diff_state();
+                        self.error = None;
+                        self.status = format!(
+                            "Loaded local changes: {changed_files} file(s), {commits_ahead} unpushed commit(s)"
+                        );
+                    }
+                    Err(error) => {
+                        self.local_snapshot = None;
+                        self.pr_list_load = LoadState::Failed(error.clone());
+                        self.detail_load = LoadState::Failed(error);
+                        self.comments_load = LoadState::Idle;
+                        self.diff_load = LoadState::Idle;
+                        self.ai_review_load = LoadState::Idle;
+                        self.status = "Failed to load local changes".to_string();
+                    }
+                }
+            }
             LoadEvent::Detail { request_id, result } if request_id == self.pr_request_id => {
                 match result {
                     Ok(detail) => {
@@ -1144,6 +1179,9 @@ impl TuiApp {
     }
 
     fn update_ai_review_markers(&mut self, pr_id: u32) {
+        if pr_id == 0 {
+            return;
+        }
         match self.ai_review_state.as_ref().map(|state| state.status) {
             Some(AiReviewRunStatus::Running) => self.mark_ai_review_running(pr_id),
             Some(AiReviewRunStatus::Succeeded) => {
@@ -1169,7 +1207,15 @@ impl TuiApp {
         {
             return;
         }
-        if let Some((_, _, pr_id)) = self.pr_resource_target.as_ref() {
+        if self.pr_filter == PrListFilter::Local && self.local_snapshot.is_some() {
+            self.status = match self.ai_review_state.as_ref() {
+                Some(state) if state.status == AiReviewRunStatus::Running => format!(
+                    "AI review running: {}",
+                    state.logs.last().map(String::as_str).unwrap_or("started")
+                ),
+                _ => "Loaded local changes".to_string(),
+            };
+        } else if let Some((_, _, pr_id)) = self.pr_resource_target.as_ref() {
             self.status = match self.ai_review_state.as_ref() {
                 Some(state) if state.status == AiReviewRunStatus::Running => format!(
                     "AI review running: {}",
@@ -1805,6 +1851,10 @@ impl TuiApp {
     }
 
     fn select_next_pr(&mut self) {
+        if self.pr_filter == PrListFilter::Local {
+            self.selected_pr = 0;
+            return;
+        }
         if self.pull_requests.is_empty() {
             self.selected_pr = 0;
             return;
@@ -1813,10 +1863,21 @@ impl TuiApp {
     }
 
     fn select_previous_pr(&mut self) {
+        if self.pr_filter == PrListFilter::Local {
+            self.selected_pr = 0;
+            return;
+        }
         self.selected_pr = self.selected_pr.saturating_sub(1);
     }
 
     fn select_pr(&mut self, index: usize) {
+        if self.pr_filter == PrListFilter::Local {
+            if index == 0 && self.local_snapshot.is_some() {
+                self.focus = FocusPane::PullRequests;
+                self.status = "Selected local changes; press enter to inspect".to_string();
+            }
+            return;
+        }
         if index >= self.pull_requests.len() {
             return;
         }
@@ -1872,7 +1933,11 @@ impl TuiApp {
 
     fn set_pr_filter(&mut self, filter: PrListFilter) {
         if self.pr_filter == filter {
-            self.status = format!("Showing {} PRs", self.pr_filter.label());
+            self.status = if filter == PrListFilter::Local {
+                "Showing local changes".to_string()
+            } else {
+                format!("Showing {} PRs", self.pr_filter.label())
+            };
             return;
         }
         self.pr_filter = filter;
@@ -1893,24 +1958,43 @@ impl TuiApp {
         let request_id = self.next_request();
         self.repo_request_id = request_id;
         self.pr_list_load = LoadState::Loading;
-        self.status = format!(
-            "Loading {} PRs for {workspace}/{repo_name}...",
-            self.pr_filter.label()
-        );
+        self.status = if self.pr_filter == PrListFilter::Local {
+            format!("Loading local changes for {workspace}/{repo_name}...")
+        } else {
+            format!(
+                "Loading {} PRs for {workspace}/{repo_name}...",
+                self.pr_filter.label()
+            )
+        };
         self.error = None;
-        self.loader.pull_requests(
-            request_id,
-            provider,
-            workspace,
-            repo_name,
-            self.pr_filter.provider_state().to_string(),
-        );
+        if self.pr_filter == PrListFilter::Local {
+            let ai_request_id = self.next_request();
+            self.ai_request_id = ai_request_id;
+            self.ai_review_load = LoadState::Loading;
+            self.loader.local_snapshot(
+                request_id,
+                ai_request_id,
+                provider,
+                workspace,
+                repo_name,
+                self.ai_review_store.clone(),
+            );
+        } else {
+            self.loader.pull_requests(
+                request_id,
+                provider,
+                workspace,
+                repo_name,
+                self.pr_filter.provider_state().to_string(),
+            );
+        }
     }
 
     fn clear_pr_context_for_repo_load(&mut self) {
         self.pr_request_id = 0;
         self.ai_request_id = 0;
         self.pull_requests.clear();
+        self.local_snapshot = None;
         self.selected_pr = 0;
         self.ai_reviewed_pr_ids.clear();
         self.ai_review_running_pr_ids.clear();
@@ -1935,7 +2019,30 @@ impl TuiApp {
     }
 
     fn load_selected_pr(&mut self) {
-        self.load_selected_pr_for_view(DetailView::PullRequest);
+        if self.pr_filter == PrListFilter::Local {
+            self.load_selected_local_for_view(DetailView::PullRequest);
+        } else {
+            self.load_selected_pr_for_view(DetailView::PullRequest);
+        }
+    }
+
+    fn load_selected_local_for_view(&mut self, target_view: DetailView) {
+        if self.pr_list_load.is_loading() {
+            self.status = "Wait for local changes to load".to_string();
+            return;
+        }
+        if self.local_snapshot.is_none() {
+            self.status = "No local changes target is available".to_string();
+            return;
+        }
+        self.detail_view = target_view;
+        self.focus = if target_view == DetailView::Diff {
+            FocusPane::Diff
+        } else {
+            FocusPane::PullRequests
+        };
+        self.reset_detail_scrolls();
+        self.status = "Loaded local changes".to_string();
     }
 
     fn load_selected_pr_for_view(&mut self, target_view: DetailView) {
@@ -2008,6 +2115,10 @@ impl TuiApp {
     }
 
     fn start_comment_composer(&mut self) {
+        if self.pr_filter == PrListFilter::Local {
+            self.status = "Provider comments are unavailable for local changes".to_string();
+            return;
+        }
         if !matches!(self.pr_list_load, LoadState::Ready)
             || !matches!(self.detail_load, LoadState::Ready)
         {
@@ -2045,6 +2156,10 @@ impl TuiApp {
     }
 
     fn publish_drafts(&mut self) {
+        if self.pr_filter == PrListFilter::Local {
+            self.status = "Provider publication is unavailable for local changes".to_string();
+            return;
+        }
         if self.comments_load.is_loading() {
             self.status = "Wait for comments to load before publishing drafts".to_string();
             return;
@@ -2071,6 +2186,10 @@ impl TuiApp {
     }
 
     fn start_ai_review(&mut self) {
+        if self.pr_filter == PrListFilter::Local {
+            self.start_local_ai_review();
+            return;
+        }
         let Some((provider, workspace, repo, pr_id)) = self.selected_review_target() else {
             self.status = "Select a pull request before starting AI review".to_string();
             return;
@@ -2147,6 +2266,73 @@ impl TuiApp {
         }
     }
 
+    fn start_local_ai_review(&mut self) {
+        let Some(snapshot) = self.local_snapshot.clone() else {
+            self.status = "Load local changes before starting AI review".to_string();
+            return;
+        };
+        if snapshot.diff.trim().is_empty() {
+            self.status = "There are no local changes to review".to_string();
+            return;
+        }
+        let prompt = match self.review_prompt_for_selected_repo() {
+            Ok(prompt) => prompt,
+            Err(error) => {
+                self.error = Some(error);
+                self.status = "Failed to load review prompt".to_string();
+                return;
+            }
+        };
+        let destination = snapshot
+            .upstream
+            .clone()
+            .unwrap_or_else(|| "HEAD".to_string());
+        let title = format!("Local changes on {}", snapshot.current_branch);
+        let payload = build_local_review_payload(&prompt, &snapshot);
+        self.diff = Some(snapshot.diff.clone());
+        match start_inline_review_native(
+            self.ai_review_store.clone(),
+            snapshot.workspace.clone(),
+            snapshot.repo.clone(),
+            0,
+            title,
+            snapshot.current_branch.clone(),
+            destination,
+            Some(snapshot.base_sha.clone()),
+            None,
+            payload,
+            Some("Review these unpublished local changes from the terminal UI.".to_string()),
+            Some("Local review".to_string()),
+            Some("Local changes".to_string()),
+            TUI_SKIP_AI_REVIEW_ANALYZERS,
+            self.ai_provider,
+            self.claude_model.clone(),
+            self.claude_effort.clone(),
+            self.codex_model.clone(),
+            self.codex_effort.clone(),
+            None,
+        ) {
+            Ok(state) => {
+                self.ai_request_id = self.next_request();
+                self.active_ai_target = Some((snapshot.workspace, snapshot.repo, 0));
+                self.ai_review_state = Some(state);
+                self.ai_review_output = None;
+                self.ai_review_load = LoadState::Ready;
+                self.detail_view = DetailView::AiReview;
+                self.ai_review_scroll = 0;
+                self.error = None;
+                self.status = format!(
+                    "Started {} local AI review",
+                    ai_provider_label(self.ai_provider)
+                );
+            }
+            Err(error) => {
+                self.error = Some(error);
+                self.status = "Failed to start local AI review".to_string();
+            }
+        }
+    }
+
     fn toggle_detail_view(&mut self) {
         self.detail_view = match self.detail_view {
             DetailView::PullRequest => DetailView::AiReview,
@@ -2211,7 +2397,7 @@ impl TuiApp {
             }
             DetailView::Diff => {
                 self.diff_scroll = 0;
-                self.status = "Reset PR diff scroll".to_string();
+                self.status = "Reset diff scroll".to_string();
             }
         }
     }
@@ -2223,7 +2409,9 @@ impl TuiApp {
     }
 
     fn refresh_active_view(&mut self) {
-        if self.selected_pull_request_id().is_some() {
+        if self.pr_filter == PrListFilter::Local {
+            self.load_selected_repo();
+        } else if self.selected_pull_request_id().is_some() {
             self.load_selected_pr_for_view(self.detail_view);
         } else {
             self.load_selected_repo();
@@ -2277,6 +2465,31 @@ impl TuiApp {
             self.image_diff = None;
             return;
         };
+        if self.pr_filter == PrListFilter::Local {
+            let Some(snapshot) = self.local_snapshot.as_ref() else {
+                self.image_diff = None;
+                return;
+            };
+            let provider = snapshot.provider;
+            let workspace = snapshot.workspace.clone();
+            let repo = snapshot.repo.clone();
+            let base_sha = snapshot.base_sha.clone();
+            self.image_diff = Some(ImageDiffState::load(
+                self.selected_diff_file,
+                candidate,
+                |side, path| {
+                    get_local_file_preview_native(
+                        provider,
+                        &workspace,
+                        &repo,
+                        &base_sha,
+                        path,
+                        side.provider_value(),
+                    )
+                },
+            ));
+            return;
+        }
         let Some((provider, workspace, repo, pr_id)) = self.selected_review_target() else {
             self.image_diff = None;
             return;
@@ -2339,11 +2552,16 @@ impl TuiApp {
         if self.detail_view == DetailView::Diff {
             self.detail_view = DetailView::PullRequest;
             self.focus = FocusPane::PullRequests;
-            self.status = "Closed PR diff".to_string();
+            self.status = "Closed diff".to_string();
             return;
         }
-        if self.repos.is_empty() || self.pull_requests.is_empty() {
-            self.status = "Select a pull request first".to_string();
+        let target_available = if self.pr_filter == PrListFilter::Local {
+            self.local_snapshot.is_some()
+        } else {
+            !self.pull_requests.is_empty()
+        };
+        if self.repos.is_empty() || !target_available {
+            self.status = "Select a review target first".to_string();
             return;
         }
         self.diff_prompt_open = true;
@@ -2352,9 +2570,10 @@ impl TuiApp {
 
     fn open_browser_diff(&mut self) {
         let Some(web_state) = self.selected_web_diff_state() else {
-            self.status = "Select a pull request first".to_string();
+            self.status = "Select a review target first".to_string();
             return;
         };
+        let target_kind = web_state.target_kind;
         let pr_id = web_state.pr_id;
 
         if self.web_diff_server.is_none() {
@@ -2372,7 +2591,11 @@ impl TuiApp {
             let url = server.url();
             match (self.browser_opener)(&url) {
                 Ok(()) => {
-                    self.status = format!("Opened PR #{pr_id} diff in browser");
+                    self.status = if target_kind == WebDiffTargetKind::Local {
+                        "Opened local diff in browser".to_string()
+                    } else {
+                        format!("Opened PR #{pr_id} diff in browser")
+                    };
                 }
                 Err(error) => {
                     self.status =
@@ -2384,6 +2607,28 @@ impl TuiApp {
 
     fn selected_web_diff_state(&self) -> Option<WebDiffState> {
         let repo = self.repos.get(self.selected_repo)?;
+        if self.pr_filter == PrListFilter::Local {
+            let snapshot = self.local_snapshot.as_ref()?;
+            return Some(WebDiffState {
+                version: 0,
+                provider: Some(snapshot.provider),
+                target_kind: WebDiffTargetKind::Local,
+                workspace: snapshot.workspace.clone(),
+                repo: snapshot.repo.clone(),
+                pr_id: 0,
+                pr_title: format!("Local changes on {}", snapshot.current_branch),
+                pr_author: String::new(),
+                source_branch: snapshot.current_branch.clone(),
+                target_branch: snapshot
+                    .upstream
+                    .clone()
+                    .unwrap_or_else(|| "HEAD".to_string()),
+                base_sha: Some(snapshot.base_sha.clone()),
+                diff: Some(snapshot.diff.clone()),
+                diffstat: Some(snapshot.diffstat.clone()),
+                population_failed: false,
+            });
+        }
         let pr = self.pull_requests.get(self.selected_pr)?;
         let target = (repo.workspace.clone(), repo.repo.clone(), pr.id);
         let selected_pr_is_loaded = self.pr_resource_target.as_ref() == Some(&target);
@@ -2396,6 +2641,7 @@ impl TuiApp {
         Some(WebDiffState {
             version: 0,
             provider: Some(repo.provider),
+            target_kind: WebDiffTargetKind::PullRequest,
             workspace: repo.workspace.clone(),
             repo: repo.repo.clone(),
             pr_id: pr.id,
@@ -2411,6 +2657,7 @@ impl TuiApp {
             target_branch: detail
                 .map(|loaded| loaded.destination_branch.clone())
                 .unwrap_or_default(),
+            base_sha: detail.and_then(|loaded| loaded.destination_commit_hash.clone()),
             diff: if selected_pr_is_loaded && matches!(self.diff_load, LoadState::Ready) {
                 self.diff.clone()
             } else {
@@ -2425,12 +2672,16 @@ impl TuiApp {
         if self.detail_view == DetailView::Diff {
             self.detail_view = DetailView::PullRequest;
             self.focus = FocusPane::PullRequests;
-            self.status = "Closed PR diff".to_string();
+            self.status = "Closed diff".to_string();
             return;
         }
-        self.detail_view = DetailView::Diff;
-        self.focus = FocusPane::Diff;
-        self.load_selected_pr_for_view(DetailView::Diff);
+        if self.pr_filter == PrListFilter::Local {
+            self.load_selected_local_for_view(DetailView::Diff);
+        } else {
+            self.detail_view = DetailView::Diff;
+            self.focus = FocusPane::Diff;
+            self.load_selected_pr_for_view(DetailView::Diff);
+        }
     }
 
     fn copy_ai_review_output(&mut self) {
@@ -2638,6 +2889,7 @@ impl TuiApp {
             selected_repo: self.selected_repo,
             focus: self.focus,
             pull_requests: &self.pull_requests,
+            local_snapshot: self.local_snapshot.as_ref(),
             pr_filter: self.pr_filter,
             selected_pr: self.selected_pr,
             detail: self.detail.as_ref(),
@@ -2748,6 +3000,40 @@ fn build_review_payload(prompt: &str, detail: &PullRequestDetail, diff: &str) ->
     lines.join("\n")
 }
 
+fn build_local_review_payload(prompt: &str, snapshot: &LocalReviewSnapshot) -> String {
+    let upstream = snapshot.upstream.as_deref().unwrap_or("not configured");
+    let mut lines = vec![
+        prompt.trim().to_string(),
+        String::new(),
+        "## Local changes".to_string(),
+        format!("Repository: {}/{}", snapshot.workspace, snapshot.repo),
+        format!("Current branch: {}", snapshot.current_branch),
+        format!("Upstream: {upstream}"),
+        format!("Unpushed commits: {}", snapshot.commits_ahead),
+    ];
+    if !snapshot.warnings.is_empty() {
+        lines.push(String::new());
+        lines.push("## Snapshot warnings".to_string());
+        lines.extend(
+            snapshot
+                .warnings
+                .iter()
+                .map(|warning| format!("- {warning}")),
+        );
+    }
+    lines.extend([
+        String::new(),
+        "## Diff".to_string(),
+        "```diff".to_string(),
+        snapshot.diff.trim().to_string(),
+        "```".to_string(),
+        String::new(),
+        "This target contains unpublished local work. Do not describe a change as pushed or available in a pull request unless the supplied context proves it."
+            .to_string(),
+    ]);
+    lines.join("\n")
+}
+
 fn ai_provider_label(provider: AiProvider) -> &'static str {
     match provider {
         AiProvider::Claude => "Claude",
@@ -2821,6 +3107,22 @@ mod tests {
             destination_commit_hash: None,
             created_on: String::new(),
             updated_on: String::new(),
+        }
+    }
+
+    fn local_snapshot(branch: &str) -> LocalReviewSnapshot {
+        LocalReviewSnapshot {
+            provider: ReviewProvider::Github,
+            workspace: "delaudio".to_string(),
+            repo: "norn".to_string(),
+            current_branch: branch.to_string(),
+            upstream: Some("origin/main".to_string()),
+            commits_ahead: 2,
+            head_sha: Some("1111111111111111111111111111111111111111".to_string()),
+            base_sha: "0000000000000000000000000000000000000000".to_string(),
+            diff: "diff --git a/src/a.rs b/src/a.rs\n--- a/src/a.rs\n+++ b/src/a.rs\n@@ -1 +1 @@\n-old\n+new\n".to_string(),
+            diffstat: vec![],
+            warnings: vec![],
         }
     }
 
@@ -3291,6 +3593,100 @@ review:
 
         assert_eq!(app.pull_requests.len(), 1);
         assert_eq!(app.pull_requests[0].id, 7);
+    }
+
+    #[test]
+    fn stale_local_snapshot_cannot_replace_the_current_selection() {
+        let mut app = TuiApp::from_repos(vec![repo("delaudio", "norn")]);
+        app.pr_filter = PrListFilter::Local;
+        app.repo_request_id = 2;
+        app.local_snapshot = Some(local_snapshot("current"));
+
+        app.apply_load_event(LoadEvent::LocalSnapshot {
+            request_id: 1,
+            result: Ok(local_snapshot("stale")),
+        });
+
+        assert_eq!(
+            app.local_snapshot
+                .as_ref()
+                .map(|snapshot| snapshot.current_branch.as_str()),
+            Some("current")
+        );
+    }
+
+    #[test]
+    fn local_snapshot_becomes_the_loaded_review_target() {
+        let mut app = TuiApp::from_repos(vec![repo("delaudio", "norn")]);
+        app.pr_filter = PrListFilter::Local;
+        app.repo_request_id = 2;
+        app.pr_list_load = LoadState::Loading;
+
+        app.apply_load_event(LoadEvent::LocalSnapshot {
+            request_id: 2,
+            result: Ok(local_snapshot("feature/local")),
+        });
+
+        assert!(matches!(app.pr_list_load, LoadState::Ready));
+        assert!(matches!(app.diff_load, LoadState::Ready));
+        assert_eq!(
+            app.active_ai_target,
+            Some(("delaudio".into(), "norn".into(), 0))
+        );
+        assert!(app
+            .diff
+            .as_deref()
+            .is_some_and(|diff| diff.contains("+new")));
+    }
+
+    #[test]
+    fn local_target_disables_provider_comment_and_publication_actions() {
+        let mut app = TuiApp::from_repos(vec![repo("delaudio", "norn")]);
+        app.pr_filter = PrListFilter::Local;
+        app.local_snapshot = Some(local_snapshot("feature/local"));
+
+        app.start_comment_composer();
+        assert_eq!(
+            app.status,
+            "Provider comments are unavailable for local changes"
+        );
+        assert!(app.composer.is_none());
+
+        app.publish_drafts();
+        assert_eq!(
+            app.status,
+            "Provider publication is unavailable for local changes"
+        );
+    }
+
+    #[test]
+    fn browser_diff_state_identifies_local_changes_without_a_fake_pr() {
+        let mut app = TuiApp::from_repos(vec![repo("delaudio", "norn")]);
+        app.pr_filter = PrListFilter::Local;
+        app.local_snapshot = Some(local_snapshot("feature/local"));
+
+        let state = app.selected_web_diff_state().expect("local browser state");
+
+        assert_eq!(state.target_kind, WebDiffTargetKind::Local);
+        assert_eq!(state.pr_id, 0);
+        assert_eq!(state.pr_title, "Local changes on feature/local");
+        assert_eq!(
+            state.base_sha.as_deref(),
+            Some("0000000000000000000000000000000000000000")
+        );
+    }
+
+    #[test]
+    fn local_review_payload_uses_the_loaded_snapshot_context() {
+        let snapshot = local_snapshot("feature/local");
+
+        let payload = build_local_review_payload("Review carefully.", &snapshot);
+
+        assert!(payload.contains("## Local changes"));
+        assert!(payload.contains("Current branch: feature/local"));
+        assert!(payload.contains("Unpushed commits: 2"));
+        assert!(payload.contains("+new"));
+        assert!(!payload.contains("Pull request:"));
     }
 
     #[test]
@@ -3867,6 +4263,9 @@ review:
         assert_eq!(app.pr_filter, PrListFilter::Merged);
 
         app.handle_key(KeyCode::Char('f'));
+        assert_eq!(app.pr_filter, PrListFilter::Local);
+
+        app.handle_key(KeyCode::Char('f'));
         assert_eq!(app.pr_filter, PrListFilter::Open);
     }
 
@@ -3877,7 +4276,7 @@ review:
         app.handle_mouse(
             MouseEvent {
                 kind: MouseEventKind::Down(MouseButton::Left),
-                column: 14,
+                column: 8,
                 row: 19,
                 modifiers: event::KeyModifiers::empty(),
             },
