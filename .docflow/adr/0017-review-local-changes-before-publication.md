@@ -1,7 +1,7 @@
 ---
 adr: 0017
 title: Review local changes before publication
-status: Proposed
+status: Accepted
 date: 2026-09-03
 owner: codex
 supersedes:
@@ -107,8 +107,10 @@ desktop app can inspect and submit to the existing local AI-review workflow.
 | Date | Revision | Author | Change |
 |------|----------|--------|--------|
 | 2026-09-03 | r1 | codex | Initial draft. |
+| 2026-09-03 | r2 | codex | Accepted the TUI-first local review target contract after maintainer approval. |
 
 ## Approvals
 
 | Role | Name | Date | Signature |
 |------|------|------|-----------|
+| Maintainer | delaudio | 2026-09-03 | approved implementation in chat |

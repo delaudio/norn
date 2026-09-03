@@ -21,4 +21,4 @@ metadata.
 | 0014 | Deliver Norn through reproducible releases and verified upgrade channels | Implemented | 2026-08-31 | codex | release, distribution, homebrew, cli, tui, desktop |
 | 0015 | Distribute managed agent review skills with installed Norn | Implemented | 2026-09-01 | codex | distribution, skills, codex, claude, cli, homebrew |
 | 0016 | Offer an authenticated browser diff viewer from the terminal UI | Implemented | 2026-09-02 | default-agent | tui, diff, browser, security, rust |
-| 0017 | Review local changes before publication | Proposed | 2026-09-03 | codex | local, review, git, tui, desktop, diff |
+| 0017 | Review local changes before publication | Accepted | 2026-09-03 | codex | local, review, git, tui, desktop, diff |

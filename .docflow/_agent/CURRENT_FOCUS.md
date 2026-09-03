@@ -8,12 +8,12 @@ If status files and git disagree, git is authoritative; correct this file.
 
 ## Active state
 
-- **Branch:** `main` (post-release snapshot; no work branch remains active).
-- **Active item:** none.
-- **Plan items:** none.
-- **Verification:** Norn v0.2.9 is stable; command artifacts, Intel and Apple
-  Silicon Homebrew lifecycle checks, and public tap publication passed in
-  workflow run `33686264305`.
+- **Branch:** `feat/local-review-targets`.
+- **Active item:** `.docflow/plan/todo/0013-local-review-target-tui.md`.
+- **Plan items:** implement the shared local snapshot and TUI first, then
+  `.docflow/plan/todo/0014-local-review-target-desktop.md`.
+- **Verification:** ADR 0017 is accepted; implementation verification has not
+  started.
 
 ## Last shipped
 
@@ -21,4 +21,4 @@ If status files and git disagree, git is authoritative; correct this file.
 
 ## Next item
 
-- Select the next queued item when the maintainer starts a new work session.
+- Implement the shared local snapshot and terminal Local review target.
