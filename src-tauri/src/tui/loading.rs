@@ -132,24 +132,16 @@ impl Loader {
     pub(super) fn local_snapshot(
         &self,
         request_id: u64,
-        ai_request_id: u64,
         provider: ReviewProvider,
         workspace: String,
         repo: String,
-        store: AiReviewRunStore,
     ) {
         let sender = self.sender.clone();
-        let snapshot_workspace = workspace.clone();
-        let snapshot_repo = repo.clone();
         thread::spawn(move || {
-            let result = get_local_review_snapshot_native(
-                provider,
-                snapshot_workspace.as_str(),
-                snapshot_repo.as_str(),
-            );
+            let result =
+                get_local_review_snapshot_native(provider, workspace.as_str(), repo.as_str());
             let _ = sender.send(LoadEvent::LocalSnapshot { request_id, result });
         });
-        self.ai_review(ai_request_id, workspace, repo, 0, store);
     }
 
     #[allow(

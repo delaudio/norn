@@ -28,8 +28,10 @@ pub struct LocalReviewSnapshot {
     pub current_branch: String,
     pub upstream: Option<String>,
     pub commits_ahead: u32,
+    pub commits_behind: u32,
     pub head_sha: Option<String>,
     pub base_sha: String,
+    pub review_id: u32,
     pub diff: String,
     pub diffstat: Vec<DiffstatEntry>,
     pub preview_sha256: BTreeMap<String, String>,
@@ -100,20 +102,18 @@ pub(crate) fn local_review_snapshot_for_path(
     let upstream_sha = upstream
         .as_ref()
         .and_then(|value| optional_git_text(repo_path, &["rev-parse", "--verify", value]));
-    let base_sha = if let Some(sha) = upstream_sha.as_ref() {
-        sha.clone()
-    } else if let Some(sha) = head_sha.as_ref() {
-        sha.clone()
+    let base_sha =
+        if let (Some(upstream_sha), Some(head_sha)) = (upstream_sha.as_ref(), head_sha.as_ref()) {
+            git_text(repo_path, &["merge-base", upstream_sha, head_sha])?
+        } else if let Some(sha) = head_sha.as_ref() {
+            sha.clone()
+        } else {
+            empty_tree_oid(repo_path)?
+        };
+    let (commits_ahead, commits_behind) = if let Some(upstream) = upstream.as_ref() {
+        ahead_behind(repo_path, upstream)?
     } else {
-        empty_tree_oid(repo_path)?
-    };
-    let commits_ahead = if let Some(upstream) = upstream.as_ref() {
-        let range = format!("{upstream}..HEAD");
-        git_text(repo_path, &["rev-list", "--count", &range])?
-            .parse::<u32>()
-            .map_err(|_| "Git returned an invalid ahead count.".to_string())?
-    } else {
-        0
+        (0, 0)
     };
     let mut warnings = Vec::new();
     if upstream.is_none() {
@@ -124,6 +124,11 @@ pub(crate) fn local_review_snapshot_for_path(
             "The repository has no commits or upstream; showing tracked and eligible untracked files relative to an empty tree."
                 .to_string()
         });
+    }
+    if commits_behind > 0 {
+        warnings.push(format!(
+            "The current branch is {commits_behind} commit(s) behind its upstream; local changes are shown from their merge base."
+        ));
     }
 
     let collected = collect_local_diff(repo_path, &base_sha)?;
@@ -156,6 +161,16 @@ pub(crate) fn local_review_snapshot_for_path(
             "Local changes changed while Norn was loading them. Refresh and try again.".to_string(),
         );
     }
+    let review_id = local_review_id(
+        provider,
+        workspace,
+        repo,
+        &current_branch,
+        upstream.as_deref(),
+        head_sha.as_deref(),
+        &base_sha,
+        &collected.diff,
+    );
 
     Ok(LocalReviewSnapshot {
         provider,
@@ -164,13 +179,67 @@ pub(crate) fn local_review_snapshot_for_path(
         current_branch,
         upstream,
         commits_ahead,
+        commits_behind,
         head_sha,
         base_sha,
+        review_id,
         diff: collected.diff,
         diffstat: collected.diffstat,
         preview_sha256: collected.preview_sha256,
         warnings,
     })
+}
+
+fn ahead_behind(repo_path: &Path, upstream: &str) -> Result<(u32, u32), String> {
+    let range = format!("{upstream}...HEAD");
+    let output = git_text(repo_path, &["rev-list", "--left-right", "--count", &range])?;
+    let mut counts = output.split_whitespace();
+    let behind = counts
+        .next()
+        .ok_or_else(|| "Git returned an invalid upstream comparison.".to_string())?
+        .parse::<u32>()
+        .map_err(|_| "Git returned an invalid behind count.".to_string())?;
+    let ahead = counts
+        .next()
+        .ok_or_else(|| "Git returned an invalid upstream comparison.".to_string())?
+        .parse::<u32>()
+        .map_err(|_| "Git returned an invalid ahead count.".to_string())?;
+    if counts.next().is_some() {
+        return Err("Git returned an invalid upstream comparison.".to_string());
+    }
+    Ok((ahead, behind))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn local_review_id(
+    provider: ReviewProvider,
+    workspace: &str,
+    repo: &str,
+    current_branch: &str,
+    upstream: Option<&str>,
+    head_sha: Option<&str>,
+    base_sha: &str,
+    diff: &str,
+) -> u32 {
+    let mut hasher = Sha256::new();
+    for part in [
+        match provider {
+            ReviewProvider::Bitbucket => "bitbucket",
+            ReviewProvider::Github => "github",
+        },
+        workspace,
+        repo,
+        current_branch,
+        upstream.unwrap_or_default(),
+        head_sha.unwrap_or_default(),
+        base_sha,
+        diff,
+    ] {
+        hasher.update((part.len() as u64).to_be_bytes());
+        hasher.update(part.as_bytes());
+    }
+    let digest = hasher.finalize();
+    u32::from_be_bytes([digest[0], digest[1], digest[2], digest[3]]) | 0x8000_0000
 }
 
 fn collect_local_diff(repo_path: &Path, base_sha: &str) -> Result<CollectedLocalDiff, String> {
@@ -485,13 +554,10 @@ pub(crate) fn append_untracked_files(
         .split(|byte| *byte == 0)
         .filter(|path| !path.is_empty())
     {
-        let relative = String::from_utf8_lossy(raw_path).to_string();
+        let Some(relative) = utf8_untracked_path(raw_path, warnings) else {
+            continue;
+        };
         let display_relative = relative.escape_default().to_string();
-        if std::str::from_utf8(raw_path).is_err() {
-            warnings.push(format!(
-                "Untracked file path `{display_relative}` is not UTF-8 and was rendered lossily."
-            ));
-        }
         if is_sensitive_untracked_path(&relative) {
             warnings.push(format!(
                 "Skipped potentially sensitive untracked file `{display_relative}`."
@@ -602,6 +668,21 @@ pub(crate) fn append_untracked_files(
         included_bytes = included_bytes.saturating_add(contents.len() as u64);
     }
     Ok(())
+}
+
+fn utf8_untracked_path(raw_path: &[u8], warnings: &mut Vec<String>) -> Option<String> {
+    match std::str::from_utf8(raw_path) {
+        Ok(relative) => Some(relative.to_string()),
+        Err(_) => {
+            let display_relative = String::from_utf8_lossy(raw_path)
+                .escape_default()
+                .to_string();
+            warnings.push(format!(
+                "Skipped untracked file with a non-UTF-8 path `{display_relative}`."
+            ));
+            None
+        }
+    }
 }
 
 fn read_bounded(reader: impl Read, limit: usize) -> Result<Vec<u8>, String> {
@@ -1021,6 +1102,7 @@ mod tests {
                 .expect("snapshot");
 
         assert_eq!(snapshot.commits_ahead, 1);
+        assert_eq!(snapshot.commits_behind, 0);
         assert_eq!(snapshot.upstream.as_deref(), Some("upstream"));
         assert_eq!(snapshot.diff.matches("diff --git a/tracked.txt").count(), 1);
         assert!(snapshot.diff.contains("diff --git a/committed.txt"));
@@ -1051,6 +1133,7 @@ mod tests {
 
         assert!(snapshot.upstream.is_none());
         assert_eq!(snapshot.commits_ahead, 0);
+        assert_eq!(snapshot.commits_behind, 0);
         assert!(snapshot.diff.contains("+changed"));
         assert!(snapshot.warnings[0].contains("no upstream"));
     }
@@ -1088,6 +1171,47 @@ mod tests {
             .warnings
             .iter()
             .any(|warning| warning.contains(".env")));
+    }
+
+    #[test]
+    fn divergent_upstream_changes_are_not_reported_as_local_changes() {
+        let fixture = Fixture::new("diverged");
+        fixture.write("base.txt", "base\n");
+        fixture.commit_all("base");
+        let current_branch =
+            git_text(&fixture.path, &["symbolic-ref", "--short", "HEAD"]).expect("current branch");
+        run(&fixture.path, &["branch", "upstream"]);
+        run(&fixture.path, &["checkout", "-q", "upstream"]);
+        fixture.write("upstream-only.txt", "remote work\n");
+        fixture.commit_all("upstream work");
+        run(&fixture.path, &["checkout", "-q", &current_branch]);
+        fixture.write("local-only.txt", "local work\n");
+        fixture.commit_all("local work");
+        run(&fixture.path, &["branch", "--set-upstream-to", "upstream"]);
+
+        let snapshot =
+            local_review_snapshot_for_path(ReviewProvider::Github, "acme", "demo", &fixture.path)
+                .expect("snapshot");
+
+        assert_eq!(snapshot.commits_ahead, 1);
+        assert_eq!(snapshot.commits_behind, 1);
+        assert!(snapshot.diff.contains("local-only.txt"));
+        assert!(!snapshot.diff.contains("upstream-only.txt"));
+        assert!(snapshot
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("behind its upstream")));
+    }
+
+    #[test]
+    fn non_utf8_untracked_paths_are_rejected_before_file_access() {
+        let mut warnings = Vec::new();
+
+        let path = utf8_untracked_path(b"secret-\xff.txt", &mut warnings);
+
+        assert!(path.is_none());
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].contains("non-UTF-8 path"));
     }
 
     #[test]
@@ -1168,5 +1292,33 @@ mod tests {
             .expect_err("oversized output");
 
         assert_eq!(error, "Test output exceeds the 8-byte limit.");
+    }
+
+    #[test]
+    fn review_identity_changes_with_the_loaded_diff() {
+        let first = local_review_id(
+            ReviewProvider::Github,
+            "acme",
+            "demo",
+            "feature/local",
+            Some("origin/main"),
+            Some("1111111111111111111111111111111111111111"),
+            "0000000000000000000000000000000000000000",
+            "+first",
+        );
+        let second = local_review_id(
+            ReviewProvider::Github,
+            "acme",
+            "demo",
+            "feature/local",
+            Some("origin/main"),
+            Some("1111111111111111111111111111111111111111"),
+            "0000000000000000000000000000000000000000",
+            "+second",
+        );
+
+        assert_ne!(first, second);
+        assert_ne!(first, 0);
+        assert_ne!(second, 0);
     }
 }

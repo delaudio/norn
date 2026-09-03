@@ -1083,14 +1083,27 @@ impl TuiApp {
                     Ok(snapshot) => {
                         let changed_files = snapshot.diffstat.len();
                         let commits_ahead = snapshot.commits_ahead;
+                        let review_id = snapshot.review_id;
+                        let review_workspace = snapshot.workspace.clone();
+                        let review_repo = snapshot.repo.clone();
                         self.diff = Some(snapshot.diff.clone());
                         self.active_ai_target =
-                            Some((snapshot.workspace.clone(), snapshot.repo.clone(), 0));
+                            Some((review_workspace.clone(), review_repo.clone(), review_id));
                         self.local_snapshot = Some(snapshot);
                         self.pr_list_load = LoadState::Ready;
                         self.detail_load = LoadState::Ready;
                         self.comments_load = LoadState::Ready;
                         self.diff_load = LoadState::Ready;
+                        let ai_request_id = self.next_request();
+                        self.ai_request_id = ai_request_id;
+                        self.ai_review_load = LoadState::Loading;
+                        self.loader.ai_review(
+                            ai_request_id,
+                            review_workspace,
+                            review_repo,
+                            review_id,
+                            self.ai_review_store.clone(),
+                        );
                         self.reset_diff_state();
                         self.error = None;
                         self.status = format!(
@@ -1179,7 +1192,11 @@ impl TuiApp {
     }
 
     fn update_ai_review_markers(&mut self, pr_id: u32) {
-        if pr_id == 0 {
+        if self
+            .local_snapshot
+            .as_ref()
+            .is_some_and(|snapshot| snapshot.review_id == pr_id)
+        {
             return;
         }
         match self.ai_review_state.as_ref().map(|state| state.status) {
@@ -1968,17 +1985,8 @@ impl TuiApp {
         };
         self.error = None;
         if self.pr_filter == PrListFilter::Local {
-            let ai_request_id = self.next_request();
-            self.ai_request_id = ai_request_id;
-            self.ai_review_load = LoadState::Loading;
-            self.loader.local_snapshot(
-                request_id,
-                ai_request_id,
-                provider,
-                workspace,
-                repo_name,
-                self.ai_review_store.clone(),
-            );
+            self.loader
+                .local_snapshot(request_id, provider, workspace, repo_name);
         } else {
             self.loader.pull_requests(
                 request_id,
@@ -2294,7 +2302,7 @@ impl TuiApp {
             self.ai_review_store.clone(),
             snapshot.workspace.clone(),
             snapshot.repo.clone(),
-            0,
+            snapshot.review_id,
             title,
             snapshot.current_branch.clone(),
             destination,
@@ -2314,7 +2322,8 @@ impl TuiApp {
         ) {
             Ok(state) => {
                 self.ai_request_id = self.next_request();
-                self.active_ai_target = Some((snapshot.workspace, snapshot.repo, 0));
+                self.active_ai_target =
+                    Some((snapshot.workspace, snapshot.repo, snapshot.review_id));
                 self.ai_review_state = Some(state);
                 self.ai_review_output = None;
                 self.ai_review_load = LoadState::Ready;
@@ -2518,7 +2527,9 @@ impl TuiApp {
         self.refresh_selected_image_diff();
         if let Some(image) = self.image_diff.as_mut() {
             self.rendered_diff = None;
-            let image_area = diff_image_area_for_area(area, self.detail.is_some());
+            let has_metadata = self.detail.is_some()
+                || (self.pr_filter == PrListFilter::Local && self.local_snapshot.is_some());
+            let image_area = diff_image_area_for_area(area, has_metadata);
             if let Err(error) = image.prepare_protocol(&self.image_support, image_area) {
                 self.error = Some(error);
             }
@@ -3013,6 +3024,7 @@ fn build_local_review_payload(prompt: &str, snapshot: &LocalReviewSnapshot) -> S
         format!("Current branch: {}", snapshot.current_branch),
         format!("Upstream: {upstream}"),
         format!("Unpushed commits: {}", snapshot.commits_ahead),
+        format!("Commits behind upstream: {}", snapshot.commits_behind),
     ];
     if !snapshot.warnings.is_empty() {
         lines.push(String::new());
@@ -3121,8 +3133,10 @@ mod tests {
             current_branch: branch.to_string(),
             upstream: Some("origin/main".to_string()),
             commits_ahead: 2,
+            commits_behind: 0,
             head_sha: Some("1111111111111111111111111111111111111111".to_string()),
             base_sha: "0000000000000000000000000000000000000000".to_string(),
+            review_id: 0x8000_0042,
             diff: "diff --git a/src/a.rs b/src/a.rs\n--- a/src/a.rs\n+++ b/src/a.rs\n@@ -1 +1 @@\n-old\n+new\n".to_string(),
             diffstat: vec![],
             preview_sha256: Default::default(),
@@ -3635,12 +3649,49 @@ review:
         assert!(matches!(app.diff_load, LoadState::Ready));
         assert_eq!(
             app.active_ai_target,
-            Some(("delaudio".into(), "norn".into(), 0))
+            Some(("delaudio".into(), "norn".into(), 0x8000_0042))
         );
         assert!(app
             .diff
             .as_deref()
             .is_some_and(|diff| diff.contains("+new")));
+    }
+
+    #[test]
+    fn refreshed_local_snapshot_cannot_display_the_previous_snapshot_review() {
+        let mut app = TuiApp::from_repos(vec![repo("delaudio", "norn")]);
+        app.pr_filter = PrListFilter::Local;
+        app.repo_request_id = 1;
+        app.apply_load_event(LoadEvent::LocalSnapshot {
+            request_id: 1,
+            result: Ok(local_snapshot("feature/first")),
+        });
+        let previous_ai_request = app.ai_request_id;
+
+        let mut refreshed = local_snapshot("feature/second");
+        refreshed.review_id = 0x8000_0043;
+        refreshed.diff.push_str("+refreshed\n");
+        app.repo_request_id = 2;
+        app.apply_load_event(LoadEvent::LocalSnapshot {
+            request_id: 2,
+            result: Ok(refreshed),
+        });
+
+        app.apply_load_event(LoadEvent::AiReview {
+            request_id: previous_ai_request,
+            pr_id: 0x8000_0042,
+            state: Some(AiReviewRunState {
+                status: AiReviewRunStatus::Succeeded,
+                ..AiReviewRunState::default()
+            }),
+            output: Ok(Some("stale local review".to_string())),
+        });
+
+        assert_eq!(
+            app.active_ai_target,
+            Some(("delaudio".into(), "norn".into(), 0x8000_0043))
+        );
+        assert!(app.ai_review_output.is_none());
     }
 
     #[test]

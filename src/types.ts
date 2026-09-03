@@ -548,8 +548,10 @@ export interface LocalReviewSnapshot {
   currentBranch: string;
   upstream: string | null;
   commitsAhead: number;
+  commitsBehind: number;
   headSha: string | null;
   baseSha: string;
+  reviewId: number;
   diff: string;
   diffstat: DiffstatEntry[];
   previewSha256: Record<string, string>;

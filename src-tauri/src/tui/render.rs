@@ -674,7 +674,9 @@ fn render_image_diff_file(
 ) {
     let block = panel_block("Diff *", true);
     frame.render_widget(block, area);
-    let (metadata_area, image_area) = image_render_areas(area, state.detail.is_some());
+    let has_metadata = state.detail.is_some()
+        || (state.pr_filter == PrListFilter::Local && state.local_snapshot.is_some());
+    let (metadata_area, image_area) = image_render_areas(area, has_metadata);
     let mut lines = Vec::new();
     if let Some(snapshot) = state
         .local_snapshot
@@ -932,9 +934,10 @@ fn render_pull_requests(frame: &mut Frame<'_>, area: Rect, state: TuiState<'_>) 
                 Span::styled(upstream.to_string(), branch_style()),
                 Span::styled(
                     format!(
-                        "  {} file(s), {} unpushed commit(s)",
+                        "  {} file(s), {} ahead, {} behind",
                         snapshot.diffstat.len(),
-                        snapshot.commits_ahead
+                        snapshot.commits_ahead,
+                        snapshot.commits_behind
                     ),
                     text_style(),
                 ),
@@ -1089,6 +1092,8 @@ fn render_pull_request_detail(frame: &mut Frame<'_>, area: Rect, state: TuiState
             lines.push(Line::from(vec![
                 Span::styled("Unpushed commits: ", muted_style()),
                 Span::styled(snapshot.commits_ahead.to_string(), text_style()),
+                Span::styled(" | Behind upstream: ", muted_style()),
+                Span::styled(snapshot.commits_behind.to_string(), text_style()),
                 Span::styled(" | Changed files: ", muted_style()),
                 Span::styled(snapshot.diffstat.len().to_string(), text_style()),
             ]));
@@ -2439,8 +2444,10 @@ mod tests {
             current_branch: "feature/local-review".to_string(),
             upstream: Some("origin/main".to_string()),
             commits_ahead: 2,
+            commits_behind: 0,
             head_sha: Some("1111111111111111111111111111111111111111".to_string()),
             base_sha: "0000000000000000000000000000000000000000".to_string(),
+            review_id: 0x8000_0042,
             diff: "diff --git a/src/a.rs b/src/a.rs\n--- a/src/a.rs\n+++ b/src/a.rs\n@@ -1 +1 @@\n-old\n+new\n".to_string(),
             diffstat: vec![],
             preview_sha256: Default::default(),
