@@ -143,11 +143,26 @@ pub(crate) fn local_review_snapshot_for_path(
         "Local repository status",
     )?;
     let ending_head = optional_git_text(repo_path, &["rev-parse", "--verify", "HEAD"]);
-    let ending_upstream_sha = upstream
+    let ending_branch =
+        optional_git_text(repo_path, &["symbolic-ref", "--quiet", "--short", "HEAD"]);
+    let ending_upstream = ending_branch.as_ref().and_then(|_| {
+        optional_git_text(
+            repo_path,
+            &[
+                "rev-parse",
+                "--abbrev-ref",
+                "--symbolic-full-name",
+                "@{upstream}",
+            ],
+        )
+    });
+    let ending_upstream_sha = ending_upstream
         .as_ref()
         .and_then(|value| optional_git_text(repo_path, &["rev-parse", "--verify", value]));
     if starting_status != ending_status
         || head_sha != ending_head
+        || branch != ending_branch
+        || upstream != ending_upstream
         || upstream_sha != ending_upstream_sha
     {
         return Err(
@@ -643,15 +658,13 @@ pub(crate) fn append_untracked_files(
         if !opened_metadata.is_file() {
             continue;
         }
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::MetadataExt;
-            if opened_metadata.nlink() > 1 {
-                warnings.push(format!(
-                    "Skipped untracked file with multiple hard links `{display_relative}`."
-                ));
-                continue;
-            }
+        if has_multiple_hard_links(&file, &opened_metadata).map_err(|error| {
+            format!("Failed to inspect untracked file `{display_relative}` links: {error}")
+        })? {
+            warnings.push(format!(
+                "Skipped untracked file with multiple hard links `{display_relative}`."
+            ));
+            continue;
         }
         if opened_metadata.len() > MAX_UNTRACKED_FILE_BYTES {
             warnings.push(format!(
@@ -709,6 +722,40 @@ pub(crate) fn append_untracked_files(
         });
     }
     Ok(())
+}
+
+#[cfg(unix)]
+fn has_multiple_hard_links(_file: &File, metadata: &fs::Metadata) -> io::Result<bool> {
+    use std::os::unix::fs::MetadataExt;
+
+    Ok(metadata.nlink() > 1)
+}
+
+#[cfg(windows)]
+fn has_multiple_hard_links(file: &File, _metadata: &fs::Metadata) -> io::Result<bool> {
+    use std::mem::MaybeUninit;
+    use std::os::windows::io::AsRawHandle;
+    use windows_sys::Win32::Storage::FileSystem::{
+        GetFileInformationByHandle, BY_HANDLE_FILE_INFORMATION,
+    };
+
+    let mut information = MaybeUninit::<BY_HANDLE_FILE_INFORMATION>::uninit();
+    let succeeded =
+        unsafe { GetFileInformationByHandle(file.as_raw_handle(), information.as_mut_ptr()) };
+    if succeeded == 0 {
+        Err(io::Error::last_os_error())
+    } else {
+        let information = unsafe { information.assume_init() };
+        Ok(information.nNumberOfLinks > 1)
+    }
+}
+
+#[cfg(not(any(unix, windows)))]
+fn has_multiple_hard_links(_file: &File, _metadata: &fs::Metadata) -> io::Result<bool> {
+    Err(io::Error::new(
+        io::ErrorKind::Unsupported,
+        "hard-link inspection is unavailable on this platform",
+    ))
 }
 
 fn utf8_untracked_path(raw_path: &[u8], warnings: &mut Vec<String>) -> Option<String> {
@@ -1212,6 +1259,28 @@ mod tests {
             .warnings
             .iter()
             .any(|warning| warning.contains(".env")));
+    }
+
+    #[cfg(any(unix, windows))]
+    #[test]
+    fn untracked_hard_links_are_excluded() {
+        let fixture = Fixture::new("hard-link");
+        fixture.write("README.md", "base\n");
+        fixture.commit_all("base");
+        let external = tempfile::NamedTempFile::new().expect("external file");
+        fs::write(external.path(), "private contents\n").expect("write external file");
+        fs::hard_link(external.path(), fixture.path.join("innocent.txt"))
+            .expect("create hard link");
+
+        let snapshot =
+            local_review_snapshot_for_path(ReviewProvider::Github, "acme", "demo", &fixture.path)
+                .expect("snapshot");
+
+        assert!(!snapshot.diff.contains("private contents"));
+        assert!(snapshot
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("multiple hard links")));
     }
 
     #[test]
