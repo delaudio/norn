@@ -552,6 +552,7 @@ export interface LocalReviewSnapshot {
   baseSha: string;
   diff: string;
   diffstat: DiffstatEntry[];
+  previewSha256: Record<string, string>;
   warnings: string[];
 }
 

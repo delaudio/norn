@@ -1,4 +1,5 @@
 use std::{
+    collections::BTreeMap,
     collections::HashMap,
     fs,
     io::{Read, Write},
@@ -226,6 +227,8 @@ pub struct WebDiffState {
     pub base_sha: Option<String>,
     pub diff: Option<String>,
     pub diffstat: Option<Vec<DiffstatEntry>>,
+    #[serde(skip)]
+    pub local_preview_sha256: BTreeMap<String, String>,
     pub population_failed: bool,
 }
 
@@ -323,7 +326,8 @@ impl WebDiffServer {
                 || lock.pr_author != next.pr_author
                 || lock.source_branch != next.source_branch
                 || lock.target_branch != next.target_branch
-                || lock.base_sha != next.base_sha;
+                || lock.base_sha != next.base_sha
+                || lock.local_preview_sha256 != next.local_preview_sha256;
             if !content_changed && next.diffstat.is_none() {
                 next.diffstat = lock.diffstat.clone();
             }
@@ -572,6 +576,10 @@ fn handle_connection(
                                     &state_data.workspace,
                                     &state_data.repo,
                                     base_sha,
+                                    state_data
+                                        .local_preview_sha256
+                                        .get(&file_path)
+                                        .map(String::as_str),
                                     &file_path,
                                     &side,
                                 )
@@ -905,6 +913,7 @@ fn same_pull_request(current: &WebDiffState, snapshot: &WebDiffState) -> bool {
         && current.repo == snapshot.repo
         && current.pr_id == snapshot.pr_id
         && current.base_sha == snapshot.base_sha
+        && current.local_preview_sha256 == snapshot.local_preview_sha256
 }
 
 fn parse_query(query: &str) -> std::collections::HashMap<String, String> {
@@ -1253,6 +1262,7 @@ mod tests {
             base_sha: None,
             diff: Some("diff --git a/a b/a".to_string()),
             diffstat: None,
+            local_preview_sha256: Default::default(),
             population_failed: false,
         });
 
@@ -1396,6 +1406,7 @@ mod tests {
             base_sha: None,
             diff: diff.clone(),
             diffstat: None,
+            local_preview_sha256: Default::default(),
             population_failed: false,
         });
         let initial_version = state.read().unwrap().version;
@@ -1413,6 +1424,7 @@ mod tests {
             base_sha: None,
             diff,
             diffstat: Some(vec![diffstat(Some("a.png"), Some("a.png"))]),
+            local_preview_sha256: Default::default(),
             population_failed: false,
         });
 

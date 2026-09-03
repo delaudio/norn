@@ -1292,6 +1292,7 @@ export const mockHandlers: Record<string, Handler> = {
       baseSha: "75f1fc8355b2743b06a30c4bb413f513b45e8af0",
       diff: mockRawDiff,
       diffstat: mockDiffstat,
+      previewSha256: {},
       warnings: [],
     }) satisfies LocalReviewSnapshot,
   get_pr_file_preview: (args) => {

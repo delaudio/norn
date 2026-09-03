@@ -2443,6 +2443,7 @@ mod tests {
             base_sha: "0000000000000000000000000000000000000000".to_string(),
             diff: "diff --git a/src/a.rs b/src/a.rs\n--- a/src/a.rs\n+++ b/src/a.rs\n@@ -1 +1 @@\n-old\n+new\n".to_string(),
             diffstat: vec![],
+            preview_sha256: Default::default(),
             warnings: vec![],
         }
     }

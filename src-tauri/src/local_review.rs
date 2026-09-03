@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::ffi::OsStr;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Write};
@@ -6,6 +7,7 @@ use std::process::{Command, Stdio};
 use std::thread;
 
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
 use crate::config::ReviewProvider;
 use crate::local_repo::resolve_local_repo_for_provider;
@@ -30,7 +32,15 @@ pub struct LocalReviewSnapshot {
     pub base_sha: String,
     pub diff: String,
     pub diffstat: Vec<DiffstatEntry>,
+    pub preview_sha256: BTreeMap<String, String>,
     pub warnings: Vec<String>,
+}
+
+struct CollectedLocalDiff {
+    diff: String,
+    diffstat: Vec<DiffstatEntry>,
+    preview_sha256: BTreeMap<String, String>,
+    warnings: Vec<String>,
 }
 
 #[tauri::command]
@@ -116,8 +126,8 @@ pub(crate) fn local_review_snapshot_for_path(
         });
     }
 
-    let (diff, diffstat, snapshot_warnings) = collect_local_diff(repo_path, &base_sha)?;
-    warnings.extend(snapshot_warnings);
+    let collected = collect_local_diff(repo_path, &base_sha)?;
+    warnings.extend(collected.warnings.clone());
 
     let ending_status = git_bytes_limited(
         repo_path,
@@ -137,8 +147,11 @@ pub(crate) fn local_review_snapshot_for_path(
             "Local changes changed while Norn was loading them. Refresh and try again.".to_string(),
         );
     }
-    let (verification_diff, verification_diffstat, _) = collect_local_diff(repo_path, &base_sha)?;
-    if diff != verification_diff || diffstat != verification_diffstat {
+    let verification = collect_local_diff(repo_path, &base_sha)?;
+    if collected.diff != verification.diff
+        || collected.diffstat != verification.diffstat
+        || collected.preview_sha256 != verification.preview_sha256
+    {
         return Err(
             "Local changes changed while Norn was loading them. Refresh and try again.".to_string(),
         );
@@ -153,16 +166,14 @@ pub(crate) fn local_review_snapshot_for_path(
         commits_ahead,
         head_sha,
         base_sha,
-        diff,
-        diffstat,
+        diff: collected.diff,
+        diffstat: collected.diffstat,
+        preview_sha256: collected.preview_sha256,
         warnings,
     })
 }
 
-fn collect_local_diff(
-    repo_path: &Path,
-    base_sha: &str,
-) -> Result<(String, Vec<DiffstatEntry>, Vec<String>), String> {
+fn collect_local_diff(repo_path: &Path, base_sha: &str) -> Result<CollectedLocalDiff, String> {
     let mut diffstat = tracked_diffstat(repo_path, base_sha)?;
     if diffstat.len() > MAX_LOCAL_CHANGED_FILES {
         return Err(format!(
@@ -200,7 +211,13 @@ fn collect_local_diff(
             MAX_LOCAL_DIFF_BYTES / (1024 * 1024)
         ));
     }
-    Ok((diff, diffstat, warnings))
+    let preview_sha256 = collect_preview_hashes(repo_path, &diffstat)?;
+    Ok(CollectedLocalDiff {
+        diff,
+        diffstat,
+        preview_sha256,
+        warnings,
+    })
 }
 
 pub fn get_local_file_preview_native(
@@ -208,6 +225,7 @@ pub fn get_local_file_preview_native(
     workspace: &str,
     repo: &str,
     base_sha: &str,
+    expected_new_sha256: Option<&str>,
     path: &str,
     side: &str,
 ) -> Result<PrFilePreview, String> {
@@ -218,10 +236,28 @@ pub fn get_local_file_preview_native(
     let mime_type = raster_mime_type(path)
         .ok_or_else(|| "Only PNG, JPEG, WebP, and GIF previews are supported.".to_string())?;
     let repo_path = resolve_local_repo_for_provider(provider, workspace, repo)?;
+    local_file_preview_for_path(
+        &repo_path,
+        base_sha,
+        expected_new_sha256,
+        path,
+        side,
+        mime_type,
+    )
+}
+
+fn local_file_preview_for_path(
+    repo_path: &Path,
+    base_sha: &str,
+    expected_new_sha256: Option<&str>,
+    path: &str,
+    side: &str,
+    mime_type: &str,
+) -> Result<PrFilePreview, String> {
     let bytes = if side == "old" {
         let object = format!("{base_sha}:{path}");
         git_bytes_limited(
-            &repo_path,
+            repo_path,
             &["show", object.as_str()],
             MAX_PR_IMAGE_PREVIEW_BYTES,
             "Image preview",
@@ -237,9 +273,20 @@ pub fn get_local_file_preview_native(
         if !resolved.starts_with(&root) {
             return Err("Local image preview escaped the repository root.".to_string());
         }
-        let file = File::open(&resolved)
+        let file = open_untracked_file(&resolved)
             .map_err(|error| format!("Failed to open local image preview: {error}"))?;
-        read_bounded(file, MAX_PR_IMAGE_PREVIEW_BYTES)?
+        let bytes = read_bounded(file, MAX_PR_IMAGE_PREVIEW_BYTES)?;
+        let expected = expected_new_sha256.ok_or_else(|| {
+            "The local image preview is unavailable for this snapshot; refresh and try again."
+                .to_string()
+        })?;
+        if sha256_hex(&bytes) != expected {
+            return Err(
+                "The local image changed after this snapshot was loaded; refresh and try again."
+                    .to_string(),
+            );
+        }
+        bytes
     };
     let encoded = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &bytes);
     Ok(PrFilePreview {
@@ -292,7 +339,95 @@ fn tracked_diffstat(repo_path: &Path, base_sha: &str) -> Result<Vec<DiffstatEntr
         MAX_GIT_METADATA_BYTES,
         "Local review file metadata",
     )?;
-    parse_name_status(&output)
+    let mut entries = parse_name_status(&output)?;
+    let numstat = git_bytes_limited(
+        repo_path,
+        &["diff", "--numstat", "-z", "--find-renames", base_sha, "--"],
+        MAX_GIT_METADATA_BYTES,
+        "Local review line metadata",
+    )?;
+    let counts = parse_numstat(&numstat)?;
+    for entry in &mut entries {
+        let path = entry.new_path.as_ref().or(entry.old_path.as_ref());
+        if let Some((_, added, removed)) =
+            path.and_then(|path| counts.iter().find(|(candidate, _, _)| candidate == path))
+        {
+            entry.lines_added = *added;
+            entry.lines_removed = *removed;
+        }
+    }
+    Ok(entries)
+}
+
+fn parse_numstat(output: &[u8]) -> Result<Vec<(String, u32, u32)>, String> {
+    let mut records = output
+        .split(|byte| *byte == 0)
+        .filter(|record| !record.is_empty());
+    let mut counts = Vec::new();
+    while let Some(record) = records.next() {
+        let mut fields = record.splitn(3, |byte| *byte == b'\t');
+        let added = parse_numstat_count(fields.next())?;
+        let removed = parse_numstat_count(fields.next())?;
+        let path_field = fields
+            .next()
+            .ok_or_else(|| "Git returned incomplete line metadata.".to_string())?;
+        let path = if path_field.is_empty() {
+            let _old_path = utf8_path(records.next())?;
+            utf8_path(records.next())?
+        } else {
+            utf8_path(Some(path_field))?
+        };
+        counts.push((path, added, removed));
+    }
+    Ok(counts)
+}
+
+fn parse_numstat_count(raw: Option<&[u8]>) -> Result<u32, String> {
+    let raw = raw.ok_or_else(|| "Git returned incomplete line metadata.".to_string())?;
+    if raw == b"-" {
+        return Ok(0);
+    }
+    std::str::from_utf8(raw)
+        .map_err(|_| "Git returned invalid line metadata.".to_string())?
+        .parse::<u32>()
+        .map_err(|_| "Git returned invalid line metadata.".to_string())
+}
+
+fn collect_preview_hashes(
+    repo_path: &Path,
+    diffstat: &[DiffstatEntry],
+) -> Result<BTreeMap<String, String>, String> {
+    let root = repo_path
+        .canonicalize()
+        .map_err(|error| format!("Failed to resolve local repository: {error}"))?;
+    let mut hashes = BTreeMap::new();
+    for path in diffstat
+        .iter()
+        .filter_map(|entry| entry.new_path.as_deref())
+    {
+        if raster_mime_type(path).is_none() || validate_repo_relative_path(path).is_err() {
+            continue;
+        }
+        let candidate = root.join(path);
+        let Ok(resolved) = candidate.canonicalize() else {
+            continue;
+        };
+        if !resolved.starts_with(&root) {
+            continue;
+        }
+        let Ok(file) = open_untracked_file(&resolved) else {
+            continue;
+        };
+        let Ok(bytes) = read_bounded(file, MAX_PR_IMAGE_PREVIEW_BYTES) else {
+            continue;
+        };
+        hashes.insert(path.to_string(), sha256_hex(&bytes));
+    }
+    Ok(hashes)
+}
+
+fn sha256_hex(bytes: &[u8]) -> String {
+    hex::encode(Sha256::digest(bytes))
 }
 
 fn parse_name_status(output: &[u8]) -> Result<Vec<DiffstatEntry>, String> {
@@ -697,7 +832,7 @@ pub(crate) fn new_file_patch(path: &str, contents: &str) -> String {
 }
 
 fn git_command(repo_path: &Path) -> Command {
-    let mut command = Command::new("/usr/bin/git");
+    let mut command = Command::new("git");
     command.arg("-C").arg(repo_path);
     command
 }
@@ -856,7 +991,7 @@ mod tests {
     }
 
     fn run(path: &Path, args: &[&str]) {
-        let output = Command::new("/usr/bin/git")
+        let output = Command::new("git")
             .arg("-C")
             .arg(path)
             .args(args)
@@ -891,6 +1026,12 @@ mod tests {
         assert!(snapshot.diff.contains("diff --git a/committed.txt"));
         assert!(snapshot.diff.contains("diff --git a/untracked.txt"));
         assert_eq!(snapshot.diffstat.len(), 3);
+        let tracked = snapshot
+            .diffstat
+            .iter()
+            .find(|entry| entry.new_path.as_deref() == Some("tracked.txt"))
+            .expect("tracked diffstat");
+        assert_eq!((tracked.lines_added, tracked.lines_removed), (1, 1));
     }
 
     #[test]
@@ -959,6 +1100,54 @@ mod tests {
         assert_eq!(parsed[1].new_path, None);
         assert_eq!(parsed[2].old_path.as_deref(), Some("before.png"));
         assert_eq!(parsed[2].new_path.as_deref(), Some("after.png"));
+    }
+
+    #[test]
+    fn numstat_preserves_counts_for_normal_binary_and_renamed_paths() {
+        let parsed = parse_numstat(b"3\t2\tsrc/lib.rs\0-\t-\timage.png\05\t1\t\0old.rs\0new.rs\0")
+            .expect("parse numstat");
+
+        assert_eq!(parsed[0], ("src/lib.rs".to_string(), 3, 2));
+        assert_eq!(parsed[1], ("image.png".to_string(), 0, 0));
+        assert_eq!(parsed[2], ("new.rs".to_string(), 5, 1));
+    }
+
+    #[test]
+    fn new_image_preview_rejects_content_that_drifted_after_snapshot() {
+        let fixture = Fixture::new("image-drift");
+        fixture.write("preview.png", "base-image");
+        fixture.commit_all("base image");
+        fixture.write("preview.png", "snapshot-image");
+        let snapshot =
+            local_review_snapshot_for_path(ReviewProvider::Github, "acme", "demo", &fixture.path)
+                .expect("snapshot");
+        let expected = snapshot
+            .preview_sha256
+            .get("preview.png")
+            .expect("preview fingerprint");
+
+        let preview = local_file_preview_for_path(
+            &fixture.path,
+            &snapshot.base_sha,
+            Some(expected),
+            "preview.png",
+            "new",
+            "image/png",
+        )
+        .expect("matching preview");
+        assert_eq!(preview.size, "snapshot-image".len());
+
+        fixture.write("preview.png", "changed-after-snapshot");
+        let error = local_file_preview_for_path(
+            &fixture.path,
+            &snapshot.base_sha,
+            Some(expected),
+            "preview.png",
+            "new",
+            "image/png",
+        )
+        .expect_err("drifted preview");
+        assert!(error.contains("changed after this snapshot"));
     }
 
     #[test]

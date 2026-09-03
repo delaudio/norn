@@ -2483,6 +2483,7 @@ impl TuiApp {
                         &workspace,
                         &repo,
                         &base_sha,
+                        snapshot.preview_sha256.get(path).map(String::as_str),
                         path,
                         side.provider_value(),
                     )
@@ -2626,6 +2627,7 @@ impl TuiApp {
                 base_sha: Some(snapshot.base_sha.clone()),
                 diff: Some(snapshot.diff.clone()),
                 diffstat: Some(snapshot.diffstat.clone()),
+                local_preview_sha256: snapshot.preview_sha256.clone(),
                 population_failed: false,
             });
         }
@@ -2664,6 +2666,7 @@ impl TuiApp {
                 None
             },
             diffstat: None,
+            local_preview_sha256: Default::default(),
             population_failed: false,
         })
     }
@@ -3122,6 +3125,7 @@ mod tests {
             base_sha: "0000000000000000000000000000000000000000".to_string(),
             diff: "diff --git a/src/a.rs b/src/a.rs\n--- a/src/a.rs\n+++ b/src/a.rs\n@@ -1 +1 @@\n-old\n+new\n".to_string(),
             diffstat: vec![],
+            preview_sha256: Default::default(),
             warnings: vec![],
         }
     }
