@@ -9,6 +9,8 @@ use std::thread;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
+#[cfg(unix)]
+use cap_fs_ext::OpenOptionsSyncExt;
 use cap_fs_ext::{FollowSymlinks, OpenOptionsFollowExt};
 use cap_std::{ambient_authority, fs::Dir};
 
@@ -16,9 +18,6 @@ use crate::config::ReviewProvider;
 use crate::local_repo::resolve_local_repo_for_provider;
 use crate::services::bitbucket::{DiffstatEntry, PrFilePreview, MAX_PR_IMAGE_PREVIEW_BYTES};
 
-pub(crate) const MAX_UNTRACKED_FILE_BYTES: u64 = 512 * 1024;
-pub(crate) const MAX_UNTRACKED_TOTAL_BYTES: u64 = 2 * 1024 * 1024;
-const MAX_UNTRACKED_CANDIDATES: usize = 2_000;
 const MAX_LOCAL_DIFF_BYTES: usize = 16 * 1024 * 1024;
 const MAX_LOCAL_CHANGED_FILES: usize = 2_000;
 const MAX_GIT_METADATA_BYTES: usize = 8 * 1024 * 1024;
@@ -128,9 +127,15 @@ pub(crate) fn local_review_snapshot_for_path(
             "The current branch has no upstream; showing working-tree changes relative to HEAD."
                 .to_string()
         } else {
-            "The repository has no commits or upstream; showing tracked and eligible untracked files relative to an empty tree."
+            "The repository has no commits or upstream; showing tracked changes relative to an empty tree."
                 .to_string()
         });
+    }
+    if status_contains_untracked(&starting_status) {
+        warnings.push(
+            "Untracked files are excluded from local review until they are staged or committed."
+                .to_string(),
+        );
     }
     if commits_behind > 0 {
         warnings.push(format!(
@@ -179,7 +184,12 @@ pub(crate) fn local_review_snapshot_for_path(
         );
     }
     let verification = collect_local_diff(repo_path, &base_sha)?;
-    if collected.diff != verification.diff || collected.diffstat != verification.diffstat {
+    let (verification_preview_sha256, _) =
+        collect_preview_hashes(repo_path, &verification.diffstat)?;
+    if collected.diff != verification.diff
+        || collected.diffstat != verification.diffstat
+        || collected.preview_sha256 != verification_preview_sha256
+    {
         return Err(
             "Local changes changed while Norn was loading them. Refresh and try again.".to_string(),
         );
@@ -190,8 +200,11 @@ pub(crate) fn local_review_snapshot_for_path(
         repo,
         &current_branch,
         upstream.as_deref(),
+        upstream_sha.as_deref(),
         head_sha.as_deref(),
         &base_sha,
+        commits_ahead,
+        commits_behind,
         &collected.diff,
         &collected.preview_sha256,
     );
@@ -242,8 +255,11 @@ fn local_review_identity(
     repo: &str,
     current_branch: &str,
     upstream: Option<&str>,
+    upstream_sha: Option<&str>,
     head_sha: Option<&str>,
     base_sha: &str,
+    commits_ahead: u32,
+    commits_behind: u32,
     diff: &str,
     preview_sha256: &BTreeMap<String, String>,
 ) -> (String, u32) {
@@ -257,6 +273,7 @@ fn local_review_identity(
         repo,
         current_branch,
         upstream.unwrap_or_default(),
+        upstream_sha.unwrap_or_default(),
         head_sha.unwrap_or_default(),
         base_sha,
         diff,
@@ -264,6 +281,8 @@ fn local_review_identity(
         hasher.update((part.len() as u64).to_be_bytes());
         hasher.update(part.as_bytes());
     }
+    hasher.update(commits_ahead.to_be_bytes());
+    hasher.update(commits_behind.to_be_bytes());
     hasher.update((preview_sha256.len() as u64).to_be_bytes());
     for (path, sha256) in preview_sha256 {
         for part in [path.as_str(), sha256.as_str()] {
@@ -277,7 +296,7 @@ fn local_review_identity(
 }
 
 fn collect_local_diff(repo_path: &Path, base_sha: &str) -> Result<CollectedLocalDiff, String> {
-    let mut diffstat = tracked_diffstat(repo_path, base_sha)?;
+    let diffstat = tracked_diffstat(repo_path, base_sha)?;
     if diffstat.len() > MAX_LOCAL_CHANGED_FILES {
         return Err(format!(
             "Local review contains {} changed files, exceeding the {}-file limit.",
@@ -285,7 +304,7 @@ fn collect_local_diff(repo_path: &Path, base_sha: &str) -> Result<CollectedLocal
             MAX_LOCAL_CHANGED_FILES
         ));
     }
-    let mut diff = git_text_raw_limited(
+    let diff = git_text_raw_limited(
         repo_path,
         &[
             "diff",
@@ -299,8 +318,7 @@ fn collect_local_diff(repo_path: &Path, base_sha: &str) -> Result<CollectedLocal
         MAX_LOCAL_DIFF_BYTES,
         "Local review diff",
     )?;
-    let mut warnings = Vec::new();
-    append_untracked_files(repo_path, &mut diff, &mut warnings, &mut diffstat)?;
+    let warnings = Vec::new();
     if diffstat.len() > MAX_LOCAL_CHANGED_FILES {
         return Err(format!(
             "Local review contains {} changed files, exceeding the {}-file limit.",
@@ -320,6 +338,12 @@ fn collect_local_diff(repo_path: &Path, base_sha: &str) -> Result<CollectedLocal
         preview_sha256: BTreeMap::new(),
         warnings,
     })
+}
+
+fn status_contains_untracked(status: &[u8]) -> bool {
+    status
+        .split(|byte| *byte == 0)
+        .any(|entry| entry.starts_with(b"?? "))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -662,141 +686,6 @@ fn utf8_path(raw: Option<&[u8]>) -> Result<String, String> {
         .map_err(|_| "Local review does not support non-UTF-8 changed paths.".to_string())
 }
 
-pub(crate) fn append_untracked_files(
-    repo_path: &Path,
-    diff: &mut String,
-    warnings: &mut Vec<String>,
-    diffstat: &mut Vec<DiffstatEntry>,
-) -> Result<(), String> {
-    let output = git_bytes_limited(
-        repo_path,
-        &["ls-files", "--others", "--exclude-standard", "-z"],
-        MAX_GIT_METADATA_BYTES,
-        "Untracked file metadata",
-    )?;
-    let root = open_repo_dir(repo_path)?;
-    let mut scanned_bytes = 0_u64;
-    for (candidate_index, raw_path) in output
-        .split(|byte| *byte == 0)
-        .filter(|path| !path.is_empty())
-        .enumerate()
-    {
-        if candidate_index >= MAX_UNTRACKED_CANDIDATES {
-            warnings.push(format!(
-                "Skipped additional untracked files because the {}-file scan limit was reached.",
-                MAX_UNTRACKED_CANDIDATES
-            ));
-            break;
-        }
-        let Some(relative) = utf8_untracked_path(raw_path, warnings) else {
-            continue;
-        };
-        let display_relative = relative.escape_default().to_string();
-        if is_sensitive_untracked_path(&relative) {
-            warnings.push(format!(
-                "Skipped potentially sensitive untracked file `{display_relative}`."
-            ));
-            continue;
-        }
-        if !is_safe_synthetic_diff_path(&relative) {
-            warnings.push(format!(
-                "Skipped untracked file with a path that cannot be represented safely in a synthetic diff: `{display_relative}`."
-            ));
-            continue;
-        }
-        let file = match open_repo_file(&root, Path::new(&relative)) {
-            Ok(file) => file,
-            Err(error)
-                if matches!(
-                    error.kind(),
-                    io::ErrorKind::NotFound
-                        | io::ErrorKind::PermissionDenied
-                        | io::ErrorKind::InvalidInput
-                ) =>
-            {
-                warnings.push(format!(
-                    "Skipped untracked file that could not be resolved safely `{display_relative}`."
-                ));
-                continue;
-            }
-            Err(error) => {
-                return Err(format!(
-                    "Failed to open untracked file `{display_relative}`: {error}"
-                ));
-            }
-        };
-        let opened_metadata = file.metadata().map_err(|error| {
-            format!("Failed to inspect untracked file `{display_relative}`: {error}")
-        })?;
-        if !opened_metadata.is_file() {
-            continue;
-        }
-        if has_multiple_hard_links(&file, &opened_metadata).map_err(|error| {
-            format!("Failed to inspect untracked file `{display_relative}` links: {error}")
-        })? {
-            warnings.push(format!(
-                "Skipped untracked file with multiple hard links `{display_relative}`."
-            ));
-            continue;
-        }
-        if opened_metadata.len() > MAX_UNTRACKED_FILE_BYTES {
-            warnings.push(format!(
-                "Skipped large untracked file `{display_relative}`."
-            ));
-            continue;
-        }
-        if scanned_bytes >= MAX_UNTRACKED_TOTAL_BYTES {
-            warnings.push(format!(
-                "Skipped additional untracked files starting with `{display_relative}` because the total untracked-file byte limit was reached."
-            ));
-            break;
-        }
-        let remaining = MAX_UNTRACKED_TOTAL_BYTES.saturating_sub(scanned_bytes);
-        if opened_metadata.len() > remaining {
-            warnings.push(format!(
-                "Skipped additional untracked files starting with `{display_relative}` because the total untracked-file byte limit was reached."
-            ));
-            break;
-        }
-        let mut contents = Vec::new();
-        file.take(opened_metadata.len())
-            .read_to_end(&mut contents)
-            .map_err(|error| {
-                format!("Failed to read untracked file `{display_relative}`: {error}")
-            })?;
-        scanned_bytes = scanned_bytes.saturating_add(contents.len() as u64);
-        if contents.len() as u64 != opened_metadata.len() {
-            return Err(format!(
-                "Untracked file `{display_relative}` changed while Norn was loading it. Refresh and try again."
-            ));
-        }
-        if contents.contains(&0) {
-            warnings.push(format!(
-                "Skipped binary untracked file `{display_relative}`."
-            ));
-            continue;
-        }
-        let text = match std::str::from_utf8(&contents) {
-            Ok(text) => text,
-            Err(_) => {
-                warnings.push(format!(
-                    "Skipped non-UTF-8 untracked file `{display_relative}`."
-                ));
-                continue;
-            }
-        };
-        append_diff(diff, &new_file_patch(&relative, text));
-        diffstat.push(DiffstatEntry {
-            status: "added".to_string(),
-            lines_added: u32::try_from(text.lines().count()).unwrap_or(u32::MAX),
-            lines_removed: 0,
-            old_path: None,
-            new_path: Some(relative),
-        });
-    }
-    Ok(())
-}
-
 #[cfg(unix)]
 fn has_multiple_hard_links(_file: &File, metadata: &fs::Metadata) -> io::Result<bool> {
     use std::os::unix::fs::MetadataExt;
@@ -829,21 +718,6 @@ fn has_multiple_hard_links(_file: &File, _metadata: &fs::Metadata) -> io::Result
         io::ErrorKind::Unsupported,
         "hard-link inspection is unavailable on this platform",
     ))
-}
-
-fn utf8_untracked_path(raw_path: &[u8], warnings: &mut Vec<String>) -> Option<String> {
-    match std::str::from_utf8(raw_path) {
-        Ok(relative) => Some(relative.to_string()),
-        Err(_) => {
-            let display_relative = String::from_utf8_lossy(raw_path)
-                .escape_default()
-                .to_string();
-            warnings.push(format!(
-                "Skipped untracked file with a non-UTF-8 path `{display_relative}`."
-            ));
-            None
-        }
-    }
 }
 
 fn read_bounded(reader: impl Read, limit: usize) -> Result<Vec<u8>, String> {
@@ -904,157 +778,10 @@ fn open_repo_dir(repo_path: &Path) -> Result<Dir, String> {
 fn open_repo_file(root: &Dir, relative: &Path) -> io::Result<File> {
     let mut options = cap_std::fs::OpenOptions::new();
     options.read(true).follow(FollowSymlinks::No);
+    #[cfg(unix)]
+    options.nonblock(true);
     root.open_with(relative, &options)
         .map(|file| file.into_std())
-}
-
-pub(crate) fn is_safe_synthetic_diff_path(relative: &str) -> bool {
-    !relative
-        .chars()
-        .any(|character| character.is_control() || matches!(character, '"' | '\\'))
-}
-
-fn append_diff(diff: &mut String, patch: &str) {
-    if !diff.is_empty() && !diff.ends_with('\n') && !patch.is_empty() {
-        diff.push('\n');
-    }
-    if !diff.is_empty() && !patch.is_empty() {
-        diff.push('\n');
-    }
-    diff.push_str(patch);
-}
-
-pub(crate) fn is_sensitive_untracked_path(relative: &str) -> bool {
-    let normalized = relative.replace('\\', "/").to_ascii_lowercase();
-    let path = Path::new(&normalized);
-    let file_name = path.file_name().and_then(OsStr::to_str).unwrap_or_default();
-    let extension = path.extension().and_then(OsStr::to_str).unwrap_or_default();
-    let normalized_file_name = file_name.replace('-', "_");
-    let has_sensitive_name_token = file_name
-        .trim_start_matches('.')
-        .split(['.', '_', '-'])
-        .any(|part| {
-            matches!(
-                part,
-                "secret"
-                    | "secrets"
-                    | "password"
-                    | "passwords"
-                    | "passwd"
-                    | "token"
-                    | "tokens"
-                    | "credential"
-                    | "credentials"
-            )
-        });
-    if normalized.split('/').any(|component| {
-        matches!(
-            component,
-            ".ssh" | ".aws" | ".gnupg" | ".kube" | ".docker" | ".azure" | "gcloud" | ".configstore"
-        )
-    }) {
-        return true;
-    }
-    if file_name == ".env"
-        || file_name == ".envrc"
-        || file_name.starts_with(".envrc.")
-        || file_name.starts_with(".env.")
-        || file_name.ends_with(".env")
-        || file_name.starts_with("env.")
-        || file_name.contains(".env.")
-        || matches!(
-            file_name,
-            ".npmrc"
-                | ".pypirc"
-                | ".netrc"
-                | ".git-credentials"
-                | ".authinfo"
-                | ".authinfo.gpg"
-                | ".boto"
-                | "id_rsa"
-                | "id_dsa"
-                | "id_ecdsa"
-                | "id_ed25519"
-                | "credentials"
-                | "credentials.json"
-                | "auth.json"
-                | "application_default_credentials.json"
-                | "access_tokens.db"
-                | "accesstokens.json"
-                | "access_tokens.json"
-        )
-        || file_name.starts_with(".npmrc.")
-        || file_name.starts_with(".pypirc.")
-        || file_name.starts_with(".netrc.")
-        || file_name == "terraform.tfvars"
-        || file_name.ends_with(".auto.tfvars")
-        || file_name.ends_with(".tfvars.json")
-    {
-        return true;
-    }
-    if matches!(
-        extension,
-        "pem" | "key" | "p12" | "pfx" | "jks" | "keystore" | "der"
-    ) {
-        return true;
-    }
-    let likely_secret_text = file_name.starts_with('.')
-        || extension.is_empty()
-        || matches!(
-            extension,
-            "txt"
-                | "md"
-                | "json"
-                | "yaml"
-                | "yml"
-                | "toml"
-                | "ini"
-                | "conf"
-                | "config"
-                | "properties"
-                | "csv"
-                | "log"
-        );
-    let first_name_segment = normalized_file_name
-        .trim_start_matches('.')
-        .split('.')
-        .next()
-        .unwrap_or_default();
-    if likely_secret_text
-        && (has_sensitive_name_token
-            || matches!(
-                first_name_segment,
-                "api_key" | "private_key" | "access_token" | "auth_token" | "refresh_token"
-            ))
-    {
-        return true;
-    }
-    matches!(extension, "json" | "yaml" | "yml" | "toml")
-        && (normalized_file_name.contains("secret")
-            || normalized_file_name.contains("credential")
-            || normalized_file_name.contains("service_account")
-            || normalized_file_name.contains("private_key")
-            || normalized_file_name.contains("access_token")
-            || normalized_file_name.contains("api_token")
-            || normalized_file_name.contains("auth_token")
-            || normalized_file_name.contains("refresh_token"))
-}
-
-pub(crate) fn new_file_patch(path: &str, contents: &str) -> String {
-    let escaped_path = path.replace('\\', "/").replace('\n', "\\n");
-    let line_count = contents.lines().count();
-    let mut patch = format!(
-        "diff --git a/{escaped_path} b/{escaped_path}\nnew file mode 100644\n--- /dev/null\n+++ b/{escaped_path}\n@@ -0,0 +1,{line_count} @@\n"
-    );
-    for line in contents.lines() {
-        patch.push('+');
-        patch.push_str(line);
-        patch.push('\n');
-    }
-    if !contents.is_empty() && !contents.ends_with('\n') {
-        patch.push_str("\\ No newline at end of file\n");
-    }
-    patch
 }
 
 fn git_command(repo_path: &Path) -> Command {
@@ -1252,8 +979,12 @@ mod tests {
         assert_eq!(snapshot.upstream.as_deref(), Some("upstream"));
         assert_eq!(snapshot.diff.matches("diff --git a/tracked.txt").count(), 1);
         assert!(snapshot.diff.contains("diff --git a/committed.txt"));
-        assert!(snapshot.diff.contains("diff --git a/untracked.txt"));
-        assert_eq!(snapshot.diffstat.len(), 3);
+        assert!(!snapshot.diff.contains("untracked.txt"));
+        assert_eq!(snapshot.diffstat.len(), 2);
+        assert!(snapshot
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("Untracked files are excluded")));
         let tracked = snapshot
             .diffstat
             .iter()
@@ -1285,7 +1016,7 @@ mod tests {
     }
 
     #[test]
-    fn snapshot_for_unborn_repository_includes_safe_untracked_files() {
+    fn snapshot_for_unborn_repository_excludes_untracked_files() {
         let fixture = Fixture::new("unborn");
         fixture.write("src/new.rs", "fn main() {}\n");
 
@@ -1295,12 +1026,16 @@ mod tests {
 
         assert!(!snapshot.current_branch.is_empty());
         assert!(snapshot.head_sha.is_none());
-        assert!(snapshot.diff.contains("diff --git a/src/new.rs"));
-        assert_eq!(snapshot.diffstat.len(), 1);
+        assert!(snapshot.diff.is_empty());
+        assert!(snapshot.diffstat.is_empty());
+        assert!(snapshot
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("Untracked files are excluded")));
     }
 
     #[test]
-    fn sensitive_untracked_files_are_excluded() {
+    fn untracked_files_are_excluded_without_revealing_their_names() {
         let fixture = Fixture::new("sensitive");
         fixture.write("README.md", "base\n");
         fixture.commit_all("base");
@@ -1312,33 +1047,11 @@ mod tests {
                 .expect("snapshot");
 
         assert!(!snapshot.diff.contains("TOKEN=private"));
-        assert!(snapshot.diff.contains("safe.txt"));
+        assert!(!snapshot.diff.contains("safe.txt"));
         assert!(snapshot
             .warnings
             .iter()
-            .any(|warning| warning.contains(".env")));
-    }
-
-    #[cfg(any(unix, windows))]
-    #[test]
-    fn untracked_hard_links_are_excluded() {
-        let fixture = Fixture::new("hard-link");
-        fixture.write("README.md", "base\n");
-        fixture.commit_all("base");
-        let external = tempfile::NamedTempFile::new().expect("external file");
-        fs::write(external.path(), "private contents\n").expect("write external file");
-        fs::hard_link(external.path(), fixture.path.join("innocent.txt"))
-            .expect("create hard link");
-
-        let snapshot =
-            local_review_snapshot_for_path(ReviewProvider::Github, "acme", "demo", &fixture.path)
-                .expect("snapshot");
-
-        assert!(!snapshot.diff.contains("private contents"));
-        assert!(snapshot
-            .warnings
-            .iter()
-            .any(|warning| warning.contains("multiple hard links")));
+            .all(|warning| !warning.contains(".env") && !warning.contains("safe.txt")));
     }
 
     #[test]
@@ -1369,17 +1082,6 @@ mod tests {
             .warnings
             .iter()
             .any(|warning| warning.contains("behind its upstream")));
-    }
-
-    #[test]
-    fn non_utf8_untracked_paths_are_rejected_before_file_access() {
-        let mut warnings = Vec::new();
-
-        let path = utf8_untracked_path(b"secret-\xff.txt", &mut warnings);
-
-        assert!(path.is_none());
-        assert_eq!(warnings.len(), 1);
-        assert!(warnings[0].contains("non-UTF-8 path"));
     }
 
     #[test]
@@ -1487,6 +1189,33 @@ mod tests {
         assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn capability_open_does_not_block_on_a_fifo() {
+        use std::ffi::CString;
+        use std::os::unix::ffi::OsStrExt;
+        use std::time::{Duration, Instant};
+
+        let fixture = Fixture::new("fifo");
+        let fifo_path = fixture.path.join("preview.png");
+        let fifo_path_c = CString::new(fifo_path.as_os_str().as_bytes()).expect("fifo path");
+        assert_eq!(unsafe { libc::mkfifo(fifo_path_c.as_ptr(), 0o600) }, 0);
+        let writer_path = fifo_path.clone();
+        let writer = thread::spawn(move || {
+            thread::sleep(Duration::from_millis(250));
+            let _ = fs::OpenOptions::new().write(true).open(writer_path);
+        });
+        let root = open_repo_dir(&fixture.path).expect("repository capability");
+
+        let started = Instant::now();
+        let file = open_repo_file(&root, Path::new("preview.png")).expect("open fifo");
+        let elapsed = started.elapsed();
+
+        assert!(elapsed < Duration::from_millis(100));
+        assert!(!file.metadata().expect("fifo metadata").is_file());
+        writer.join().expect("writer thread");
+    }
+
     #[test]
     fn preview_hashing_enforces_cumulative_byte_and_candidate_limits() {
         let fixture = Fixture::new("preview-budget");
@@ -1523,35 +1252,22 @@ mod tests {
     }
 
     #[test]
-    fn skipped_binary_untracked_files_consume_the_total_scan_budget() {
-        let fixture = Fixture::new("untracked-scan-budget");
-        fixture.write("README.md", "base\n");
-        fixture.commit_all("base");
-        let binary = "\0".repeat(400_000);
-        for index in 0..6 {
-            fixture.write(&format!("a{index}.bin"), &binary);
-        }
-        fixture.write("z-safe.txt", "must not be scanned\n");
-        let mut diff = String::new();
-        let mut warnings = Vec::new();
-        let mut diffstat = Vec::new();
+    fn preview_fingerprints_change_when_content_changes() {
+        let fixture = Fixture::new("preview-revalidation");
+        fixture.write("preview.png", "first");
+        let diffstat = vec![DiffstatEntry {
+            status: "modified".to_string(),
+            lines_added: 0,
+            lines_removed: 0,
+            old_path: Some("preview.png".to_string()),
+            new_path: Some("preview.png".to_string()),
+        }];
+        let (first, _) = collect_preview_hashes(&fixture.path, &diffstat).expect("first hash");
 
-        append_untracked_files(&fixture.path, &mut diff, &mut warnings, &mut diffstat)
-            .expect("bounded scan");
+        fixture.write("preview.png", "other");
+        let (second, _) = collect_preview_hashes(&fixture.path, &diffstat).expect("second hash");
 
-        assert!(!diff.contains("z-safe.txt"));
-        assert!(diffstat.is_empty());
-        assert!(warnings
-            .iter()
-            .any(|warning| warning.contains("total untracked-file byte limit")));
-    }
-
-    #[test]
-    fn unsafe_and_sensitive_paths_are_rejected() {
-        assert!(!is_safe_synthetic_diff_path("src/tab\tfile.ts"));
-        assert!(!is_safe_synthetic_diff_path("src/quoted\"file.ts"));
-        assert!(is_sensitive_untracked_path("config/client-secrets.json"));
-        assert!(!is_sensitive_untracked_path("src/token.rs"));
+        assert_ne!(first, second);
     }
 
     #[test]
@@ -1575,8 +1291,11 @@ mod tests {
             "demo",
             "feature/local",
             Some("origin/main"),
+            Some("2222222222222222222222222222222222222222"),
             Some("1111111111111111111111111111111111111111"),
             "0000000000000000000000000000000000000000",
+            1,
+            0,
             "+first",
             &previews,
         );
@@ -1586,8 +1305,11 @@ mod tests {
             "demo",
             "feature/local",
             Some("origin/main"),
+            Some("2222222222222222222222222222222222222222"),
             Some("1111111111111111111111111111111111111111"),
             "0000000000000000000000000000000000000000",
+            1,
+            0,
             "+second",
             &previews,
         );
@@ -1611,8 +1333,11 @@ mod tests {
             "demo",
             "feature/local",
             Some("origin/main"),
+            Some("2222222222222222222222222222222222222222"),
             Some("1111111111111111111111111111111111111111"),
             "0000000000000000000000000000000000000000",
+            1,
+            0,
             "binary diff marker",
             &first_previews,
         );
@@ -1622,10 +1347,48 @@ mod tests {
             "demo",
             "feature/local",
             Some("origin/main"),
+            Some("2222222222222222222222222222222222222222"),
             Some("1111111111111111111111111111111111111111"),
             "0000000000000000000000000000000000000000",
+            1,
+            0,
             "binary diff marker",
             &second_previews,
+        );
+
+        assert_ne!(first, second);
+    }
+
+    #[test]
+    fn review_identity_changes_with_upstream_state() {
+        let previews = BTreeMap::new();
+        let first = local_review_identity(
+            ReviewProvider::Github,
+            "acme",
+            "demo",
+            "feature/local",
+            Some("origin/main"),
+            Some("2222222222222222222222222222222222222222"),
+            Some("1111111111111111111111111111111111111111"),
+            "0000000000000000000000000000000000000000",
+            1,
+            0,
+            "+same",
+            &previews,
+        );
+        let second = local_review_identity(
+            ReviewProvider::Github,
+            "acme",
+            "demo",
+            "feature/local",
+            Some("origin/main"),
+            Some("3333333333333333333333333333333333333333"),
+            Some("1111111111111111111111111111111111111111"),
+            "0000000000000000000000000000000000000000",
+            2,
+            1,
+            "+same",
+            &previews,
         );
 
         assert_ne!(first, second);
