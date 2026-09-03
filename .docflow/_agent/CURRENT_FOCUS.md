@@ -12,10 +12,10 @@ If status files and git disagree, git is authoritative; correct this file.
 - **Active item:** `.docflow/plan/todo/0013-local-review-target-tui.md`.
 - **Plan items:** implement the shared local snapshot and TUI first, then
   `.docflow/plan/todo/0014-local-review-target-desktop.md`.
-- **Verification:** 619 Rust tests, 110 frontend tests plus tooling, Clippy,
-  typecheck, lint, and Archgate 17/17 pass after cross-platform hard-link
-  protection and complete branch/upstream snapshot fencing were added; the
-  final bounded pre-push Norn rerun is pending.
+- **Verification:** 623 Rust tests, 110 frontend tests plus tooling, all-target
+  Clippy, typecheck, lint, Archgate 17/17, and an isolated Windows target check
+  pass after capability-based file access, bounded preview hashing, and
+  full-SHA local review storage isolation; the pre-push Norn review is pending.
 
 ## Last shipped
 
