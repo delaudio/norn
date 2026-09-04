@@ -54,6 +54,7 @@ const LEGACY_REVIEWS_MIGRATION_MARKER: &str = ".legacy-reviews-imported-v1";
 const MAX_ADMINISTRATIVE_AUDIT_TIMESTAMP_MS: i64 = 4_102_444_800_000;
 const SHARED_REVIEW_JOB_LEASE_MS: i64 = 15 * 60 * 1000;
 const FINDING_PUBLICATION_LEASE_MS: i64 = 5 * 60 * 1000;
+const MAX_LOCAL_REVIEW_SNAPSHOTS_PER_REPOSITORY: i64 = 20;
 
 /// Defaults used by the scheduled organization retention policy. Callers pass
 /// the resulting cutoff to `apply_repository_retention` for a scoped run.
@@ -3961,7 +3962,48 @@ pub fn save_local_review_json(
     json: &str,
 ) -> Result<(), String> {
     let key = local_review_key(workspace, repo, snapshot_sha256)?;
-    save_review_json_for_key("local", &key, workspace, repo, legacy_id, json, false)
+    validate_audit_identifier("tenantId", "local").map_err(|error| error.to_string())?;
+    let mut conn = open()?;
+    let transaction = conn
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .map_err(|error| error.to_string())?;
+    let now = now_ms();
+    upsert_review_json_for_connection(
+        &transaction,
+        "local",
+        &key,
+        workspace,
+        repo,
+        legacy_id,
+        json,
+        false,
+        &now,
+    )?;
+    transaction
+        .execute(
+            r#"
+            DELETE FROM ai_review_stores
+            WHERE rowid IN (
+              SELECT rowid
+              FROM ai_review_stores
+              WHERE tenant_id = 'local'
+                AND review_key GLOB 'local:*'
+                AND workspace = ?1 COLLATE NOCASE
+                AND repo = ?2 COLLATE NOCASE
+                AND review_key <> ?3
+              ORDER BY CAST(updated_at AS INTEGER) DESC, rowid DESC
+              LIMIT -1 OFFSET ?4
+            )
+            "#,
+            params![
+                workspace,
+                repo,
+                key,
+                MAX_LOCAL_REVIEW_SNAPSHOTS_PER_REPOSITORY - 1
+            ],
+        )
+        .map_err(|error| error.to_string())?;
+    transaction.commit().map_err(|error| error.to_string())
 }
 
 fn load_review_json_by_key(key: &str) -> Result<Option<String>, String> {
@@ -4035,6 +4077,31 @@ fn save_review_json_for_key(
     validate_audit_identifier("tenantId", tenant_id).map_err(|error| error.to_string())?;
     let conn = open()?;
     let now = now_ms();
+    upsert_review_json_for_connection(
+        &conn,
+        tenant_id,
+        key,
+        workspace,
+        repo,
+        id,
+        json,
+        migrated_from_json,
+        &now,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn upsert_review_json_for_connection(
+    conn: &Connection,
+    tenant_id: &str,
+    key: &str,
+    workspace: &str,
+    repo: &str,
+    id: u32,
+    json: &str,
+    migrated_from_json: bool,
+    now: &str,
+) -> Result<(), String> {
     conn.execute(
         r#"
         INSERT INTO ai_review_stores (
@@ -5210,6 +5277,78 @@ mod tests {
                 load_local_review_json("workspace", "repo", &snapshot_sha256)
                     .expect("load local snapshot store"),
                 Some(r#"{"kind":"local"}"#.to_string())
+            );
+        });
+    }
+
+    #[test]
+    fn local_snapshot_retention_keeps_only_the_newest_repository_records() {
+        with_test_data_dir("local-snapshot-retention", |dir| {
+            save_review_json("workspace", "repo", 42, r#"{"kind":"pull-request"}"#)
+                .expect("save pull request store");
+            let other_snapshot = "f".repeat(64);
+            save_local_review_json(
+                "workspace",
+                "other-repo",
+                7,
+                &other_snapshot,
+                r#"{"kind":"other"}"#,
+            )
+            .expect("save other repository snapshot");
+
+            for index in 0..22_u32 {
+                let snapshot = format!("{index:064x}");
+                save_local_review_json(
+                    "workspace",
+                    "repo",
+                    index,
+                    &snapshot,
+                    &format!(r#"{{"snapshot":{index}}}"#),
+                )
+                .expect("save local snapshot");
+            }
+            let refreshed_snapshot = format!("{:064x}", 2);
+            save_local_review_json(
+                "workspace",
+                "repo",
+                2,
+                &refreshed_snapshot,
+                r#"{"snapshot":2,"refreshed":true}"#,
+            )
+            .expect("refresh retained snapshot");
+
+            let conn = Connection::open(dir.join(DB_FILE)).expect("open review database");
+            let retained = conn
+                .query_row(
+                    "SELECT COUNT(*) FROM ai_review_stores WHERE tenant_id = 'local' AND review_key GLOB 'local:*' AND workspace = 'workspace' AND repo = 'repo'",
+                    [],
+                    |row| row.get::<_, i64>(0),
+                )
+                .expect("count retained snapshots");
+            assert_eq!(retained, MAX_LOCAL_REVIEW_SNAPSHOTS_PER_REPOSITORY);
+            assert!(
+                load_local_review_json("workspace", "repo", &format!("{:064x}", 0))
+                    .expect("load oldest snapshot")
+                    .is_none()
+            );
+            assert!(
+                load_local_review_json("workspace", "repo", &format!("{:064x}", 21))
+                    .expect("load newest snapshot")
+                    .is_some()
+            );
+            assert_eq!(
+                load_local_review_json("workspace", "repo", &refreshed_snapshot)
+                    .expect("load refreshed snapshot")
+                    .as_deref(),
+                Some(r#"{"snapshot":2,"refreshed":true}"#)
+            );
+            assert!(load_review_json("workspace", "repo", 42)
+                .expect("load pull request store")
+                .is_some());
+            assert!(
+                load_local_review_json("workspace", "other-repo", &other_snapshot)
+                    .expect("load other repository snapshot")
+                    .is_some()
             );
         });
     }

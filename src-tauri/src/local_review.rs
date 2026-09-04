@@ -3,8 +3,13 @@ use std::ffi::OsStr;
 use std::fs::{self, File};
 use std::io::{self, Read, Write};
 use std::path::Path;
-use std::process::{Command, Stdio};
+use std::process::{Command, ExitStatus, Stdio};
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc,
+};
 use std::thread;
+use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -21,6 +26,8 @@ use crate::services::bitbucket::{DiffstatEntry, PrFilePreview, MAX_PR_IMAGE_PREV
 const MAX_LOCAL_DIFF_BYTES: usize = 16 * 1024 * 1024;
 const MAX_LOCAL_CHANGED_FILES: usize = 2_000;
 const MAX_GIT_METADATA_BYTES: usize = 8 * 1024 * 1024;
+const MAX_GIT_DIAGNOSTIC_BYTES: usize = 256 * 1024;
+const LOCAL_GIT_TIMEOUT: Duration = Duration::from_secs(30);
 const MAX_LOCAL_PREVIEW_CANDIDATES: usize = 64;
 const MAX_LOCAL_PREVIEW_TOTAL_BYTES: u64 = 64 * 1024 * 1024;
 
@@ -86,15 +93,15 @@ pub(crate) fn local_review_snapshot_for_path(
         MAX_GIT_METADATA_BYTES,
         "Local repository status",
     )?;
-    let head_sha = optional_git_text(repo_path, &["rev-parse", "--verify", "HEAD"]);
-    let branch = optional_git_text(repo_path, &["symbolic-ref", "--quiet", "--short", "HEAD"]);
+    let head_sha = optional_git_text(repo_path, &["rev-parse", "--verify", "HEAD"])?;
+    let branch = optional_git_text(repo_path, &["symbolic-ref", "--quiet", "--short", "HEAD"])?;
     let current_branch = branch.clone().unwrap_or_else(|| {
         head_sha
             .as_deref()
             .map(|sha| format!("HEAD ({})", &sha[..sha.len().min(12)]))
             .unwrap_or_else(|| "unborn HEAD".to_string())
     });
-    let upstream = branch.as_ref().and_then(|_| {
+    let upstream = if branch.is_some() {
         optional_git_text(
             repo_path,
             &[
@@ -103,11 +110,15 @@ pub(crate) fn local_review_snapshot_for_path(
                 "--symbolic-full-name",
                 "@{upstream}",
             ],
-        )
-    });
+        )?
+    } else {
+        None
+    };
     let upstream_sha = upstream
         .as_ref()
-        .and_then(|value| optional_git_text(repo_path, &["rev-parse", "--verify", value]));
+        .map(|value| optional_git_text(repo_path, &["rev-parse", "--verify", value]))
+        .transpose()?
+        .flatten();
     let base_sha =
         if let (Some(upstream_sha), Some(head_sha)) = (upstream_sha.as_ref(), head_sha.as_ref()) {
             git_text(repo_path, &["merge-base", upstream_sha, head_sha])?
@@ -156,10 +167,10 @@ pub(crate) fn local_review_snapshot_for_path(
         MAX_GIT_METADATA_BYTES,
         "Local repository status",
     )?;
-    let ending_head = optional_git_text(repo_path, &["rev-parse", "--verify", "HEAD"]);
+    let ending_head = optional_git_text(repo_path, &["rev-parse", "--verify", "HEAD"])?;
     let ending_branch =
-        optional_git_text(repo_path, &["symbolic-ref", "--quiet", "--short", "HEAD"]);
-    let ending_upstream = ending_branch.as_ref().and_then(|_| {
+        optional_git_text(repo_path, &["symbolic-ref", "--quiet", "--short", "HEAD"])?;
+    let ending_upstream = if ending_branch.is_some() {
         optional_git_text(
             repo_path,
             &[
@@ -168,11 +179,15 @@ pub(crate) fn local_review_snapshot_for_path(
                 "--symbolic-full-name",
                 "@{upstream}",
             ],
-        )
-    });
+        )?
+    } else {
+        None
+    };
     let ending_upstream_sha = ending_upstream
         .as_ref()
-        .and_then(|value| optional_git_text(repo_path, &["rev-parse", "--verify", value]));
+        .map(|value| optional_git_text(repo_path, &["rev-parse", "--verify", value]))
+        .transpose()?
+        .flatten();
     if starting_status != ending_status
         || head_sha != ending_head
         || branch != ending_branch
@@ -395,6 +410,10 @@ fn local_file_preview_for_path(
             "Image preview",
         )?
     } else {
+        let expected = expected_new_sha256.ok_or_else(|| {
+            "The local image preview is unavailable for this snapshot; refresh and try again."
+                .to_string()
+        })?;
         let root = open_repo_dir(repo_path)?;
         let file = open_repo_file(&root, Path::new(path))
             .map_err(|error| format!("Failed to open local image preview: {error}"))?;
@@ -409,10 +428,6 @@ fn local_file_preview_for_path(
             );
         }
         let bytes = read_bounded(file, MAX_PR_IMAGE_PREVIEW_BYTES)?;
-        let expected = expected_new_sha256.ok_or_else(|| {
-            "The local image preview is unavailable for this snapshot; refresh and try again."
-                .to_string()
-        })?;
         if sha256_hex(&bytes) != expected {
             return Err(
                 "The local image changed after this snapshot was loaded; refresh and try again."
@@ -456,23 +471,15 @@ fn ensure_git_repository(repo_path: &Path) -> Result<(), String> {
 }
 
 fn empty_tree_oid(repo_path: &Path) -> Result<String, String> {
-    let mut child = git_command(repo_path)
-        .args(["hash-object", "-t", "tree", "--stdin"])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|error| format!("Failed to start git hash-object: {error}"))?;
-    child
-        .stdin
-        .take()
-        .ok_or_else(|| "Failed to open git hash-object input.".to_string())?
-        .write_all(&[])
-        .map_err(|error| format!("Failed to write git hash-object input: {error}"))?;
-    let output = child
-        .wait_with_output()
-        .map_err(|error| format!("Failed to finish git hash-object: {error}"))?;
-    checked_text(output)
+    let output = run_git_bounded(
+        repo_path,
+        &["hash-object", "-t", "tree", "--stdin"],
+        Some(&[]),
+        MAX_GIT_METADATA_BYTES,
+        "Git hash-object output",
+        LOCAL_GIT_TIMEOUT,
+    )?;
+    checked_git_text(output)
 }
 
 fn tracked_diffstat(repo_path: &Path, base_sha: &str) -> Result<Vec<DiffstatEntry>, String> {
@@ -787,19 +794,19 @@ fn open_repo_file(root: &Dir, relative: &Path) -> io::Result<File> {
 fn git_command(repo_path: &Path) -> Command {
     let mut command = Command::new("git");
     command.arg("-C").arg(repo_path);
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        command.process_group(0);
+    }
     command
 }
 
-fn git_bytes(repo_path: &Path, args: &[&str]) -> Result<Vec<u8>, String> {
-    let output = git_command(repo_path)
-        .args(args)
-        .output()
-        .map_err(|error| format!("Failed to run git: {error}"))?;
-    if output.status.success() {
-        Ok(output.stdout)
-    } else {
-        Err(git_error(&output.stderr, output.status.to_string()))
-    }
+#[derive(Debug)]
+struct BoundedGitOutput {
+    status: ExitStatus,
+    stdout: Vec<u8>,
+    stderr: Vec<u8>,
 }
 
 fn git_bytes_limited(
@@ -808,53 +815,145 @@ fn git_bytes_limited(
     limit: usize,
     description: &str,
 ) -> Result<Vec<u8>, String> {
+    let output = run_git_bounded(repo_path, args, None, limit, description, LOCAL_GIT_TIMEOUT)?;
+    if output.status.success() {
+        Ok(output.stdout)
+    } else {
+        Err(git_error(&output.stderr, output.status.to_string()))
+    }
+}
+
+fn run_git_bounded(
+    repo_path: &Path,
+    args: &[&str],
+    stdin: Option<&[u8]>,
+    stdout_limit: usize,
+    description: &str,
+    timeout: Duration,
+) -> Result<BoundedGitOutput, String> {
     let mut child = git_command(repo_path)
         .args(args)
+        .stdin(if stdin.is_some() {
+            Stdio::piped()
+        } else {
+            Stdio::null()
+        })
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
         .map_err(|error| format!("Failed to run git: {error}"))?;
-    let mut stdout = child
+    if let Some(input) = stdin {
+        child
+            .stdin
+            .take()
+            .ok_or_else(|| "Failed to open git input.".to_string())?
+            .write_all(input)
+            .map_err(|error| format!("Failed to write git input: {error}"))?;
+    }
+    let stdout = child
         .stdout
         .take()
         .ok_or_else(|| "Failed to capture git output.".to_string())?;
-    let mut stderr = child
+    let stderr = child
         .stderr
         .take()
         .ok_or_else(|| "Failed to capture git diagnostics.".to_string())?;
-    let stderr_reader = thread::spawn(move || {
-        let mut bytes = Vec::new();
-        let result = stderr.read_to_end(&mut bytes);
-        (result, bytes)
-    });
-    let mut bytes = Vec::new();
-    let read_result = stdout
-        .by_ref()
-        .take(limit as u64 + 1)
-        .read_to_end(&mut bytes);
-    if read_result.is_err() || bytes.len() > limit {
-        let _ = child.kill();
+    let output_exceeded = Arc::new(AtomicBool::new(false));
+    let stdout_reader = spawn_bounded_reader(stdout, stdout_limit, Arc::clone(&output_exceeded));
+    let stderr_reader = spawn_bounded_reader(
+        stderr,
+        MAX_GIT_DIAGNOSTIC_BYTES,
+        Arc::clone(&output_exceeded),
+    );
+    let started = Instant::now();
+    let mut status = None;
+    let mut failure = None;
+    loop {
+        match child.try_wait() {
+            Ok(Some(exit_status)) => {
+                status = Some(exit_status);
+                break;
+            }
+            Ok(None) if output_exceeded.load(Ordering::Acquire) => {
+                terminate_git_child(&mut child);
+                failure = Some("Git output exceeded a configured byte limit.".to_string());
+                break;
+            }
+            Ok(None) if started.elapsed() >= timeout => {
+                terminate_git_child(&mut child);
+                failure = Some(format!(
+                    "Git command timed out after {} seconds.",
+                    timeout.as_secs_f64()
+                ));
+                break;
+            }
+            Ok(None) => thread::sleep(Duration::from_millis(10)),
+            Err(error) => {
+                terminate_git_child(&mut child);
+                failure = Some(format!("Failed while waiting for git: {error}"));
+                break;
+            }
+        }
     }
-    let status = child
-        .wait()
-        .map_err(|error| format!("Failed to finish git: {error}"))?;
-    let (stderr_result, stderr_bytes) = stderr_reader
+    let stdout_bytes = stdout_reader
         .join()
-        .map_err(|_| "Failed to collect git diagnostics.".to_string())?;
-    read_result.map_err(|error| format!("Failed to read git output: {error}"))?;
-    stderr_result.map_err(|error| format!("Failed to read git diagnostics: {error}"))?;
-    if bytes.len() > limit {
-        return Err(format!("{description} exceeds the {limit}-byte limit."));
+        .map_err(|_| "Failed to collect git output.".to_string())?
+        .map_err(|error| format!("Failed to read git output: {error}"))?;
+    let stderr_bytes = stderr_reader
+        .join()
+        .map_err(|_| "Failed to collect git diagnostics.".to_string())?
+        .map_err(|error| format!("Failed to read git diagnostics: {error}"))?;
+    if stdout_bytes.len() > stdout_limit {
+        return Err(format!(
+            "{description} exceeds the {stdout_limit}-byte limit."
+        ));
     }
-    if status.success() {
+    if stderr_bytes.len() > MAX_GIT_DIAGNOSTIC_BYTES {
+        return Err(format!(
+            "Git diagnostics exceed the {MAX_GIT_DIAGNOSTIC_BYTES}-byte limit."
+        ));
+    }
+    if let Some(failure) = failure {
+        return Err(failure);
+    }
+    Ok(BoundedGitOutput {
+        status: status.ok_or_else(|| "Git did not report an exit status.".to_string())?,
+        stdout: stdout_bytes,
+        stderr: stderr_bytes,
+    })
+}
+
+fn spawn_bounded_reader(
+    reader: impl Read + Send + 'static,
+    limit: usize,
+    exceeded: Arc<AtomicBool>,
+) -> thread::JoinHandle<io::Result<Vec<u8>>> {
+    thread::spawn(move || {
+        let mut bytes = Vec::new();
+        reader.take(limit as u64 + 1).read_to_end(&mut bytes)?;
+        if bytes.len() > limit {
+            exceeded.store(true, Ordering::Release);
+        }
         Ok(bytes)
-    } else {
-        Err(git_error(&stderr_bytes, status.to_string()))
+    })
+}
+
+fn terminate_git_child(child: &mut std::process::Child) {
+    #[cfg(unix)]
+    unsafe {
+        libc::kill(-(child.id() as i32), libc::SIGKILL);
     }
+    let _ = child.kill();
+    let _ = child.wait();
 }
 
 fn git_text(repo_path: &Path, args: &[&str]) -> Result<String, String> {
-    let output = git_bytes(repo_path, args)?;
+    let output = git_bytes_limited(
+        repo_path,
+        args,
+        MAX_GIT_METADATA_BYTES,
+        "Git metadata output",
+    )?;
     String::from_utf8(output)
         .map(|value| value.trim().to_string())
         .map_err(|_| "Git returned non-UTF-8 output.".to_string())
@@ -870,13 +969,27 @@ fn git_text_raw_limited(
         .map_err(|_| "Git returned a non-UTF-8 diff.".to_string())
 }
 
-fn optional_git_text(repo_path: &Path, args: &[&str]) -> Option<String> {
-    git_text(repo_path, args)
-        .ok()
-        .filter(|value| !value.is_empty())
+fn optional_git_text(repo_path: &Path, args: &[&str]) -> Result<Option<String>, String> {
+    let output = run_git_bounded(
+        repo_path,
+        args,
+        None,
+        MAX_GIT_METADATA_BYTES,
+        "Git metadata output",
+        LOCAL_GIT_TIMEOUT,
+    )?;
+    if !output.status.success() {
+        return Ok(None);
+    }
+    String::from_utf8(output.stdout)
+        .map(|value| {
+            let value = value.trim().to_string();
+            (!value.is_empty()).then_some(value)
+        })
+        .map_err(|_| "Git returned non-UTF-8 output.".to_string())
 }
 
-fn checked_text(output: std::process::Output) -> Result<String, String> {
+fn checked_git_text(output: BoundedGitOutput) -> Result<String, String> {
     if output.status.success() {
         String::from_utf8(output.stdout)
             .map(|value| value.trim().to_string())
@@ -1172,6 +1285,32 @@ mod tests {
         assert!(error.contains("not part of this local review snapshot"));
     }
 
+    #[test]
+    fn new_image_preview_requires_a_fingerprint_before_file_access() {
+        let fixture = Fixture::new("missing-preview-fingerprint");
+        let diffstat = vec![DiffstatEntry {
+            status: "added".to_string(),
+            lines_added: 0,
+            lines_removed: 0,
+            old_path: None,
+            new_path: Some("missing.png".to_string()),
+        }];
+
+        let error = local_file_preview_for_path(
+            &fixture.path,
+            "0000000000000000000000000000000000000000",
+            &diffstat,
+            None,
+            "missing.png",
+            "new",
+            "image/png",
+        )
+        .expect_err("missing fingerprint");
+
+        assert!(error.contains("unavailable for this snapshot"));
+        assert!(!error.contains("open"));
+    }
+
     #[cfg(unix)]
     #[test]
     fn capability_open_rejects_intermediate_symlinks_that_escape_the_repository() {
@@ -1280,6 +1419,44 @@ mod tests {
             .expect_err("oversized output");
 
         assert_eq!(error, "Test output exceeds the 8-byte limit.");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn git_diagnostics_are_bounded_and_terminate_the_process_group() {
+        let fixture = Fixture::new("bounded-git-stderr");
+
+        let error = run_git_bounded(
+            &fixture.path,
+            &["-c", "alias.noisy=!yes diagnostic >&2", "noisy"],
+            None,
+            1_024,
+            "Test output",
+            Duration::from_secs(2),
+        )
+        .expect_err("oversized diagnostics");
+
+        assert!(error.contains("Git diagnostics exceed"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn git_commands_are_terminated_after_the_deadline() {
+        let fixture = Fixture::new("git-timeout");
+        let started = Instant::now();
+
+        let error = run_git_bounded(
+            &fixture.path,
+            &["-c", "alias.pause=!sleep 5", "pause"],
+            None,
+            1_024,
+            "Test output",
+            Duration::from_millis(50),
+        )
+        .expect_err("timed out command");
+
+        assert!(error.contains("timed out"));
+        assert!(started.elapsed() < Duration::from_secs(1));
     }
 
     #[test]
