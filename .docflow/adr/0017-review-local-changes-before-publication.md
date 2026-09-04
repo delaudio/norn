@@ -78,8 +78,9 @@ heuristic cannot silently authorize external AI processing.
    restrictions and empty/error states.
 8. Snapshot size, file count, binary handling, path validation, untracked-file
    exclusion, cancellation, filesystem special-file handling, preview-content
-   verification, and stale asynchronous result fencing remain bounded and
-   covered by automated tests.
+   verification, Git subprocess output and duration, persisted local-snapshot
+   retention, and stale asynchronous result fencing remain bounded and covered
+   by automated tests.
 9. Existing provider pull-request review behavior, browser-diff authentication,
    headless working-tree and branch scopes, and GitHub/Bitbucket integrations
    remain backward compatible.
@@ -115,6 +116,7 @@ heuristic cannot silently authorize external AI processing.
 | 2026-09-03 | r1 | codex | Initial draft. |
 | 2026-09-03 | r2 | codex | Accepted the TUI-first local review target contract after maintainer approval. |
 | 2026-09-03 | r3 | codex | Required untracked content to remain excluded pending explicit local per-file consent, and strengthened snapshot identity and verification boundaries. |
+| 2026-09-04 | r4 | codex | Bounded Git subprocess lifetime and diagnostics, required preview authorization before reads, and capped persisted local snapshot history per repository. |
 
 ## Approvals
 
@@ -122,3 +124,4 @@ heuristic cannot silently authorize external AI processing.
 |------|------|------|-----------|
 | Maintainer | delaudio | 2026-09-03 | approved implementation in chat |
 | Maintainer | delaudio | 2026-09-03 | approved security remediation in chat |
+| Maintainer | delaudio | 2026-09-04 | approved bounded execution and retention remediation in chat |

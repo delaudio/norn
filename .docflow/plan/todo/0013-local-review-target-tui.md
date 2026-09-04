@@ -34,7 +34,8 @@ publication, and repository mutations such as commit, push, stash, or discard.
   local snapshot with accurate non-PR context.
 - ADR 0017 AC6: AI review consumes the loaded immutable snapshot and no
   provider-only action is available for a local target.
-- ADR 0017 AC8-9: bounds, special-file handling, preview revalidation,
+- ADR 0017 AC8-9: bounds, special-file handling, preview revalidation, Git
+  subprocess deadlines and output limits, local snapshot retention,
   stale-result fencing, fallback behavior, and existing provider PR workflows
   have regression coverage.
 - `pnpm run typecheck`, `pnpm run test`, and `archgate check` pass.
