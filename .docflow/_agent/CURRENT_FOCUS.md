@@ -12,11 +12,12 @@ If status files and git disagree, git is authoritative; correct this file.
 - **Active item:** `.docflow/plan/todo/0013-local-review-target-tui.md`.
 - **Plan items:** implement the shared local snapshot and TUI first, then
   `.docflow/plan/todo/0014-local-review-target-desktop.md`.
-- **Verification:** 622 Rust tests pass with 2 ignored, alongside 110 frontend
+- **Verification:** 626 Rust tests pass with 2 ignored, alongside 110 frontend
   tests plus tooling, all-target Clippy, typecheck, lint, and Archgate 17/17.
-  Untracked content is excluded, filesystem opens are non-blocking on Unix,
-  preview content is revalidated, and upstream state participates in snapshot
-  identity; the final pre-push Norn review is pending.
+  Git subprocess output and duration are bounded, local snapshot history keeps
+  the newest 20 entries per repository transactionally, and preview
+  fingerprints are required before file access; the final pre-push Norn review
+  is pending.
 
 ## Last shipped
 
