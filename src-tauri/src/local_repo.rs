@@ -19,7 +19,7 @@ const SKIP_DIRS: &[&str] = &[
     "Applications",
 ];
 
-fn matches_remote(
+pub(crate) fn matches_remote(
     config_contents: &str,
     provider: ReviewProvider,
     workspace: &str,
@@ -271,6 +271,10 @@ pub fn configured_repo_path(repo_ref: &RepoRef) -> Option<PathBuf> {
         .as_ref()
         .map(|path| PathBuf::from(path.trim()))
         .filter(|path| !path.as_os_str().is_empty())
+}
+
+pub fn has_usable_configured_path(repo_ref: &RepoRef) -> bool {
+    configured_repo_path(repo_ref).is_some_and(|path| path.is_dir() && path.join(".git").exists())
 }
 
 pub fn configured_or_discovered_repo(workspace: &str, repo: &str) -> Option<PathBuf> {

@@ -1,12 +1,17 @@
 use std::{
-    sync::mpsc::{self, Receiver, Sender},
+    sync::{
+        mpsc::{self, Receiver, Sender},
+        Mutex,
+    },
     thread,
 };
 
 use crate::{
     config::{RepoRef, ReviewProvider},
     local_repo,
-    local_review::{get_local_review_snapshot_native, LocalReviewSnapshot},
+    local_review::{
+        local_review_snapshot_for_configured_path, LocalReviewCancellation, LocalReviewSnapshot,
+    },
     services::{
         bitbucket::{
             get_pr_diff_native, get_pull_request_native, list_comments_native,
@@ -84,12 +89,17 @@ pub(super) enum LoadEvent {
 pub(super) struct Loader {
     sender: Sender<LoadEvent>,
     receiver: Receiver<LoadEvent>,
+    local_snapshot_cancellation: Mutex<Option<LocalReviewCancellation>>,
 }
 
 impl Loader {
     pub(super) fn new() -> Self {
         let (sender, receiver) = mpsc::channel();
-        Self { sender, receiver }
+        Self {
+            sender,
+            receiver,
+            local_snapshot_cancellation: Mutex::new(None),
+        }
     }
 
     pub(super) fn try_recv(&self) -> Option<LoadEvent> {
@@ -136,13 +146,32 @@ impl Loader {
         provider: ReviewProvider,
         workspace: String,
         repo: String,
+        local_path: String,
     ) {
+        self.cancel_local_snapshot();
+        let cancellation = LocalReviewCancellation::new();
+        if let Ok(mut active) = self.local_snapshot_cancellation.lock() {
+            *active = Some(cancellation.clone());
+        }
         let sender = self.sender.clone();
         thread::spawn(move || {
-            let result =
-                get_local_review_snapshot_native(provider, workspace.as_str(), repo.as_str());
+            let result = local_review_snapshot_for_configured_path(
+                provider,
+                workspace.as_str(),
+                repo.as_str(),
+                std::path::Path::new(local_path.as_str()),
+                cancellation,
+            );
             let _ = sender.send(LoadEvent::LocalSnapshot { request_id, result });
         });
+    }
+
+    pub(super) fn cancel_local_snapshot(&self) {
+        if let Ok(mut active) = self.local_snapshot_cancellation.lock() {
+            if let Some(cancellation) = active.take() {
+                cancellation.cancel();
+            }
+        }
     }
 
     #[allow(
@@ -315,6 +344,12 @@ impl Loader {
                 running,
             });
         });
+    }
+}
+
+impl Drop for Loader {
+    fn drop(&mut self) {
+        self.cancel_local_snapshot();
     }
 }
 

@@ -14,6 +14,7 @@ use unicode_segmentation::UnicodeSegmentation;
 use super::image_diff::{ImageDiffState, ImageVersionState};
 use super::loading::LoadState;
 use crate::config::{RepoRef, ReviewProvider};
+use crate::local_repo;
 use crate::local_review::LocalReviewSnapshot;
 use crate::services::bitbucket::{PrComment, PullRequestDetail, PullRequestSummary};
 use crate::services::review::{AiReviewRunState, AiReviewRunStatus};
@@ -233,8 +234,12 @@ pub fn mouse_target(area: Rect, x: u16, y: u16, state: TuiState<'_>) -> Option<M
     let [repos, filters] = *left_areas().split(left) else {
         return None;
     };
-    if let Some(index) = list_index_at(repos, x, y, state.repos.len()) {
-        return Some(MouseTarget::Repository(index));
+    let visible_repos = visible_repository_indices(state);
+    if let Some(index) = list_index_at(repos, x, y, visible_repos.len()) {
+        return visible_repos
+            .get(index)
+            .copied()
+            .map(MouseTarget::Repository);
     }
     if let Some(filter) = pr_filter_at(filters, x, y) {
         return Some(MouseTarget::PrFilter(filter));
@@ -401,7 +406,8 @@ fn render_left_panel(frame: &mut Frame<'_>, area: Rect, state: TuiState<'_>) {
 }
 
 fn render_repos(frame: &mut Frame<'_>, area: Rect, state: TuiState<'_>) {
-    let items = if state.repos.is_empty() && state.loading.repo.is_loading() {
+    let visible_repos = visible_repository_indices(state);
+    let items = if visible_repos.is_empty() && state.loading.repo.is_loading() {
         vec![ListItem::new(loading_line(
             "Resolving repository",
             state.loading.tick,
@@ -411,13 +417,16 @@ fn render_repos(frame: &mut Frame<'_>, area: Rect, state: TuiState<'_>) {
             Span::styled("Error: ", error_style()),
             Span::styled(error.to_string(), muted_style()),
         ]))]
-    } else if state.repos.is_empty() {
-        vec![ListItem::new("No repositories configured")]
+    } else if visible_repos.is_empty() {
+        vec![ListItem::new(if state.pr_filter == PrListFilter::Local {
+            "No repositories with a usable local path"
+        } else {
+            "No repositories configured"
+        })]
     } else {
-        state
-            .repos
-            .iter()
-            .enumerate()
+        visible_repos
+            .into_iter()
+            .filter_map(|index| state.repos.get(index).map(|repo| (index, repo)))
             .map(|(index, repo)| {
                 let selected = index == state.selected_repo;
                 let marker = if selected { ">" } else { " " };
@@ -454,6 +463,18 @@ fn render_repos(frame: &mut Frame<'_>, area: Rect, state: TuiState<'_>) {
         state.focus == FocusPane::Repositories,
     ));
     frame.render_widget(list, area);
+}
+
+fn visible_repository_indices(state: TuiState<'_>) -> Vec<usize> {
+    state
+        .repos
+        .iter()
+        .enumerate()
+        .filter(|(_, repo)| {
+            state.pr_filter != PrListFilter::Local || local_repo::has_usable_configured_path(repo)
+        })
+        .map(|(index, _)| index)
+        .collect()
 }
 
 fn render_pr_filters(frame: &mut Frame<'_>, area: Rect, selected_filter: PrListFilter) {

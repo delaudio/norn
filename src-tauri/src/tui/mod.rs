@@ -26,6 +26,7 @@ use zeroize::Zeroizing;
 
 use crate::config::{self, AiProvider, AppConfig, RepoRef};
 use crate::credentials::{self, CredentialProvider, CredentialSource, CredentialStatus};
+use crate::local_repo;
 use crate::local_review::{get_local_file_preview_native, LocalReviewSnapshot};
 use crate::readiness::{self, ReadinessIssueSeverity, ReadinessStatus};
 use crate::repo_config;
@@ -1856,27 +1857,41 @@ impl TuiApp {
     }
 
     fn select_next_repo(&mut self) {
-        if self.repos.is_empty() {
+        let visible = self.visible_repo_indices();
+        if visible.is_empty() {
             self.selected_repo = 0;
             return;
         }
+        let position = visible
+            .iter()
+            .position(|index| *index == self.selected_repo)
+            .unwrap_or(0);
         let previous = self.selected_repo;
-        self.selected_repo = (self.selected_repo + 1).min(self.repos.len() - 1);
+        self.selected_repo = visible[(position + 1).min(visible.len() - 1)];
         if self.selected_repo != previous {
             self.load_selected_repo();
         }
     }
 
     fn select_previous_repo(&mut self) {
+        let visible = self.visible_repo_indices();
+        if visible.is_empty() {
+            self.selected_repo = 0;
+            return;
+        }
+        let position = visible
+            .iter()
+            .position(|index| *index == self.selected_repo)
+            .unwrap_or(0);
         let previous = self.selected_repo;
-        self.selected_repo = self.selected_repo.saturating_sub(1);
+        self.selected_repo = visible[position.saturating_sub(1)];
         if self.selected_repo != previous {
             self.load_selected_repo();
         }
     }
 
     fn select_repo(&mut self, index: usize) {
-        if index >= self.repos.len() {
+        if !self.visible_repo_indices().contains(&index) {
             return;
         }
         self.focus = FocusPane::Repositories;
@@ -1978,10 +1993,41 @@ impl TuiApp {
         }
         self.pr_filter = filter;
         self.selected_pr = 0;
+        self.reconcile_selected_repo();
         self.load_selected_repo();
     }
 
+    fn visible_repo_indices(&self) -> Vec<usize> {
+        self.repos
+            .iter()
+            .enumerate()
+            .filter(|(_, repo)| {
+                self.pr_filter != PrListFilter::Local
+                    || local_repo::has_usable_configured_path(repo)
+            })
+            .map(|(index, _)| index)
+            .collect()
+    }
+
+    fn reconcile_selected_repo(&mut self) {
+        let visible = self.visible_repo_indices();
+        if !visible.contains(&self.selected_repo) {
+            self.selected_repo = visible.first().copied().unwrap_or(0);
+        }
+    }
+
     fn load_selected_repo(&mut self) {
+        self.loader.cancel_local_snapshot();
+        if !self.visible_repo_indices().contains(&self.selected_repo) {
+            self.clear_pr_context_for_repo_load();
+            self.pr_list_load = LoadState::Idle;
+            self.status = if self.pr_filter == PrListFilter::Local {
+                "No repositories have a usable configured local path".to_string()
+            } else {
+                "No repositories configured".to_string()
+            };
+            return;
+        }
         let Some(repo) = self.repos.get(self.selected_repo).cloned() else {
             self.pr_list_load = LoadState::Idle;
             self.status = "No repositories configured".to_string();
@@ -2004,8 +2050,9 @@ impl TuiApp {
         };
         self.error = None;
         if self.pr_filter == PrListFilter::Local {
+            let local_path = repo.local_path.unwrap_or_default();
             self.loader
-                .local_snapshot(request_id, provider, workspace, repo_name);
+                .local_snapshot(request_id, provider, workspace, repo_name, local_path);
         } else {
             self.loader.pull_requests(
                 request_id,
@@ -3650,6 +3697,43 @@ review:
 
         assert_eq!(app.pull_requests.len(), 1);
         assert_eq!(app.pull_requests[0].id, 7);
+    }
+
+    #[test]
+    fn local_filter_only_exposes_repositories_with_usable_configured_paths() {
+        let usable_path = temp_repo_path("local-filter-usable");
+        fs::create_dir_all(usable_path.join(".git")).expect("create usable git path");
+        let missing_path = temp_repo_path("local-filter-missing");
+        let mut unavailable = repo("delaudio", "unavailable");
+        unavailable.local_path = Some(missing_path.display().to_string());
+        let mut usable = repo("delaudio", "usable");
+        usable.local_path = Some(usable_path.display().to_string());
+        let mut app = TuiApp::from_repos(vec![unavailable, usable]);
+        app.selected_repo = 0;
+        app.pr_filter = PrListFilter::Local;
+
+        app.reconcile_selected_repo();
+
+        assert_eq!(app.visible_repo_indices(), vec![1]);
+        assert_eq!(app.selected_repo, 1);
+        let _ = fs::remove_dir_all(usable_path);
+    }
+
+    #[test]
+    fn local_filter_handles_an_empty_usable_repository_set() {
+        let mut app = TuiApp::from_repos(vec![repo("delaudio", "unconfigured")]);
+        app.pr_filter = PrListFilter::Local;
+
+        app.reconcile_selected_repo();
+        app.load_selected_repo();
+
+        assert!(app.visible_repo_indices().is_empty());
+        assert_eq!(app.selected_repo, 0);
+        assert!(matches!(app.pr_list_load, LoadState::Idle));
+        assert_eq!(
+            app.status,
+            "No repositories have a usable configured local path"
+        );
     }
 
     #[test]

@@ -4,7 +4,11 @@ use std::fs::{self, File};
 use std::io::{self, Read, Write};
 use std::path::Path;
 use std::process::{Command, ExitStatus, Stdio};
-use std::sync::mpsc::{self, Receiver, TryRecvError};
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    mpsc::{self, Receiver, TryRecvError},
+    Arc,
+};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -27,6 +31,59 @@ const MAX_GIT_DIAGNOSTIC_BYTES: usize = 256 * 1024;
 const LOCAL_GIT_TIMEOUT: Duration = Duration::from_secs(30);
 const MAX_LOCAL_PREVIEW_CANDIDATES: usize = 64;
 const MAX_LOCAL_PREVIEW_TOTAL_BYTES: u64 = 64 * 1024 * 1024;
+
+#[derive(Clone, Debug, Default)]
+pub(crate) struct LocalReviewCancellation(Arc<AtomicBool>);
+
+impl LocalReviewCancellation {
+    pub(crate) fn new() -> Self {
+        Self::default()
+    }
+
+    pub(crate) fn cancel(&self) {
+        self.0.store(true, Ordering::Release);
+    }
+
+    fn is_cancelled(&self) -> bool {
+        self.0.load(Ordering::Acquire)
+    }
+}
+
+struct GitRunControl {
+    deadline: Instant,
+    timeout: Duration,
+    cancellation: LocalReviewCancellation,
+    operation: &'static str,
+}
+
+impl GitRunControl {
+    fn new(
+        timeout: Duration,
+        cancellation: LocalReviewCancellation,
+        operation: &'static str,
+    ) -> Self {
+        Self {
+            deadline: Instant::now() + timeout,
+            timeout,
+            cancellation,
+            operation,
+        }
+    }
+
+    fn check(&self) -> Result<(), String> {
+        if self.cancellation.is_cancelled() {
+            return Err(format!("{} was cancelled.", self.operation));
+        }
+        if Instant::now() >= self.deadline {
+            return Err(format!(
+                "{} timed out after {} seconds.",
+                self.operation,
+                self.timeout.as_secs_f64()
+            ));
+        }
+        Ok(())
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -73,25 +130,102 @@ pub fn get_local_review_snapshot_native(
     workspace: &str,
     repo: &str,
 ) -> Result<LocalReviewSnapshot, String> {
-    let repo_path = resolve_local_repo_for_provider(provider, workspace, repo)?;
-    local_review_snapshot_for_path(provider, workspace, repo, &repo_path)
+    get_local_review_snapshot_native_with_cancellation(
+        provider,
+        workspace,
+        repo,
+        LocalReviewCancellation::new(),
+    )
 }
 
+pub(crate) fn get_local_review_snapshot_native_with_cancellation(
+    provider: ReviewProvider,
+    workspace: &str,
+    repo: &str,
+    cancellation: LocalReviewCancellation,
+) -> Result<LocalReviewSnapshot, String> {
+    let repo_path = resolve_local_repo_for_provider(provider, workspace, repo)?;
+    local_review_snapshot_for_path_with_control(
+        provider,
+        workspace,
+        repo,
+        &repo_path,
+        cancellation,
+        LOCAL_GIT_TIMEOUT,
+        false,
+    )
+}
+
+pub(crate) fn local_review_snapshot_for_configured_path(
+    provider: ReviewProvider,
+    workspace: &str,
+    repo: &str,
+    repo_path: &Path,
+    cancellation: LocalReviewCancellation,
+) -> Result<LocalReviewSnapshot, String> {
+    local_review_snapshot_for_path_with_control(
+        provider,
+        workspace,
+        repo,
+        repo_path,
+        cancellation,
+        LOCAL_GIT_TIMEOUT,
+        true,
+    )
+}
+
+#[cfg(test)]
 pub(crate) fn local_review_snapshot_for_path(
     provider: ReviewProvider,
     workspace: &str,
     repo: &str,
     repo_path: &Path,
 ) -> Result<LocalReviewSnapshot, String> {
-    ensure_git_repository(repo_path)?;
-    let starting_status = git_bytes_limited(
+    local_review_snapshot_for_path_with_control(
+        provider,
+        workspace,
+        repo,
+        repo_path,
+        LocalReviewCancellation::new(),
+        LOCAL_GIT_TIMEOUT,
+        false,
+    )
+}
+
+fn local_review_snapshot_for_path_with_control(
+    provider: ReviewProvider,
+    workspace: &str,
+    repo: &str,
+    repo_path: &Path,
+    cancellation: LocalReviewCancellation,
+    timeout: Duration,
+    validate_origin: bool,
+) -> Result<LocalReviewSnapshot, String> {
+    let control = GitRunControl::new(timeout, cancellation, "Local review snapshot");
+    ensure_git_repository(repo_path, &control)?;
+    if validate_origin {
+        let origin = git_text_with_control(repo_path, &["remote", "get-url", "origin"], &control)?;
+        if !crate::local_repo::matches_remote(&origin, provider, workspace, repo) {
+            return Err(format!(
+                "Configured local path does not match the selected repository: {}.",
+                repo_path.display()
+            ));
+        }
+    }
+    let starting_status = git_bytes_limited_with_control(
         repo_path,
         &["status", "--porcelain=v1", "-z", "--untracked-files=normal"],
         MAX_GIT_METADATA_BYTES,
         "Local repository status",
+        &control,
     )?;
-    let head_sha = optional_git_text(repo_path, &["rev-parse", "--verify", "HEAD"])?;
-    let branch = optional_git_text(repo_path, &["symbolic-ref", "--quiet", "--short", "HEAD"])?;
+    let head_sha =
+        optional_git_text_with_control(repo_path, &["rev-parse", "--verify", "HEAD"], &control)?;
+    let branch = optional_git_text_with_control(
+        repo_path,
+        &["symbolic-ref", "--quiet", "--short", "HEAD"],
+        &control,
+    )?;
     let current_branch = branch.clone().unwrap_or_else(|| {
         head_sha
             .as_deref()
@@ -99,7 +233,7 @@ pub(crate) fn local_review_snapshot_for_path(
             .unwrap_or_else(|| "unborn HEAD".to_string())
     });
     let upstream = if branch.is_some() {
-        optional_git_text(
+        optional_git_text_with_control(
             repo_path,
             &[
                 "rev-parse",
@@ -107,25 +241,28 @@ pub(crate) fn local_review_snapshot_for_path(
                 "--symbolic-full-name",
                 "@{upstream}",
             ],
+            &control,
         )?
     } else {
         None
     };
     let upstream_sha = upstream
         .as_ref()
-        .map(|value| optional_git_text(repo_path, &["rev-parse", "--verify", value]))
+        .map(|value| {
+            optional_git_text_with_control(repo_path, &["rev-parse", "--verify", value], &control)
+        })
         .transpose()?
         .flatten();
     let base_sha =
         if let (Some(upstream_sha), Some(head_sha)) = (upstream_sha.as_ref(), head_sha.as_ref()) {
-            git_text(repo_path, &["merge-base", upstream_sha, head_sha])?
+            git_text_with_control(repo_path, &["merge-base", upstream_sha, head_sha], &control)?
         } else if let Some(sha) = head_sha.as_ref() {
             sha.clone()
         } else {
-            empty_tree_oid(repo_path)?
+            empty_tree_oid(repo_path, &control)?
         };
     let (commits_ahead, commits_behind) = if let Some(upstream) = upstream.as_ref() {
-        ahead_behind(repo_path, upstream)?
+        ahead_behind(repo_path, upstream, &control)?
     } else {
         (0, 0)
     };
@@ -151,24 +288,29 @@ pub(crate) fn local_review_snapshot_for_path(
         ));
     }
 
-    let mut collected = collect_local_diff(repo_path, &base_sha)?;
+    let mut collected = collect_local_diff(repo_path, &base_sha, &control)?;
     let (preview_sha256, preview_warnings) =
-        collect_preview_hashes(repo_path, &collected.diffstat)?;
+        collect_preview_hashes_with_control(repo_path, &collected.diffstat, &control)?;
     collected.preview_sha256 = preview_sha256;
     collected.warnings.extend(preview_warnings);
     warnings.extend(collected.warnings.clone());
 
-    let ending_status = git_bytes_limited(
+    let ending_status = git_bytes_limited_with_control(
         repo_path,
         &["status", "--porcelain=v1", "-z", "--untracked-files=normal"],
         MAX_GIT_METADATA_BYTES,
         "Local repository status",
+        &control,
     )?;
-    let ending_head = optional_git_text(repo_path, &["rev-parse", "--verify", "HEAD"])?;
-    let ending_branch =
-        optional_git_text(repo_path, &["symbolic-ref", "--quiet", "--short", "HEAD"])?;
+    let ending_head =
+        optional_git_text_with_control(repo_path, &["rev-parse", "--verify", "HEAD"], &control)?;
+    let ending_branch = optional_git_text_with_control(
+        repo_path,
+        &["symbolic-ref", "--quiet", "--short", "HEAD"],
+        &control,
+    )?;
     let ending_upstream = if ending_branch.is_some() {
-        optional_git_text(
+        optional_git_text_with_control(
             repo_path,
             &[
                 "rev-parse",
@@ -176,13 +318,16 @@ pub(crate) fn local_review_snapshot_for_path(
                 "--symbolic-full-name",
                 "@{upstream}",
             ],
+            &control,
         )?
     } else {
         None
     };
     let ending_upstream_sha = ending_upstream
         .as_ref()
-        .map(|value| optional_git_text(repo_path, &["rev-parse", "--verify", value]))
+        .map(|value| {
+            optional_git_text_with_control(repo_path, &["rev-parse", "--verify", value], &control)
+        })
         .transpose()?
         .flatten();
     if starting_status != ending_status
@@ -195,9 +340,9 @@ pub(crate) fn local_review_snapshot_for_path(
             "Local changes changed while Norn was loading them. Refresh and try again.".to_string(),
         );
     }
-    let verification = collect_local_diff(repo_path, &base_sha)?;
+    let verification = collect_local_diff(repo_path, &base_sha, &control)?;
     let (verification_preview_sha256, _) =
-        collect_preview_hashes(repo_path, &verification.diffstat)?;
+        collect_preview_hashes_with_control(repo_path, &verification.diffstat, &control)?;
     if collected.diff != verification.diff
         || collected.diffstat != verification.diffstat
         || collected.preview_sha256 != verification_preview_sha256
@@ -240,9 +385,17 @@ pub(crate) fn local_review_snapshot_for_path(
     })
 }
 
-fn ahead_behind(repo_path: &Path, upstream: &str) -> Result<(u32, u32), String> {
+fn ahead_behind(
+    repo_path: &Path,
+    upstream: &str,
+    control: &GitRunControl,
+) -> Result<(u32, u32), String> {
     let range = format!("{upstream}...HEAD");
-    let output = git_text(repo_path, &["rev-list", "--left-right", "--count", &range])?;
+    let output = git_text_with_control(
+        repo_path,
+        &["rev-list", "--left-right", "--count", &range],
+        control,
+    )?;
     let mut counts = output.split_whitespace();
     let behind = counts
         .next()
@@ -307,8 +460,12 @@ fn local_review_identity(
     (hex::encode(digest), review_id)
 }
 
-fn collect_local_diff(repo_path: &Path, base_sha: &str) -> Result<CollectedLocalDiff, String> {
-    let diffstat = tracked_diffstat(repo_path, base_sha)?;
+fn collect_local_diff(
+    repo_path: &Path,
+    base_sha: &str,
+    control: &GitRunControl,
+) -> Result<CollectedLocalDiff, String> {
+    let diffstat = tracked_diffstat(repo_path, base_sha, control)?;
     if diffstat.len() > MAX_LOCAL_CHANGED_FILES {
         return Err(format!(
             "Local review contains {} changed files, exceeding the {}-file limit.",
@@ -316,7 +473,7 @@ fn collect_local_diff(repo_path: &Path, base_sha: &str) -> Result<CollectedLocal
             MAX_LOCAL_CHANGED_FILES
         ));
     }
-    let diff = git_text_raw_limited(
+    let diff = git_text_raw_limited_with_control(
         repo_path,
         &[
             "diff",
@@ -329,6 +486,7 @@ fn collect_local_diff(repo_path: &Path, base_sha: &str) -> Result<CollectedLocal
         ],
         MAX_LOCAL_DIFF_BYTES,
         "Local review diff",
+        control,
     )?;
     let warnings = Vec::new();
     if diffstat.len() > MAX_LOCAL_CHANGED_FILES {
@@ -459,28 +617,33 @@ fn ensure_snapshot_preview_path(
     }
 }
 
-fn ensure_git_repository(repo_path: &Path) -> Result<(), String> {
-    if git_text(repo_path, &["rev-parse", "--is-inside-work-tree"])? == "true" {
+fn ensure_git_repository(repo_path: &Path, control: &GitRunControl) -> Result<(), String> {
+    if git_text_with_control(repo_path, &["rev-parse", "--is-inside-work-tree"], control)? == "true"
+    {
         Ok(())
     } else {
         Err("Configured local path is not a Git working tree.".to_string())
     }
 }
 
-fn empty_tree_oid(repo_path: &Path) -> Result<String, String> {
-    let output = run_git_bounded(
+fn empty_tree_oid(repo_path: &Path, control: &GitRunControl) -> Result<String, String> {
+    let output = run_git_bounded_with_control(
         repo_path,
         &["hash-object", "-t", "tree", "--stdin"],
         Some(&[]),
         MAX_GIT_METADATA_BYTES,
         "Git hash-object output",
-        LOCAL_GIT_TIMEOUT,
+        control,
     )?;
     checked_git_text(output)
 }
 
-fn tracked_diffstat(repo_path: &Path, base_sha: &str) -> Result<Vec<DiffstatEntry>, String> {
-    let output = git_bytes_limited(
+fn tracked_diffstat(
+    repo_path: &Path,
+    base_sha: &str,
+    control: &GitRunControl,
+) -> Result<Vec<DiffstatEntry>, String> {
+    let output = git_bytes_limited_with_control(
         repo_path,
         &[
             "diff",
@@ -492,13 +655,15 @@ fn tracked_diffstat(repo_path: &Path, base_sha: &str) -> Result<Vec<DiffstatEntr
         ],
         MAX_GIT_METADATA_BYTES,
         "Local review file metadata",
+        control,
     )?;
     let mut entries = parse_name_status(&output)?;
-    let numstat = git_bytes_limited(
+    let numstat = git_bytes_limited_with_control(
         repo_path,
         &["diff", "--numstat", "-z", "--find-renames", base_sha, "--"],
         MAX_GIT_METADATA_BYTES,
         "Local review line metadata",
+        control,
     )?;
     let counts = parse_numstat(&numstat)?;
     for entry in &mut entries {
@@ -547,6 +712,7 @@ fn parse_numstat_count(raw: Option<&[u8]>) -> Result<u32, String> {
         .map_err(|_| "Git returned invalid line metadata.".to_string())
 }
 
+#[cfg(test)]
 fn collect_preview_hashes(
     repo_path: &Path,
     diffstat: &[DiffstatEntry],
@@ -560,6 +726,22 @@ fn collect_preview_hashes(
     )
 }
 
+fn collect_preview_hashes_with_control(
+    repo_path: &Path,
+    diffstat: &[DiffstatEntry],
+    control: &GitRunControl,
+) -> Result<(BTreeMap<String, String>, Vec<String>), String> {
+    collect_preview_hashes_with_limits_and_control(
+        repo_path,
+        diffstat,
+        MAX_LOCAL_PREVIEW_CANDIDATES,
+        MAX_LOCAL_PREVIEW_TOTAL_BYTES,
+        MAX_PR_IMAGE_PREVIEW_BYTES as u64,
+        Some(control),
+    )
+}
+
+#[cfg(test)]
 fn collect_preview_hashes_with_limits(
     repo_path: &Path,
     diffstat: &[DiffstatEntry],
@@ -567,6 +749,27 @@ fn collect_preview_hashes_with_limits(
     total_byte_limit: u64,
     file_byte_limit: u64,
 ) -> Result<(BTreeMap<String, String>, Vec<String>), String> {
+    collect_preview_hashes_with_limits_and_control(
+        repo_path,
+        diffstat,
+        candidate_limit,
+        total_byte_limit,
+        file_byte_limit,
+        None,
+    )
+}
+
+fn collect_preview_hashes_with_limits_and_control(
+    repo_path: &Path,
+    diffstat: &[DiffstatEntry],
+    candidate_limit: usize,
+    total_byte_limit: u64,
+    file_byte_limit: u64,
+    control: Option<&GitRunControl>,
+) -> Result<(BTreeMap<String, String>, Vec<String>), String> {
+    if let Some(control) = control {
+        control.check()?;
+    }
     let root = open_repo_dir(repo_path)?;
     let mut hashes = BTreeMap::new();
     let mut warnings = Vec::new();
@@ -577,6 +780,9 @@ fn collect_preview_hashes_with_limits(
         .filter(|path| raster_mime_type(path).is_some())
         .enumerate()
     {
+        if let Some(control) = control {
+            control.check()?;
+        }
         if candidate_index >= candidate_limit {
             warnings.push(format!(
                 "Skipped additional image previews because the {candidate_limit}-file preview limit was reached."
@@ -645,6 +851,9 @@ fn collect_preview_hashes_with_limits(
             ));
         }
         hashes.insert(path.to_string(), sha256_hex(&bytes));
+    }
+    if let Some(control) = control {
+        control.check()?;
     }
     Ok((hashes, warnings))
 }
@@ -796,6 +1005,12 @@ fn git_command(repo_path: &Path) -> Command {
         use std::os::unix::process::CommandExt;
         command.process_group(0);
     }
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        use windows_sys::Win32::System::Threading::CREATE_SUSPENDED;
+        command.creation_flags(CREATE_SUSPENDED);
+    }
     command
 }
 
@@ -812,7 +1027,22 @@ fn git_bytes_limited(
     limit: usize,
     description: &str,
 ) -> Result<Vec<u8>, String> {
-    let output = run_git_bounded(repo_path, args, None, limit, description, LOCAL_GIT_TIMEOUT)?;
+    let control = GitRunControl::new(
+        LOCAL_GIT_TIMEOUT,
+        LocalReviewCancellation::new(),
+        "Git command",
+    );
+    git_bytes_limited_with_control(repo_path, args, limit, description, &control)
+}
+
+fn git_bytes_limited_with_control(
+    repo_path: &Path,
+    args: &[&str],
+    limit: usize,
+    description: &str,
+    control: &GitRunControl,
+) -> Result<Vec<u8>, String> {
+    let output = run_git_bounded_with_control(repo_path, args, None, limit, description, control)?;
     if output.status.success() {
         Ok(output.stdout)
     } else {
@@ -820,6 +1050,7 @@ fn git_bytes_limited(
     }
 }
 
+#[cfg(test)]
 fn run_git_bounded(
     repo_path: &Path,
     args: &[&str],
@@ -828,6 +1059,19 @@ fn run_git_bounded(
     description: &str,
     timeout: Duration,
 ) -> Result<BoundedGitOutput, String> {
+    let control = GitRunControl::new(timeout, LocalReviewCancellation::new(), "Git command");
+    run_git_bounded_with_control(repo_path, args, stdin, stdout_limit, description, &control)
+}
+
+fn run_git_bounded_with_control(
+    repo_path: &Path,
+    args: &[&str],
+    stdin: Option<&[u8]>,
+    stdout_limit: usize,
+    description: &str,
+    control: &GitRunControl,
+) -> Result<BoundedGitOutput, String> {
+    control.check()?;
     let mut child = git_command(repo_path)
         .args(args)
         .stdin(if stdin.is_some() {
@@ -839,7 +1083,7 @@ fn run_git_bounded(
         .stderr(Stdio::piped())
         .spawn()
         .map_err(|error| format!("Failed to run git: {error}"))?;
-    let process_tree = GitProcessTree::attach(&child).map_err(|error| {
+    let process_tree = GitProcessTree::attach_and_resume(&child).map_err(|error| {
         let _ = child.kill();
         let _ = child.wait();
         format!("Failed to contain git process tree: {error}")
@@ -862,7 +1106,6 @@ fn run_git_bounded(
         .ok_or_else(|| "Failed to capture git diagnostics.".to_string())?;
     let stdout_reader = spawn_bounded_reader(stdout, stdout_limit);
     let stderr_reader = spawn_bounded_reader(stderr, MAX_GIT_DIAGNOSTIC_BYTES);
-    let started = Instant::now();
     let mut status = None;
     let mut stdout_bytes = None;
     let mut stderr_bytes = None;
@@ -899,11 +1142,10 @@ fn run_git_bounded(
                 Err(error) => failure = Some(format!("Failed while waiting for git: {error}")),
             }
         }
-        if failure.is_none() && started.elapsed() >= timeout {
-            failure = Some(format!(
-                "Git command timed out after {} seconds.",
-                timeout.as_secs_f64()
-            ));
+        if failure.is_none() {
+            if let Err(error) = control.check() {
+                failure = Some(error);
+            }
         }
         if let Some(failure) = failure {
             terminate_git_child(&mut child, &process_tree);
@@ -971,7 +1213,7 @@ struct GitProcessTree;
 
 #[cfg(not(windows))]
 impl GitProcessTree {
-    fn attach(_child: &std::process::Child) -> io::Result<Self> {
+    fn attach_and_resume(_child: &std::process::Child) -> io::Result<Self> {
         Ok(Self)
     }
 
@@ -985,7 +1227,7 @@ struct GitProcessTree {
 
 #[cfg(windows)]
 impl GitProcessTree {
-    fn attach(child: &std::process::Child) -> io::Result<Self> {
+    fn attach_and_resume(child: &std::process::Child) -> io::Result<Self> {
         use std::mem::size_of;
         use std::os::windows::io::AsRawHandle;
         use windows_sys::Win32::System::JobObjects::{
@@ -1021,6 +1263,7 @@ impl GitProcessTree {
         if assigned == 0 {
             return Err(io::Error::last_os_error());
         }
+        resume_process_thread(child.id())?;
         Ok(job)
     }
 
@@ -1032,6 +1275,55 @@ impl GitProcessTree {
 }
 
 #[cfg(windows)]
+fn resume_process_thread(process_id: u32) -> io::Result<()> {
+    use std::mem::size_of;
+    use windows_sys::Win32::{
+        Foundation::{CloseHandle, INVALID_HANDLE_VALUE},
+        System::{
+            Diagnostics::ToolHelp::{
+                CreateToolhelp32Snapshot, Thread32First, Thread32Next, TH32CS_SNAPTHREAD,
+                THREADENTRY32,
+            },
+            Threading::{OpenThread, ResumeThread, THREAD_SUSPEND_RESUME},
+        },
+    };
+
+    let snapshot = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0) };
+    if snapshot == INVALID_HANDLE_VALUE {
+        return Err(io::Error::last_os_error());
+    }
+    let mut entry = THREADENTRY32 {
+        dwSize: size_of::<THREADENTRY32>() as u32,
+        ..Default::default()
+    };
+    let mut found = unsafe { Thread32First(snapshot, &mut entry) } != 0;
+    let mut result = Err(io::Error::new(
+        io::ErrorKind::NotFound,
+        "suspended git process thread was not found",
+    ));
+    while found {
+        if entry.th32OwnerProcessID == process_id {
+            let thread = unsafe { OpenThread(THREAD_SUSPEND_RESUME, 0, entry.th32ThreadID) };
+            if thread.is_null() {
+                result = Err(io::Error::last_os_error());
+            } else {
+                let resumed = unsafe { ResumeThread(thread) };
+                unsafe { CloseHandle(thread) };
+                result = if resumed == u32::MAX {
+                    Err(io::Error::last_os_error())
+                } else {
+                    Ok(())
+                };
+            }
+            break;
+        }
+        found = unsafe { Thread32Next(snapshot, &mut entry) } != 0;
+    }
+    unsafe { CloseHandle(snapshot) };
+    result
+}
+
+#[cfg(windows)]
 impl Drop for GitProcessTree {
     fn drop(&mut self) {
         unsafe {
@@ -1040,6 +1332,7 @@ impl Drop for GitProcessTree {
     }
 }
 
+#[cfg(test)]
 fn git_text(repo_path: &Path, args: &[&str]) -> Result<String, String> {
     let output = git_bytes_limited(
         repo_path,
@@ -1052,24 +1345,52 @@ fn git_text(repo_path: &Path, args: &[&str]) -> Result<String, String> {
         .map_err(|_| "Git returned non-UTF-8 output.".to_string())
 }
 
-fn git_text_raw_limited(
+fn git_text_with_control(
+    repo_path: &Path,
+    args: &[&str],
+    control: &GitRunControl,
+) -> Result<String, String> {
+    let output = git_bytes_limited_with_control(
+        repo_path,
+        args,
+        MAX_GIT_METADATA_BYTES,
+        "Git metadata output",
+        control,
+    )?;
+    String::from_utf8(output)
+        .map(|value| value.trim().to_string())
+        .map_err(|_| "Git returned non-UTF-8 output.".to_string())
+}
+
+fn git_text_raw_limited_with_control(
     repo_path: &Path,
     args: &[&str],
     limit: usize,
     description: &str,
+    control: &GitRunControl,
 ) -> Result<String, String> {
-    String::from_utf8(git_bytes_limited(repo_path, args, limit, description)?)
-        .map_err(|_| "Git returned a non-UTF-8 diff.".to_string())
+    String::from_utf8(git_bytes_limited_with_control(
+        repo_path,
+        args,
+        limit,
+        description,
+        control,
+    )?)
+    .map_err(|_| "Git returned a non-UTF-8 diff.".to_string())
 }
 
-fn optional_git_text(repo_path: &Path, args: &[&str]) -> Result<Option<String>, String> {
-    let output = run_git_bounded(
+fn optional_git_text_with_control(
+    repo_path: &Path,
+    args: &[&str],
+    control: &GitRunControl,
+) -> Result<Option<String>, String> {
+    let output = run_git_bounded_with_control(
         repo_path,
         args,
         None,
         MAX_GIT_METADATA_BYTES,
         "Git metadata output",
-        LOCAL_GIT_TIMEOUT,
+        control,
     )?;
     if !output.status.success() {
         return Ok(None);
@@ -1570,6 +1891,71 @@ mod tests {
 
         assert!(error.contains("timed out"));
         assert!(started.elapsed() < Duration::from_secs(1));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn cancelled_git_commands_terminate_the_process_group() {
+        let fixture = Fixture::new("git-cancellation");
+        let cancellation = LocalReviewCancellation::new();
+        let cancel_from_worker = cancellation.clone();
+        let control = GitRunControl::new(
+            Duration::from_secs(5),
+            cancellation,
+            "Local review snapshot",
+        );
+        thread::spawn(move || {
+            thread::sleep(Duration::from_millis(50));
+            cancel_from_worker.cancel();
+        });
+        let started = Instant::now();
+
+        let error = run_git_bounded_with_control(
+            &fixture.path,
+            &["-c", "alias.pause=!sleep 5", "pause"],
+            None,
+            1_024,
+            "Test output",
+            &control,
+        )
+        .expect_err("cancelled command");
+
+        assert!(error.contains("cancelled"));
+        assert!(started.elapsed() < Duration::from_secs(1));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn git_commands_share_one_operation_deadline() {
+        let fixture = Fixture::new("git-shared-deadline");
+        let control = GitRunControl::new(
+            Duration::from_millis(120),
+            LocalReviewCancellation::new(),
+            "Local review snapshot",
+        );
+        let started = Instant::now();
+
+        run_git_bounded_with_control(
+            &fixture.path,
+            &["-c", "alias.pause=!sleep 0.08", "pause"],
+            None,
+            1_024,
+            "Test output",
+            &control,
+        )
+        .expect("first command before shared deadline");
+        let error = run_git_bounded_with_control(
+            &fixture.path,
+            &["-c", "alias.pause=!sleep 0.08", "pause"],
+            None,
+            1_024,
+            "Test output",
+            &control,
+        )
+        .expect_err("second command exceeds shared deadline");
+
+        assert!(error.contains("timed out"));
+        assert!(started.elapsed() < Duration::from_millis(300));
     }
 
     #[test]
