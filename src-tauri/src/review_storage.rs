@@ -48,7 +48,7 @@ const APP_DIR: &str = "norn";
 const LEGACY_APP_DIR: &str = "lachesi";
 pub(crate) const DB_FILE: &str = "norn.sqlite3";
 pub(crate) const LEGACY_DB_FILE: &str = "lachesi.sqlite3";
-const LATEST_SCHEMA_VERSION: i64 = 13;
+const LATEST_SCHEMA_VERSION: i64 = 14;
 const LEGACY_REVIEWS_DIR: &str = "reviews";
 const LEGACY_REVIEWS_MIGRATION_MARKER: &str = ".legacy-reviews-imported-v1";
 const MAX_ADMINISTRATIVE_AUDIT_TIMESTAMP_MS: i64 = 4_102_444_800_000;
@@ -524,6 +524,7 @@ fn migrate(conn: &mut Connection) -> Result<(), String> {
           migrated_from_json INTEGER NOT NULL DEFAULT 0,
           created_at TEXT NOT NULL,
           updated_at TEXT NOT NULL,
+          retention_generation INTEGER NOT NULL DEFAULT 0 CHECK (retention_generation >= 0),
           PRIMARY KEY (tenant_id, review_key)
         );
 
@@ -1124,6 +1125,45 @@ fn migrate(conn: &mut Connection) -> Result<(), String> {
         [],
     )
     .map_err(|error| error.to_string())?;
+
+    let migration = conn
+        .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+        .map_err(|error| error.to_string())?;
+    let has_retention_generation = migration
+        .prepare("PRAGMA table_info(ai_review_stores)")
+        .and_then(|mut statement| {
+            let names = statement
+                .query_map([], |row| row.get::<_, String>(1))?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            Ok(names.iter().any(|name| name == "retention_generation"))
+        })
+        .map_err(|error| error.to_string())?;
+    if !has_retention_generation {
+        migration
+            .execute(
+                "ALTER TABLE ai_review_stores ADD COLUMN retention_generation INTEGER NOT NULL DEFAULT 0 CHECK (retention_generation >= 0)",
+                [],
+            )
+            .map_err(|error| error.to_string())?;
+    }
+    migration
+        .execute_batch(
+            r#"
+            CREATE INDEX IF NOT EXISTS idx_ai_review_stores_local_retention
+              ON ai_review_stores(
+                tenant_id, workspace, repo, retention_generation DESC
+              )
+              WHERE tenant_id = 'local' AND review_key GLOB 'local:*';
+            "#,
+        )
+        .map_err(|error| error.to_string())?;
+    migration
+        .execute(
+            "INSERT OR IGNORE INTO schema_migrations(version) VALUES (14)",
+            [],
+        )
+        .map_err(|error| error.to_string())?;
+    migration.commit().map_err(|error| error.to_string())?;
 
     Ok(())
 }
@@ -3968,6 +4008,23 @@ pub fn save_local_review_json(
         .transaction_with_behavior(TransactionBehavior::Immediate)
         .map_err(|error| error.to_string())?;
     let now = now_ms();
+    let previous_generation = transaction
+        .query_row(
+            r#"
+            SELECT COALESCE(MAX(retention_generation), 0)
+            FROM ai_review_stores
+            WHERE tenant_id = 'local'
+              AND review_key GLOB 'local:*'
+              AND workspace = ?1 COLLATE NOCASE
+              AND repo = ?2 COLLATE NOCASE
+            "#,
+            params![workspace, repo],
+            |row| row.get::<_, i64>(0),
+        )
+        .map_err(|error| error.to_string())?;
+    let retention_generation = previous_generation
+        .checked_add(1)
+        .ok_or_else(|| "Local review retention generation is exhausted.".to_string())?;
     upsert_review_json_for_connection(
         &transaction,
         "local",
@@ -3978,6 +4035,7 @@ pub fn save_local_review_json(
         json,
         false,
         &now,
+        retention_generation,
     )?;
     transaction
         .execute(
@@ -3991,7 +4049,7 @@ pub fn save_local_review_json(
                 AND workspace = ?1 COLLATE NOCASE
                 AND repo = ?2 COLLATE NOCASE
                 AND review_key <> ?3
-              ORDER BY CAST(updated_at AS INTEGER) DESC, rowid DESC
+              ORDER BY retention_generation DESC
               LIMIT -1 OFFSET ?4
             )
             "#,
@@ -4087,6 +4145,7 @@ fn save_review_json_for_key(
         json,
         migrated_from_json,
         &now,
+        0,
     )
 }
 
@@ -4101,18 +4160,20 @@ fn upsert_review_json_for_connection(
     json: &str,
     migrated_from_json: bool,
     now: &str,
+    retention_generation: i64,
 ) -> Result<(), String> {
     conn.execute(
         r#"
         INSERT INTO ai_review_stores (
           review_key, tenant_id, workspace, repo, pr_id, store_json,
-          migrated_from_json, created_at, updated_at
+          migrated_from_json, created_at, updated_at, retention_generation
         )
-        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?8)
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?8, ?9)
         ON CONFLICT(tenant_id, review_key) DO UPDATE SET
           store_json = excluded.store_json,
           migrated_from_json = ai_review_stores.migrated_from_json OR excluded.migrated_from_json,
-          updated_at = excluded.updated_at
+          updated_at = excluded.updated_at,
+          retention_generation = excluded.retention_generation
         "#,
         params![
             key,
@@ -4122,7 +4183,8 @@ fn upsert_review_json_for_connection(
             i64::from(id),
             json,
             if migrated_from_json { 1 } else { 0 },
-            now
+            now,
+            retention_generation
         ],
     )
     .map_err(|e| e.to_string())?;
@@ -5318,6 +5380,29 @@ mod tests {
             .expect("refresh retained snapshot");
 
             let conn = Connection::open(dir.join(DB_FILE)).expect("open review database");
+            let refreshed_key =
+                local_review_key("workspace", "repo", &refreshed_snapshot).expect("refreshed key");
+            let (refreshed_generation, maximum_generation) = conn
+                .query_row(
+                    "SELECT retention_generation, (SELECT MAX(retention_generation) FROM ai_review_stores WHERE tenant_id = 'local' AND review_key GLOB 'local:*' AND workspace = 'workspace' AND repo = 'repo') FROM ai_review_stores WHERE tenant_id = 'local' AND review_key = ?1",
+                    params![refreshed_key],
+                    |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?)),
+                )
+                .expect("read refreshed generation");
+            assert_eq!(refreshed_generation, maximum_generation);
+            drop(conn);
+
+            let following_snapshot = format!("{:064x}", 22);
+            save_local_review_json(
+                "workspace",
+                "repo",
+                22,
+                &following_snapshot,
+                r#"{"snapshot":22}"#,
+            )
+            .expect("save snapshot after refresh");
+
+            let conn = Connection::open(dir.join(DB_FILE)).expect("reopen review database");
             let retained = conn
                 .query_row(
                     "SELECT COUNT(*) FROM ai_review_stores WHERE tenant_id = 'local' AND review_key GLOB 'local:*' AND workspace = 'workspace' AND repo = 'repo'",
@@ -6148,7 +6233,20 @@ mod tests {
                 .expect("query migrations")
                 .collect::<rusqlite::Result<_>>()
                 .expect("read migration versions");
-            assert_eq!(versions, vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]);
+            assert_eq!(
+                versions,
+                vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]
+            );
+            let store_columns: Vec<String> = conn
+                .prepare("PRAGMA table_info(ai_review_stores)")
+                .expect("prepare store columns")
+                .query_map([], |row| row.get(1))
+                .expect("query store columns")
+                .collect::<rusqlite::Result<_>>()
+                .expect("read store columns");
+            assert!(store_columns
+                .iter()
+                .any(|column| column == "retention_generation"));
         });
     }
 

@@ -4,10 +4,7 @@ use std::fs::{self, File};
 use std::io::{self, Read, Write};
 use std::path::Path;
 use std::process::{Command, ExitStatus, Stdio};
-use std::sync::{
-    atomic::{AtomicBool, Ordering},
-    Arc,
-};
+use std::sync::mpsc::{self, Receiver, TryRecvError};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -842,6 +839,11 @@ fn run_git_bounded(
         .stderr(Stdio::piped())
         .spawn()
         .map_err(|error| format!("Failed to run git: {error}"))?;
+    let process_tree = GitProcessTree::attach(&child).map_err(|error| {
+        let _ = child.kill();
+        let _ = child.wait();
+        format!("Failed to contain git process tree: {error}")
+    })?;
     if let Some(input) = stdin {
         child
             .stdin
@@ -858,93 +860,184 @@ fn run_git_bounded(
         .stderr
         .take()
         .ok_or_else(|| "Failed to capture git diagnostics.".to_string())?;
-    let output_exceeded = Arc::new(AtomicBool::new(false));
-    let stdout_reader = spawn_bounded_reader(stdout, stdout_limit, Arc::clone(&output_exceeded));
-    let stderr_reader = spawn_bounded_reader(
-        stderr,
-        MAX_GIT_DIAGNOSTIC_BYTES,
-        Arc::clone(&output_exceeded),
-    );
+    let stdout_reader = spawn_bounded_reader(stdout, stdout_limit);
+    let stderr_reader = spawn_bounded_reader(stderr, MAX_GIT_DIAGNOSTIC_BYTES);
     let started = Instant::now();
     let mut status = None;
+    let mut stdout_bytes = None;
+    let mut stderr_bytes = None;
     let mut failure = None;
     loop {
-        match child.try_wait() {
-            Ok(Some(exit_status)) => {
-                status = Some(exit_status);
-                break;
-            }
-            Ok(None) if output_exceeded.load(Ordering::Acquire) => {
-                terminate_git_child(&mut child);
-                failure = Some("Git output exceeded a configured byte limit.".to_string());
-                break;
-            }
-            Ok(None) if started.elapsed() >= timeout => {
-                terminate_git_child(&mut child);
-                failure = Some(format!(
-                    "Git command timed out after {} seconds.",
-                    timeout.as_secs_f64()
-                ));
-                break;
-            }
-            Ok(None) => thread::sleep(Duration::from_millis(10)),
-            Err(error) => {
-                terminate_git_child(&mut child);
-                failure = Some(format!("Failed while waiting for git: {error}"));
-                break;
+        if let Err(error) = poll_bounded_reader(&stdout_reader, &mut stdout_bytes, "git output") {
+            failure = Some(error);
+        }
+        if let Err(error) =
+            poll_bounded_reader(&stderr_reader, &mut stderr_bytes, "git diagnostics")
+        {
+            failure = Some(error);
+        }
+        if stdout_bytes
+            .as_ref()
+            .is_some_and(|bytes| bytes.len() > stdout_limit)
+        {
+            failure = Some(format!(
+                "{description} exceeds the {stdout_limit}-byte limit."
+            ));
+        }
+        if stderr_bytes
+            .as_ref()
+            .is_some_and(|bytes| bytes.len() > MAX_GIT_DIAGNOSTIC_BYTES)
+        {
+            failure = Some(format!(
+                "Git diagnostics exceed the {MAX_GIT_DIAGNOSTIC_BYTES}-byte limit."
+            ));
+        }
+        if status.is_none() {
+            match child.try_wait() {
+                Ok(Some(exit_status)) => status = Some(exit_status),
+                Ok(None) => {}
+                Err(error) => failure = Some(format!("Failed while waiting for git: {error}")),
             }
         }
-    }
-    let stdout_bytes = stdout_reader
-        .join()
-        .map_err(|_| "Failed to collect git output.".to_string())?
-        .map_err(|error| format!("Failed to read git output: {error}"))?;
-    let stderr_bytes = stderr_reader
-        .join()
-        .map_err(|_| "Failed to collect git diagnostics.".to_string())?
-        .map_err(|error| format!("Failed to read git diagnostics: {error}"))?;
-    if stdout_bytes.len() > stdout_limit {
-        return Err(format!(
-            "{description} exceeds the {stdout_limit}-byte limit."
-        ));
-    }
-    if stderr_bytes.len() > MAX_GIT_DIAGNOSTIC_BYTES {
-        return Err(format!(
-            "Git diagnostics exceed the {MAX_GIT_DIAGNOSTIC_BYTES}-byte limit."
-        ));
-    }
-    if let Some(failure) = failure {
-        return Err(failure);
+        if failure.is_none() && started.elapsed() >= timeout {
+            failure = Some(format!(
+                "Git command timed out after {} seconds.",
+                timeout.as_secs_f64()
+            ));
+        }
+        if let Some(failure) = failure {
+            terminate_git_child(&mut child, &process_tree);
+            return Err(failure);
+        }
+        if status.is_some() && stdout_bytes.is_some() && stderr_bytes.is_some() {
+            break;
+        }
+        thread::sleep(Duration::from_millis(10));
     }
     Ok(BoundedGitOutput {
         status: status.ok_or_else(|| "Git did not report an exit status.".to_string())?,
-        stdout: stdout_bytes,
-        stderr: stderr_bytes,
+        stdout: stdout_bytes.ok_or_else(|| "Git output did not close.".to_string())?,
+        stderr: stderr_bytes.ok_or_else(|| "Git diagnostics did not close.".to_string())?,
     })
 }
 
 fn spawn_bounded_reader(
     reader: impl Read + Send + 'static,
     limit: usize,
-    exceeded: Arc<AtomicBool>,
-) -> thread::JoinHandle<io::Result<Vec<u8>>> {
+) -> Receiver<io::Result<Vec<u8>>> {
+    let (sender, receiver) = mpsc::sync_channel(1);
     thread::spawn(move || {
         let mut bytes = Vec::new();
-        reader.take(limit as u64 + 1).read_to_end(&mut bytes)?;
-        if bytes.len() > limit {
-            exceeded.store(true, Ordering::Release);
-        }
-        Ok(bytes)
-    })
+        let result = reader
+            .take(limit as u64 + 1)
+            .read_to_end(&mut bytes)
+            .map(|_| bytes);
+        let _ = sender.send(result);
+    });
+    receiver
 }
 
-fn terminate_git_child(child: &mut std::process::Child) {
+fn poll_bounded_reader(
+    receiver: &Receiver<io::Result<Vec<u8>>>,
+    output: &mut Option<Vec<u8>>,
+    label: &str,
+) -> Result<(), String> {
+    if output.is_some() {
+        return Ok(());
+    }
+    match receiver.try_recv() {
+        Ok(Ok(bytes)) => {
+            *output = Some(bytes);
+            Ok(())
+        }
+        Ok(Err(error)) => Err(format!("Failed to read {label}: {error}")),
+        Err(TryRecvError::Empty) => Ok(()),
+        Err(TryRecvError::Disconnected) => Err(format!("Failed to collect {label}.")),
+    }
+}
+
+fn terminate_git_child(child: &mut std::process::Child, process_tree: &GitProcessTree) {
+    process_tree.terminate();
     #[cfg(unix)]
     unsafe {
         libc::kill(-(child.id() as i32), libc::SIGKILL);
     }
     let _ = child.kill();
     let _ = child.wait();
+}
+
+#[cfg(not(windows))]
+struct GitProcessTree;
+
+#[cfg(not(windows))]
+impl GitProcessTree {
+    fn attach(_child: &std::process::Child) -> io::Result<Self> {
+        Ok(Self)
+    }
+
+    fn terminate(&self) {}
+}
+
+#[cfg(windows)]
+struct GitProcessTree {
+    handle: windows_sys::Win32::Foundation::HANDLE,
+}
+
+#[cfg(windows)]
+impl GitProcessTree {
+    fn attach(child: &std::process::Child) -> io::Result<Self> {
+        use std::mem::size_of;
+        use std::os::windows::io::AsRawHandle;
+        use windows_sys::Win32::System::JobObjects::{
+            AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation,
+            SetInformationJobObject, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
+            JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+        };
+
+        let handle = unsafe { CreateJobObjectW(std::ptr::null(), std::ptr::null()) };
+        if handle.is_null() {
+            return Err(io::Error::last_os_error());
+        }
+        let job = Self { handle };
+        let mut limits = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
+        limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+        let configured = unsafe {
+            SetInformationJobObject(
+                job.handle,
+                JobObjectExtendedLimitInformation,
+                std::ptr::addr_of!(limits).cast(),
+                size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+            )
+        };
+        if configured == 0 {
+            return Err(io::Error::last_os_error());
+        }
+        let assigned = unsafe {
+            AssignProcessToJobObject(
+                job.handle,
+                child.as_raw_handle() as windows_sys::Win32::Foundation::HANDLE,
+            )
+        };
+        if assigned == 0 {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(job)
+    }
+
+    fn terminate(&self) {
+        unsafe {
+            windows_sys::Win32::System::JobObjects::TerminateJobObject(self.handle, 1);
+        }
+    }
+}
+
+#[cfg(windows)]
+impl Drop for GitProcessTree {
+    fn drop(&mut self) {
+        unsafe {
+            windows_sys::Win32::Foundation::CloseHandle(self.handle);
+        }
+    }
 }
 
 fn git_text(repo_path: &Path, args: &[&str]) -> Result<String, String> {
@@ -1454,6 +1547,26 @@ mod tests {
             Duration::from_millis(50),
         )
         .expect_err("timed out command");
+
+        assert!(error.contains("timed out"));
+        assert!(started.elapsed() < Duration::from_secs(1));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn git_deadline_includes_pipes_held_by_descendants() {
+        let fixture = Fixture::new("git-descendant-pipe-timeout");
+        let started = Instant::now();
+
+        let error = run_git_bounded(
+            &fixture.path,
+            &["-c", "alias.leak=!sleep 5 &", "leak"],
+            None,
+            1_024,
+            "Test output",
+            Duration::from_millis(100),
+        )
+        .expect_err("descendant-held pipe timed out");
 
         assert!(error.contains("timed out"));
         assert!(started.elapsed() < Duration::from_secs(1));
