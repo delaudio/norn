@@ -12,11 +12,12 @@ If status files and git disagree, git is authoritative; correct this file.
 - **Active item:** `.docflow/plan/todo/0013-local-review-target-tui.md`.
 - **Plan items:** implement the shared local snapshot and TUI first, then
   `.docflow/plan/todo/0014-local-review-target-desktop.md`.
-- **Verification:** 627 Rust tests pass with 2 ignored, alongside 110 frontend
+- **Verification:** 631 Rust tests pass with 2 ignored, alongside 110 frontend
   tests plus tooling, all-target Clippy, typecheck, lint, Archgate 17/17, and an
-  isolated Windows Job Object compile check. Git process trees and pipe closure
-  share one deadline on Unix and Windows, while schema v14 assigns monotonic
-  retention generations to local snapshots; the final pre-push Norn review is
+  isolated Windows target compile check. Local snapshots share one end-to-end
+  deadline, superseded TUI loads cancel their process trees, Windows Git starts
+  suspended before Job Object assignment, and Local-mode repository navigation
+  is restricted to usable configured paths; the final pre-push Norn review is
   pending.
 
 ## Last shipped
