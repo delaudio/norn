@@ -17,8 +17,10 @@ If status files and git disagree, git is authoritative; correct this file.
   isolated Windows target compile check. Local snapshots share one end-to-end
   deadline, superseded TUI loads cancel their process trees, Windows Git starts
   suspended before Job Object assignment, and Local-mode repository navigation
-  is restricted to usable configured paths; the final pre-push Norn review is
-  pending.
+  is restricted to usable configured paths. Norn review run
+  `run-1788509355794197000` confirmed the original findings are resolved and
+  reported two residual items: interruptible preview hashing (high) and cached
+  Local repository eligibility outside the render loop (low).
 
 ## Last shipped
 
