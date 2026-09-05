@@ -1,6 +1,5 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::OsStr;
-use std::fs::{self, File};
 use std::io::{self, Read, Write};
 use std::path::Path;
 use std::process::{Command, ExitStatus, Stdio};
@@ -15,11 +14,6 @@ use std::time::{Duration, Instant};
 use serde::{Deserialize, Serialize};
 use sha1::Sha1;
 use sha2::{Digest, Sha256};
-
-#[cfg(unix)]
-use cap_fs_ext::OpenOptionsSyncExt;
-use cap_fs_ext::{FollowSymlinks, OpenOptionsFollowExt};
-use cap_std::{ambient_authority, fs::Dir};
 
 use crate::config::ReviewProvider;
 use crate::local_repo::{resolve_local_repo_for_provider, trusted_git_path};
@@ -561,7 +555,7 @@ fn local_file_preview_for_path(
         let object = format!("{base_sha}:{path}");
         git_bytes_limited(
             repo_path,
-            &["show", object.as_str()],
+            &["cat-file", "blob", object.as_str()],
             MAX_PR_IMAGE_PREVIEW_BYTES,
             "Image preview",
         )?
@@ -570,20 +564,29 @@ fn local_file_preview_for_path(
             "The local image preview is unavailable for this snapshot; refresh and try again."
                 .to_string()
         })?;
-        let root = open_repo_dir(repo_path)?;
-        let file = open_repo_file(&root, Path::new(path))
-            .map_err(|error| format!("Failed to open local image preview: {error}"))?;
-        let metadata = file
-            .metadata()
-            .map_err(|error| format!("Failed to inspect local image preview: {error}"))?;
-        if has_multiple_hard_links(&file, &metadata)
-            .map_err(|error| format!("Failed to inspect local image preview links: {error}"))?
-        {
+        if !valid_git_object_id(expected) {
+            return Err("The local image preview fingerprint is invalid.".to_string());
+        }
+        let expected = expected.to_ascii_lowercase();
+        let control = GitRunControl::new(
+            LOCAL_GIT_TIMEOUT,
+            LocalReviewCancellation::new(),
+            "Image preview",
+        );
+        let current = index_blob_oids(repo_path, &[path.to_string()], &control)?;
+        if current.get(path) != Some(&expected) {
             return Err(
-                "Local image previews cannot use files with multiple hard links.".to_string(),
+                "The local image changed after this snapshot was loaded; refresh and try again."
+                    .to_string(),
             );
         }
-        let bytes = read_bounded(file, MAX_PR_IMAGE_PREVIEW_BYTES)?;
+        let bytes = git_bytes_limited_with_control(
+            repo_path,
+            &["cat-file", "blob", &expected],
+            MAX_PR_IMAGE_PREVIEW_BYTES,
+            "Image preview",
+            &control,
+        )?;
         if git_object_id_for_bytes(&bytes, expected.len())? != expected {
             return Err(
                 "The local image changed after this snapshot was loaded; refresh and try again."
@@ -791,11 +794,10 @@ fn collect_preview_oids_with_limits(
     control: &GitRunControl,
 ) -> Result<(BTreeMap<String, String>, Vec<String>), String> {
     control.check()?;
-    let root = open_repo_dir(repo_path)?;
     let mut oids = BTreeMap::new();
     let mut warnings = Vec::new();
     let mut total_bytes = 0_u64;
-    let mut repository_oid_len = None;
+    let mut candidates = Vec::new();
     for (candidate_index, path) in diffstat
         .iter()
         .filter_map(|entry| entry.new_path.as_deref())
@@ -816,31 +818,39 @@ fn collect_preview_oids_with_limits(
             ));
             continue;
         }
-        let Ok(file) = open_repo_file(&root, Path::new(path)) else {
+        candidates.push(path.to_string());
+    }
+    if candidates.is_empty() {
+        return Ok((oids, warnings));
+    }
+
+    let unstaged = unstaged_paths(repo_path, &candidates, control)?;
+    let index_oids = index_blob_oids(repo_path, &candidates, control)?;
+    let object_sizes = object_sizes(repo_path, index_oids.values(), control)?;
+    for path in candidates {
+        control.check()?;
+        if unstaged.contains(&path) {
             warnings.push(format!(
-                "Skipped image preview that could not be opened safely `{}`.",
-                path.escape_default()
-            ));
-            continue;
-        };
-        let metadata = match file.metadata() {
-            Ok(metadata) => metadata,
-            Err(_) => {
-                warnings.push(format!(
-                    "Skipped image preview that could not be inspected `{}`.",
-                    path.escape_default()
-                ));
-                continue;
-            }
-        };
-        if has_multiple_hard_links(&file, &metadata).unwrap_or(true) {
-            warnings.push(format!(
-                "Skipped image preview with unsafe link metadata `{}`.",
+                "Skipped image preview with unstaged content `{}`; stage it to create an immutable preview.",
                 path.escape_default()
             ));
             continue;
         }
-        if !metadata.is_file() || metadata.len() > file_byte_limit {
+        let Some(oid) = index_oids.get(&path) else {
+            warnings.push(format!(
+                "Skipped image preview that is unavailable from the Git index `{}`.",
+                path.escape_default()
+            ));
+            continue;
+        };
+        let Some(size) = object_sizes.get(oid).copied() else {
+            warnings.push(format!(
+                "Skipped image preview whose Git object could not be inspected `{}`.",
+                path.escape_default()
+            ));
+            continue;
+        };
+        if size > file_byte_limit {
             warnings.push(format!(
                 "Skipped oversized image preview `{}`.",
                 path.escape_default()
@@ -848,67 +858,135 @@ fn collect_preview_oids_with_limits(
             continue;
         }
         let remaining = total_byte_limit.saturating_sub(total_bytes);
-        if metadata.len() > remaining {
+        if size > remaining {
             warnings.push(format!(
                 "Skipped additional image previews starting with `{}` because the total preview byte limit was reached.",
                 path.escape_default()
             ));
             break;
         }
-        let bytes = match read_bounded(file, usize::try_from(file_byte_limit).unwrap_or(usize::MAX))
-        {
-            Ok(bytes) if bytes.len() as u64 == metadata.len() => bytes,
-            Ok(_) | Err(_) => {
-                control.check()?;
-                warnings.push(format!(
-                    "Skipped image preview that changed while being read `{}`.",
-                    path.escape_default()
-                ));
-                continue;
-            }
-        };
-        let oid_len = match repository_oid_len {
-            Some(oid_len) => oid_len,
-            None => match git_object_id_len(repo_path, control) {
-                Ok(oid_len) => {
-                    repository_oid_len = Some(oid_len);
-                    oid_len
-                }
-                Err(_) => {
-                    control.check()?;
-                    warnings.push(format!(
-                        "Skipped image preview that could not be fingerprinted `{}`.",
-                        path.escape_default()
-                    ));
-                    continue;
-                }
-            },
-        };
-        let oid = match git_object_id_for_bytes(&bytes, oid_len) {
-            Ok(oid) => oid,
-            Err(_) => {
-                control.check()?;
-                warnings.push(format!(
-                    "Skipped image preview that could not be fingerprinted `{}`.",
-                    path.escape_default()
-                ));
-                continue;
-            }
-        };
-        total_bytes = total_bytes.saturating_add(bytes.len() as u64);
-        oids.insert(path.to_string(), oid);
+        total_bytes = total_bytes.saturating_add(size);
+        oids.insert(path, oid.clone());
     }
     control.check()?;
     Ok((oids, warnings))
 }
 
-fn git_object_id_len(repo_path: &Path, control: &GitRunControl) -> Result<usize, String> {
-    let oid = empty_tree_oid(repo_path, control)?;
-    if (oid.len() == 40 || oid.len() == 64) && oid.bytes().all(|byte| byte.is_ascii_hexdigit()) {
-        Ok(oid.len())
-    } else {
-        Err("Git returned an invalid object fingerprint.".to_string())
+fn unstaged_paths(
+    repo_path: &Path,
+    candidates: &[String],
+    control: &GitRunControl,
+) -> Result<BTreeSet<String>, String> {
+    let mut args = vec![
+        "diff",
+        "--no-ext-diff",
+        "--no-textconv",
+        "--name-only",
+        "-z",
+        "--",
+    ];
+    args.extend(candidates.iter().map(String::as_str));
+    let output = git_bytes_limited_with_control(
+        repo_path,
+        &args,
+        MAX_GIT_METADATA_BYTES,
+        "Local image preview status",
+        control,
+    )?;
+    output
+        .split(|byte| *byte == 0)
+        .filter(|path| !path.is_empty())
+        .map(|path| {
+            std::str::from_utf8(path)
+                .map(str::to_string)
+                .map_err(|_| "Git returned a non-UTF-8 image preview path.".to_string())
+        })
+        .collect()
+}
+
+fn index_blob_oids(
+    repo_path: &Path,
+    candidates: &[String],
+    control: &GitRunControl,
+) -> Result<BTreeMap<String, String>, String> {
+    let mut args = vec!["ls-files", "--stage", "-z", "--"];
+    args.extend(candidates.iter().map(String::as_str));
+    let output = git_bytes_limited_with_control(
+        repo_path,
+        &args,
+        MAX_GIT_METADATA_BYTES,
+        "Local image preview index",
+        control,
+    )?;
+    let mut oids = BTreeMap::new();
+    for record in output
+        .split(|byte| *byte == 0)
+        .filter(|record| !record.is_empty())
+    {
+        let Some(tab) = record.iter().position(|byte| *byte == b'\t') else {
+            return Err("Git returned invalid image preview index metadata.".to_string());
+        };
+        let header = std::str::from_utf8(&record[..tab])
+            .map_err(|_| "Git returned invalid image preview index metadata.".to_string())?;
+        let path = std::str::from_utf8(&record[tab + 1..])
+            .map_err(|_| "Git returned a non-UTF-8 image preview path.".to_string())?;
+        let mut fields = header.split_ascii_whitespace();
+        let _mode = fields.next();
+        let oid = fields.next();
+        let stage = fields.next();
+        if fields.next().is_some() || stage != Some("0") {
+            continue;
+        }
+        if let Some(oid) = oid.filter(|oid| valid_git_object_id(oid)) {
+            oids.insert(path.to_string(), oid.to_ascii_lowercase());
+        }
     }
+    Ok(oids)
+}
+
+fn object_sizes<'a>(
+    repo_path: &Path,
+    oids: impl Iterator<Item = &'a String>,
+    control: &GitRunControl,
+) -> Result<BTreeMap<String, u64>, String> {
+    let mut input = Vec::new();
+    for oid in oids {
+        input.extend_from_slice(oid.as_bytes());
+        input.push(b'\n');
+    }
+    if input.is_empty() {
+        return Ok(BTreeMap::new());
+    }
+    let output = run_git_bounded_with_control(
+        repo_path,
+        &[
+            "cat-file",
+            "--batch-check=%(objectname) %(objecttype) %(objectsize)",
+        ],
+        Some(&input),
+        MAX_GIT_METADATA_BYTES,
+        "Local image preview object metadata",
+        control,
+    )?;
+    let output = checked_git_text(output)?;
+    let mut sizes = BTreeMap::new();
+    for line in output.lines() {
+        let mut fields = line.split_ascii_whitespace();
+        if let (Some(oid), Some("blob"), Some(size), None) =
+            (fields.next(), fields.next(), fields.next(), fields.next())
+        {
+            if valid_git_object_id(oid) {
+                if let Ok(size) = size.parse::<u64>() {
+                    sizes.insert(oid.to_ascii_lowercase(), size);
+                }
+            }
+        }
+    }
+    Ok(sizes)
+}
+
+fn valid_git_object_id(oid: &str) -> bool {
+    (oid.len() == 40 || oid.len() == 64) && oid.bytes().all(|byte| byte.is_ascii_hexdigit())
 }
 
 fn git_object_id_for_bytes(bytes: &[u8], oid_len: usize) -> Result<String, String> {
@@ -967,57 +1045,6 @@ fn utf8_path(raw: Option<&[u8]>) -> Result<String, String> {
         .map_err(|_| "Local review does not support non-UTF-8 changed paths.".to_string())
 }
 
-#[cfg(unix)]
-fn has_multiple_hard_links(_file: &File, metadata: &fs::Metadata) -> io::Result<bool> {
-    use std::os::unix::fs::MetadataExt;
-
-    Ok(metadata.nlink() > 1)
-}
-
-#[cfg(windows)]
-fn has_multiple_hard_links(file: &File, _metadata: &fs::Metadata) -> io::Result<bool> {
-    use std::mem::MaybeUninit;
-    use std::os::windows::io::AsRawHandle;
-    use windows_sys::Win32::Storage::FileSystem::{
-        GetFileInformationByHandle, BY_HANDLE_FILE_INFORMATION,
-    };
-
-    let mut information = MaybeUninit::<BY_HANDLE_FILE_INFORMATION>::uninit();
-    let succeeded =
-        unsafe { GetFileInformationByHandle(file.as_raw_handle(), information.as_mut_ptr()) };
-    if succeeded == 0 {
-        Err(io::Error::last_os_error())
-    } else {
-        let information = unsafe { information.assume_init() };
-        Ok(information.nNumberOfLinks > 1)
-    }
-}
-
-#[cfg(not(any(unix, windows)))]
-fn has_multiple_hard_links(_file: &File, _metadata: &fs::Metadata) -> io::Result<bool> {
-    Err(io::Error::new(
-        io::ErrorKind::Unsupported,
-        "hard-link inspection is unavailable on this platform",
-    ))
-}
-
-fn read_bounded(reader: impl Read, limit: usize) -> Result<Vec<u8>, String> {
-    let mut bytes = Vec::new();
-    reader
-        .take(limit as u64 + 1)
-        .read_to_end(&mut bytes)
-        .map_err(|error| format!("Could not read image preview: {error}"))?;
-    bounded_bytes(bytes, limit)
-}
-
-fn bounded_bytes(bytes: Vec<u8>, limit: usize) -> Result<Vec<u8>, String> {
-    if bytes.len() > limit {
-        Err(format!("Image preview exceeds the {limit}-byte limit."))
-    } else {
-        Ok(bytes)
-    }
-}
-
 fn raster_mime_type(path: &str) -> Option<&'static str> {
     match Path::new(path)
         .extension()
@@ -1051,20 +1078,6 @@ fn validate_repo_relative_path(path: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn open_repo_dir(repo_path: &Path) -> Result<Dir, String> {
-    Dir::open_ambient_dir(repo_path, ambient_authority())
-        .map_err(|error| format!("Failed to open local repository safely: {error}"))
-}
-
-fn open_repo_file(root: &Dir, relative: &Path) -> io::Result<File> {
-    let mut options = cap_std::fs::OpenOptions::new();
-    options.read(true).follow(FollowSymlinks::No);
-    #[cfg(unix)]
-    options.nonblock(true);
-    root.open_with(relative, &options)
-        .map(|file| file.into_std())
-}
-
 fn git_command(repo_path: &Path) -> Result<Command, String> {
     let mut command = Command::new(trusted_git_path()?);
     command
@@ -1076,6 +1089,7 @@ fn git_command(repo_path: &Path) -> Result<Command, String> {
         .arg("-c")
         .arg("diff.external=")
         .env("GIT_OPTIONAL_LOCKS", "0")
+        .env("GIT_NO_LAZY_FETCH", "1")
         .env("GIT_TERMINAL_PROMPT", "0")
         .env("GIT_PAGER", "cat");
     for key in [
@@ -1523,6 +1537,7 @@ fn git_error(stderr: &[u8], status: String) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
     use std::path::PathBuf;
     use std::sync::atomic::{AtomicU64, Ordering};
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -1608,6 +1623,10 @@ mod tests {
         assert_eq!(
             environment.get("GIT_OPTIONAL_LOCKS"),
             Some(&Some("0".to_string()))
+        );
+        assert_eq!(
+            environment.get("GIT_NO_LAZY_FETCH"),
+            Some(&Some("1".to_string()))
         );
         assert_eq!(environment.get("GIT_CONFIG_COUNT"), Some(&None));
         assert_eq!(environment.get("GIT_CONFIG_PARAMETERS"), Some(&None));
@@ -1828,11 +1847,12 @@ mod tests {
     }
 
     #[test]
-    fn new_image_preview_rejects_content_that_drifted_after_snapshot() {
+    fn new_image_preview_reads_the_immutable_snapshot_blob_after_worktree_drift() {
         let fixture = Fixture::new("image-drift");
         fixture.write("preview.png", "base-image");
         fixture.commit_all("base image");
         fixture.write("preview.png", "snapshot-image");
+        run(&fixture.path, &["add", "preview.png"]);
         let snapshot =
             local_review_snapshot_for_path(ReviewProvider::Github, "acme", "demo", &fixture.path)
                 .expect("snapshot");
@@ -1854,7 +1874,7 @@ mod tests {
         assert_eq!(preview.size, "snapshot-image".len());
 
         fixture.write("preview.png", "changed-after-snapshot");
-        let error = local_file_preview_for_path(
+        let preview = local_file_preview_for_path(
             &fixture.path,
             &snapshot.base_sha,
             &snapshot.diffstat,
@@ -1863,8 +1883,13 @@ mod tests {
             "new",
             "image/png",
         )
-        .expect_err("drifted preview");
-        assert!(error.contains("changed after this snapshot"));
+        .expect("snapshot blob remains available");
+        let decoded = base64::Engine::decode(
+            &base64::engine::general_purpose::STANDARD,
+            preview.data_url.split_once(',').expect("data URL").1,
+        )
+        .expect("preview bytes");
+        assert_eq!(decoded, b"snapshot-image");
     }
 
     #[test]
@@ -1918,50 +1943,6 @@ mod tests {
         assert!(!error.contains("open"));
     }
 
-    #[cfg(unix)]
-    #[test]
-    fn capability_open_rejects_intermediate_symlinks_that_escape_the_repository() {
-        use std::os::unix::fs::symlink;
-
-        let fixture = Fixture::new("intermediate-link");
-        let external = tempfile::tempdir().expect("external directory");
-        fs::write(external.path().join("secret.txt"), "private\n").expect("external secret");
-        symlink(external.path(), fixture.path.join("redirect")).expect("directory symlink");
-        let root = open_repo_dir(&fixture.path).expect("repository capability");
-
-        let error = open_repo_file(&root, Path::new("redirect/secret.txt"))
-            .expect_err("outside path must be rejected");
-
-        assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn capability_open_does_not_block_on_a_fifo() {
-        use std::ffi::CString;
-        use std::os::unix::ffi::OsStrExt;
-        use std::time::{Duration, Instant};
-
-        let fixture = Fixture::new("fifo");
-        let fifo_path = fixture.path.join("preview.png");
-        let fifo_path_c = CString::new(fifo_path.as_os_str().as_bytes()).expect("fifo path");
-        assert_eq!(unsafe { libc::mkfifo(fifo_path_c.as_ptr(), 0o600) }, 0);
-        let writer_path = fifo_path.clone();
-        let writer = thread::spawn(move || {
-            thread::sleep(Duration::from_millis(250));
-            let _ = fs::OpenOptions::new().write(true).open(writer_path);
-        });
-        let root = open_repo_dir(&fixture.path).expect("repository capability");
-
-        let started = Instant::now();
-        let file = open_repo_file(&root, Path::new("preview.png")).expect("open fifo");
-        let elapsed = started.elapsed();
-
-        assert!(elapsed < Duration::from_millis(100));
-        assert!(!file.metadata().expect("fifo metadata").is_file());
-        writer.join().expect("writer thread");
-    }
-
     #[test]
     fn preview_hashing_enforces_cumulative_byte_and_candidate_limits() {
         let fixture = Fixture::new("preview-budget");
@@ -1969,6 +1950,7 @@ mod tests {
         for path in paths {
             fixture.write(path, "1234");
         }
+        run(&fixture.path, &["add", "a.png", "b.png", "c.png"]);
         let diffstat = paths
             .into_iter()
             .map(|path| DiffstatEntry {
@@ -2001,6 +1983,7 @@ mod tests {
     fn preview_fingerprints_change_when_content_changes() {
         let fixture = Fixture::new("preview-revalidation");
         fixture.write("preview.png", "first");
+        run(&fixture.path, &["add", "preview.png"]);
         let diffstat = vec![DiffstatEntry {
             status: "modified".to_string(),
             lines_added: 0,
@@ -2011,13 +1994,37 @@ mod tests {
         let (first, _) = collect_preview_oids(&fixture.path, &diffstat).expect("first hash");
 
         fixture.write("preview.png", "other");
+        run(&fixture.path, &["add", "preview.png"]);
         let (second, _) = collect_preview_oids(&fixture.path, &diffstat).expect("second hash");
 
         assert_ne!(first, second);
     }
 
     #[test]
-    fn unreadable_preview_candidates_remain_non_fatal_warnings() {
+    fn unstaged_image_content_is_not_read_into_the_snapshot() {
+        let fixture = Fixture::new("unstaged-preview");
+        fs::write(fixture.path.join("preview.png"), b"base\0").expect("base image");
+        fixture.commit_all("base image");
+        fs::write(
+            fixture.path.join("preview.png"),
+            b"unstaged-image-content\0",
+        )
+        .expect("unstaged image");
+
+        let snapshot =
+            local_review_snapshot_for_path(ReviewProvider::Github, "acme", "demo", &fixture.path)
+                .expect("snapshot");
+
+        assert!(snapshot.preview_oid.is_empty());
+        assert!(snapshot
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("unstaged content")));
+        assert!(!snapshot.diff.contains("unstaged-image-content"));
+    }
+
+    #[test]
+    fn previews_missing_from_the_index_remain_non_fatal_warnings() {
         let fixture = Fixture::new("preview-read-warning");
         let diffstat = vec![DiffstatEntry {
             status: "added".to_string(),
@@ -2033,7 +2040,7 @@ mod tests {
         assert!(oids.is_empty());
         assert!(warnings
             .iter()
-            .any(|warning| warning.contains("could not be opened safely")));
+            .any(|warning| warning.contains("unavailable from the Git index")));
     }
 
     #[test]
