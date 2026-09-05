@@ -648,6 +648,8 @@ fn tracked_diffstat(
         repo_path,
         &[
             "diff",
+            "--no-ext-diff",
+            "--no-textconv",
             "--name-status",
             "-z",
             "--find-renames",
@@ -661,7 +663,16 @@ fn tracked_diffstat(
     let mut entries = parse_name_status(&output)?;
     let numstat = git_bytes_limited_with_control(
         repo_path,
-        &["diff", "--numstat", "-z", "--find-renames", base_sha, "--"],
+        &[
+            "diff",
+            "--no-ext-diff",
+            "--no-textconv",
+            "--numstat",
+            "-z",
+            "--find-renames",
+            base_sha,
+            "--",
+        ],
         MAX_GIT_METADATA_BYTES,
         "Local review line metadata",
         control,
@@ -1056,7 +1067,36 @@ fn open_repo_file(root: &Dir, relative: &Path) -> io::Result<File> {
 
 fn git_command(repo_path: &Path) -> Result<Command, String> {
     let mut command = Command::new(trusted_git_path()?);
-    command.arg("-C").arg(repo_path);
+    command
+        .arg("-C")
+        .arg(repo_path)
+        .arg("--no-optional-locks")
+        .arg("-c")
+        .arg("core.fsmonitor=false")
+        .arg("-c")
+        .arg("diff.external=")
+        .env("GIT_OPTIONAL_LOCKS", "0")
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .env("GIT_PAGER", "cat");
+    for key in [
+        "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+        "GIT_COMMON_DIR",
+        "GIT_CONFIG",
+        "GIT_CONFIG_COUNT",
+        "GIT_CONFIG_GLOBAL",
+        "GIT_CONFIG_NOSYSTEM",
+        "GIT_CONFIG_PARAMETERS",
+        "GIT_CONFIG_SYSTEM",
+        "GIT_DIFF_OPTS",
+        "GIT_DIR",
+        "GIT_EXEC_PATH",
+        "GIT_EXTERNAL_DIFF",
+        "GIT_INDEX_FILE",
+        "GIT_OBJECT_DIRECTORY",
+        "GIT_WORK_TREE",
+    ] {
+        command.env_remove(key);
+    }
     #[cfg(unix)]
     {
         use std::os::unix::process::CommandExt;
@@ -1541,6 +1581,101 @@ mod tests {
             "{}",
             String::from_utf8_lossy(&output.stderr)
         );
+    }
+
+    #[test]
+    fn git_command_disables_mutating_and_injected_git_features() {
+        let command = git_command(Path::new("repository")).expect("git command");
+        let args = command
+            .get_args()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect::<Vec<_>>();
+        assert!(args
+            .windows(2)
+            .any(|args| args == ["-c", "core.fsmonitor=false"]));
+        assert!(args.windows(2).any(|args| args == ["-c", "diff.external="]));
+        assert!(args.iter().any(|arg| arg == "--no-optional-locks"));
+
+        let environment = command
+            .get_envs()
+            .map(|(key, value)| {
+                (
+                    key.to_string_lossy().into_owned(),
+                    value.map(|value| value.to_string_lossy().into_owned()),
+                )
+            })
+            .collect::<BTreeMap<_, _>>();
+        assert_eq!(
+            environment.get("GIT_OPTIONAL_LOCKS"),
+            Some(&Some("0".to_string()))
+        );
+        assert_eq!(environment.get("GIT_CONFIG_COUNT"), Some(&None));
+        assert_eq!(environment.get("GIT_CONFIG_PARAMETERS"), Some(&None));
+        assert_eq!(environment.get("GIT_EXTERNAL_DIFF"), Some(&None));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn snapshot_does_not_execute_repository_configured_git_helpers() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let fixture = Fixture::new("disabled-git-helpers");
+        fixture.write(".gitattributes", "*.txt diff=unsafe\n");
+        fixture.write("tracked.txt", "base\n");
+        fixture.commit_all("base");
+
+        let fsmonitor_marker = fixture.path.join("fsmonitor-ran");
+        let fsmonitor_helper = fixture.path.join("fsmonitor-helper.sh");
+        fs::write(
+            &fsmonitor_helper,
+            format!("#!/bin/sh\n: > '{}'\n", fsmonitor_marker.display()),
+        )
+        .expect("write fsmonitor helper");
+        let mut permissions = fs::metadata(&fsmonitor_helper)
+            .expect("fsmonitor helper metadata")
+            .permissions();
+        permissions.set_mode(0o700);
+        fs::set_permissions(&fsmonitor_helper, permissions).expect("chmod fsmonitor helper");
+
+        let textconv_marker = fixture.path.join("textconv-ran");
+        let textconv_helper = fixture.path.join("textconv-helper.sh");
+        fs::write(
+            &textconv_helper,
+            format!(
+                "#!/bin/sh\n: > '{}'\ncat \"$1\"\n",
+                textconv_marker.display()
+            ),
+        )
+        .expect("write textconv helper");
+        let mut permissions = fs::metadata(&textconv_helper)
+            .expect("textconv helper metadata")
+            .permissions();
+        permissions.set_mode(0o700);
+        fs::set_permissions(&textconv_helper, permissions).expect("chmod textconv helper");
+
+        run(
+            &fixture.path,
+            &[
+                "config",
+                "core.fsmonitor",
+                fsmonitor_helper.to_str().expect("utf-8 helper path"),
+            ],
+        );
+        run(
+            &fixture.path,
+            &[
+                "config",
+                "diff.unsafe.textconv",
+                textconv_helper.to_str().expect("utf-8 helper path"),
+            ],
+        );
+        fixture.write("tracked.txt", "changed\n");
+
+        local_review_snapshot_for_path(ReviewProvider::Github, "acme", "demo", &fixture.path)
+            .expect("snapshot");
+
+        assert!(!fsmonitor_marker.exists());
+        assert!(!textconv_marker.exists());
     }
 
     #[test]
