@@ -60,6 +60,11 @@ pub(super) enum LoadEvent {
         request_id: u64,
         result: Result<LocalReviewSnapshot, String>,
     },
+    LocalRepoEligibility {
+        request_id: u64,
+        repo_generation: u64,
+        eligible_repositories: Vec<RepoEligibilityIdentity>,
+    },
     Detail {
         request_id: u64,
         result: Result<PullRequestDetail, String>,
@@ -84,6 +89,32 @@ pub(super) enum LoadEvent {
         reviewed: Vec<u32>,
         running: Vec<u32>,
     },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct RepoEligibilityIdentity {
+    provider: ReviewProvider,
+    workspace: String,
+    repo: String,
+    local_path: Option<String>,
+}
+
+impl RepoEligibilityIdentity {
+    pub(super) fn from_repo(repo: &RepoRef) -> Self {
+        Self {
+            provider: repo.provider,
+            workspace: repo.workspace.clone(),
+            repo: repo.repo.clone(),
+            local_path: repo.local_path.clone(),
+        }
+    }
+
+    pub(super) fn matches(&self, repo: &RepoRef) -> bool {
+        self.provider == repo.provider
+            && self.workspace == repo.workspace
+            && self.repo == repo.repo
+            && self.local_path == repo.local_path
+    }
 }
 
 pub(super) struct Loader {
@@ -163,6 +194,27 @@ impl Loader {
                 cancellation,
             );
             let _ = sender.send(LoadEvent::LocalSnapshot { request_id, result });
+        });
+    }
+
+    pub(super) fn local_repo_eligibility(
+        &self,
+        request_id: u64,
+        repo_generation: u64,
+        repos: Vec<RepoRef>,
+    ) {
+        let sender = self.sender.clone();
+        thread::spawn(move || {
+            let eligible_repositories = repos
+                .iter()
+                .filter(|repo| local_repo::has_usable_configured_path(repo))
+                .map(RepoEligibilityIdentity::from_repo)
+                .collect();
+            let _ = sender.send(LoadEvent::LocalRepoEligibility {
+                request_id,
+                repo_generation,
+                eligible_repositories,
+            });
         });
     }
 

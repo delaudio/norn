@@ -14,7 +14,6 @@ use unicode_segmentation::UnicodeSegmentation;
 use super::image_diff::{ImageDiffState, ImageVersionState};
 use super::loading::LoadState;
 use crate::config::{RepoRef, ReviewProvider};
-use crate::local_repo;
 use crate::local_review::LocalReviewSnapshot;
 use crate::services::bitbucket::{PrComment, PullRequestDetail, PullRequestSummary};
 use crate::services::review::{AiReviewRunState, AiReviewRunStatus};
@@ -22,6 +21,8 @@ use crate::services::review::{AiReviewRunState, AiReviewRunStatus};
 #[derive(Clone, Copy)]
 pub struct TuiState<'a> {
     pub repos: &'a [RepoRef],
+    pub visible_repo_indices: &'a [usize],
+    pub repo_eligibility_loading: bool,
     pub selected_repo: usize,
     pub focus: FocusPane,
     pub pull_requests: &'a [PullRequestSummary],
@@ -234,9 +235,9 @@ pub fn mouse_target(area: Rect, x: u16, y: u16, state: TuiState<'_>) -> Option<M
     let [repos, filters] = *left_areas().split(left) else {
         return None;
     };
-    let visible_repos = visible_repository_indices(state);
-    if let Some(index) = list_index_at(repos, x, y, visible_repos.len()) {
-        return visible_repos
+    if let Some(index) = list_index_at(repos, x, y, state.visible_repo_indices.len()) {
+        return state
+            .visible_repo_indices
             .get(index)
             .copied()
             .map(MouseTarget::Repository);
@@ -406,8 +407,15 @@ fn render_left_panel(frame: &mut Frame<'_>, area: Rect, state: TuiState<'_>) {
 }
 
 fn render_repos(frame: &mut Frame<'_>, area: Rect, state: TuiState<'_>) {
-    let visible_repos = visible_repository_indices(state);
-    let items = if visible_repos.is_empty() && state.loading.repo.is_loading() {
+    let items = if state.visible_repo_indices.is_empty()
+        && state.pr_filter == PrListFilter::Local
+        && state.repo_eligibility_loading
+    {
+        vec![ListItem::new(loading_line(
+            "Checking local repositories",
+            state.loading.tick,
+        ))]
+    } else if state.visible_repo_indices.is_empty() && state.loading.repo.is_loading() {
         vec![ListItem::new(loading_line(
             "Resolving repository",
             state.loading.tick,
@@ -417,15 +425,17 @@ fn render_repos(frame: &mut Frame<'_>, area: Rect, state: TuiState<'_>) {
             Span::styled("Error: ", error_style()),
             Span::styled(error.to_string(), muted_style()),
         ]))]
-    } else if visible_repos.is_empty() {
+    } else if state.visible_repo_indices.is_empty() {
         vec![ListItem::new(if state.pr_filter == PrListFilter::Local {
             "No repositories with a usable local path"
         } else {
             "No repositories configured"
         })]
     } else {
-        visible_repos
-            .into_iter()
+        state
+            .visible_repo_indices
+            .iter()
+            .copied()
             .filter_map(|index| state.repos.get(index).map(|repo| (index, repo)))
             .map(|(index, repo)| {
                 let selected = index == state.selected_repo;
@@ -463,18 +473,6 @@ fn render_repos(frame: &mut Frame<'_>, area: Rect, state: TuiState<'_>) {
         state.focus == FocusPane::Repositories,
     ));
     frame.render_widget(list, area);
-}
-
-fn visible_repository_indices(state: TuiState<'_>) -> Vec<usize> {
-    state
-        .repos
-        .iter()
-        .enumerate()
-        .filter(|(_, repo)| {
-            state.pr_filter != PrListFilter::Local || local_repo::has_usable_configured_path(repo)
-        })
-        .map(|(index, _)| index)
-        .collect()
 }
 
 fn render_pr_filters(frame: &mut Frame<'_>, area: Rect, selected_filter: PrListFilter) {
@@ -2473,7 +2471,7 @@ mod tests {
             review_id: 0x8000_0042,
             diff: "diff --git a/src/a.rs b/src/a.rs\n--- a/src/a.rs\n+++ b/src/a.rs\n@@ -1 +1 @@\n-old\n+new\n".to_string(),
             diffstat: vec![],
-            preview_sha256: Default::default(),
+            preview_oid: Default::default(),
             warnings: vec![],
         }
     }
@@ -2496,6 +2494,8 @@ mod tests {
                     frame,
                     TuiState {
                         repos: &repos,
+                        visible_repo_indices: &[0],
+                        repo_eligibility_loading: false,
                         selected_repo: 0,
                         focus: FocusPane::PullRequests,
                         pull_requests: &[],
@@ -2550,6 +2550,8 @@ mod tests {
                     frame,
                     TuiState {
                         repos: &[],
+                        visible_repo_indices: &[],
+                        repo_eligibility_loading: false,
                         selected_repo: 0,
                         focus: FocusPane::Repositories,
                         pull_requests: &[],
@@ -2592,6 +2594,57 @@ mod tests {
     }
 
     #[test]
+    fn renders_local_repository_eligibility_as_loading() {
+        let backend = TestBackend::new(120, 20);
+        let mut terminal = Terminal::new(backend).expect("terminal");
+
+        terminal
+            .draw(|frame| {
+                render(
+                    frame,
+                    TuiState {
+                        repos: &[],
+                        visible_repo_indices: &[],
+                        repo_eligibility_loading: true,
+                        selected_repo: 0,
+                        focus: FocusPane::Repositories,
+                        pull_requests: &[],
+                        local_snapshot: None,
+                        pr_filter: PrListFilter::Local,
+                        selected_pr: 0,
+                        detail: None,
+                        comments: &[],
+                        ai_reviewed_pr_ids: &[],
+                        ai_review_running_pr_ids: &[],
+                        diff: None,
+                        drafts: &[],
+                        composer: None,
+                        ai_review: None,
+                        ai_review_output: None,
+                        detail_view: DetailView::PullRequest,
+                        detail_scroll: 0,
+                        ai_review_scroll: 0,
+                        diff_scroll: 0,
+                        selected_diff_file: 0,
+                        diff_view_mode: DiffViewMode::Unified,
+                        rendered_diff_output: None,
+                        image_diff: None,
+                        image_protocol: "unsupported",
+                        loading: LoadingView::idle(),
+                        error: None,
+                        status: "Checking configured local repositories...",
+                        diff_prompt_open: false,
+                    },
+                );
+            })
+            .expect("draw");
+
+        let text = buffer_text(&terminal);
+        assert!(text.contains("Checking local repositories"));
+        assert!(!text.contains("No repositories with a usable local path"));
+    }
+
+    #[test]
     fn renders_selected_repository_detail() {
         let backend = TestBackend::new(140, 24);
         let mut terminal = Terminal::new(backend).expect("terminal");
@@ -2622,6 +2675,8 @@ mod tests {
                     frame,
                     TuiState {
                         repos: &repos,
+                        visible_repo_indices: &[0],
+                        repo_eligibility_loading: false,
                         selected_repo: 0,
                         focus: FocusPane::PullRequests,
                         pull_requests: &pull_requests,
@@ -2719,6 +2774,8 @@ mod tests {
                     frame,
                     TuiState {
                         repos: &[],
+                        visible_repo_indices: &[],
+                        repo_eligibility_loading: false,
                         selected_repo: 0,
                         focus: FocusPane::PullRequests,
                         pull_requests: &pull_requests,
@@ -2794,6 +2851,8 @@ mod tests {
                     frame,
                     TuiState {
                         repos: &[],
+                        visible_repo_indices: &[],
+                        repo_eligibility_loading: false,
                         selected_repo: 0,
                         focus: FocusPane::PullRequests,
                         pull_requests: &[],
@@ -2849,6 +2908,8 @@ mod tests {
                     frame,
                     TuiState {
                         repos: &[],
+                        visible_repo_indices: &[],
+                        repo_eligibility_loading: false,
                         selected_repo: 0,
                         focus: FocusPane::PullRequests,
                         pull_requests: &[],
@@ -2934,6 +2995,8 @@ mod tests {
         ];
         let state = TuiState {
             repos: &repos,
+            visible_repo_indices: &[0, 1],
+            repo_eligibility_loading: false,
             selected_repo: 0,
             focus: FocusPane::Repositories,
             pull_requests: &pull_requests,
@@ -2978,6 +3041,8 @@ mod tests {
     fn maps_mouse_clicks_to_pull_request_filter_segments() {
         let state = TuiState {
             repos: &[],
+            visible_repo_indices: &[],
+            repo_eligibility_loading: false,
             selected_repo: 0,
             focus: FocusPane::Repositories,
             pull_requests: &[],
@@ -3098,6 +3163,8 @@ mod tests {
                     frame,
                     TuiState {
                         repos: &[],
+                        visible_repo_indices: &[],
+                        repo_eligibility_loading: false,
                         selected_repo: 0,
                         focus: FocusPane::PullRequests,
                         pull_requests: &[],
@@ -3164,6 +3231,8 @@ mod tests {
                     frame,
                     TuiState {
                         repos: &[],
+                        visible_repo_indices: &[],
+                        repo_eligibility_loading: false,
                         selected_repo: 0,
                         focus: FocusPane::Diff,
                         pull_requests: &[],
@@ -3233,6 +3302,8 @@ mod tests {
                     frame,
                     TuiState {
                         repos: &[],
+                        visible_repo_indices: &[],
+                        repo_eligibility_loading: false,
                         selected_repo: 0,
                         focus: FocusPane::Diff,
                         pull_requests: &[],
@@ -3301,6 +3372,8 @@ mod tests {
                     frame,
                     TuiState {
                         repos: &[],
+                        visible_repo_indices: &[],
+                        repo_eligibility_loading: false,
                         selected_repo: 0,
                         focus: FocusPane::Diff,
                         pull_requests: &[],
@@ -3381,6 +3454,8 @@ mod tests {
                     frame,
                     TuiState {
                         repos: &[],
+                        visible_repo_indices: &[],
+                        repo_eligibility_loading: false,
                         selected_repo: 0,
                         focus: FocusPane::PullRequests,
                         pull_requests: &[],
@@ -3447,6 +3522,8 @@ mod tests {
                     frame,
                     TuiState {
                         repos: &[],
+                        visible_repo_indices: &[],
+                        repo_eligibility_loading: false,
                         selected_repo: 0,
                         focus: FocusPane::PullRequests,
                         pull_requests: &[],
@@ -3516,6 +3593,8 @@ mod tests {
                     frame,
                     TuiState {
                         repos: &[],
+                        visible_repo_indices: &[],
+                        repo_eligibility_loading: false,
                         selected_repo: 0,
                         focus: FocusPane::PullRequests,
                         pull_requests: &[],
@@ -3584,6 +3663,8 @@ mod tests {
                     frame,
                     TuiState {
                         repos: &[],
+                        visible_repo_indices: &[],
+                        repo_eligibility_loading: false,
                         selected_repo: 0,
                         focus: FocusPane::Diff,
                         pull_requests: &[],
@@ -3666,6 +3747,8 @@ mod tests {
                     frame,
                     TuiState {
                         repos: &[],
+                        visible_repo_indices: &[],
+                        repo_eligibility_loading: false,
                         selected_repo: 0,
                         focus: FocusPane::Diff,
                         pull_requests: &[],

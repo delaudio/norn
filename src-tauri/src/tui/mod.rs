@@ -26,7 +26,6 @@ use zeroize::Zeroizing;
 
 use crate::config::{self, AiProvider, AppConfig, RepoRef};
 use crate::credentials::{self, CredentialProvider, CredentialSource, CredentialStatus};
-use crate::local_repo;
 use crate::local_review::{get_local_file_preview_native, LocalReviewSnapshot};
 use crate::readiness::{self, ReadinessIssueSeverity, ReadinessStatus};
 use crate::repo_config;
@@ -781,6 +780,8 @@ impl SettingsEditor {
 
 struct TuiApp {
     repos: Vec<RepoRef>,
+    repo_generation: u64,
+    visible_repo_indices: Vec<usize>,
     selected_repo: usize,
     focus: FocusPane,
     pull_requests: Vec<PullRequestSummary>,
@@ -829,6 +830,8 @@ struct TuiApp {
     loader: Loader,
     next_request_id: u64,
     repo_request_id: u64,
+    repo_eligibility_request_id: u64,
+    repo_eligibility_loading: bool,
     pr_request_id: u64,
     ai_request_id: u64,
     marker_generation: u64,
@@ -886,8 +889,11 @@ impl TuiApp {
     }
 
     fn from_repos(repos: Vec<RepoRef>) -> Self {
+        let visible_repo_indices = (0..repos.len()).collect();
         Self {
             repos,
+            repo_generation: 1,
+            visible_repo_indices,
             selected_repo: 0,
             settings_open: false,
             settings_field: SettingsField::AiProvider,
@@ -944,6 +950,8 @@ impl TuiApp {
             loader: Loader::new(),
             next_request_id: 1,
             repo_request_id: 0,
+            repo_eligibility_request_id: 0,
+            repo_eligibility_loading: false,
             pr_request_id: 0,
             ai_request_id: 0,
             marker_generation: 0,
@@ -984,6 +992,12 @@ impl TuiApp {
         self.spinner_tick = self.spinner_tick.wrapping_add(1);
         while let Some(event) = self.loader.try_recv() {
             self.apply_load_event(event);
+        }
+        if self.pr_filter == PrListFilter::Local
+            && self.spinner_tick.is_multiple_of(8)
+            && !self.repo_eligibility_loading
+        {
+            self.refresh_local_repo_eligibility();
         }
         self.ai_poll_tick = self.ai_poll_tick.wrapping_add(1);
         if self.ai_poll_tick.is_multiple_of(4)
@@ -1030,9 +1044,20 @@ impl TuiApp {
                 match result {
                     Ok(repo) => {
                         self.repos = vec![repo];
+                        self.repo_generation = self.repo_generation.wrapping_add(1).max(1);
                         self.selected_repo = 0;
                         self.repo_load = LoadState::Ready;
-                        self.load_selected_repo();
+                        if self.pr_filter == PrListFilter::Local {
+                            self.loader.cancel_local_snapshot();
+                            self.clear_pr_context_for_repo_load();
+                            self.visible_repo_indices.clear();
+                            self.pr_list_load = LoadState::Loading;
+                            self.status = "Checking configured local repositories...".to_string();
+                            self.refresh_local_repo_eligibility_for_replaced_repos();
+                        } else {
+                            self.visible_repo_indices = vec![0];
+                            self.load_selected_repo();
+                        }
                     }
                     Err(error) => {
                         self.repo_load = LoadState::Failed(error.clone());
@@ -1139,6 +1164,41 @@ impl TuiApp {
                         self.ai_review_load = LoadState::Idle;
                         self.status = "Failed to load local changes".to_string();
                     }
+                }
+            }
+            LoadEvent::LocalRepoEligibility {
+                request_id,
+                repo_generation,
+                eligible_repositories,
+            } if request_id == self.repo_eligibility_request_id => {
+                self.repo_eligibility_loading = false;
+                if self.pr_filter != PrListFilter::Local {
+                    return;
+                }
+                if repo_generation != self.repo_generation {
+                    self.refresh_local_repo_eligibility();
+                    return;
+                }
+                let eligible_indices = self
+                    .repos
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, repo)| {
+                        eligible_repositories
+                            .iter()
+                            .any(|identity| identity.matches(repo))
+                    })
+                    .map(|(index, _)| index)
+                    .collect();
+                let previous_indices =
+                    std::mem::replace(&mut self.visible_repo_indices, eligible_indices);
+                let previous_selection = self.selected_repo;
+                self.reconcile_selected_repo();
+                if previous_indices != self.visible_repo_indices
+                    || previous_selection != self.selected_repo
+                    || self.pr_list_load == LoadState::Idle
+                {
+                    self.load_selected_repo();
                 }
             }
             LoadEvent::Detail { request_id, result } if request_id == self.pr_request_id => {
@@ -1857,7 +1917,7 @@ impl TuiApp {
     }
 
     fn select_next_repo(&mut self) {
-        let visible = self.visible_repo_indices();
+        let visible = &self.visible_repo_indices;
         if visible.is_empty() {
             self.selected_repo = 0;
             return;
@@ -1874,7 +1934,7 @@ impl TuiApp {
     }
 
     fn select_previous_repo(&mut self) {
-        let visible = self.visible_repo_indices();
+        let visible = &self.visible_repo_indices;
         if visible.is_empty() {
             self.selected_repo = 0;
             return;
@@ -1891,7 +1951,7 @@ impl TuiApp {
     }
 
     fn select_repo(&mut self, index: usize) {
-        if !self.visible_repo_indices().contains(&index) {
+        if !self.visible_repo_indices.contains(&index) {
             return;
         }
         self.focus = FocusPane::Repositories;
@@ -1993,32 +2053,51 @@ impl TuiApp {
         }
         self.pr_filter = filter;
         self.selected_pr = 0;
-        self.reconcile_selected_repo();
-        self.load_selected_repo();
+        if filter == PrListFilter::Local {
+            self.loader.cancel_local_snapshot();
+            self.clear_pr_context_for_repo_load();
+            self.visible_repo_indices.clear();
+            self.pr_list_load = LoadState::Loading;
+            self.status = "Checking configured local repositories...".to_string();
+            self.refresh_local_repo_eligibility();
+        } else {
+            self.visible_repo_indices = (0..self.repos.len()).collect();
+            self.reconcile_selected_repo();
+            self.load_selected_repo();
+        }
     }
 
-    fn visible_repo_indices(&self) -> Vec<usize> {
-        self.repos
-            .iter()
-            .enumerate()
-            .filter(|(_, repo)| {
-                self.pr_filter != PrListFilter::Local
-                    || local_repo::has_usable_configured_path(repo)
-            })
-            .map(|(index, _)| index)
-            .collect()
+    fn refresh_local_repo_eligibility(&mut self) {
+        if self.repo_eligibility_loading || self.pr_filter != PrListFilter::Local {
+            return;
+        }
+        self.start_local_repo_eligibility();
+    }
+
+    fn refresh_local_repo_eligibility_for_replaced_repos(&mut self) {
+        if self.pr_filter != PrListFilter::Local {
+            return;
+        }
+        self.start_local_repo_eligibility();
+    }
+
+    fn start_local_repo_eligibility(&mut self) {
+        let request_id = self.next_request();
+        self.repo_eligibility_request_id = request_id;
+        self.repo_eligibility_loading = true;
+        self.loader
+            .local_repo_eligibility(request_id, self.repo_generation, self.repos.clone());
     }
 
     fn reconcile_selected_repo(&mut self) {
-        let visible = self.visible_repo_indices();
-        if !visible.contains(&self.selected_repo) {
-            self.selected_repo = visible.first().copied().unwrap_or(0);
+        if !self.visible_repo_indices.contains(&self.selected_repo) {
+            self.selected_repo = self.visible_repo_indices.first().copied().unwrap_or(0);
         }
     }
 
     fn load_selected_repo(&mut self) {
         self.loader.cancel_local_snapshot();
-        if !self.visible_repo_indices().contains(&self.selected_repo) {
+        if !self.visible_repo_indices.contains(&self.selected_repo) {
             self.clear_pr_context_for_repo_load();
             self.pr_list_load = LoadState::Idle;
             self.status = if self.pr_filter == PrListFilter::Local {
@@ -2574,7 +2653,7 @@ impl TuiApp {
                         &repo,
                         &base_sha,
                         &snapshot.diffstat,
-                        snapshot.preview_sha256.get(path).map(String::as_str),
+                        snapshot.preview_oid.get(path).map(String::as_str),
                         path,
                         side.provider_value(),
                     )
@@ -2720,7 +2799,7 @@ impl TuiApp {
                 base_sha: Some(snapshot.base_sha.clone()),
                 diff: Some(snapshot.diff.clone()),
                 diffstat: Some(snapshot.diffstat.clone()),
-                local_preview_sha256: snapshot.preview_sha256.clone(),
+                local_preview_oid: snapshot.preview_oid.clone(),
                 local_snapshot_sha256: Some(snapshot.snapshot_sha256.clone()),
                 population_failed: false,
             });
@@ -2760,7 +2839,7 @@ impl TuiApp {
                 None
             },
             diffstat: None,
-            local_preview_sha256: Default::default(),
+            local_preview_oid: Default::default(),
             local_snapshot_sha256: None,
             population_failed: false,
         })
@@ -2984,6 +3063,8 @@ impl TuiApp {
     fn view_state(&self) -> TuiState<'_> {
         TuiState {
             repos: &self.repos,
+            visible_repo_indices: &self.visible_repo_indices,
+            repo_eligibility_loading: self.repo_eligibility_loading,
             selected_repo: self.selected_repo,
             focus: self.focus,
             pull_requests: &self.pull_requests,
@@ -3225,7 +3306,7 @@ mod tests {
             review_id: 0x8000_0042,
             diff: "diff --git a/src/a.rs b/src/a.rs\n--- a/src/a.rs\n+++ b/src/a.rs\n@@ -1 +1 @@\n-old\n+new\n".to_string(),
             diffstat: vec![],
-            preview_sha256: Default::default(),
+            preview_oid: Default::default(),
             warnings: vec![],
         }
     }
@@ -3701,39 +3782,111 @@ review:
 
     #[test]
     fn local_filter_only_exposes_repositories_with_usable_configured_paths() {
-        let usable_path = temp_repo_path("local-filter-usable");
-        fs::create_dir_all(usable_path.join(".git")).expect("create usable git path");
-        let missing_path = temp_repo_path("local-filter-missing");
         let mut unavailable = repo("delaudio", "unavailable");
-        unavailable.local_path = Some(missing_path.display().to_string());
+        unavailable.local_path = Some("/missing/unavailable".to_string());
         let mut usable = repo("delaudio", "usable");
-        usable.local_path = Some(usable_path.display().to_string());
-        let mut app = TuiApp::from_repos(vec![unavailable, usable]);
+        usable.local_path = Some("/missing/usable".to_string());
+        let mut app = TuiApp::from_repos(vec![unavailable, usable.clone()]);
         app.selected_repo = 0;
         app.pr_filter = PrListFilter::Local;
+        app.repo_eligibility_request_id = 7;
+        app.repo_eligibility_loading = true;
 
-        app.reconcile_selected_repo();
+        app.apply_load_event(LoadEvent::LocalRepoEligibility {
+            request_id: 7,
+            repo_generation: app.repo_generation,
+            eligible_repositories: vec![loading::RepoEligibilityIdentity::from_repo(&usable)],
+        });
 
-        assert_eq!(app.visible_repo_indices(), vec![1]);
+        assert_eq!(app.visible_repo_indices, vec![1]);
         assert_eq!(app.selected_repo, 1);
-        let _ = fs::remove_dir_all(usable_path);
+    }
+
+    #[test]
+    fn stale_local_eligibility_generation_cannot_retarget_replaced_repositories() {
+        let old_repo = repo("delaudio", "old");
+        let mut app = TuiApp::from_repos(vec![repo("delaudio", "replacement")]);
+        app.pr_filter = PrListFilter::Local;
+        app.visible_repo_indices.clear();
+        app.repo_generation = 2;
+        app.repo_eligibility_request_id = 7;
+        app.repo_eligibility_loading = true;
+
+        app.apply_load_event(LoadEvent::LocalRepoEligibility {
+            request_id: 7,
+            repo_generation: 1,
+            eligible_repositories: vec![loading::RepoEligibilityIdentity::from_repo(&old_repo)],
+        });
+
+        assert!(app.visible_repo_indices.is_empty());
+        assert!(app.repo_eligibility_loading);
+        assert_ne!(app.repo_eligibility_request_id, 7);
+    }
+
+    #[test]
+    fn current_repo_resolution_checks_local_eligibility_before_exposing_repo() {
+        let mut app = TuiApp::from_repos(Vec::new());
+        app.pr_filter = PrListFilter::Local;
+        app.repo_request_id = 7;
+
+        app.apply_load_event(LoadEvent::CurrentRepo {
+            request_id: 7,
+            result: Ok(repo("delaudio", "norn")),
+        });
+
+        assert!(app.visible_repo_indices.is_empty());
+        assert_eq!(app.repo_generation, 2);
+        assert!(app.repo_eligibility_loading);
+        assert_eq!(app.pr_list_load, LoadState::Loading);
     }
 
     #[test]
     fn local_filter_handles_an_empty_usable_repository_set() {
         let mut app = TuiApp::from_repos(vec![repo("delaudio", "unconfigured")]);
         app.pr_filter = PrListFilter::Local;
+        app.repo_eligibility_request_id = 7;
+        app.repo_eligibility_loading = true;
 
-        app.reconcile_selected_repo();
-        app.load_selected_repo();
+        app.apply_load_event(LoadEvent::LocalRepoEligibility {
+            request_id: 7,
+            repo_generation: app.repo_generation,
+            eligible_repositories: Vec::new(),
+        });
 
-        assert!(app.visible_repo_indices().is_empty());
+        assert!(app.visible_repo_indices.is_empty());
         assert_eq!(app.selected_repo, 0);
         assert!(matches!(app.pr_list_load, LoadState::Idle));
         assert_eq!(
             app.status,
             "No repositories have a usable configured local path"
         );
+    }
+
+    #[test]
+    fn periodic_eligibility_results_invalidate_local_repository_visibility() {
+        let mut configured = repo("delaudio", "dynamic");
+        configured.local_path = Some("/missing/dynamic".to_string());
+        let mut app = TuiApp::from_repos(vec![configured.clone()]);
+        app.pr_filter = PrListFilter::Local;
+        app.visible_repo_indices = vec![0];
+        app.repo_eligibility_request_id = 7;
+        app.repo_eligibility_loading = true;
+
+        app.apply_load_event(LoadEvent::LocalRepoEligibility {
+            request_id: 7,
+            repo_generation: app.repo_generation,
+            eligible_repositories: Vec::new(),
+        });
+        assert!(app.visible_repo_indices.is_empty());
+
+        app.repo_eligibility_request_id = 8;
+        app.repo_eligibility_loading = true;
+        app.apply_load_event(LoadEvent::LocalRepoEligibility {
+            request_id: 8,
+            repo_generation: app.repo_generation,
+            eligible_repositories: vec![loading::RepoEligibilityIdentity::from_repo(&configured)],
+        });
+        assert_eq!(app.visible_repo_indices, vec![0]);
     }
 
     #[test]

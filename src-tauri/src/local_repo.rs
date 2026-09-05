@@ -2,6 +2,8 @@ use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+#[cfg(windows)]
+use std::sync::OnceLock;
 
 use crate::config::{self, RepoRef, ReviewProvider};
 
@@ -111,7 +113,7 @@ pub fn git_origin_matches(
     workspace: &str,
     repo: &str,
 ) -> Result<bool, String> {
-    let output = Command::new("/usr/bin/git")
+    let output = platform_git_command()?
         .arg("-C")
         .arg(path)
         .arg("remote")
@@ -204,7 +206,7 @@ fn redact_git_remote(remote: &str) -> String {
 }
 
 fn git_output(args: &[&str], working_dir: &Path) -> Result<String, String> {
-    let output = Command::new("/usr/bin/git")
+    let output = platform_git_command()?
         .arg("-C")
         .arg(working_dir)
         .args(args)
@@ -219,6 +221,92 @@ fn git_output(args: &[&str], working_dir: &Path) -> Result<String, String> {
         });
     }
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
+fn platform_git_command() -> Result<Command, String> {
+    trusted_git_path().map(Command::new)
+}
+
+#[cfg(not(windows))]
+fn trusted_git_path() -> Result<PathBuf, String> {
+    Ok(PathBuf::from("/usr/bin/git"))
+}
+
+#[cfg(windows)]
+fn trusted_git_path() -> Result<PathBuf, String> {
+    static TRUSTED_GIT_PATH: OnceLock<Result<PathBuf, String>> = OnceLock::new();
+    TRUSTED_GIT_PATH
+        .get_or_init(resolve_trusted_windows_git)
+        .clone()
+}
+
+#[cfg(windows)]
+fn resolve_trusted_windows_git() -> Result<PathBuf, String> {
+    use windows_sys::Win32::UI::Shell::{
+        FOLDERID_LocalAppData, FOLDERID_ProgramFiles, FOLDERID_ProgramFilesX64,
+        FOLDERID_ProgramFilesX86,
+    };
+
+    let mut candidates = Vec::new();
+    for folder_id in [
+        &FOLDERID_ProgramFiles,
+        &FOLDERID_ProgramFilesX64,
+        &FOLDERID_ProgramFilesX86,
+    ] {
+        if let Some(root) = windows_known_folder(folder_id) {
+            candidates.push((root.clone(), root.join("Git/cmd/git.exe")));
+            candidates.push((root.clone(), root.join("Git/bin/git.exe")));
+        }
+    }
+    if let Some(root) = windows_known_folder(&FOLDERID_LocalAppData) {
+        candidates.push((root.clone(), root.join("Programs/Git/cmd/git.exe")));
+        candidates.push((root.clone(), root.join("Programs/Git/bin/git.exe")));
+    }
+
+    candidates
+        .into_iter()
+        .find_map(|(root, candidate)| validated_trusted_executable(&root, &candidate))
+        .ok_or_else(|| {
+            "Cannot locate Git for Windows in a trusted installation directory. Install Git for Windows under Program Files or Local AppData, then restart Norn."
+                .to_string()
+        })
+}
+
+#[cfg(windows)]
+fn windows_known_folder(folder_id: &windows_sys::core::GUID) -> Option<PathBuf> {
+    use std::ffi::OsString;
+    use std::os::windows::ffi::OsStringExt;
+    use std::ptr::null_mut;
+    use windows_sys::Win32::System::Com::CoTaskMemFree;
+    use windows_sys::Win32::UI::Shell::SHGetKnownFolderPath;
+
+    let mut raw_path = null_mut();
+    let result = unsafe { SHGetKnownFolderPath(folder_id, 0, null_mut(), &mut raw_path) };
+    if result < 0 || raw_path.is_null() {
+        if !raw_path.is_null() {
+            unsafe { CoTaskMemFree(raw_path.cast()) };
+        }
+        return None;
+    }
+    let mut length = 0;
+    unsafe {
+        while *raw_path.add(length) != 0 {
+            length += 1;
+        }
+    }
+    let path = PathBuf::from(OsString::from_wide(unsafe {
+        std::slice::from_raw_parts(raw_path, length)
+    }));
+    unsafe { CoTaskMemFree(raw_path.cast()) };
+    Some(path)
+}
+
+#[cfg(any(windows, test))]
+fn validated_trusted_executable(root: &Path, candidate: &Path) -> Option<PathBuf> {
+    let canonical_root = fs::canonicalize(root).ok()?;
+    let canonical_candidate = fs::canonicalize(candidate).ok()?;
+    (canonical_candidate.starts_with(canonical_root) && canonical_candidate.is_file())
+        .then_some(canonical_candidate)
 }
 
 fn current_repo_remote(root: &Path) -> Result<(String, String), String> {
@@ -274,7 +362,18 @@ pub fn configured_repo_path(repo_ref: &RepoRef) -> Option<PathBuf> {
 }
 
 pub fn has_usable_configured_path(repo_ref: &RepoRef) -> bool {
-    configured_repo_path(repo_ref).is_some_and(|path| path.is_dir() && path.join(".git").exists())
+    configured_repo_path(repo_ref).is_some_and(|path| {
+        path.is_dir()
+            && path.join(".git").exists()
+            && git_origin_matches(
+                &path,
+                repo_ref.provider,
+                &repo_ref.workspace,
+                &repo_ref.repo,
+            )
+            .ok()
+                == Some(true)
+    })
 }
 
 pub fn configured_or_discovered_repo(workspace: &str, repo: &str) -> Option<PathBuf> {
@@ -544,5 +643,42 @@ mod tests {
 
         assert!(error.contains("<redacted>@github.com"));
         assert!(!error.contains("secret"));
+    }
+
+    #[test]
+    fn trusted_executable_validation_accepts_only_files_inside_the_install_root() {
+        let root = temp_path("trusted-git-root");
+        let candidate = root.join("Git/cmd/git.exe");
+        fs::create_dir_all(candidate.parent().expect("candidate parent"))
+            .expect("trusted Git directory");
+        fs::write(&candidate, b"fixture").expect("trusted Git fixture");
+
+        let resolved =
+            validated_trusted_executable(&root, &candidate).expect("candidate inside trusted root");
+
+        assert_eq!(
+            resolved,
+            fs::canonicalize(&candidate).expect("canonical path")
+        );
+        fs::remove_dir_all(root).expect("cleanup trusted root");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn trusted_executable_validation_rejects_symlink_escape() {
+        use std::os::unix::fs::symlink;
+
+        let root = temp_path("trusted-git-symlink-root");
+        let outside = temp_path("untrusted-git-target");
+        let candidate = root.join("Git/cmd/git.exe");
+        fs::create_dir_all(candidate.parent().expect("candidate parent"))
+            .expect("trusted Git directory");
+        fs::write(&outside, b"fixture").expect("untrusted Git fixture");
+        symlink(&outside, &candidate).expect("Git symlink fixture");
+
+        assert!(validated_trusted_executable(&root, &candidate).is_none());
+
+        fs::remove_dir_all(root).expect("cleanup trusted root");
+        fs::remove_file(outside).expect("cleanup untrusted target");
     }
 }

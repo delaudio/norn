@@ -228,7 +228,7 @@ pub struct WebDiffState {
     pub diff: Option<String>,
     pub diffstat: Option<Vec<DiffstatEntry>>,
     #[serde(skip)]
-    pub local_preview_sha256: BTreeMap<String, String>,
+    pub local_preview_oid: BTreeMap<String, String>,
     #[serde(skip)]
     pub local_snapshot_sha256: Option<String>,
     pub population_failed: bool,
@@ -329,7 +329,7 @@ impl WebDiffServer {
                 || lock.source_branch != next.source_branch
                 || lock.target_branch != next.target_branch
                 || lock.base_sha != next.base_sha
-                || lock.local_preview_sha256 != next.local_preview_sha256
+                || lock.local_preview_oid != next.local_preview_oid
                 || lock.local_snapshot_sha256 != next.local_snapshot_sha256;
             if !content_changed && next.diffstat.is_none() {
                 next.diffstat = lock.diffstat.clone();
@@ -581,7 +581,7 @@ fn handle_connection(
                                     base_sha,
                                     state_data.diffstat.as_deref().unwrap_or(&[]),
                                     state_data
-                                        .local_preview_sha256
+                                        .local_preview_oid
                                         .get(&file_path)
                                         .map(String::as_str),
                                     &file_path,
@@ -917,7 +917,7 @@ fn same_pull_request(current: &WebDiffState, snapshot: &WebDiffState) -> bool {
         && current.repo == snapshot.repo
         && current.pr_id == snapshot.pr_id
         && current.base_sha == snapshot.base_sha
-        && current.local_preview_sha256 == snapshot.local_preview_sha256
+        && current.local_preview_oid == snapshot.local_preview_oid
         && current.local_snapshot_sha256 == snapshot.local_snapshot_sha256
 }
 
@@ -998,11 +998,55 @@ mod tests {
         stream
             .write_all(request.as_bytes())
             .expect("write HTTP request");
-        let mut response = String::new();
-        stream
-            .read_to_string(&mut response)
-            .expect("read HTTP response");
-        response
+        let expect_body = !request.starts_with("HEAD ");
+        let mut response = Vec::new();
+        let mut chunk = [0u8; 4_096];
+        loop {
+            match stream.read(&mut chunk) {
+                Ok(0) => break,
+                Ok(bytes_read) => {
+                    response.extend_from_slice(&chunk[..bytes_read]);
+                    if complete_http_response(&response, expect_body) {
+                        break;
+                    }
+                }
+                Err(error)
+                    if error.kind() == std::io::ErrorKind::ConnectionReset
+                        && complete_http_response(&response, expect_body) =>
+                {
+                    break;
+                }
+                Err(error) => panic!("read HTTP response: {error}"),
+            }
+        }
+        assert!(
+            complete_http_response(&response, expect_body),
+            "server closed before returning a complete HTTP response"
+        );
+        String::from_utf8(response).expect("HTTP response is UTF-8")
+    }
+
+    fn complete_http_response(response: &[u8], expect_body: bool) -> bool {
+        let Some(header_end) = response
+            .windows(4)
+            .position(|window| window == b"\r\n\r\n")
+            .map(|index| index + 4)
+        else {
+            return false;
+        };
+        if !expect_body {
+            return true;
+        }
+        let Ok(headers) = std::str::from_utf8(&response[..header_end]) else {
+            return false;
+        };
+        let Some(content_length) = headers.lines().find_map(|line| {
+            line.strip_prefix("Content-Length: ")
+                .and_then(|value| value.parse::<usize>().ok())
+        }) else {
+            return false;
+        };
+        response.len() >= header_end.saturating_add(content_length)
     }
 
     #[test]
@@ -1267,7 +1311,7 @@ mod tests {
             base_sha: None,
             diff: Some("diff --git a/a b/a".to_string()),
             diffstat: None,
-            local_preview_sha256: Default::default(),
+            local_preview_oid: Default::default(),
             local_snapshot_sha256: None,
             population_failed: false,
         });
@@ -1412,7 +1456,7 @@ mod tests {
             base_sha: None,
             diff: diff.clone(),
             diffstat: None,
-            local_preview_sha256: Default::default(),
+            local_preview_oid: Default::default(),
             local_snapshot_sha256: None,
             population_failed: false,
         });
@@ -1431,7 +1475,7 @@ mod tests {
             base_sha: None,
             diff,
             diffstat: Some(vec![diffstat(Some("a.png"), Some("a.png"))]),
-            local_preview_sha256: Default::default(),
+            local_preview_oid: Default::default(),
             local_snapshot_sha256: None,
             population_failed: false,
         });

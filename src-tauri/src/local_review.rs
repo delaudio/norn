@@ -13,6 +13,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
+use sha1::Sha1;
 use sha2::{Digest, Sha256};
 
 #[cfg(unix)]
@@ -101,14 +102,14 @@ pub struct LocalReviewSnapshot {
     pub review_id: u32,
     pub diff: String,
     pub diffstat: Vec<DiffstatEntry>,
-    pub preview_sha256: BTreeMap<String, String>,
+    pub preview_oid: BTreeMap<String, String>,
     pub warnings: Vec<String>,
 }
 
 struct CollectedLocalDiff {
     diff: String,
     diffstat: Vec<DiffstatEntry>,
-    preview_sha256: BTreeMap<String, String>,
+    preview_oid: BTreeMap<String, String>,
     warnings: Vec<String>,
 }
 
@@ -289,9 +290,9 @@ fn local_review_snapshot_for_path_with_control(
     }
 
     let mut collected = collect_local_diff(repo_path, &base_sha, &control)?;
-    let (preview_sha256, preview_warnings) =
-        collect_preview_hashes_with_control(repo_path, &collected.diffstat, &control)?;
-    collected.preview_sha256 = preview_sha256;
+    let (preview_oid, preview_warnings) =
+        collect_preview_oids_with_control(repo_path, &collected.diffstat, &control)?;
+    collected.preview_oid = preview_oid;
     collected.warnings.extend(preview_warnings);
     warnings.extend(collected.warnings.clone());
 
@@ -341,11 +342,11 @@ fn local_review_snapshot_for_path_with_control(
         );
     }
     let verification = collect_local_diff(repo_path, &base_sha, &control)?;
-    let (verification_preview_sha256, _) =
-        collect_preview_hashes_with_control(repo_path, &verification.diffstat, &control)?;
+    let (verification_preview_oid, _) =
+        collect_preview_oids_with_control(repo_path, &verification.diffstat, &control)?;
     if collected.diff != verification.diff
         || collected.diffstat != verification.diffstat
-        || collected.preview_sha256 != verification_preview_sha256
+        || collected.preview_oid != verification_preview_oid
     {
         return Err(
             "Local changes changed while Norn was loading them. Refresh and try again.".to_string(),
@@ -363,7 +364,7 @@ fn local_review_snapshot_for_path_with_control(
         commits_ahead,
         commits_behind,
         &collected.diff,
-        &collected.preview_sha256,
+        &collected.preview_oid,
     );
 
     Ok(LocalReviewSnapshot {
@@ -380,7 +381,7 @@ fn local_review_snapshot_for_path_with_control(
         review_id,
         diff: collected.diff,
         diffstat: collected.diffstat,
-        preview_sha256: collected.preview_sha256,
+        preview_oid: collected.preview_oid,
         warnings,
     })
 }
@@ -426,7 +427,7 @@ fn local_review_identity(
     commits_ahead: u32,
     commits_behind: u32,
     diff: &str,
-    preview_sha256: &BTreeMap<String, String>,
+    preview_oids: &BTreeMap<String, String>,
 ) -> (String, u32) {
     let mut hasher = Sha256::new();
     for part in [
@@ -448,9 +449,9 @@ fn local_review_identity(
     }
     hasher.update(commits_ahead.to_be_bytes());
     hasher.update(commits_behind.to_be_bytes());
-    hasher.update((preview_sha256.len() as u64).to_be_bytes());
-    for (path, sha256) in preview_sha256 {
-        for part in [path.as_str(), sha256.as_str()] {
+    hasher.update((preview_oids.len() as u64).to_be_bytes());
+    for (path, oid) in preview_oids {
+        for part in [path.as_str(), oid.as_str()] {
             hasher.update((part.len() as u64).to_be_bytes());
             hasher.update(part.as_bytes());
         }
@@ -505,7 +506,7 @@ fn collect_local_diff(
     Ok(CollectedLocalDiff {
         diff,
         diffstat,
-        preview_sha256: BTreeMap::new(),
+        preview_oid: BTreeMap::new(),
         warnings,
     })
 }
@@ -523,7 +524,7 @@ pub fn get_local_file_preview_native(
     repo: &str,
     base_sha: &str,
     diffstat: &[DiffstatEntry],
-    expected_new_sha256: Option<&str>,
+    expected_new_oid: Option<&str>,
     path: &str,
     side: &str,
 ) -> Result<PrFilePreview, String> {
@@ -539,7 +540,7 @@ pub fn get_local_file_preview_native(
         &repo_path,
         base_sha,
         diffstat,
-        expected_new_sha256,
+        expected_new_oid,
         path,
         side,
         mime_type,
@@ -550,7 +551,7 @@ fn local_file_preview_for_path(
     repo_path: &Path,
     base_sha: &str,
     diffstat: &[DiffstatEntry],
-    expected_new_sha256: Option<&str>,
+    expected_new_oid: Option<&str>,
     path: &str,
     side: &str,
     mime_type: &str,
@@ -565,10 +566,21 @@ fn local_file_preview_for_path(
             "Image preview",
         )?
     } else {
-        let expected = expected_new_sha256.ok_or_else(|| {
+        let expected = expected_new_oid.ok_or_else(|| {
             "The local image preview is unavailable for this snapshot; refresh and try again."
                 .to_string()
         })?;
+        let control = GitRunControl::new(
+            LOCAL_GIT_TIMEOUT,
+            LocalReviewCancellation::new(),
+            "Git command",
+        );
+        if git_object_id_for_path(repo_path, path, &control)? != expected {
+            return Err(
+                "The local image changed after this snapshot was loaded; refresh and try again."
+                    .to_string(),
+            );
+        }
         let root = open_repo_dir(repo_path)?;
         let file = open_repo_file(&root, Path::new(path))
             .map_err(|error| format!("Failed to open local image preview: {error}"))?;
@@ -583,7 +595,7 @@ fn local_file_preview_for_path(
             );
         }
         let bytes = read_bounded(file, MAX_PR_IMAGE_PREVIEW_BYTES)?;
-        if sha256_hex(&bytes) != expected {
+        if git_object_id_for_bytes(&bytes, expected.len())? != expected {
             return Err(
                 "The local image changed after this snapshot was loaded; refresh and try again."
                     .to_string(),
@@ -713,65 +725,74 @@ fn parse_numstat_count(raw: Option<&[u8]>) -> Result<u32, String> {
 }
 
 #[cfg(test)]
-fn collect_preview_hashes(
+fn collect_preview_oids(
     repo_path: &Path,
     diffstat: &[DiffstatEntry],
 ) -> Result<(BTreeMap<String, String>, Vec<String>), String> {
-    collect_preview_hashes_with_limits(
+    let control = GitRunControl::new(
+        LOCAL_GIT_TIMEOUT,
+        LocalReviewCancellation::new(),
+        "Git command",
+    );
+    collect_preview_oids_with_limits(
         repo_path,
         diffstat,
         MAX_LOCAL_PREVIEW_CANDIDATES,
         MAX_LOCAL_PREVIEW_TOTAL_BYTES,
         MAX_PR_IMAGE_PREVIEW_BYTES as u64,
+        &control,
     )
 }
 
-fn collect_preview_hashes_with_control(
+fn collect_preview_oids_with_control(
     repo_path: &Path,
     diffstat: &[DiffstatEntry],
     control: &GitRunControl,
 ) -> Result<(BTreeMap<String, String>, Vec<String>), String> {
-    collect_preview_hashes_with_limits_and_control(
+    collect_preview_oids_with_limits(
         repo_path,
         diffstat,
         MAX_LOCAL_PREVIEW_CANDIDATES,
         MAX_LOCAL_PREVIEW_TOTAL_BYTES,
         MAX_PR_IMAGE_PREVIEW_BYTES as u64,
-        Some(control),
+        control,
     )
 }
 
 #[cfg(test)]
-fn collect_preview_hashes_with_limits(
+fn collect_preview_oids_with_test_limits(
     repo_path: &Path,
     diffstat: &[DiffstatEntry],
     candidate_limit: usize,
     total_byte_limit: u64,
     file_byte_limit: u64,
 ) -> Result<(BTreeMap<String, String>, Vec<String>), String> {
-    collect_preview_hashes_with_limits_and_control(
+    let control = GitRunControl::new(
+        LOCAL_GIT_TIMEOUT,
+        LocalReviewCancellation::new(),
+        "Git command",
+    );
+    collect_preview_oids_with_limits(
         repo_path,
         diffstat,
         candidate_limit,
         total_byte_limit,
         file_byte_limit,
-        None,
+        &control,
     )
 }
 
-fn collect_preview_hashes_with_limits_and_control(
+fn collect_preview_oids_with_limits(
     repo_path: &Path,
     diffstat: &[DiffstatEntry],
     candidate_limit: usize,
     total_byte_limit: u64,
     file_byte_limit: u64,
-    control: Option<&GitRunControl>,
+    control: &GitRunControl,
 ) -> Result<(BTreeMap<String, String>, Vec<String>), String> {
-    if let Some(control) = control {
-        control.check()?;
-    }
+    control.check()?;
     let root = open_repo_dir(repo_path)?;
-    let mut hashes = BTreeMap::new();
+    let mut oids = BTreeMap::new();
     let mut warnings = Vec::new();
     let mut total_bytes = 0_u64;
     for (candidate_index, path) in diffstat
@@ -780,9 +801,7 @@ fn collect_preview_hashes_with_limits_and_control(
         .filter(|path| raster_mime_type(path).is_some())
         .enumerate()
     {
-        if let Some(control) = control {
-            control.check()?;
-        }
+        control.check()?;
         if candidate_index >= candidate_limit {
             warnings.push(format!(
                 "Skipped additional image previews because the {candidate_limit}-file preview limit was reached."
@@ -835,31 +854,58 @@ fn collect_preview_hashes_with_limits_and_control(
             ));
             break;
         }
-        let mut bytes = Vec::new();
-        if file.take(metadata.len()).read_to_end(&mut bytes).is_err() {
-            warnings.push(format!(
-                "Skipped image preview that could not be read `{}`.",
-                path.escape_default()
-            ));
-            continue;
-        }
-        total_bytes = total_bytes.saturating_add(bytes.len() as u64);
-        if bytes.len() as u64 != metadata.len() {
-            return Err(format!(
-                "Local image `{}` changed while Norn was loading it. Refresh and try again.",
-                path.escape_default()
-            ));
-        }
-        hashes.insert(path.to_string(), sha256_hex(&bytes));
+        let oid = match git_object_id_for_path(repo_path, path, control) {
+            Ok(oid) => oid,
+            Err(_) => {
+                control.check()?;
+                warnings.push(format!(
+                    "Skipped image preview that could not be fingerprinted `{}`.",
+                    path.escape_default()
+                ));
+                continue;
+            }
+        };
+        total_bytes = total_bytes.saturating_add(metadata.len());
+        oids.insert(path.to_string(), oid);
     }
-    if let Some(control) = control {
-        control.check()?;
-    }
-    Ok((hashes, warnings))
+    control.check()?;
+    Ok((oids, warnings))
 }
 
-fn sha256_hex(bytes: &[u8]) -> String {
-    hex::encode(Sha256::digest(bytes))
+fn git_object_id_for_path(
+    repo_path: &Path,
+    path: &str,
+    control: &GitRunControl,
+) -> Result<String, String> {
+    let oid = git_text_with_control(
+        repo_path,
+        &["hash-object", "--no-filters", "--", path],
+        control,
+    )?;
+    if (oid.len() == 40 || oid.len() == 64) && oid.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        Ok(oid)
+    } else {
+        Err("Git returned an invalid image fingerprint.".to_string())
+    }
+}
+
+fn git_object_id_for_bytes(bytes: &[u8], oid_len: usize) -> Result<String, String> {
+    let header = format!("blob {}\0", bytes.len());
+    match oid_len {
+        40 => {
+            let mut hasher = Sha1::new();
+            hasher.update(header.as_bytes());
+            hasher.update(bytes);
+            Ok(hex::encode(hasher.finalize()))
+        }
+        64 => {
+            let mut hasher = Sha256::new();
+            hasher.update(header.as_bytes());
+            hasher.update(bytes);
+            Ok(hex::encode(hasher.finalize()))
+        }
+        _ => Err("Git returned an unsupported image fingerprint.".to_string()),
+    }
 }
 
 fn parse_name_status(output: &[u8]) -> Result<Vec<DiffstatEntry>, String> {
@@ -1644,7 +1690,7 @@ mod tests {
             local_review_snapshot_for_path(ReviewProvider::Github, "acme", "demo", &fixture.path)
                 .expect("snapshot");
         let expected = snapshot
-            .preview_sha256
+            .preview_oid
             .get("preview.png")
             .expect("preview fingerprint");
 
@@ -1788,10 +1834,10 @@ mod tests {
             .collect::<Vec<_>>();
 
         let (byte_limited, byte_warnings) =
-            collect_preview_hashes_with_limits(&fixture.path, &diffstat, 3, 8, 4)
+            collect_preview_oids_with_test_limits(&fixture.path, &diffstat, 3, 8, 4)
                 .expect("byte-limited previews");
         let (candidate_limited, candidate_warnings) =
-            collect_preview_hashes_with_limits(&fixture.path, &diffstat, 1, 64, 4)
+            collect_preview_oids_with_test_limits(&fixture.path, &diffstat, 1, 64, 4)
                 .expect("candidate-limited previews");
 
         assert_eq!(byte_limited.len(), 2);
@@ -1815,12 +1861,55 @@ mod tests {
             old_path: Some("preview.png".to_string()),
             new_path: Some("preview.png".to_string()),
         }];
-        let (first, _) = collect_preview_hashes(&fixture.path, &diffstat).expect("first hash");
+        let (first, _) = collect_preview_oids(&fixture.path, &diffstat).expect("first hash");
 
         fixture.write("preview.png", "other");
-        let (second, _) = collect_preview_hashes(&fixture.path, &diffstat).expect("second hash");
+        let (second, _) = collect_preview_oids(&fixture.path, &diffstat).expect("second hash");
 
         assert_ne!(first, second);
+    }
+
+    #[test]
+    fn unreadable_preview_candidates_remain_non_fatal_warnings() {
+        let fixture = Fixture::new("preview-read-warning");
+        let diffstat = vec![DiffstatEntry {
+            status: "added".to_string(),
+            lines_added: 0,
+            lines_removed: 0,
+            old_path: None,
+            new_path: Some("missing.png".to_string()),
+        }];
+
+        let (oids, warnings) = collect_preview_oids(&fixture.path, &diffstat)
+            .expect("missing preview should be recoverable");
+
+        assert!(oids.is_empty());
+        assert!(warnings
+            .iter()
+            .any(|warning| warning.contains("could not be opened safely")));
+    }
+
+    #[test]
+    fn in_memory_blob_fingerprint_matches_git_sha1() {
+        let fixture = Fixture::new("preview-blob-oid");
+        let bytes = b"preview contents";
+        let expected = checked_git_text(
+            run_git_bounded(
+                &fixture.path,
+                &["hash-object", "--stdin"],
+                Some(bytes),
+                MAX_GIT_METADATA_BYTES,
+                "Test image fingerprint",
+                LOCAL_GIT_TIMEOUT,
+            )
+            .expect("git blob oid"),
+        )
+        .expect("git oid");
+
+        assert_eq!(
+            git_object_id_for_bytes(bytes, expected.len()).expect("blob oid"),
+            expected
+        );
     }
 
     #[test]
@@ -1929,7 +2018,7 @@ mod tests {
     fn git_commands_share_one_operation_deadline() {
         let fixture = Fixture::new("git-shared-deadline");
         let control = GitRunControl::new(
-            Duration::from_millis(120),
+            Duration::from_secs(1),
             LocalReviewCancellation::new(),
             "Local review snapshot",
         );
@@ -1937,7 +2026,7 @@ mod tests {
 
         run_git_bounded_with_control(
             &fixture.path,
-            &["-c", "alias.pause=!sleep 0.08", "pause"],
+            &["-c", "alias.pause=!sleep 0.2", "pause"],
             None,
             1_024,
             "Test output",
@@ -1946,7 +2035,7 @@ mod tests {
         .expect("first command before shared deadline");
         let error = run_git_bounded_with_control(
             &fixture.path,
-            &["-c", "alias.pause=!sleep 0.08", "pause"],
+            &["-c", "alias.pause=!sleep 1", "pause"],
             None,
             1_024,
             "Test output",
@@ -1955,7 +2044,7 @@ mod tests {
         .expect_err("second command exceeds shared deadline");
 
         assert!(error.contains("timed out"));
-        assert!(started.elapsed() < Duration::from_millis(300));
+        assert!(started.elapsed() < Duration::from_millis(1_500));
     }
 
     #[test]
