@@ -121,6 +121,7 @@ pub(super) struct Loader {
     sender: Sender<LoadEvent>,
     receiver: Receiver<LoadEvent>,
     local_snapshot_cancellation: Mutex<Option<LocalReviewCancellation>>,
+    local_repo_eligibility_cancellation: Mutex<Option<LocalReviewCancellation>>,
 }
 
 impl Loader {
@@ -130,6 +131,7 @@ impl Loader {
             sender,
             receiver,
             local_snapshot_cancellation: Mutex::new(None),
+            local_repo_eligibility_cancellation: Mutex::new(None),
         }
     }
 
@@ -203,11 +205,18 @@ impl Loader {
         repo_generation: u64,
         repos: Vec<RepoRef>,
     ) {
+        self.cancel_local_repo_eligibility();
+        let cancellation = LocalReviewCancellation::new();
+        if let Ok(mut active) = self.local_repo_eligibility_cancellation.lock() {
+            *active = Some(cancellation.clone());
+        }
+        let control = local_repo::eligibility_control(cancellation);
         let sender = self.sender.clone();
         thread::spawn(move || {
             let eligible_repositories = repos
                 .iter()
-                .filter(|repo| local_repo::has_usable_configured_path(repo))
+                .take_while(|_| control.check().is_ok())
+                .filter(|repo| local_repo::has_usable_configured_path_with_control(repo, &control))
                 .map(RepoEligibilityIdentity::from_repo)
                 .collect();
             let _ = sender.send(LoadEvent::LocalRepoEligibility {
@@ -220,6 +229,14 @@ impl Loader {
 
     pub(super) fn cancel_local_snapshot(&self) {
         if let Ok(mut active) = self.local_snapshot_cancellation.lock() {
+            if let Some(cancellation) = active.take() {
+                cancellation.cancel();
+            }
+        }
+    }
+
+    pub(super) fn cancel_local_repo_eligibility(&self) {
+        if let Ok(mut active) = self.local_repo_eligibility_cancellation.lock() {
             if let Some(cancellation) = active.take() {
                 cancellation.cancel();
             }
@@ -402,6 +419,7 @@ impl Loader {
 impl Drop for Loader {
     fn drop(&mut self) {
         self.cancel_local_snapshot();
+        self.cancel_local_repo_eligibility();
     }
 }
 

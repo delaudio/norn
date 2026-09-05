@@ -44,7 +44,7 @@ impl LocalReviewCancellation {
     }
 }
 
-struct GitRunControl {
+pub(crate) struct GitRunControl {
     deadline: Instant,
     timeout: Duration,
     cancellation: LocalReviewCancellation,
@@ -52,7 +52,7 @@ struct GitRunControl {
 }
 
 impl GitRunControl {
-    fn new(
+    pub(crate) fn new(
         timeout: Duration,
         cancellation: LocalReviewCancellation,
         operation: &'static str,
@@ -65,7 +65,7 @@ impl GitRunControl {
         }
     }
 
-    fn check(&self) -> Result<(), String> {
+    pub(crate) fn check(&self) -> Result<(), String> {
         if self.cancellation.is_cancelled() {
             return Err(format!("{} was cancelled.", self.operation));
         }
@@ -207,13 +207,14 @@ fn local_review_snapshot_for_path_with_control(
             ));
         }
     }
-    let starting_status = git_bytes_limited_with_control(
+    let starting_tracked_status = git_bytes_limited_with_control(
         repo_path,
-        &["status", "--porcelain=v1", "-z", "--untracked-files=normal"],
+        &["status", "--porcelain=v1", "-z", "--untracked-files=no"],
         MAX_GIT_METADATA_BYTES,
         "Local repository status",
         &control,
     )?;
+    let starting_has_untracked = has_untracked_files(repo_path, &control)?;
     let head_sha =
         optional_git_text_with_control(repo_path, &["rev-parse", "--verify", "HEAD"], &control)?;
     let branch = optional_git_text_with_control(
@@ -271,7 +272,7 @@ fn local_review_snapshot_for_path_with_control(
                 .to_string()
         });
     }
-    if status_contains_untracked(&starting_status) {
+    if starting_has_untracked {
         warnings.push(
             "Untracked files are excluded from local review until they are staged or committed."
                 .to_string(),
@@ -290,13 +291,14 @@ fn local_review_snapshot_for_path_with_control(
     collected.warnings.extend(preview_warnings);
     warnings.extend(collected.warnings.clone());
 
-    let ending_status = git_bytes_limited_with_control(
+    let ending_tracked_status = git_bytes_limited_with_control(
         repo_path,
-        &["status", "--porcelain=v1", "-z", "--untracked-files=normal"],
+        &["status", "--porcelain=v1", "-z", "--untracked-files=no"],
         MAX_GIT_METADATA_BYTES,
         "Local repository status",
         &control,
     )?;
+    let ending_has_untracked = has_untracked_files(repo_path, &control)?;
     let ending_head =
         optional_git_text_with_control(repo_path, &["rev-parse", "--verify", "HEAD"], &control)?;
     let ending_branch = optional_git_text_with_control(
@@ -325,7 +327,8 @@ fn local_review_snapshot_for_path_with_control(
         })
         .transpose()?
         .flatten();
-    if starting_status != ending_status
+    if starting_tracked_status != ending_tracked_status
+        || starting_has_untracked != ending_has_untracked
         || head_sha != ending_head
         || branch != ending_branch
         || upstream != ending_upstream
@@ -509,6 +512,17 @@ fn status_contains_untracked(status: &[u8]) -> bool {
     status
         .split(|byte| *byte == 0)
         .any(|entry| entry.starts_with(b"?? "))
+}
+
+fn has_untracked_files(repo_path: &Path, control: &GitRunControl) -> Result<bool, String> {
+    git_bytes_limited_with_control(
+        repo_path,
+        &["status", "--porcelain=v1", "-z", "--untracked-files=normal"],
+        MAX_GIT_METADATA_BYTES,
+        "Local untracked-file status",
+        control,
+    )
+    .map(|status| status_contains_untracked(&status))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1090,6 +1104,7 @@ fn git_command(repo_path: &Path) -> Result<Command, String> {
         .arg("diff.external=")
         .env("GIT_OPTIONAL_LOCKS", "0")
         .env("GIT_NO_LAZY_FETCH", "1")
+        .env("GIT_LITERAL_PATHSPECS", "1")
         .env("GIT_TERMINAL_PROMPT", "0")
         .env("GIT_PAGER", "cat");
     for key in [
@@ -1126,10 +1141,10 @@ fn git_command(repo_path: &Path) -> Result<Command, String> {
 }
 
 #[derive(Debug)]
-struct BoundedGitOutput {
-    status: ExitStatus,
-    stdout: Vec<u8>,
-    stderr: Vec<u8>,
+pub(crate) struct BoundedGitOutput {
+    pub(crate) status: ExitStatus,
+    pub(crate) stdout: Vec<u8>,
+    pub(crate) stderr: Vec<u8>,
 }
 
 fn git_bytes_limited(
@@ -1174,7 +1189,7 @@ fn run_git_bounded(
     run_git_bounded_with_control(repo_path, args, stdin, stdout_limit, description, &control)
 }
 
-fn run_git_bounded_with_control(
+pub(crate) fn run_git_bounded_with_control(
     repo_path: &Path,
     args: &[&str],
     stdin: Option<&[u8]>,

@@ -993,12 +993,6 @@ impl TuiApp {
         while let Some(event) = self.loader.try_recv() {
             self.apply_load_event(event);
         }
-        if self.pr_filter == PrListFilter::Local
-            && self.spinner_tick.is_multiple_of(8)
-            && !self.repo_eligibility_loading
-        {
-            self.refresh_local_repo_eligibility();
-        }
         self.ai_poll_tick = self.ai_poll_tick.wrapping_add(1);
         if self.ai_poll_tick.is_multiple_of(4)
             && !self.ai_review_load.is_loading()
@@ -2061,6 +2055,7 @@ impl TuiApp {
             self.status = "Checking configured local repositories...".to_string();
             self.refresh_local_repo_eligibility();
         } else {
+            self.loader.cancel_local_repo_eligibility();
             self.visible_repo_indices = (0..self.repos.len()).collect();
             self.reconcile_selected_repo();
             self.load_selected_repo();
@@ -3863,7 +3858,7 @@ review:
     }
 
     #[test]
-    fn periodic_eligibility_results_invalidate_local_repository_visibility() {
+    fn explicit_eligibility_results_update_local_repository_visibility() {
         let mut configured = repo("delaudio", "dynamic");
         configured.local_path = Some("/missing/dynamic".to_string());
         let mut app = TuiApp::from_repos(vec![configured.clone()]);

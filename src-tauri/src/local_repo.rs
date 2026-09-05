@@ -1,11 +1,25 @@
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
+#[cfg(test)]
 use std::process::Command;
 #[cfg(windows)]
 use std::sync::OnceLock;
+use std::time::Duration;
 
 use crate::config::{self, RepoRef, ReviewProvider};
+use crate::local_review::{run_git_bounded_with_control, GitRunControl, LocalReviewCancellation};
+
+const LOCAL_REPO_GIT_TIMEOUT: Duration = Duration::from_secs(5);
+const MAX_LOCAL_REPO_GIT_OUTPUT_BYTES: usize = 64 * 1024;
+
+pub(crate) fn eligibility_control(cancellation: LocalReviewCancellation) -> GitRunControl {
+    GitRunControl::new(
+        LOCAL_REPO_GIT_TIMEOUT,
+        cancellation,
+        "Local repository eligibility",
+    )
+}
 
 const SKIP_DIRS: &[&str] = &[
     "node_modules",
@@ -113,14 +127,29 @@ pub fn git_origin_matches(
     workspace: &str,
     repo: &str,
 ) -> Result<bool, String> {
-    let output = platform_git_command()?
-        .arg("-C")
-        .arg(path)
-        .arg("remote")
-        .arg("get-url")
-        .arg("origin")
-        .output()
-        .map_err(|e| format!("failed to inspect git remote for {}: {e}", path.display()))?;
+    let control = GitRunControl::new(
+        LOCAL_REPO_GIT_TIMEOUT,
+        LocalReviewCancellation::new(),
+        "Local repository inspection",
+    );
+    git_origin_matches_with_control(path, provider, workspace, repo, &control)
+}
+
+fn git_origin_matches_with_control(
+    path: &Path,
+    provider: ReviewProvider,
+    workspace: &str,
+    repo: &str,
+    control: &GitRunControl,
+) -> Result<bool, String> {
+    let output = run_git_bounded_with_control(
+        path,
+        &["remote", "get-url", "origin"],
+        None,
+        MAX_LOCAL_REPO_GIT_OUTPUT_BYTES,
+        "Git remote output",
+        control,
+    )?;
     if !output.status.success() {
         return Ok(false);
     }
@@ -206,12 +235,19 @@ fn redact_git_remote(remote: &str) -> String {
 }
 
 fn git_output(args: &[&str], working_dir: &Path) -> Result<String, String> {
-    let output = platform_git_command()?
-        .arg("-C")
-        .arg(working_dir)
-        .args(args)
-        .output()
-        .map_err(|e| format!("failed to run git in {}: {e}", working_dir.display()))?;
+    let control = GitRunControl::new(
+        LOCAL_REPO_GIT_TIMEOUT,
+        LocalReviewCancellation::new(),
+        "Local repository inspection",
+    );
+    let output = run_git_bounded_with_control(
+        working_dir,
+        args,
+        None,
+        MAX_LOCAL_REPO_GIT_OUTPUT_BYTES,
+        "Git repository metadata",
+        &control,
+    )?;
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
         return Err(if stderr.is_empty() {
@@ -221,10 +257,6 @@ fn git_output(args: &[&str], working_dir: &Path) -> Result<String, String> {
         });
     }
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
-}
-
-fn platform_git_command() -> Result<Command, String> {
-    trusted_git_path().map(Command::new)
 }
 
 #[cfg(not(windows))]
@@ -361,15 +393,19 @@ pub fn configured_repo_path(repo_ref: &RepoRef) -> Option<PathBuf> {
         .filter(|path| !path.as_os_str().is_empty())
 }
 
-pub fn has_usable_configured_path(repo_ref: &RepoRef) -> bool {
+pub(crate) fn has_usable_configured_path_with_control(
+    repo_ref: &RepoRef,
+    control: &GitRunControl,
+) -> bool {
     configured_repo_path(repo_ref).is_some_and(|path| {
         path.is_dir()
             && path.join(".git").exists()
-            && git_origin_matches(
+            && git_origin_matches_with_control(
                 &path,
                 repo_ref.provider,
                 &repo_ref.workspace,
                 &repo_ref.repo,
+                control,
             )
             .ok()
                 == Some(true)
@@ -553,6 +589,50 @@ mod tests {
             fs::canonicalize(&path).expect("expected path")
         );
 
+        fs::remove_dir_all(path).expect("cleanup temp repo");
+    }
+
+    #[test]
+    fn git_origin_output_is_bounded() {
+        let path = temp_path("bounded-origin");
+        fs::create_dir_all(&path).expect("temp repo dir");
+        Command::new("/usr/bin/git")
+            .arg("init")
+            .arg(&path)
+            .output()
+            .expect("git init");
+        let oversized_repo = "x".repeat(MAX_LOCAL_REPO_GIT_OUTPUT_BYTES + 1);
+        let remote = format!("https://github.com/delaudio/{oversized_repo}");
+        Command::new("/usr/bin/git")
+            .arg("-C")
+            .arg(&path)
+            .args(["remote", "add", "origin", &remote])
+            .output()
+            .expect("git remote add");
+
+        let error = git_origin_matches(&path, ReviewProvider::Github, "delaudio", &oversized_repo)
+            .expect_err("oversized remote output");
+
+        assert!(error.contains("exceeds the 65536-byte limit"));
+        fs::remove_dir_all(path).expect("cleanup temp repo");
+    }
+
+    #[test]
+    fn cancelled_eligibility_stops_before_running_git() {
+        let path = temp_path("cancelled-eligibility");
+        fs::create_dir_all(path.join(".git")).expect("git marker");
+        let repo = RepoRef {
+            provider: ReviewProvider::Github,
+            workspace: "delaudio".to_string(),
+            repo: "norn".to_string(),
+            local_path: Some(path.display().to_string()),
+        };
+        let cancellation = LocalReviewCancellation::new();
+        cancellation.cancel();
+        let control = eligibility_control(cancellation);
+
+        assert!(!has_usable_configured_path_with_control(&repo, &control));
+        assert!(control.check().is_err());
         fs::remove_dir_all(path).expect("cleanup temp repo");
     }
 
