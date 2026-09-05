@@ -22,7 +22,7 @@ use cap_fs_ext::{FollowSymlinks, OpenOptionsFollowExt};
 use cap_std::{ambient_authority, fs::Dir};
 
 use crate::config::ReviewProvider;
-use crate::local_repo::resolve_local_repo_for_provider;
+use crate::local_repo::{resolve_local_repo_for_provider, trusted_git_path};
 use crate::services::bitbucket::{DiffstatEntry, PrFilePreview, MAX_PR_IMAGE_PREVIEW_BYTES};
 
 const MAX_LOCAL_DIFF_BYTES: usize = 16 * 1024 * 1024;
@@ -570,17 +570,6 @@ fn local_file_preview_for_path(
             "The local image preview is unavailable for this snapshot; refresh and try again."
                 .to_string()
         })?;
-        let control = GitRunControl::new(
-            LOCAL_GIT_TIMEOUT,
-            LocalReviewCancellation::new(),
-            "Git command",
-        );
-        if git_object_id_for_path(repo_path, path, &control)? != expected {
-            return Err(
-                "The local image changed after this snapshot was loaded; refresh and try again."
-                    .to_string(),
-            );
-        }
         let root = open_repo_dir(repo_path)?;
         let file = open_repo_file(&root, Path::new(path))
             .map_err(|error| format!("Failed to open local image preview: {error}"))?;
@@ -795,6 +784,7 @@ fn collect_preview_oids_with_limits(
     let mut oids = BTreeMap::new();
     let mut warnings = Vec::new();
     let mut total_bytes = 0_u64;
+    let mut repository_oid_len = None;
     for (candidate_index, path) in diffstat
         .iter()
         .filter_map(|entry| entry.new_path.as_deref())
@@ -854,7 +844,36 @@ fn collect_preview_oids_with_limits(
             ));
             break;
         }
-        let oid = match git_object_id_for_path(repo_path, path, control) {
+        let bytes = match read_bounded(file, usize::try_from(file_byte_limit).unwrap_or(usize::MAX))
+        {
+            Ok(bytes) if bytes.len() as u64 == metadata.len() => bytes,
+            Ok(_) | Err(_) => {
+                control.check()?;
+                warnings.push(format!(
+                    "Skipped image preview that changed while being read `{}`.",
+                    path.escape_default()
+                ));
+                continue;
+            }
+        };
+        let oid_len = match repository_oid_len {
+            Some(oid_len) => oid_len,
+            None => match git_object_id_len(repo_path, control) {
+                Ok(oid_len) => {
+                    repository_oid_len = Some(oid_len);
+                    oid_len
+                }
+                Err(_) => {
+                    control.check()?;
+                    warnings.push(format!(
+                        "Skipped image preview that could not be fingerprinted `{}`.",
+                        path.escape_default()
+                    ));
+                    continue;
+                }
+            },
+        };
+        let oid = match git_object_id_for_bytes(&bytes, oid_len) {
             Ok(oid) => oid,
             Err(_) => {
                 control.check()?;
@@ -865,27 +884,19 @@ fn collect_preview_oids_with_limits(
                 continue;
             }
         };
-        total_bytes = total_bytes.saturating_add(metadata.len());
+        total_bytes = total_bytes.saturating_add(bytes.len() as u64);
         oids.insert(path.to_string(), oid);
     }
     control.check()?;
     Ok((oids, warnings))
 }
 
-fn git_object_id_for_path(
-    repo_path: &Path,
-    path: &str,
-    control: &GitRunControl,
-) -> Result<String, String> {
-    let oid = git_text_with_control(
-        repo_path,
-        &["hash-object", "--no-filters", "--", path],
-        control,
-    )?;
+fn git_object_id_len(repo_path: &Path, control: &GitRunControl) -> Result<usize, String> {
+    let oid = empty_tree_oid(repo_path, control)?;
     if (oid.len() == 40 || oid.len() == 64) && oid.bytes().all(|byte| byte.is_ascii_hexdigit()) {
-        Ok(oid)
+        Ok(oid.len())
     } else {
-        Err("Git returned an invalid image fingerprint.".to_string())
+        Err("Git returned an invalid object fingerprint.".to_string())
     }
 }
 
@@ -1043,8 +1054,8 @@ fn open_repo_file(root: &Dir, relative: &Path) -> io::Result<File> {
         .map(|file| file.into_std())
 }
 
-fn git_command(repo_path: &Path) -> Command {
-    let mut command = Command::new("git");
+fn git_command(repo_path: &Path) -> Result<Command, String> {
+    let mut command = Command::new(trusted_git_path()?);
     command.arg("-C").arg(repo_path);
     #[cfg(unix)]
     {
@@ -1057,7 +1068,7 @@ fn git_command(repo_path: &Path) -> Command {
         use windows_sys::Win32::System::Threading::CREATE_SUSPENDED;
         command.creation_flags(CREATE_SUSPENDED);
     }
-    command
+    Ok(command)
 }
 
 #[derive(Debug)]
@@ -1118,7 +1129,8 @@ fn run_git_bounded_with_control(
     control: &GitRunControl,
 ) -> Result<BoundedGitOutput, String> {
     control.check()?;
-    let mut child = git_command(repo_path)
+    let mut command = git_command(repo_path)?;
+    let mut child = command
         .args(args)
         .stdin(if stdin.is_some() {
             Stdio::piped()

@@ -1295,7 +1295,7 @@ export const mockHandlers: Record<string, Handler> = {
       reviewId: 2147483649,
       diff: mockRawDiff,
       diffstat: mockDiffstat,
-      previewSha256: {},
+      previewOid: {},
       warnings: [],
     }) satisfies LocalReviewSnapshot,
   get_pr_file_preview: (args) => {

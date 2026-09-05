@@ -556,7 +556,7 @@ export interface LocalReviewSnapshot {
   reviewId: number;
   diff: string;
   diffstat: DiffstatEntry[];
-  previewSha256: Record<string, string>;
+  previewOid: Record<string, string>;
   warnings: string[];
 }
 

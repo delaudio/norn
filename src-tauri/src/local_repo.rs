@@ -228,12 +228,12 @@ fn platform_git_command() -> Result<Command, String> {
 }
 
 #[cfg(not(windows))]
-fn trusted_git_path() -> Result<PathBuf, String> {
+pub(crate) fn trusted_git_path() -> Result<PathBuf, String> {
     Ok(PathBuf::from("/usr/bin/git"))
 }
 
 #[cfg(windows)]
-fn trusted_git_path() -> Result<PathBuf, String> {
+pub(crate) fn trusted_git_path() -> Result<PathBuf, String> {
     static TRUSTED_GIT_PATH: OnceLock<Result<PathBuf, String>> = OnceLock::new();
     TRUSTED_GIT_PATH
         .get_or_init(resolve_trusted_windows_git)
