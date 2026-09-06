@@ -8,8 +8,8 @@ If status files and git disagree, git is authoritative; correct this file.
 
 ## Active state
 
-- **Branch:** `docs/ship-local-review-tui`.
-- **Active item:** close out the shipped terminal Local review target.
+- **Branch:** `main`.
+- **Active item:** publish the prepared command-only `v0.3.0` release.
 - **Plan items:** `.docflow/plan/todo/0014-local-review-target-desktop.md`
   remains queued because the desktop acceptance criterion is not part of the
   terminal-first release.
@@ -51,7 +51,9 @@ If status files and git disagree, git is authoritative; correct this file.
   provider boundary; the maintainer explicitly authorised publication without
   a completed Norn gate. PR #247 passed its `verify` workflow and was squash
   merged as `64b9f36`. All version sources are aligned at `0.3.0`, and the
-  release guard accepts candidate tag `v0.3.0`.
+  release guard accepts candidate tag `v0.3.0`. `HOMEBREW_TAP_TOKEN` is
+  configured, the desktop release variable is absent, and the release workflow
+  will therefore skip Apple signing, notarisation, DMG, and cask jobs.
 
 ## Last shipped
 
