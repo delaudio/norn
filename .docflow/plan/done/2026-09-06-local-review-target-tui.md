@@ -43,3 +43,6 @@ publication, and repository mutations such as commit, push, stash, or discard.
 ## Dependencies
 
 - `../../adr/0017-review-local-changes-before-publication.md`
+
+Shipped at HEAD `64b9f36577500aaedf7065c1bf90d2657c424bf1` through
+[PR #247](https://github.com/delaudio/norn/pull/247).
