@@ -26,6 +26,10 @@ const MAX_GIT_DIAGNOSTIC_BYTES: usize = 256 * 1024;
 const LOCAL_GIT_TIMEOUT: Duration = Duration::from_secs(30);
 const MAX_LOCAL_PREVIEW_CANDIDATES: usize = 64;
 const MAX_LOCAL_PREVIEW_TOTAL_BYTES: u64 = 64 * 1024 * 1024;
+#[cfg(not(windows))]
+const NULL_GIT_CONFIG_PATH: &str = "/dev/null";
+#[cfg(windows)]
+const NULL_GIT_CONFIG_PATH: &str = "NUL";
 
 #[derive(Clone, Debug, Default)]
 pub(crate) struct LocalReviewCancellation(Arc<AtomicBool>);
@@ -49,6 +53,7 @@ pub(crate) struct GitRunControl {
     timeout: Duration,
     cancellation: LocalReviewCancellation,
     operation: &'static str,
+    disabled_filter_drivers: Vec<String>,
 }
 
 impl GitRunControl {
@@ -62,7 +67,13 @@ impl GitRunControl {
             timeout,
             cancellation,
             operation,
+            disabled_filter_drivers: Vec::new(),
         }
+    }
+
+    fn with_disabled_filter_drivers(mut self, drivers: Vec<String>) -> Self {
+        self.disabled_filter_drivers = drivers;
+        self
     }
 
     pub(crate) fn check(&self) -> Result<(), String> {
@@ -198,6 +209,8 @@ fn local_review_snapshot_for_path_with_control(
 ) -> Result<LocalReviewSnapshot, String> {
     let control = GitRunControl::new(timeout, cancellation, "Local review snapshot");
     ensure_git_repository(repo_path, &control)?;
+    let disabled_filter_drivers = configured_filter_drivers(repo_path, &control)?;
+    let control = control.with_disabled_filter_drivers(disabled_filter_drivers);
     if validate_origin {
         let origin = git_text_with_control(repo_path, &["remote", "get-url", "origin"], &control)?;
         if !crate::local_repo::matches_remote(&origin, provider, workspace, repo) {
@@ -1083,7 +1096,55 @@ fn validate_repo_relative_path(path: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn git_command(repo_path: &Path) -> Result<Command, String> {
+fn configured_filter_drivers(
+    repo_path: &Path,
+    control: &GitRunControl,
+) -> Result<Vec<String>, String> {
+    let output = run_git_bounded_with_control(
+        repo_path,
+        &[
+            "config",
+            "--includes",
+            "--name-only",
+            "--null",
+            "--get-regexp",
+            r"^filter\..*\.(clean|process|required)$",
+        ],
+        None,
+        MAX_GIT_METADATA_BYTES,
+        "Git filter configuration",
+        control,
+    )?;
+    if !output.status.success() {
+        if output.status.code() == Some(1) && output.stdout.is_empty() {
+            return Ok(Vec::new());
+        }
+        return Err(git_error(&output.stderr, output.status.to_string()));
+    }
+
+    let mut drivers = BTreeSet::new();
+    for raw_key in output
+        .stdout
+        .split(|byte| *byte == 0)
+        .filter(|key| !key.is_empty())
+    {
+        let key = std::str::from_utf8(raw_key)
+            .map_err(|_| "Git returned a non-UTF-8 filter configuration key.".to_string())?;
+        let normalized = key.to_ascii_lowercase();
+        let suffix = [".clean", ".process", ".required"]
+            .into_iter()
+            .find(|suffix| normalized.ends_with(suffix))
+            .ok_or_else(|| "Git returned an invalid filter configuration key.".to_string())?;
+        let driver = key
+            .get("filter.".len()..key.len().saturating_sub(suffix.len()))
+            .filter(|driver| !driver.is_empty())
+            .ok_or_else(|| "Git returned an invalid filter driver name.".to_string())?;
+        drivers.insert(driver.to_string());
+    }
+    Ok(drivers.into_iter().collect())
+}
+
+fn git_command(repo_path: &Path, control: &GitRunControl) -> Result<Command, String> {
     let repo_path = repo_path.canonicalize().map_err(|error| {
         format!(
             "Failed to resolve local repository path {}: {error}",
@@ -1103,20 +1164,31 @@ fn git_command(repo_path: &Path) -> Result<Command, String> {
         .arg("core.fsmonitor=false")
         .arg("-c")
         .arg("diff.external=")
+        .arg("-c")
+        .arg(format!("core.attributesFile={NULL_GIT_CONFIG_PATH}"))
         .env("GIT_OPTIONAL_LOCKS", "0")
         .env("GIT_NO_LAZY_FETCH", "1")
         .env("GIT_LITERAL_PATHSPECS", "1")
         .env("GIT_TERMINAL_PROMPT", "0")
-        .env("GIT_PAGER", "cat");
+        .env("GIT_PAGER", "cat")
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("GIT_CONFIG_SYSTEM", NULL_GIT_CONFIG_PATH)
+        .env("GIT_CONFIG_GLOBAL", NULL_GIT_CONFIG_PATH);
+    for driver in &control.disabled_filter_drivers {
+        command
+            .arg("-c")
+            .arg(format!("filter.{driver}.clean="))
+            .arg("-c")
+            .arg(format!("filter.{driver}.process="))
+            .arg("-c")
+            .arg(format!("filter.{driver}.required=false"));
+    }
     for key in [
         "GIT_ALTERNATE_OBJECT_DIRECTORIES",
         "GIT_COMMON_DIR",
         "GIT_CONFIG",
         "GIT_CONFIG_COUNT",
-        "GIT_CONFIG_GLOBAL",
-        "GIT_CONFIG_NOSYSTEM",
         "GIT_CONFIG_PARAMETERS",
-        "GIT_CONFIG_SYSTEM",
         "GIT_DIFF_OPTS",
         "GIT_DIR",
         "GIT_EXEC_PATH",
@@ -1183,7 +1255,7 @@ fn git_output_exists_with_control(
     control: &GitRunControl,
 ) -> Result<bool, String> {
     control.check()?;
-    let mut command = git_command(repo_path)?;
+    let mut command = git_command(repo_path, control)?;
     let mut child = command
         .args(args)
         .stdin(Stdio::null())
@@ -1290,7 +1362,7 @@ pub(crate) fn run_git_bounded_with_control(
     control: &GitRunControl,
 ) -> Result<BoundedGitOutput, String> {
     control.check()?;
-    let mut command = git_command(repo_path)?;
+    let mut command = git_command(repo_path, control)?;
     let mut child = command
         .args(args)
         .stdin(if stdin.is_some() {
@@ -1777,7 +1849,13 @@ mod tests {
     fn git_command_disables_mutating_and_injected_git_features() {
         let fixture = Fixture::new("git-command-boundary");
         let canonical_path = fixture.path.canonicalize().expect("canonical fixture path");
-        let command = git_command(&fixture.path).expect("git command");
+        let control = GitRunControl::new(
+            LOCAL_GIT_TIMEOUT,
+            LocalReviewCancellation::new(),
+            "Git command",
+        )
+        .with_disabled_filter_drivers(vec!["unsafe".to_string()]);
+        let command = git_command(&fixture.path, &control).expect("git command");
         let args = command
             .get_args()
             .map(|arg| arg.to_string_lossy().into_owned())
@@ -1789,6 +1867,15 @@ mod tests {
             .windows(2)
             .any(|args| args == ["-c", "core.fsmonitor=false"]));
         assert!(args.windows(2).any(|args| args == ["-c", "diff.external="]));
+        assert!(args
+            .windows(2)
+            .any(|args| args == ["-c", "filter.unsafe.clean="]));
+        assert!(args
+            .windows(2)
+            .any(|args| args == ["-c", "filter.unsafe.process="]));
+        assert!(args
+            .windows(2)
+            .any(|args| args == ["-c", "filter.unsafe.required=false"]));
         assert!(args.iter().any(|arg| arg == "--no-optional-locks"));
 
         let environment = command
@@ -1811,6 +1898,14 @@ mod tests {
         assert_eq!(environment.get("GIT_CONFIG_COUNT"), Some(&None));
         assert_eq!(environment.get("GIT_CONFIG_PARAMETERS"), Some(&None));
         assert_eq!(environment.get("GIT_EXTERNAL_DIFF"), Some(&None));
+        assert_eq!(
+            environment.get("GIT_CONFIG_GLOBAL"),
+            Some(&Some(NULL_GIT_CONFIG_PATH.to_string()))
+        );
+        assert_eq!(
+            environment.get("GIT_CONFIG_SYSTEM"),
+            Some(&Some(NULL_GIT_CONFIG_PATH.to_string()))
+        );
     }
 
     #[cfg(unix)]
@@ -1819,7 +1914,7 @@ mod tests {
         use std::os::unix::fs::PermissionsExt;
 
         let fixture = Fixture::new("disabled-git-helpers");
-        fixture.write(".gitattributes", "*.txt diff=unsafe\n");
+        fixture.write(".gitattributes", "*.txt diff=unsafe filter=unsafe-clean\n");
         fixture.write("tracked.txt", "base\n");
         fixture.commit_all("base");
 
@@ -1852,6 +1947,19 @@ mod tests {
         permissions.set_mode(0o700);
         fs::set_permissions(&textconv_helper, permissions).expect("chmod textconv helper");
 
+        let clean_marker = fixture.path.join("clean-filter-ran");
+        let clean_helper = fixture.path.join("clean-filter-helper.sh");
+        fs::write(
+            &clean_helper,
+            format!("#!/bin/sh\n: > '{}'\ncat\n", clean_marker.display()),
+        )
+        .expect("write clean-filter helper");
+        let mut permissions = fs::metadata(&clean_helper)
+            .expect("clean-filter helper metadata")
+            .permissions();
+        permissions.set_mode(0o700);
+        fs::set_permissions(&clean_helper, permissions).expect("chmod clean-filter helper");
+
         run(
             &fixture.path,
             &[
@@ -1868,6 +1976,18 @@ mod tests {
                 textconv_helper.to_str().expect("utf-8 helper path"),
             ],
         );
+        run(
+            &fixture.path,
+            &[
+                "config",
+                "filter.unsafe-clean.clean",
+                clean_helper.to_str().expect("utf-8 helper path"),
+            ],
+        );
+        run(
+            &fixture.path,
+            &["config", "filter.unsafe-clean.required", "true"],
+        );
         fixture.write("tracked.txt", "changed\n");
 
         local_review_snapshot_for_path(ReviewProvider::Github, "acme", "demo", &fixture.path)
@@ -1875,6 +1995,59 @@ mod tests {
 
         assert!(!fsmonitor_marker.exists());
         assert!(!textconv_marker.exists());
+        assert!(!clean_marker.exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn snapshot_does_not_start_repository_process_filters() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let fixture = Fixture::new("disabled-process-filter");
+        fixture.write(".gitattributes", "*.txt filter=unsafe-process\n");
+        fixture.write("tracked.txt", "base\n");
+        fixture.commit_all("base");
+
+        let marker = fixture.path.join("process-filter-ran");
+        let helper = fixture.path.join("process-filter-helper.sh");
+        fs::write(
+            &helper,
+            format!("#!/bin/sh\n: > '{}'\nsleep 5\n", marker.display()),
+        )
+        .expect("write process-filter helper");
+        let mut permissions = fs::metadata(&helper)
+            .expect("process-filter helper metadata")
+            .permissions();
+        permissions.set_mode(0o700);
+        fs::set_permissions(&helper, permissions).expect("chmod process-filter helper");
+        run(
+            &fixture.path,
+            &[
+                "config",
+                "filter.unsafe-process.process",
+                helper.to_str().expect("utf-8 helper path"),
+            ],
+        );
+        run(
+            &fixture.path,
+            &["config", "filter.unsafe-process.required", "true"],
+        );
+        fixture.write("tracked.txt", "changed\n");
+        let started = Instant::now();
+
+        local_review_snapshot_for_path_with_control(
+            ReviewProvider::Github,
+            "acme",
+            "demo",
+            &fixture.path,
+            LocalReviewCancellation::new(),
+            Duration::from_secs(2),
+            false,
+        )
+        .expect("snapshot");
+
+        assert!(!marker.exists());
+        assert!(started.elapsed() < Duration::from_secs(2));
     }
 
     #[test]
