@@ -8,10 +8,11 @@ If status files and git disagree, git is authoritative; correct this file.
 
 ## Active state
 
-- **Branch:** `feat/local-review-tui`.
-- **Active item:** `.docflow/plan/todo/0013-local-review-target-tui.md`.
-- **Plan items:** implement the shared local snapshot and TUI first, then
-  `.docflow/plan/todo/0014-local-review-target-desktop.md`.
+- **Branch:** `docs/ship-local-review-tui`.
+- **Active item:** close out the shipped terminal Local review target.
+- **Plan items:** `.docflow/plan/todo/0014-local-review-target-desktop.md`
+  remains queued because the desktop acceptance criterion is not part of the
+  terminal-first release.
 - **Verification:** 625 Rust library tests pass with 2 ignored and 32
   keychain-dependent tests filtered after the macOS Keychain blocked the full
   local run; all 17 affected Git, retention, migration, and active-session
@@ -46,16 +47,17 @@ If status files and git disagree, git is authoritative; correct this file.
   expose their file counts in the TUI, and bind both layer identities into the
   snapshot hash. Canceled eligibility requests are invalidated before leaving
   Local mode. Norn branch reviews through `run-1788699087691905000` drove these
-  remediations. The next bounded review is pending.
-  Implementation commits through `93e4692` and release metadata commit
-  `8460524` are prepared, all version sources are aligned at `0.3.0`, and the
-  release guard accepts candidate tag `v0.3.0`; branch publication and PR
-  creation are pending the final pre-push Norn branch review.
+  remediations. Two final pre-push attempts timed out at the configured AI
+  provider boundary; the maintainer explicitly authorised publication without
+  a completed Norn gate. PR #247 passed its `verify` workflow and was squash
+  merged as `64b9f36`. All version sources are aligned at `0.3.0`, and the
+  release guard accepts candidate tag `v0.3.0`.
 
 ## Last shipped
 
-`1e08045` - release Norn v0.2.9 with the shared desktop/browser diff UI.
+`64b9f36` - ship the terminal-first Local review target through PR #247.
 
 ## Next item
 
-- Implement the shared local snapshot and terminal Local review target.
+- Implement the desktop Local review target without changing the shipped TUI
+  snapshot contract.
