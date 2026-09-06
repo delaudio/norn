@@ -1,5 +1,5 @@
 use std::collections::{BTreeMap, BTreeSet};
-use std::ffi::OsStr;
+use std::ffi::{OsStr, OsString};
 use std::io::{self, Read, Write};
 use std::path::Path;
 use std::process::{Command, ExitStatus, Stdio};
@@ -1093,10 +1093,20 @@ fn validate_repo_relative_path(path: &str) -> Result<(), String> {
 }
 
 fn git_command(repo_path: &Path) -> Result<Command, String> {
+    let repo_path = repo_path.canonicalize().map_err(|error| {
+        format!(
+            "Failed to resolve local repository path {}: {error}",
+            repo_path.display()
+        )
+    })?;
+    let mut work_tree = OsString::from("--work-tree=");
+    work_tree.push(&repo_path);
+
     let mut command = Command::new(trusted_git_path()?);
     command
         .arg("-C")
-        .arg(repo_path)
+        .arg(&repo_path)
+        .arg(work_tree)
         .arg("--no-optional-locks")
         .arg("-c")
         .arg("core.fsmonitor=false")
@@ -1615,11 +1625,16 @@ mod tests {
 
     #[test]
     fn git_command_disables_mutating_and_injected_git_features() {
-        let command = git_command(Path::new("repository")).expect("git command");
+        let fixture = Fixture::new("git-command-boundary");
+        let canonical_path = fixture.path.canonicalize().expect("canonical fixture path");
+        let command = git_command(&fixture.path).expect("git command");
         let args = command
             .get_args()
             .map(|arg| arg.to_string_lossy().into_owned())
             .collect::<Vec<_>>();
+        assert!(args
+            .iter()
+            .any(|arg| arg == &format!("--work-tree={}", canonical_path.display())));
         assert!(args
             .windows(2)
             .any(|args| args == ["-c", "core.fsmonitor=false"]));
@@ -1710,6 +1725,33 @@ mod tests {
 
         assert!(!fsmonitor_marker.exists());
         assert!(!textconv_marker.exists());
+    }
+
+    #[test]
+    fn repository_config_cannot_redirect_the_reviewed_worktree() {
+        let fixture = Fixture::new("configured-worktree-boundary");
+        fixture.write("tracked.txt", "base\n");
+        fixture.commit_all("base");
+
+        let external = tempfile::tempdir().expect("external worktree");
+        fs::write(external.path().join("tracked.txt"), "outside-secret\n")
+            .expect("write external worktree file");
+        run(
+            &fixture.path,
+            &[
+                "config",
+                "core.worktree",
+                external.path().to_str().expect("utf-8 external path"),
+            ],
+        );
+        fixture.write("tracked.txt", "local-worktree\n");
+
+        let snapshot =
+            local_review_snapshot_for_path(ReviewProvider::Github, "acme", "demo", &fixture.path)
+                .expect("snapshot");
+
+        assert!(snapshot.diff.contains("+local-worktree"));
+        assert!(!snapshot.diff.contains("outside-secret"));
     }
 
     #[test]

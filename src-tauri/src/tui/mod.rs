@@ -1190,7 +1190,7 @@ impl TuiApp {
                 self.reconcile_selected_repo();
                 if previous_indices != self.visible_repo_indices
                     || previous_selection != self.selected_repo
-                    || self.pr_list_load == LoadState::Idle
+                    || matches!(self.pr_list_load, LoadState::Idle | LoadState::Loading)
                 {
                     self.load_selected_repo();
                 }
@@ -3838,12 +3838,11 @@ review:
     #[test]
     fn local_filter_handles_an_empty_usable_repository_set() {
         let mut app = TuiApp::from_repos(vec![repo("delaudio", "unconfigured")]);
-        app.pr_filter = PrListFilter::Local;
-        app.repo_eligibility_request_id = 7;
-        app.repo_eligibility_loading = true;
+        app.set_pr_filter(PrListFilter::Local);
+        let request_id = app.repo_eligibility_request_id;
 
         app.apply_load_event(LoadEvent::LocalRepoEligibility {
-            request_id: 7,
+            request_id,
             repo_generation: app.repo_generation,
             eligible_repositories: Vec::new(),
         });
