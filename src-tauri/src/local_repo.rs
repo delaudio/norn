@@ -268,35 +268,30 @@ pub(crate) fn trusted_git_path() -> Result<PathBuf, String> {
 
 #[cfg(not(windows))]
 fn resolve_trusted_unix_git() -> Result<PathBuf, String> {
-    let trusted_roots = [
-        Path::new("/usr"),
-        Path::new("/usr/local"),
-        Path::new("/opt/homebrew"),
-        Path::new("/opt/local"),
-        Path::new("/home/linuxbrew/.linuxbrew"),
-        Path::new("/nix/store"),
-    ];
     let fixed_candidates = [
-        Path::new("/usr/bin/git"),
-        Path::new("/usr/local/bin/git"),
-        Path::new("/opt/homebrew/bin/git"),
-        Path::new("/opt/local/bin/git"),
-        Path::new("/home/linuxbrew/.linuxbrew/bin/git"),
+        (Path::new("/usr"), Path::new("/usr/bin/git")),
+        (Path::new("/usr/local"), Path::new("/usr/local/bin/git")),
+        (
+            Path::new("/opt/homebrew"),
+            Path::new("/opt/homebrew/bin/git"),
+        ),
+        (Path::new("/opt/local"), Path::new("/opt/local/bin/git")),
+        (
+            Path::new("/home/linuxbrew/.linuxbrew"),
+            Path::new("/home/linuxbrew/.linuxbrew/bin/git"),
+        ),
+        (
+            Path::new("/nix/store"),
+            Path::new("/run/current-system/sw/bin/git"),
+        ),
+        (
+            Path::new("/nix/store"),
+            Path::new("/nix/var/nix/profiles/default/bin/git"),
+        ),
     ];
 
-    for candidate in fixed_candidates {
-        if let Some(path) = trusted_roots
-            .iter()
-            .find_map(|root| validated_trusted_executable(root, candidate))
-        {
-            return Ok(path);
-        }
-    }
-    if let Some(candidate) = find_in_path("git") {
-        if let Some(path) = trusted_roots
-            .iter()
-            .find_map(|root| validated_trusted_executable(root, &candidate))
-        {
+    for (root, candidate) in fixed_candidates {
+        if let Some(path) = validated_trusted_executable(root, candidate) {
             return Ok(path);
         }
     }
@@ -376,8 +371,23 @@ fn windows_known_folder(folder_id: &windows_sys::core::GUID) -> Option<PathBuf> 
 fn validated_trusted_executable(root: &Path, candidate: &Path) -> Option<PathBuf> {
     let canonical_root = fs::canonicalize(root).ok()?;
     let canonical_candidate = fs::canonicalize(candidate).ok()?;
-    (canonical_candidate.starts_with(canonical_root) && canonical_candidate.is_file())
-        .then_some(canonical_candidate)
+    if !canonical_candidate.starts_with(canonical_root) || !canonical_candidate.is_file() {
+        return None;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if fs::metadata(&canonical_candidate)
+            .ok()?
+            .permissions()
+            .mode()
+            & 0o111
+            == 0
+        {
+            return None;
+        }
+    }
+    Some(canonical_candidate)
 }
 
 fn current_repo_remote(root: &Path) -> Result<(String, String), String> {
@@ -566,6 +576,10 @@ mod tests {
         ))
     }
 
+    fn test_git() -> PathBuf {
+        trusted_git_path().expect("trusted Git installation")
+    }
+
     #[test]
     fn parses_github_and_bitbucket_remote_urls() {
         assert_eq!(
@@ -604,12 +618,12 @@ mod tests {
     fn resolves_current_repo_from_git_remote() {
         let path = temp_path("current");
         fs::create_dir_all(&path).expect("temp repo dir");
-        Command::new("/usr/bin/git")
+        Command::new(test_git())
             .arg("init")
             .arg(&path)
             .output()
             .expect("git init");
-        Command::new("/usr/bin/git")
+        Command::new(test_git())
             .arg("-C")
             .arg(&path)
             .arg("remote")
@@ -636,14 +650,14 @@ mod tests {
     fn git_origin_output_is_bounded() {
         let path = temp_path("bounded-origin");
         fs::create_dir_all(&path).expect("temp repo dir");
-        Command::new("/usr/bin/git")
+        Command::new(test_git())
             .arg("init")
             .arg(&path)
             .output()
             .expect("git init");
         let oversized_repo = "x".repeat(MAX_LOCAL_REPO_GIT_OUTPUT_BYTES + 1);
         let remote = format!("https://github.com/delaudio/{oversized_repo}");
-        Command::new("/usr/bin/git")
+        Command::new(test_git())
             .arg("-C")
             .arg(&path)
             .args(["remote", "add", "origin", &remote])
@@ -681,12 +695,12 @@ mod tests {
     fn resolves_configured_repo_for_explicit_provider() {
         let path = temp_path("configured-provider");
         fs::create_dir_all(&path).expect("temp repo dir");
-        Command::new("/usr/bin/git")
+        Command::new(test_git())
             .arg("init")
             .arg(&path)
             .output()
             .expect("git init");
-        Command::new("/usr/bin/git")
+        Command::new(test_git())
             .arg("-C")
             .arg(&path)
             .args([
@@ -742,7 +756,7 @@ mod tests {
     fn resolving_current_repo_reports_missing_remote() {
         let path = temp_path("no-remote");
         fs::create_dir_all(&path).expect("temp repo dir");
-        Command::new("/usr/bin/git")
+        Command::new(test_git())
             .arg("init")
             .arg(&path)
             .output()
@@ -789,6 +803,15 @@ mod tests {
         fs::create_dir_all(candidate.parent().expect("candidate parent"))
             .expect("trusted Git directory");
         fs::write(&candidate, b"fixture").expect("trusted Git fixture");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut permissions = fs::metadata(&candidate)
+                .expect("trusted Git fixture metadata")
+                .permissions();
+            permissions.set_mode(0o700);
+            fs::set_permissions(&candidate, permissions).expect("executable Git fixture");
+        }
 
         let resolved =
             validated_trusted_executable(&root, &candidate).expect("candidate inside trusted root");
@@ -817,5 +840,26 @@ mod tests {
 
         fs::remove_dir_all(root).expect("cleanup trusted root");
         fs::remove_file(outside).expect("cleanup untrusted target");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn trusted_executable_validation_rejects_non_executable_files() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = temp_path("trusted-non-executable-root");
+        let candidate = root.join("bin/git");
+        fs::create_dir_all(candidate.parent().expect("candidate parent"))
+            .expect("trusted Git directory");
+        fs::write(&candidate, b"fixture").expect("trusted Git fixture");
+        let mut permissions = fs::metadata(&candidate)
+            .expect("trusted Git fixture metadata")
+            .permissions();
+        permissions.set_mode(0o600);
+        fs::set_permissions(&candidate, permissions).expect("non-executable Git fixture");
+
+        assert!(validated_trusted_executable(&root, &candidate).is_none());
+
+        fs::remove_dir_all(root).expect("cleanup trusted root");
     }
 }

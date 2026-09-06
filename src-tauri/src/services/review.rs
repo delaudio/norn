@@ -825,6 +825,7 @@ fn save_review_store_for_target(
     repo: &str,
     target: &ReviewStoreTarget,
     store: &AiReviewStoreData,
+    run_store: &AiReviewRunStore,
 ) -> Result<(), String> {
     match target {
         ReviewStoreTarget::PullRequest { id } => save_review_store(workspace, repo, *id, store),
@@ -833,15 +834,44 @@ fn save_review_store_for_target(
             legacy_id,
         } => {
             let json = serde_json::to_string(store).map_err(|error| error.to_string())?;
-            review_storage::save_local_review_json(
+            let protected_snapshots = active_local_snapshot_sha256s(run_store, workspace, repo);
+            review_storage::save_local_review_json_with_protected(
                 workspace,
                 repo,
                 *legacy_id,
                 snapshot_sha256,
                 &json,
+                &protected_snapshots,
             )
         }
     }
+}
+
+fn active_local_snapshot_sha256s(
+    store: &AiReviewRunStore,
+    workspace: &str,
+    repo: &str,
+) -> Vec<String> {
+    let prefix = format!(
+        "local/{}/{workspace}/{}/{repo}/",
+        workspace.len(),
+        repo.len()
+    );
+    with_review_run_store(store, |inner| {
+        inner
+            .sessions
+            .iter()
+            .filter(|(_, session)| session.public.status == AiReviewRunStatus::Running)
+            .filter_map(|(key, _)| key.strip_prefix(&prefix))
+            .filter(|snapshot| {
+                snapshot.len() == 64
+                    && snapshot
+                        .bytes()
+                        .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+            })
+            .map(ToOwned::to_owned)
+            .collect()
+    })
 }
 
 fn analyzer_source(id: &str) -> ReviewEvidenceSource {
@@ -5370,7 +5400,7 @@ fn run_inline_review_pipeline(
     }
     review_store.active_thread_id = Some(thread_id);
     review_store.review_runs.push(review_run);
-    save_review_store_for_target(&workspace, &repo, &target, &review_store)
+    save_review_store_for_target(&workspace, &repo, &target, &review_store, &store)
         .map_err(ReviewPipelineFailure::internal)?;
 
     finish_inline_review_success(&store, &key, run_id, generated_at, provider_label);
@@ -5572,7 +5602,9 @@ fn start_inline_review_for_target(
         );
     }
     review_store.threads.push(thread);
-    if let Err(error) = save_review_store_for_target(&workspace, &repo, &target, &review_store) {
+    if let Err(error) =
+        save_review_store_for_target(&workspace, &repo, &target, &review_store, &store)
+    {
         set_inline_review_failed(&store, &key, run_id, error.clone());
         return Err(error);
     }
@@ -6472,15 +6504,15 @@ fn review_provider_for_repo(workspace: &str, repo: &str) -> ReviewProvider {
 #[cfg(test)]
 mod tests {
     use super::{
-        ai_provider_timeout_from, analyzer_specs_from_config, append_execution_policy_to_payloads,
-        apply_review_finding_publication_event, begin_inline_review_run, build_claude_text_command,
-        build_codex_text_command, extract_review_findings, format_claude_stream_log_line,
-        get_ai_review_run_state_native, human_duration, materialize_review_run,
-        normalize_codex_effort, normalize_codex_model, parse_claude_fix_result,
-        parse_claude_structured_json, parse_claude_text_result, parse_review_resources,
-        resolve_gui_skip_analyzers, review_analyzer_specs, review_findings_from_output,
-        review_profile_for_thread, should_execute_analyzers, trim_evidence_output,
-        user_installed_cli_command, validate_isolated_provider_cli,
+        active_local_snapshot_sha256s, ai_provider_timeout_from, analyzer_specs_from_config,
+        append_execution_policy_to_payloads, apply_review_finding_publication_event,
+        begin_inline_review_run, build_claude_text_command, build_codex_text_command,
+        extract_review_findings, format_claude_stream_log_line, get_ai_review_run_state_native,
+        human_duration, materialize_review_run, normalize_codex_effort, normalize_codex_model,
+        parse_claude_fix_result, parse_claude_structured_json, parse_claude_text_result,
+        parse_review_resources, resolve_gui_skip_analyzers, review_analyzer_specs,
+        review_findings_from_output, review_profile_for_thread, should_execute_analyzers,
+        trim_evidence_output, user_installed_cli_command, validate_isolated_provider_cli,
         validate_organization_policy_repo_path, wait_for_ai_provider, AiReviewDraftCommentResult,
         AiReviewRunStatus, AiReviewRunStore, AiReviewStoreData, AiReviewTurnKind,
         ProviderExecutionContext, ReviewEvidenceArtifact, ReviewEvidenceKind, ReviewEvidenceSource,
@@ -7529,6 +7561,42 @@ Fix: invalidate the query after the mutation succeeds."#;
         assert_ne!(
             first.session_key("workspace", "repo"),
             second.session_key("workspace", "repo")
+        );
+    }
+
+    #[test]
+    fn active_local_snapshot_collection_is_repository_scoped() {
+        let store = AiReviewRunStore::default();
+        let active_snapshot = "a".repeat(64);
+        let other_snapshot = "b".repeat(64);
+        let active_target =
+            ReviewStoreTarget::local(active_snapshot.clone(), 1).expect("active target");
+        let other_target =
+            ReviewStoreTarget::local(other_snapshot, 2).expect("other repository target");
+        begin_inline_review_run(
+            &store,
+            &active_target.session_key("workspace", "repo"),
+            "Active".to_string(),
+            "thread-active".to_string(),
+            AiReviewTurnKind::Initial,
+            None,
+            None,
+        )
+        .expect("start active review");
+        begin_inline_review_run(
+            &store,
+            &other_target.session_key("workspace", "other"),
+            "Other".to_string(),
+            "thread-other".to_string(),
+            AiReviewTurnKind::Initial,
+            None,
+            None,
+        )
+        .expect("start other review");
+
+        assert_eq!(
+            active_local_snapshot_sha256s(&store, "workspace", "repo"),
+            vec![active_snapshot]
         );
     }
 }

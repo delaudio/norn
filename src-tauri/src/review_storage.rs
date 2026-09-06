@@ -48,7 +48,7 @@ const APP_DIR: &str = "norn";
 const LEGACY_APP_DIR: &str = "lachesi";
 pub(crate) const DB_FILE: &str = "norn.sqlite3";
 pub(crate) const LEGACY_DB_FILE: &str = "lachesi.sqlite3";
-const LATEST_SCHEMA_VERSION: i64 = 14;
+const LATEST_SCHEMA_VERSION: i64 = 15;
 const LEGACY_REVIEWS_DIR: &str = "reviews";
 const LEGACY_REVIEWS_MIGRATION_MARKER: &str = ".legacy-reviews-imported-v1";
 const MAX_ADMINISTRATIVE_AUDIT_TIMESTAMP_MS: i64 = 4_102_444_800_000;
@@ -525,6 +525,8 @@ fn migrate(conn: &mut Connection) -> Result<(), String> {
           created_at TEXT NOT NULL,
           updated_at TEXT NOT NULL,
           retention_generation INTEGER NOT NULL DEFAULT 0 CHECK (retention_generation >= 0),
+          target_kind TEXT NOT NULL DEFAULT 'pull_request'
+            CHECK (target_kind IN ('pull_request', 'local')),
           PRIMARY KEY (tenant_id, review_key)
         );
 
@@ -1160,6 +1162,52 @@ fn migrate(conn: &mut Connection) -> Result<(), String> {
     migration
         .execute(
             "INSERT OR IGNORE INTO schema_migrations(version) VALUES (14)",
+            [],
+        )
+        .map_err(|error| error.to_string())?;
+    migration.commit().map_err(|error| error.to_string())?;
+
+    let migration = conn
+        .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+        .map_err(|error| error.to_string())?;
+    let has_target_kind = migration
+        .prepare("PRAGMA table_info(ai_review_stores)")
+        .and_then(|mut statement| {
+            let names = statement
+                .query_map([], |row| row.get::<_, String>(1))?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            Ok(names.iter().any(|name| name == "target_kind"))
+        })
+        .map_err(|error| error.to_string())?;
+    if !has_target_kind {
+        migration
+            .execute(
+                "ALTER TABLE ai_review_stores ADD COLUMN target_kind TEXT NOT NULL DEFAULT 'pull_request' CHECK (target_kind IN ('pull_request', 'local'))",
+                [],
+            )
+            .map_err(|error| error.to_string())?;
+        migration
+            .execute(
+                "UPDATE ai_review_stores SET target_kind = 'local' WHERE tenant_id = 'local' AND retention_generation > 0",
+                [],
+            )
+            .map_err(|error| error.to_string())?;
+    }
+    migration
+        .execute_batch(
+            r#"
+            DROP INDEX IF EXISTS idx_ai_review_stores_local_retention;
+            CREATE INDEX idx_ai_review_stores_local_retention
+              ON ai_review_stores(
+                tenant_id, workspace, repo, retention_generation DESC
+              )
+              WHERE tenant_id = 'local' AND target_kind = 'local';
+            "#,
+        )
+        .map_err(|error| error.to_string())?;
+    migration
+        .execute(
+            "INSERT OR IGNORE INTO schema_migrations(version) VALUES (15)",
             [],
         )
         .map_err(|error| error.to_string())?;
@@ -1993,7 +2041,7 @@ pub fn review_effectiveness_metrics(
             SELECT tenant_id, workspace, repo, pr_id, store_json
             FROM ai_review_stores
             WHERE tenant_id = ?1
-              AND review_key NOT LIKE 'local:%'
+              AND target_kind = 'pull_request'
               AND (?2 IS NULL OR workspace = ?2)
               AND (?3 IS NULL OR repo = ?3)
             ORDER BY workspace ASC, repo ASC, pr_id ASC
@@ -3994,14 +4042,31 @@ pub fn load_local_review_json(
     load_review_json_by_key(&local_review_key(workspace, repo, snapshot_sha256)?)
 }
 
-pub fn save_local_review_json(
+#[cfg(test)]
+fn save_local_review_json(
     workspace: &str,
     repo: &str,
     legacy_id: u32,
     snapshot_sha256: &str,
     json: &str,
 ) -> Result<(), String> {
+    save_local_review_json_with_protected(workspace, repo, legacy_id, snapshot_sha256, json, &[])
+}
+
+pub(crate) fn save_local_review_json_with_protected(
+    workspace: &str,
+    repo: &str,
+    legacy_id: u32,
+    snapshot_sha256: &str,
+    json: &str,
+    protected_snapshot_sha256s: &[String],
+) -> Result<(), String> {
     let key = local_review_key(workspace, repo, snapshot_sha256)?;
+    let mut protected_keys = protected_snapshot_sha256s
+        .iter()
+        .map(|snapshot| local_review_key(workspace, repo, snapshot))
+        .collect::<Result<HashSet<_>, _>>()?;
+    protected_keys.insert(key.clone());
     validate_audit_identifier("tenantId", "local").map_err(|error| error.to_string())?;
     let mut conn = open()?;
     let transaction = conn
@@ -4014,7 +4079,7 @@ pub fn save_local_review_json(
             SELECT COALESCE(MAX(retention_generation), 0)
             FROM ai_review_stores
             WHERE tenant_id = 'local'
-              AND review_key GLOB 'local:*'
+              AND target_kind = 'local'
               AND workspace = ?1 COLLATE NOCASE
               AND repo = ?2 COLLATE NOCASE
             "#,
@@ -4034,33 +4099,48 @@ pub fn save_local_review_json(
         legacy_id,
         json,
         false,
+        "local",
         &now,
         retention_generation,
     )?;
-    transaction
-        .execute(
-            r#"
-            DELETE FROM ai_review_stores
-            WHERE rowid IN (
-              SELECT rowid
-              FROM ai_review_stores
-              WHERE tenant_id = 'local'
-                AND review_key GLOB 'local:*'
-                AND workspace = ?1 COLLATE NOCASE
-                AND repo = ?2 COLLATE NOCASE
-                AND review_key <> ?3
-              ORDER BY retention_generation DESC
-              LIMIT -1 OFFSET ?4
+    let candidates = {
+        let mut statement = transaction
+            .prepare(
+                r#"
+                SELECT review_key
+                FROM ai_review_stores
+                WHERE tenant_id = 'local'
+                  AND target_kind = 'local'
+                  AND workspace = ?1 COLLATE NOCASE
+                  AND repo = ?2 COLLATE NOCASE
+                ORDER BY retention_generation DESC
+                "#,
             )
-            "#,
-            params![
-                workspace,
-                repo,
-                key,
-                MAX_LOCAL_REVIEW_SNAPSHOTS_PER_REPOSITORY - 1
-            ],
-        )
-        .map_err(|error| error.to_string())?;
+            .map_err(|error| error.to_string())?;
+        let rows = statement
+            .query_map(params![workspace, repo], |row| row.get::<_, String>(0))
+            .map_err(|error| error.to_string())?
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(|error| error.to_string())?;
+        rows
+    };
+    let mut retained = protected_keys;
+    for candidate in &candidates {
+        if retained.len() >= MAX_LOCAL_REVIEW_SNAPSHOTS_PER_REPOSITORY as usize {
+            break;
+        }
+        retained.insert(candidate.clone());
+    }
+    for candidate in candidates {
+        if !retained.contains(&candidate) {
+            transaction
+                .execute(
+                    "DELETE FROM ai_review_stores WHERE tenant_id = 'local' AND target_kind = 'local' AND review_key = ?1",
+                    params![candidate],
+                )
+                .map_err(|error| error.to_string())?;
+        }
+    }
     transaction.commit().map_err(|error| error.to_string())
 }
 
@@ -4144,6 +4224,7 @@ fn save_review_json_for_key(
         id,
         json,
         migrated_from_json,
+        "pull_request",
         &now,
         0,
     )
@@ -4159,6 +4240,7 @@ fn upsert_review_json_for_connection(
     id: u32,
     json: &str,
     migrated_from_json: bool,
+    target_kind: &str,
     now: &str,
     retention_generation: i64,
 ) -> Result<(), String> {
@@ -4166,14 +4248,15 @@ fn upsert_review_json_for_connection(
         r#"
         INSERT INTO ai_review_stores (
           review_key, tenant_id, workspace, repo, pr_id, store_json,
-          migrated_from_json, created_at, updated_at, retention_generation
+          migrated_from_json, created_at, updated_at, retention_generation, target_kind
         )
-        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?8, ?9)
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?8, ?9, ?10)
         ON CONFLICT(tenant_id, review_key) DO UPDATE SET
           store_json = excluded.store_json,
           migrated_from_json = ai_review_stores.migrated_from_json OR excluded.migrated_from_json,
           updated_at = excluded.updated_at,
-          retention_generation = excluded.retention_generation
+          retention_generation = excluded.retention_generation,
+          target_kind = excluded.target_kind
         "#,
         params![
             key,
@@ -4184,7 +4267,8 @@ fn upsert_review_json_for_connection(
             json,
             if migrated_from_json { 1 } else { 0 },
             now,
-            retention_generation
+            retention_generation,
+            target_kind
         ],
     )
     .map_err(|e| e.to_string())?;
@@ -4195,7 +4279,7 @@ pub fn delete_review(workspace: &str, repo: &str, id: u32) -> Result<(), String>
     let conn = open()?;
     let key = review_key(workspace, repo, id);
     conn.execute(
-        "DELETE FROM ai_review_stores WHERE tenant_id = 'local' AND review_key = ?1",
+        "DELETE FROM ai_review_stores WHERE tenant_id = 'local' AND target_kind = 'pull_request' AND review_key = ?1",
         params![key],
     )
     .map_err(|e| e.to_string())?;
@@ -4208,11 +4292,14 @@ pub fn delete_review(workspace: &str, repo: &str, id: u32) -> Result<(), String>
 pub fn cleanup_stale_reviews(keep_keys: &[String]) -> Result<(), String> {
     let conn = open()?;
     if keep_keys.is_empty() {
-        conn.execute("DELETE FROM ai_review_stores WHERE tenant_id = 'local'", [])
+        conn.execute(
+            "DELETE FROM ai_review_stores WHERE tenant_id = 'local' AND target_kind = 'pull_request'",
+            [],
+        )
             .map_err(|e| e.to_string())?;
     } else {
         let mut stmt = conn
-            .prepare("SELECT review_key FROM ai_review_stores WHERE tenant_id = 'local'")
+            .prepare("SELECT review_key FROM ai_review_stores WHERE tenant_id = 'local' AND target_kind = 'pull_request'")
             .map_err(|e| e.to_string())?;
         let rows = stmt
             .query_map([], |row| row.get::<_, String>(0))
@@ -4221,7 +4308,7 @@ pub fn cleanup_stale_reviews(keep_keys: &[String]) -> Result<(), String> {
             let key = row.map_err(|e| e.to_string())?;
             if !keep_keys.contains(&key) {
                 conn.execute(
-                    "DELETE FROM ai_review_stores WHERE tenant_id = 'local' AND review_key = ?1",
+                    "DELETE FROM ai_review_stores WHERE tenant_id = 'local' AND target_kind = 'pull_request' AND review_key = ?1",
                     params![key],
                 )
                 .map_err(|e| e.to_string())?;
@@ -4554,7 +4641,7 @@ pub fn list_recent_review_jobs(limit: u32) -> Result<Vec<ReviewJob>, String> {
             SELECT review_key, workspace, repo, pr_id, store_json, created_at, updated_at
             FROM ai_review_stores
             WHERE tenant_id = 'local'
-              AND review_key NOT LIKE 'local:%'
+              AND target_kind = 'pull_request'
             ORDER BY CAST(updated_at AS INTEGER) DESC
             LIMIT ?1
             "#,
@@ -5384,7 +5471,7 @@ mod tests {
                 local_review_key("workspace", "repo", &refreshed_snapshot).expect("refreshed key");
             let (refreshed_generation, maximum_generation) = conn
                 .query_row(
-                    "SELECT retention_generation, (SELECT MAX(retention_generation) FROM ai_review_stores WHERE tenant_id = 'local' AND review_key GLOB 'local:*' AND workspace = 'workspace' AND repo = 'repo') FROM ai_review_stores WHERE tenant_id = 'local' AND review_key = ?1",
+                    "SELECT retention_generation, (SELECT MAX(retention_generation) FROM ai_review_stores WHERE tenant_id = 'local' AND target_kind = 'local' AND workspace = 'workspace' AND repo = 'repo') FROM ai_review_stores WHERE tenant_id = 'local' AND review_key = ?1",
                     params![refreshed_key],
                     |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?)),
                 )
@@ -5405,7 +5492,7 @@ mod tests {
             let conn = Connection::open(dir.join(DB_FILE)).expect("reopen review database");
             let retained = conn
                 .query_row(
-                    "SELECT COUNT(*) FROM ai_review_stores WHERE tenant_id = 'local' AND review_key GLOB 'local:*' AND workspace = 'workspace' AND repo = 'repo'",
+                    "SELECT COUNT(*) FROM ai_review_stores WHERE tenant_id = 'local' AND target_kind = 'local' AND workspace = 'workspace' AND repo = 'repo'",
                     [],
                     |row| row.get::<_, i64>(0),
                 )
@@ -5435,6 +5522,84 @@ mod tests {
                     .expect("load other repository snapshot")
                     .is_some()
             );
+        });
+    }
+
+    #[test]
+    fn local_snapshot_retention_preserves_active_review_stores() {
+        with_test_data_dir("local-snapshot-active-retention", |_| {
+            let active_snapshot = format!("{:064x}", 0);
+            save_local_review_json(
+                "workspace",
+                "repo",
+                0,
+                &active_snapshot,
+                r#"{"snapshot":0}"#,
+            )
+            .expect("save active snapshot");
+
+            for index in 1..=20_u32 {
+                let snapshot = format!("{index:064x}");
+                save_local_review_json_with_protected(
+                    "workspace",
+                    "repo",
+                    index,
+                    &snapshot,
+                    &format!(r#"{{"snapshot":{index}}}"#),
+                    std::slice::from_ref(&active_snapshot),
+                )
+                .expect("save snapshot while protecting active review");
+            }
+
+            assert!(
+                load_local_review_json("workspace", "repo", &active_snapshot)
+                    .expect("load protected snapshot")
+                    .is_some()
+            );
+            assert!(
+                load_local_review_json("workspace", "repo", &format!("{:064x}", 1))
+                    .expect("load oldest inactive snapshot")
+                    .is_none()
+            );
+
+            let next_snapshot = format!("{:064x}", 21);
+            save_local_review_json(
+                "workspace",
+                "repo",
+                21,
+                &next_snapshot,
+                r#"{"snapshot":21}"#,
+            )
+            .expect("save after active review completes");
+            assert!(
+                load_local_review_json("workspace", "repo", &active_snapshot)
+                    .expect("load completed old snapshot")
+                    .is_none()
+            );
+        });
+    }
+
+    #[test]
+    fn pull_request_store_kind_does_not_depend_on_its_key_prefix() {
+        with_test_data_dir("pull-request-target-kind", |dir| {
+            save_review_json(
+                "local:workspace",
+                "repo",
+                42,
+                r#"{"threads":[],"reviewRuns":[]}"#,
+            )
+            .expect("save prefix-colliding pull request store");
+
+            let conn = Connection::open(dir.join(DB_FILE)).expect("open review database");
+            let target_kind = conn
+                .query_row(
+                    "SELECT target_kind FROM ai_review_stores WHERE review_key = ?1",
+                    params![review_key("local:workspace", "repo", 42)],
+                    |row| row.get::<_, String>(0),
+                )
+                .expect("read target kind");
+
+            assert_eq!(target_kind, "pull_request");
         });
     }
 
@@ -6235,7 +6400,7 @@ mod tests {
                 .expect("read migration versions");
             assert_eq!(
                 versions,
-                vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]
+                vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
             );
             let store_columns: Vec<String> = conn
                 .prepare("PRAGMA table_info(ai_review_stores)")
@@ -6247,6 +6412,7 @@ mod tests {
             assert!(store_columns
                 .iter()
                 .any(|column| column == "retention_generation"));
+            assert!(store_columns.iter().any(|column| column == "target_kind"));
         });
     }
 
