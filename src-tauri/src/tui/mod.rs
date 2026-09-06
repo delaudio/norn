@@ -2101,8 +2101,8 @@ impl TuiApp {
 
     fn load_selected_repo(&mut self) {
         self.loader.cancel_local_snapshot();
+        self.clear_pr_context_for_repo_load();
         if !self.visible_repo_indices.contains(&self.selected_repo) {
-            self.clear_pr_context_for_repo_load();
             self.pr_list_load = LoadState::Idle;
             self.status = if self.pr_filter == PrListFilter::Local {
                 "No repositories have a usable configured local path".to_string()
@@ -2116,7 +2116,6 @@ impl TuiApp {
             self.status = "No repositories configured".to_string();
             return;
         };
-        self.clear_pr_context_for_repo_load();
         let provider = repo.provider;
         let workspace = repo.workspace.clone();
         let repo_name = repo.repo.clone();
@@ -3939,6 +3938,26 @@ review:
                 .map(|snapshot| snapshot.current_branch.as_str()),
             Some("current")
         );
+    }
+
+    #[test]
+    fn repository_load_clears_the_previous_local_target_immediately() {
+        let mut app =
+            TuiApp::from_repos(vec![repo("delaudio", "previous"), repo("delaudio", "next")]);
+        app.pr_filter = PrListFilter::Local;
+        app.selected_repo = 1;
+        app.local_snapshot = Some(local_snapshot("feature/previous"));
+        app.diff = Some("previous diff".to_string());
+        app.active_ai_target = Some(("delaudio".into(), "previous".into(), 42));
+        app.ai_review_output = Some("previous review".to_string());
+
+        app.load_selected_repo();
+
+        assert!(matches!(app.pr_list_load, LoadState::Loading));
+        assert!(app.local_snapshot.is_none());
+        assert!(app.diff.is_none());
+        assert!(app.active_ai_target.is_none());
+        assert!(app.ai_review_output.is_none());
     }
 
     #[test]

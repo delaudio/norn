@@ -508,21 +508,12 @@ fn collect_local_diff(
     })
 }
 
-fn status_contains_untracked(status: &[u8]) -> bool {
-    status
-        .split(|byte| *byte == 0)
-        .any(|entry| entry.starts_with(b"?? "))
-}
-
 fn has_untracked_files(repo_path: &Path, control: &GitRunControl) -> Result<bool, String> {
-    git_bytes_limited_with_control(
+    git_output_exists_with_control(
         repo_path,
-        &["status", "--porcelain=v1", "-z", "--untracked-files=normal"],
-        MAX_GIT_METADATA_BYTES,
-        "Local untracked-file status",
+        &["ls-files", "--others", "--exclude-standard", "-z"],
         control,
     )
-    .map(|status| status_contains_untracked(&status))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1186,6 +1177,97 @@ fn git_bytes_limited_with_control(
     }
 }
 
+fn git_output_exists_with_control(
+    repo_path: &Path,
+    args: &[&str],
+    control: &GitRunControl,
+) -> Result<bool, String> {
+    control.check()?;
+    let mut command = git_command(repo_path)?;
+    let mut child = command
+        .args(args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|error| format!("Failed to run git: {error}"))?;
+    let process_tree = GitProcessTree::attach_and_resume(&child).map_err(|error| {
+        let _ = child.kill();
+        let _ = child.wait();
+        format!("Failed to contain git process tree: {error}")
+    })?;
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| "Failed to capture git output.".to_string())?;
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| "Failed to capture git diagnostics.".to_string())?;
+    let stdout_reader = spawn_output_presence_reader(stdout);
+    let stderr_reader = spawn_bounded_reader(stderr, MAX_GIT_DIAGNOSTIC_BYTES);
+    let mut status = None;
+    let mut stdout_present = None;
+    let mut stderr_bytes = None;
+    let mut failure = None;
+    loop {
+        if let Err(error) =
+            poll_output_presence_reader(&stdout_reader, &mut stdout_present, "git output")
+        {
+            failure = Some(error);
+        }
+        if let Err(error) =
+            poll_bounded_reader(&stderr_reader, &mut stderr_bytes, "git diagnostics")
+        {
+            failure = Some(error);
+        }
+        if stderr_bytes
+            .as_ref()
+            .is_some_and(|bytes| bytes.len() > MAX_GIT_DIAGNOSTIC_BYTES)
+        {
+            failure = Some(format!(
+                "Git diagnostics exceed the {MAX_GIT_DIAGNOSTIC_BYTES}-byte limit."
+            ));
+        }
+        if failure.is_none() {
+            if let Err(error) = control.check() {
+                failure = Some(error);
+            }
+        }
+        if let Some(failure) = failure {
+            terminate_git_child(&mut child, &process_tree);
+            return Err(failure);
+        }
+        if stdout_present == Some(true) {
+            terminate_git_child(&mut child, &process_tree);
+            return Ok(true);
+        }
+        if status.is_none() {
+            match child.try_wait() {
+                Ok(Some(exit_status)) => status = Some(exit_status),
+                Ok(None) => {}
+                Err(error) => {
+                    terminate_git_child(&mut child, &process_tree);
+                    return Err(format!("Failed while waiting for git: {error}"));
+                }
+            }
+        }
+        if status.is_some() && stdout_present.is_some() && stderr_bytes.is_some() {
+            break;
+        }
+        thread::sleep(Duration::from_millis(10));
+    }
+    let status = status.ok_or_else(|| "Git did not report an exit status.".to_string())?;
+    if status.success() {
+        Ok(false)
+    } else {
+        Err(git_error(
+            stderr_bytes.as_deref().unwrap_or_default(),
+            status.to_string(),
+        ))
+    }
+}
+
 #[cfg(test)]
 fn run_git_bounded(
     repo_path: &Path,
@@ -1351,6 +1433,37 @@ fn spawn_bounded_reader(
         let _ = sender.send(result);
     });
     receiver
+}
+
+fn spawn_output_presence_reader(
+    mut reader: impl Read + Send + 'static,
+) -> Receiver<io::Result<bool>> {
+    let (sender, receiver) = mpsc::sync_channel(1);
+    thread::spawn(move || {
+        let mut first_byte = [0_u8; 1];
+        let result = reader.read(&mut first_byte).map(|count| count > 0);
+        let _ = sender.send(result);
+    });
+    receiver
+}
+
+fn poll_output_presence_reader(
+    receiver: &Receiver<io::Result<bool>>,
+    output: &mut Option<bool>,
+    label: &str,
+) -> Result<(), String> {
+    if output.is_some() {
+        return Ok(());
+    }
+    match receiver.try_recv() {
+        Ok(Ok(present)) => {
+            *output = Some(present);
+            Ok(())
+        }
+        Ok(Err(error)) => Err(format!("Failed to read {label}: {error}")),
+        Err(TryRecvError::Empty) => Ok(()),
+        Err(TryRecvError::Disconnected) => Err(format!("Failed to inspect {label}.")),
+    }
 }
 
 fn poll_bounded_reader(
@@ -2170,6 +2283,47 @@ mod tests {
             .expect_err("oversized output");
 
         assert_eq!(error, "Test output exceeds the 8-byte limit.");
+    }
+
+    #[test]
+    fn untracked_file_probe_reports_presence_without_collecting_paths() {
+        let fixture = Fixture::new("untracked-presence");
+        let clean_control = GitRunControl::new(
+            LOCAL_GIT_TIMEOUT,
+            LocalReviewCancellation::new(),
+            "Local review snapshot",
+        );
+        assert!(!has_untracked_files(&fixture.path, &clean_control).expect("clean probe"));
+
+        fixture.write("untracked.txt", "untracked\n");
+        let dirty_control = GitRunControl::new(
+            LOCAL_GIT_TIMEOUT,
+            LocalReviewCancellation::new(),
+            "Local review snapshot",
+        );
+        assert!(has_untracked_files(&fixture.path, &dirty_control).expect("dirty probe"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn output_presence_probe_terminates_an_unbounded_producer() {
+        let fixture = Fixture::new("output-presence-short-circuit");
+        let control = GitRunControl::new(
+            Duration::from_secs(2),
+            LocalReviewCancellation::new(),
+            "Git output presence",
+        );
+        let started = Instant::now();
+
+        let present = git_output_exists_with_control(
+            &fixture.path,
+            &["-c", "alias.noisy=!yes untracked", "noisy"],
+            &control,
+        )
+        .expect("presence result");
+
+        assert!(present);
+        assert!(started.elapsed() < Duration::from_secs(1));
     }
 
     #[cfg(unix)]
