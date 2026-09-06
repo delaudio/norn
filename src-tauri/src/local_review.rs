@@ -1225,14 +1225,6 @@ pub(crate) fn run_git_bounded_with_control(
         let _ = child.wait();
         format!("Failed to contain git process tree: {error}")
     })?;
-    if let Some(input) = stdin {
-        child
-            .stdin
-            .take()
-            .ok_or_else(|| "Failed to open git input.".to_string())?
-            .write_all(input)
-            .map_err(|error| format!("Failed to write git input: {error}"))?;
-    }
     let stdout = child
         .stdout
         .take()
@@ -1243,9 +1235,19 @@ pub(crate) fn run_git_bounded_with_control(
         .ok_or_else(|| "Failed to capture git diagnostics.".to_string())?;
     let stdout_reader = spawn_bounded_reader(stdout, stdout_limit);
     let stderr_reader = spawn_bounded_reader(stderr, MAX_GIT_DIAGNOSTIC_BYTES);
+    let stdin_writer = stdin
+        .map(|input| {
+            child
+                .stdin
+                .take()
+                .map(|writer| spawn_stdin_writer(writer, input.to_vec()))
+                .ok_or_else(|| "Failed to open git input.".to_string())
+        })
+        .transpose()?;
     let mut status = None;
     let mut stdout_bytes = None;
     let mut stderr_bytes = None;
+    let mut stdin_complete = stdin_writer.is_none();
     let mut failure = None;
     loop {
         if let Err(error) = poll_bounded_reader(&stdout_reader, &mut stdout_bytes, "git output") {
@@ -1255,6 +1257,11 @@ pub(crate) fn run_git_bounded_with_control(
             poll_bounded_reader(&stderr_reader, &mut stderr_bytes, "git diagnostics")
         {
             failure = Some(error);
+        }
+        if let Some(writer) = &stdin_writer {
+            if let Err(error) = poll_stdin_writer(writer, &mut stdin_complete) {
+                failure = Some(error);
+            }
         }
         if stdout_bytes
             .as_ref()
@@ -1288,7 +1295,7 @@ pub(crate) fn run_git_bounded_with_control(
             terminate_git_child(&mut child, &process_tree);
             return Err(failure);
         }
-        if status.is_some() && stdout_bytes.is_some() && stderr_bytes.is_some() {
+        if status.is_some() && stdout_bytes.is_some() && stderr_bytes.is_some() && stdin_complete {
             break;
         }
         thread::sleep(Duration::from_millis(10));
@@ -1298,6 +1305,36 @@ pub(crate) fn run_git_bounded_with_control(
         stdout: stdout_bytes.ok_or_else(|| "Git output did not close.".to_string())?,
         stderr: stderr_bytes.ok_or_else(|| "Git diagnostics did not close.".to_string())?,
     })
+}
+
+fn spawn_stdin_writer(
+    mut writer: impl Write + Send + 'static,
+    input: Vec<u8>,
+) -> Receiver<io::Result<()>> {
+    let (sender, receiver) = mpsc::sync_channel(1);
+    thread::spawn(move || {
+        let result = writer.write_all(&input);
+        let _ = sender.send(result);
+    });
+    receiver
+}
+
+fn poll_stdin_writer(
+    receiver: &Receiver<io::Result<()>>,
+    complete: &mut bool,
+) -> Result<(), String> {
+    if *complete {
+        return Ok(());
+    }
+    match receiver.try_recv() {
+        Ok(Ok(())) => {
+            *complete = true;
+            Ok(())
+        }
+        Ok(Err(error)) => Err(format!("Failed to write git input: {error}")),
+        Err(TryRecvError::Empty) => Ok(()),
+        Err(TryRecvError::Disconnected) => Err("Failed to write git input.".to_string()),
+    }
 }
 
 fn spawn_bounded_reader(
@@ -2168,6 +2205,27 @@ mod tests {
             Duration::from_millis(50),
         )
         .expect_err("timed out command");
+
+        assert!(error.contains("timed out"));
+        assert!(started.elapsed() < Duration::from_secs(1));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn git_stdin_writes_are_supervised_by_the_deadline() {
+        let fixture = Fixture::new("git-stdin-timeout");
+        let input = vec![b'x'; 8 * 1024 * 1024];
+        let started = Instant::now();
+
+        let error = run_git_bounded(
+            &fixture.path,
+            &["-c", "alias.pause=!sleep 5", "pause"],
+            Some(&input),
+            1_024,
+            "Test output",
+            Duration::from_millis(50),
+        )
+        .expect_err("blocked stdin write timed out");
 
         assert!(error.contains("timed out"));
         assert!(started.elapsed() < Duration::from_secs(1));

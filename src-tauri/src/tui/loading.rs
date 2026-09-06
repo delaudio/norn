@@ -63,7 +63,7 @@ pub(super) enum LoadEvent {
     LocalRepoEligibility {
         request_id: u64,
         repo_generation: u64,
-        eligible_repositories: Vec<RepoEligibilityIdentity>,
+        result: Result<Vec<RepoEligibilityIdentity>, String>,
     },
     Detail {
         request_id: u64,
@@ -213,16 +213,21 @@ impl Loader {
         let control = local_repo::eligibility_control(cancellation);
         let sender = self.sender.clone();
         thread::spawn(move || {
-            let eligible_repositories = repos
-                .iter()
-                .take_while(|_| control.check().is_ok())
-                .filter(|repo| local_repo::has_usable_configured_path_with_control(repo, &control))
-                .map(RepoEligibilityIdentity::from_repo)
-                .collect();
+            let result = (|| {
+                let mut eligible_repositories = Vec::new();
+                for repo in &repos {
+                    control.check()?;
+                    if local_repo::has_usable_configured_path_with_control(repo, &control)? {
+                        eligible_repositories.push(RepoEligibilityIdentity::from_repo(repo));
+                    }
+                }
+                control.check()?;
+                Ok(eligible_repositories)
+            })();
             let _ = sender.send(LoadEvent::LocalRepoEligibility {
                 request_id,
                 repo_generation,
-                eligible_repositories,
+                result,
             });
         });
     }

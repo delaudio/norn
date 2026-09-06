@@ -1163,7 +1163,7 @@ impl TuiApp {
             LoadEvent::LocalRepoEligibility {
                 request_id,
                 repo_generation,
-                eligible_repositories,
+                result,
             } if request_id == self.repo_eligibility_request_id => {
                 self.repo_eligibility_loading = false;
                 if self.pr_filter != PrListFilter::Local {
@@ -1173,6 +1173,15 @@ impl TuiApp {
                     self.refresh_local_repo_eligibility();
                     return;
                 }
+                let eligible_repositories = match result {
+                    Ok(eligible_repositories) => eligible_repositories,
+                    Err(error) => {
+                        self.pr_list_load = LoadState::Failed(error.clone());
+                        self.error = Some(error);
+                        self.status = "Failed to inspect configured local repositories".to_string();
+                        return;
+                    }
+                };
                 let eligible_indices = self
                     .repos
                     .iter()
@@ -3790,7 +3799,7 @@ review:
         app.apply_load_event(LoadEvent::LocalRepoEligibility {
             request_id: 7,
             repo_generation: app.repo_generation,
-            eligible_repositories: vec![loading::RepoEligibilityIdentity::from_repo(&usable)],
+            result: Ok(vec![loading::RepoEligibilityIdentity::from_repo(&usable)]),
         });
 
         assert_eq!(app.visible_repo_indices, vec![1]);
@@ -3810,7 +3819,7 @@ review:
         app.apply_load_event(LoadEvent::LocalRepoEligibility {
             request_id: 7,
             repo_generation: 1,
-            eligible_repositories: vec![loading::RepoEligibilityIdentity::from_repo(&old_repo)],
+            result: Ok(vec![loading::RepoEligibilityIdentity::from_repo(&old_repo)]),
         });
 
         assert!(app.visible_repo_indices.is_empty());
@@ -3844,7 +3853,7 @@ review:
         app.apply_load_event(LoadEvent::LocalRepoEligibility {
             request_id,
             repo_generation: app.repo_generation,
-            eligible_repositories: Vec::new(),
+            result: Ok(Vec::new()),
         });
 
         assert!(app.visible_repo_indices.is_empty());
@@ -3853,6 +3862,33 @@ review:
         assert_eq!(
             app.status,
             "No repositories have a usable configured local path"
+        );
+    }
+
+    #[test]
+    fn local_eligibility_failure_does_not_accept_a_partial_repository_set() {
+        let mut app = TuiApp::from_repos(vec![repo("delaudio", "configured")]);
+        app.pr_filter = PrListFilter::Local;
+        app.visible_repo_indices = vec![0];
+        app.repo_eligibility_request_id = 7;
+        app.repo_eligibility_loading = true;
+        app.pr_list_load = LoadState::Loading;
+
+        app.apply_load_event(LoadEvent::LocalRepoEligibility {
+            request_id: 7,
+            repo_generation: app.repo_generation,
+            result: Err("Local repository eligibility timed out".to_string()),
+        });
+
+        assert_eq!(app.visible_repo_indices, vec![0]);
+        assert!(matches!(app.pr_list_load, LoadState::Failed(_)));
+        assert_eq!(
+            app.error.as_deref(),
+            Some("Local repository eligibility timed out")
+        );
+        assert_eq!(
+            app.status,
+            "Failed to inspect configured local repositories"
         );
     }
 
@@ -3869,7 +3905,7 @@ review:
         app.apply_load_event(LoadEvent::LocalRepoEligibility {
             request_id: 7,
             repo_generation: app.repo_generation,
-            eligible_repositories: Vec::new(),
+            result: Ok(Vec::new()),
         });
         assert!(app.visible_repo_indices.is_empty());
 
@@ -3878,7 +3914,9 @@ review:
         app.apply_load_event(LoadEvent::LocalRepoEligibility {
             request_id: 8,
             repo_generation: app.repo_generation,
-            eligible_repositories: vec![loading::RepoEligibilityIdentity::from_repo(&configured)],
+            result: Ok(vec![loading::RepoEligibilityIdentity::from_repo(
+                &configured,
+            )]),
         });
         assert_eq!(app.visible_repo_indices, vec![0]);
     }

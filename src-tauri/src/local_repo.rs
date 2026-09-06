@@ -3,7 +3,6 @@ use std::fs;
 use std::path::{Path, PathBuf};
 #[cfg(test)]
 use std::process::Command;
-#[cfg(windows)]
 use std::sync::OnceLock;
 use std::time::Duration;
 
@@ -261,7 +260,48 @@ fn git_output(args: &[&str], working_dir: &Path) -> Result<String, String> {
 
 #[cfg(not(windows))]
 pub(crate) fn trusted_git_path() -> Result<PathBuf, String> {
-    Ok(PathBuf::from("/usr/bin/git"))
+    static TRUSTED_GIT_PATH: OnceLock<Result<PathBuf, String>> = OnceLock::new();
+    TRUSTED_GIT_PATH
+        .get_or_init(resolve_trusted_unix_git)
+        .clone()
+}
+
+#[cfg(not(windows))]
+fn resolve_trusted_unix_git() -> Result<PathBuf, String> {
+    let trusted_roots = [
+        Path::new("/usr"),
+        Path::new("/usr/local"),
+        Path::new("/opt/homebrew"),
+        Path::new("/opt/local"),
+        Path::new("/home/linuxbrew/.linuxbrew"),
+        Path::new("/nix/store"),
+    ];
+    let fixed_candidates = [
+        Path::new("/usr/bin/git"),
+        Path::new("/usr/local/bin/git"),
+        Path::new("/opt/homebrew/bin/git"),
+        Path::new("/opt/local/bin/git"),
+        Path::new("/home/linuxbrew/.linuxbrew/bin/git"),
+    ];
+
+    for candidate in fixed_candidates {
+        if let Some(path) = trusted_roots
+            .iter()
+            .find_map(|root| validated_trusted_executable(root, candidate))
+        {
+            return Ok(path);
+        }
+    }
+    if let Some(candidate) = find_in_path("git") {
+        if let Some(path) = trusted_roots
+            .iter()
+            .find_map(|root| validated_trusted_executable(root, &candidate))
+        {
+            return Ok(path);
+        }
+    }
+
+    Err("Cannot locate Git in a trusted system, Homebrew, MacPorts, Linuxbrew, or Nix installation directory. Install Git in a supported location, then restart Norn.".to_string())
 }
 
 #[cfg(windows)]
@@ -333,7 +373,6 @@ fn windows_known_folder(folder_id: &windows_sys::core::GUID) -> Option<PathBuf> 
     Some(path)
 }
 
-#[cfg(any(windows, test))]
 fn validated_trusted_executable(root: &Path, candidate: &Path) -> Option<PathBuf> {
     let canonical_root = fs::canonicalize(root).ok()?;
     let canonical_candidate = fs::canonicalize(candidate).ok()?;
@@ -396,20 +435,21 @@ pub fn configured_repo_path(repo_ref: &RepoRef) -> Option<PathBuf> {
 pub(crate) fn has_usable_configured_path_with_control(
     repo_ref: &RepoRef,
     control: &GitRunControl,
-) -> bool {
-    configured_repo_path(repo_ref).is_some_and(|path| {
-        path.is_dir()
-            && path.join(".git").exists()
-            && git_origin_matches_with_control(
-                &path,
-                repo_ref.provider,
-                &repo_ref.workspace,
-                &repo_ref.repo,
-                control,
-            )
-            .ok()
-                == Some(true)
-    })
+) -> Result<bool, String> {
+    control.check()?;
+    let Some(path) = configured_repo_path(repo_ref) else {
+        return Ok(false);
+    };
+    if !path.is_dir() || !path.join(".git").exists() {
+        return Ok(false);
+    }
+    git_origin_matches_with_control(
+        &path,
+        repo_ref.provider,
+        &repo_ref.workspace,
+        &repo_ref.repo,
+        control,
+    )
 }
 
 pub fn configured_or_discovered_repo(workspace: &str, repo: &str) -> Option<PathBuf> {
@@ -631,8 +671,9 @@ mod tests {
         cancellation.cancel();
         let control = eligibility_control(cancellation);
 
-        assert!(!has_usable_configured_path_with_control(&repo, &control));
-        assert!(control.check().is_err());
+        let error = has_usable_configured_path_with_control(&repo, &control)
+            .expect_err("cancelled eligibility propagates");
+        assert!(error.contains("cancelled"));
         fs::remove_dir_all(path).expect("cleanup temp repo");
     }
 
@@ -723,6 +764,22 @@ mod tests {
 
         assert!(error.contains("<redacted>@github.com"));
         assert!(!error.contains("secret"));
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn trusted_git_resolver_accepts_a_supported_unix_installation() {
+        let resolved = trusted_git_path().expect("trusted Git installation");
+
+        assert!(resolved.is_absolute());
+        assert!(resolved.is_file());
+        assert!(
+            resolved.starts_with("/usr")
+                || resolved.starts_with("/opt/homebrew")
+                || resolved.starts_with("/opt/local")
+                || resolved.starts_with("/home/linuxbrew/.linuxbrew")
+                || resolved.starts_with("/nix/store")
+        );
     }
 
     #[test]
