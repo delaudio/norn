@@ -12,9 +12,10 @@ If status files and git disagree, git is authoritative; correct this file.
 - **Active item:** `.docflow/plan/todo/0013-local-review-target-tui.md`.
 - **Plan items:** implement the shared local snapshot and TUI first, then
   `.docflow/plan/todo/0014-local-review-target-desktop.md`.
-- **Verification:** 643 Rust library tests pass with 2 ignored, alongside 110 frontend
-  tests plus tooling, all-target Clippy, typecheck, lint, Archgate 17/17, and an
-  isolated Windows target compile check. Local snapshots share one end-to-end
+- **Verification:** 646 Rust library tests pass with 2 ignored, alongside 110 frontend
+  tests plus tooling, all-target Clippy, typecheck, lint, and Archgate 17/17.
+  The local Windows cross-target check reaches native dependency compilation
+  but currently lacks the MinGW C compiler. Local snapshots share one end-to-end
   deadline, superseded TUI loads cancel their process trees, and every local
   review Git process uses the platform's trusted executable resolver. Preview
   fingerprints come from immutable Git index object IDs, and preview bytes are
@@ -25,11 +26,13 @@ If status files and git disagree, git is authoritative; correct this file.
   repository generation, and now shares one cancellable five-second Git
   deadline with bounded output. Git commands bind their canonical configured
   repository as the worktree, and an empty Local eligibility result settles the
-  TUI out of its loading state. Norn branch reviews through
-  `run-1788600515967884000` drove the trusted Git, executable-configuration,
-  immutable-preview, worktree-boundary, and eligibility remediations. The next
-  bounded review is pending. Structured eligibility errors remain a
-  low-severity follow-up.
+  TUI out of its loading state. Git input is written by a supervised worker, so
+  blocked writes remain subject to process-tree cancellation and the shared
+  deadline. Eligibility failures are propagated without accepting partial
+  repository lists, and trusted Unix Git discovery covers system, Homebrew,
+  MacPorts, Linuxbrew, and Nix roots. Norn branch reviews through
+  `run-1788685125491081000` drove these remediations. The next bounded review is
+  pending.
   Implementation commit `26b4ee6` and release metadata commit `8460524` are prepared, all
   version sources are aligned at `0.3.0`, and the release guard accepts
   candidate tag `v0.3.0`; branch publication and PR creation are pending the
