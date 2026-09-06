@@ -12,7 +12,7 @@ If status files and git disagree, git is authoritative; correct this file.
 - **Active item:** `.docflow/plan/todo/0013-local-review-target-tui.md`.
 - **Plan items:** implement the shared local snapshot and TUI first, then
   `.docflow/plan/todo/0014-local-review-target-desktop.md`.
-- **Verification:** 621 Rust library tests pass with 2 ignored and 32
+- **Verification:** 622 Rust library tests pass with 2 ignored and 32
   keychain-dependent tests filtered after the macOS Keychain blocked the full
   local run; all 17 affected Git, retention, migration, and active-session
   regressions pass. This is alongside 110 frontend tests plus tooling,
@@ -39,9 +39,12 @@ If status files and git disagree, git is authoritative; correct this file.
   snapshots. Repository changes now clear all previous local review state
   before asynchronous loading begins, and untracked-file detection terminates
   its contained Git process immediately after the first output byte. Norn
-  branch reviews through `run-1788691498309802000` drove these remediations.
-  The next bounded review is pending.
-  Implementation commits through `1ebd3b0` and release metadata commit
+  snapshots also ignore global and system Git configuration and neutralize
+  every repository-defined clean/process filter before any working-tree
+  comparison, including required and long-running process drivers. Norn branch
+  reviews through `run-1788693450296976000` drove these remediations. The next
+  bounded review is pending.
+  Implementation commits through `63d7e31` and release metadata commit
   `8460524` are prepared, all version sources are aligned at `0.3.0`, and the
   release guard accepts candidate tag `v0.3.0`; branch publication and PR
   creation are pending the final pre-push Norn branch review.
