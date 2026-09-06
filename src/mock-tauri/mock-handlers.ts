@@ -1295,6 +1295,10 @@ export const mockHandlers: Record<string, Handler> = {
       reviewId: 2147483649,
       diff: mockRawDiff,
       diffstat: mockDiffstat,
+      layers: [
+        { kind: "staged", diff: mockRawDiff, diffstat: mockDiffstat },
+        { kind: "unstaged", diff: "", diffstat: [] },
+      ],
       previewOid: {},
       warnings: [],
     }) satisfies LocalReviewSnapshot,

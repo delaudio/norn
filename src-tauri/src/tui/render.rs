@@ -14,7 +14,7 @@ use unicode_segmentation::UnicodeSegmentation;
 use super::image_diff::{ImageDiffState, ImageVersionState};
 use super::loading::LoadState;
 use crate::config::{RepoRef, ReviewProvider};
-use crate::local_review::LocalReviewSnapshot;
+use crate::local_review::{LocalReviewDiffLayerKind, LocalReviewSnapshot};
 use crate::services::bitbucket::{PrComment, PullRequestDetail, PullRequestSummary};
 use crate::services::review::{AiReviewRunState, AiReviewRunStatus};
 
@@ -937,6 +937,16 @@ fn render_pull_requests(frame: &mut Frame<'_>, area: Rect, state: TuiState<'_>) 
             let selected = state.focus == FocusPane::PullRequests;
             let marker = if selected { ">" } else { " " };
             let upstream = snapshot.upstream.as_deref().unwrap_or("no upstream");
+            let staged_files = snapshot
+                .layers
+                .iter()
+                .find(|layer| layer.kind == LocalReviewDiffLayerKind::Staged)
+                .map_or(0, |layer| layer.diffstat.len());
+            let unstaged_files = snapshot
+                .layers
+                .iter()
+                .find(|layer| layer.kind == LocalReviewDiffLayerKind::Unstaged)
+                .map_or(0, |layer| layer.diffstat.len());
             vec![ListItem::new(Line::from(vec![
                 Span::styled(
                     marker,
@@ -953,8 +963,10 @@ fn render_pull_requests(frame: &mut Frame<'_>, area: Rect, state: TuiState<'_>) 
                 Span::styled(upstream.to_string(), branch_style()),
                 Span::styled(
                     format!(
-                        "  {} file(s), {} ahead, {} behind",
+                        "  {} file(s): {} staged, {} unstaged · {} ahead, {} behind",
                         snapshot.diffstat.len(),
+                        staged_files,
+                        unstaged_files,
                         snapshot.commits_ahead,
                         snapshot.commits_behind
                     ),
@@ -2471,6 +2483,11 @@ mod tests {
             review_id: 0x8000_0042,
             diff: "diff --git a/src/a.rs b/src/a.rs\n--- a/src/a.rs\n+++ b/src/a.rs\n@@ -1 +1 @@\n-old\n+new\n".to_string(),
             diffstat: vec![],
+            layers: vec![crate::local_review::LocalReviewDiffLayer {
+                kind: crate::local_review::LocalReviewDiffLayerKind::Staged,
+                diff: "diff --git a/src/a.rs b/src/a.rs\n--- a/src/a.rs\n+++ b/src/a.rs\n@@ -1 +1 @@\n-old\n+new\n".to_string(),
+                diffstat: vec![],
+            }],
             preview_oid: Default::default(),
             warnings: vec![],
         }

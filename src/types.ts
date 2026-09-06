@@ -556,8 +556,15 @@ export interface LocalReviewSnapshot {
   reviewId: number;
   diff: string;
   diffstat: DiffstatEntry[];
+  layers: LocalReviewDiffLayer[];
   previewOid: Record<string, string>;
   warnings: string[];
+}
+
+export interface LocalReviewDiffLayer {
+  kind: "staged" | "unstaged";
+  diff: string;
+  diffstat: DiffstatEntry[];
 }
 
 export interface PrFilePreview {

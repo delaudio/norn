@@ -26,7 +26,9 @@ use zeroize::Zeroizing;
 
 use crate::config::{self, AiProvider, AppConfig, RepoRef};
 use crate::credentials::{self, CredentialProvider, CredentialSource, CredentialStatus};
-use crate::local_review::{get_local_file_preview_native, LocalReviewSnapshot};
+use crate::local_review::{
+    get_local_file_preview_native, LocalReviewDiffLayerKind, LocalReviewSnapshot,
+};
 use crate::readiness::{self, ReadinessIssueSeverity, ReadinessStatus};
 use crate::repo_config;
 use crate::services::bitbucket::{
@@ -2065,6 +2067,8 @@ impl TuiApp {
             self.refresh_local_repo_eligibility();
         } else {
             self.loader.cancel_local_repo_eligibility();
+            self.repo_eligibility_loading = false;
+            self.repo_eligibility_request_id = self.next_request();
             self.visible_repo_indices = (0..self.repos.len()).collect();
             self.reconcile_selected_repo();
             self.load_selected_repo();
@@ -3204,12 +3208,29 @@ fn build_local_review_payload(prompt: &str, snapshot: &LocalReviewSnapshot) -> S
                 .map(|warning| format!("- {warning}")),
         );
     }
+    lines.push(String::new());
+    lines.push("## Diff layers".to_string());
+    for layer in snapshot
+        .layers
+        .iter()
+        .filter(|layer| !layer.diff.trim().is_empty())
+    {
+        lines.extend([
+            String::new(),
+            match layer.kind {
+                LocalReviewDiffLayerKind::Staged => {
+                    "### Staged layer (merge base to index)".to_string()
+                }
+                LocalReviewDiffLayerKind::Unstaged => {
+                    "### Unstaged layer (index to working tree)".to_string()
+                }
+            },
+            "```diff".to_string(),
+            layer.diff.trim().to_string(),
+            "```".to_string(),
+        ]);
+    }
     lines.extend([
-        String::new(),
-        "## Diff".to_string(),
-        "```diff".to_string(),
-        snapshot.diff.trim().to_string(),
-        "```".to_string(),
         String::new(),
         "This target contains unpublished local work. Do not describe a change as pushed or available in a pull request unless the supplied context proves it."
             .to_string(),
@@ -3309,6 +3330,11 @@ mod tests {
             review_id: 0x8000_0042,
             diff: "diff --git a/src/a.rs b/src/a.rs\n--- a/src/a.rs\n+++ b/src/a.rs\n@@ -1 +1 @@\n-old\n+new\n".to_string(),
             diffstat: vec![],
+            layers: vec![crate::local_review::LocalReviewDiffLayer {
+                kind: crate::local_review::LocalReviewDiffLayerKind::Staged,
+                diff: "diff --git a/src/a.rs b/src/a.rs\n--- a/src/a.rs\n+++ b/src/a.rs\n@@ -1 +1 @@\n-old\n+new\n".to_string(),
+                diffstat: vec![],
+            }],
             preview_oid: Default::default(),
             warnings: vec![],
         }
@@ -3865,6 +3891,32 @@ review:
     }
 
     #[test]
+    fn returning_to_local_starts_fresh_eligibility_after_cancellation() {
+        let mut app = TuiApp::from_repos(vec![repo("delaudio", "norn")]);
+        app.set_pr_filter(PrListFilter::Local);
+        let canceled_request = app.repo_eligibility_request_id;
+
+        app.set_pr_filter(PrListFilter::Open);
+        assert!(!app.repo_eligibility_loading);
+        assert_ne!(app.repo_eligibility_request_id, canceled_request);
+
+        app.set_pr_filter(PrListFilter::Local);
+        let fresh_request = app.repo_eligibility_request_id;
+        assert!(app.repo_eligibility_loading);
+        assert_ne!(fresh_request, canceled_request);
+
+        app.apply_load_event(LoadEvent::LocalRepoEligibility {
+            request_id: canceled_request,
+            repo_generation: app.repo_generation,
+            result: Err("stale cancellation".to_string()),
+        });
+
+        assert!(app.repo_eligibility_loading);
+        assert_eq!(app.repo_eligibility_request_id, fresh_request);
+        assert!(app.error.is_none());
+    }
+
+    #[test]
     fn local_eligibility_failure_does_not_accept_a_partial_repository_set() {
         let mut app = TuiApp::from_repos(vec![repo("delaudio", "configured")]);
         app.pr_filter = PrListFilter::Local;
@@ -4068,6 +4120,7 @@ review:
         assert!(payload.contains("## Local changes"));
         assert!(payload.contains("Current branch: feature/local"));
         assert!(payload.contains("Unpushed commits: 2"));
+        assert!(payload.contains("### Staged layer (merge base to index)"));
         assert!(payload.contains("+new"));
         assert!(!payload.contains("Pull request:"));
     }

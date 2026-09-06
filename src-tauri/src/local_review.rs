@@ -107,13 +107,39 @@ pub struct LocalReviewSnapshot {
     pub review_id: u32,
     pub diff: String,
     pub diffstat: Vec<DiffstatEntry>,
+    pub layers: Vec<LocalReviewDiffLayer>,
     pub preview_oid: BTreeMap<String, String>,
     pub warnings: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LocalReviewDiffLayerKind {
+    Staged,
+    Unstaged,
+}
+
+impl LocalReviewDiffLayerKind {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Staged => "staged",
+            Self::Unstaged => "unstaged",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LocalReviewDiffLayer {
+    pub kind: LocalReviewDiffLayerKind,
+    pub diff: String,
+    pub diffstat: Vec<DiffstatEntry>,
 }
 
 struct CollectedLocalDiff {
     diff: String,
     diffstat: Vec<DiffstatEntry>,
+    layers: Vec<LocalReviewDiffLayer>,
     preview_oid: BTreeMap<String, String>,
     warnings: Vec<String>,
 }
@@ -356,6 +382,7 @@ fn local_review_snapshot_for_path_with_control(
         collect_preview_oids_with_control(repo_path, &verification.diffstat, &control)?;
     if collected.diff != verification.diff
         || collected.diffstat != verification.diffstat
+        || collected.layers != verification.layers
         || collected.preview_oid != verification_preview_oid
     {
         return Err(
@@ -373,7 +400,7 @@ fn local_review_snapshot_for_path_with_control(
         &base_sha,
         commits_ahead,
         commits_behind,
-        &collected.diff,
+        &collected.layers,
         &collected.preview_oid,
     );
 
@@ -391,6 +418,7 @@ fn local_review_snapshot_for_path_with_control(
         review_id,
         diff: collected.diff,
         diffstat: collected.diffstat,
+        layers: collected.layers,
         preview_oid: collected.preview_oid,
         warnings,
     })
@@ -436,7 +464,7 @@ fn local_review_identity(
     base_sha: &str,
     commits_ahead: u32,
     commits_behind: u32,
-    diff: &str,
+    layers: &[LocalReviewDiffLayer],
     preview_oids: &BTreeMap<String, String>,
 ) -> (String, u32) {
     let mut hasher = Sha256::new();
@@ -452,13 +480,19 @@ fn local_review_identity(
         upstream_sha.unwrap_or_default(),
         head_sha.unwrap_or_default(),
         base_sha,
-        diff,
     ] {
         hasher.update((part.len() as u64).to_be_bytes());
         hasher.update(part.as_bytes());
     }
     hasher.update(commits_ahead.to_be_bytes());
     hasher.update(commits_behind.to_be_bytes());
+    hasher.update((layers.len() as u64).to_be_bytes());
+    for layer in layers {
+        for part in [layer.kind.as_str(), layer.diff.as_str()] {
+            hasher.update((part.len() as u64).to_be_bytes());
+            hasher.update(part.as_bytes());
+        }
+    }
     hasher.update((preview_oids.len() as u64).to_be_bytes());
     for (path, oid) in preview_oids {
         for part in [path.as_str(), oid.as_str()] {
@@ -476,7 +510,16 @@ fn collect_local_diff(
     base_sha: &str,
     control: &GitRunControl,
 ) -> Result<CollectedLocalDiff, String> {
-    let diffstat = tracked_diffstat(repo_path, base_sha, control)?;
+    let layers = vec![
+        collect_local_diff_layer(
+            repo_path,
+            LocalReviewDiffLayerKind::Staged,
+            &["--cached", base_sha],
+            control,
+        )?,
+        collect_local_diff_layer(repo_path, LocalReviewDiffLayerKind::Unstaged, &[], control)?,
+    ];
+    let diffstat = merge_layer_diffstat(&layers);
     if diffstat.len() > MAX_LOCAL_CHANGED_FILES {
         return Err(format!(
             "Local review contains {} changed files, exceeding the {}-file limit.",
@@ -484,21 +527,12 @@ fn collect_local_diff(
             MAX_LOCAL_CHANGED_FILES
         ));
     }
-    let diff = git_text_raw_limited_with_control(
-        repo_path,
-        &[
-            "diff",
-            "--no-ext-diff",
-            "--no-textconv",
-            "--find-renames",
-            "--no-color",
-            base_sha,
-            "--",
-        ],
-        MAX_LOCAL_DIFF_BYTES,
-        "Local review diff",
-        control,
-    )?;
+    let diff = layers
+        .iter()
+        .map(|layer| layer.diff.trim())
+        .filter(|diff| !diff.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n\n");
     let warnings = Vec::new();
     if diffstat.len() > MAX_LOCAL_CHANGED_FILES {
         return Err(format!(
@@ -516,9 +550,69 @@ fn collect_local_diff(
     Ok(CollectedLocalDiff {
         diff,
         diffstat,
+        layers,
         preview_oid: BTreeMap::new(),
         warnings,
     })
+}
+
+fn collect_local_diff_layer(
+    repo_path: &Path,
+    kind: LocalReviewDiffLayerKind,
+    comparison: &[&str],
+    control: &GitRunControl,
+) -> Result<LocalReviewDiffLayer, String> {
+    let diffstat = tracked_diffstat(repo_path, comparison, control)?;
+    let mut args = vec![
+        "diff",
+        "--no-ext-diff",
+        "--no-textconv",
+        "--find-renames",
+        "--no-color",
+    ];
+    args.extend_from_slice(comparison);
+    args.push("--");
+    let diff = git_text_raw_limited_with_control(
+        repo_path,
+        &args,
+        MAX_LOCAL_DIFF_BYTES,
+        match kind {
+            LocalReviewDiffLayerKind::Staged => "Staged local review diff",
+            LocalReviewDiffLayerKind::Unstaged => "Unstaged local review diff",
+        },
+        control,
+    )?;
+    Ok(LocalReviewDiffLayer {
+        kind,
+        diff,
+        diffstat,
+    })
+}
+
+fn merge_layer_diffstat(layers: &[LocalReviewDiffLayer]) -> Vec<DiffstatEntry> {
+    let mut entries = BTreeMap::<String, DiffstatEntry>::new();
+    for entry in layers.iter().flat_map(|layer| &layer.diffstat) {
+        let Some(path) = entry.new_path.as_ref().or(entry.old_path.as_ref()) else {
+            continue;
+        };
+        entries
+            .entry(path.clone())
+            .and_modify(|combined| {
+                combined.lines_added = combined.lines_added.saturating_add(entry.lines_added);
+                combined.lines_removed = combined.lines_removed.saturating_add(entry.lines_removed);
+                if combined.status != entry.status {
+                    combined.status = "modified".to_string();
+                }
+                if combined.old_path.is_none() {
+                    combined.old_path.clone_from(&entry.old_path);
+                }
+                if combined.new_path.is_none() {
+                    combined.new_path.clone_from(&entry.new_path);
+                }
+            })
+            .or_insert_with(|| entry.clone());
+    }
+    entries.into_values().collect()
 }
 
 fn has_untracked_files(repo_path: &Path, control: &GitRunControl) -> Result<bool, String> {
@@ -662,38 +756,40 @@ fn empty_tree_oid(repo_path: &Path, control: &GitRunControl) -> Result<String, S
 
 fn tracked_diffstat(
     repo_path: &Path,
-    base_sha: &str,
+    comparison: &[&str],
     control: &GitRunControl,
 ) -> Result<Vec<DiffstatEntry>, String> {
+    let mut name_status_args = vec![
+        "diff",
+        "--no-ext-diff",
+        "--no-textconv",
+        "--name-status",
+        "-z",
+        "--find-renames",
+    ];
+    name_status_args.extend_from_slice(comparison);
+    name_status_args.push("--");
     let output = git_bytes_limited_with_control(
         repo_path,
-        &[
-            "diff",
-            "--no-ext-diff",
-            "--no-textconv",
-            "--name-status",
-            "-z",
-            "--find-renames",
-            base_sha,
-            "--",
-        ],
+        &name_status_args,
         MAX_GIT_METADATA_BYTES,
         "Local review file metadata",
         control,
     )?;
     let mut entries = parse_name_status(&output)?;
+    let mut numstat_args = vec![
+        "diff",
+        "--no-ext-diff",
+        "--no-textconv",
+        "--numstat",
+        "-z",
+        "--find-renames",
+    ];
+    numstat_args.extend_from_slice(comparison);
+    numstat_args.push("--");
     let numstat = git_bytes_limited_with_control(
         repo_path,
-        &[
-            "diff",
-            "--no-ext-diff",
-            "--no-textconv",
-            "--numstat",
-            "-z",
-            "--find-renames",
-            base_sha,
-            "--",
-        ],
+        &numstat_args,
         MAX_GIT_METADATA_BYTES,
         "Local review line metadata",
         control,
@@ -1845,6 +1941,14 @@ mod tests {
         );
     }
 
+    fn staged_layers(diff: &str) -> Vec<LocalReviewDiffLayer> {
+        vec![LocalReviewDiffLayer {
+            kind: LocalReviewDiffLayerKind::Staged,
+            diff: diff.to_string(),
+            diffstat: Vec::new(),
+        }]
+    }
+
     #[test]
     fn git_command_disables_mutating_and_injected_git_features() {
         let fixture = Fixture::new("git-command-boundary");
@@ -2110,6 +2214,36 @@ mod tests {
             .find(|entry| entry.new_path.as_deref() == Some("tracked.txt"))
             .expect("tracked diffstat");
         assert_eq!((tracked.lines_added, tracked.lines_removed), (1, 1));
+    }
+
+    #[test]
+    fn snapshot_preserves_staged_and_unstaged_layers_for_the_same_path() {
+        let fixture = Fixture::new("staged-and-unstaged-layers");
+        fixture.write("tracked.txt", "base\n");
+        fixture.commit_all("base");
+        fixture.write("tracked.txt", "staged\n");
+        run(&fixture.path, &["add", "tracked.txt"]);
+        fixture.write("tracked.txt", "base\n");
+
+        let snapshot =
+            local_review_snapshot_for_path(ReviewProvider::Github, "acme", "demo", &fixture.path)
+                .expect("snapshot");
+
+        assert_eq!(snapshot.layers.len(), 2);
+        assert_eq!(snapshot.layers[0].kind, LocalReviewDiffLayerKind::Staged);
+        assert!(snapshot.layers[0].diff.contains("+staged"));
+        assert_eq!(snapshot.layers[1].kind, LocalReviewDiffLayerKind::Unstaged);
+        assert!(snapshot.layers[1].diff.contains("-staged"));
+        assert!(snapshot.layers[1].diff.contains("+base"));
+        assert_eq!(snapshot.diff.matches("diff --git a/tracked.txt").count(), 2);
+        assert_eq!(snapshot.diffstat.len(), 1);
+        assert_eq!(
+            (
+                snapshot.diffstat[0].lines_added,
+                snapshot.diffstat[0].lines_removed,
+            ),
+            (2, 2)
+        );
     }
 
     #[test]
@@ -2657,7 +2791,7 @@ mod tests {
             "0000000000000000000000000000000000000000",
             1,
             0,
-            "+first",
+            &staged_layers("+first"),
             &previews,
         );
         let (second_hash, second_id) = local_review_identity(
@@ -2671,7 +2805,7 @@ mod tests {
             "0000000000000000000000000000000000000000",
             1,
             0,
-            "+second",
+            &staged_layers("+second"),
             &previews,
         );
 
@@ -2681,6 +2815,48 @@ mod tests {
         assert_eq!(second_hash.len(), 64);
         assert_ne!(first_id, 0);
         assert_ne!(second_id, 0);
+    }
+
+    #[test]
+    fn review_identity_includes_diff_layer_identity() {
+        let previews = BTreeMap::new();
+        let staged = staged_layers("+same");
+        let unstaged = vec![LocalReviewDiffLayer {
+            kind: LocalReviewDiffLayerKind::Unstaged,
+            diff: "+same".to_string(),
+            diffstat: Vec::new(),
+        }];
+
+        let staged_identity = local_review_identity(
+            ReviewProvider::Github,
+            "acme",
+            "demo",
+            "feature/local",
+            Some("origin/main"),
+            None,
+            None,
+            "0000000000000000000000000000000000000000",
+            0,
+            0,
+            &staged,
+            &previews,
+        );
+        let unstaged_identity = local_review_identity(
+            ReviewProvider::Github,
+            "acme",
+            "demo",
+            "feature/local",
+            Some("origin/main"),
+            None,
+            None,
+            "0000000000000000000000000000000000000000",
+            0,
+            0,
+            &unstaged,
+            &previews,
+        );
+
+        assert_ne!(staged_identity, unstaged_identity);
     }
 
     #[test]
@@ -2699,7 +2875,7 @@ mod tests {
             "0000000000000000000000000000000000000000",
             1,
             0,
-            "binary diff marker",
+            &staged_layers("binary diff marker"),
             &first_previews,
         );
         let second = local_review_identity(
@@ -2713,7 +2889,7 @@ mod tests {
             "0000000000000000000000000000000000000000",
             1,
             0,
-            "binary diff marker",
+            &staged_layers("binary diff marker"),
             &second_previews,
         );
 
@@ -2734,7 +2910,7 @@ mod tests {
             "0000000000000000000000000000000000000000",
             1,
             0,
-            "+same",
+            &staged_layers("+same"),
             &previews,
         );
         let second = local_review_identity(
@@ -2748,7 +2924,7 @@ mod tests {
             "0000000000000000000000000000000000000000",
             2,
             1,
-            "+same",
+            &staged_layers("+same"),
             &previews,
         );
 
