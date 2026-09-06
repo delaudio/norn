@@ -233,6 +233,7 @@ export interface AiReviewStore {
 export interface AiReviewRunState {
   prKey: string;
   prTitle: string | null;
+  reviewedHeadSha?: string | null;
   threadId: string | null;
   turnKind: AiReviewTurnKind | null;
   status: AiReviewRunStatus;
@@ -539,6 +540,31 @@ export interface DiffstatEntry {
   linesRemoved: number;
   oldPath: string | null;
   newPath: string | null;
+}
+
+export interface LocalReviewSnapshot {
+  provider: ReviewProvider;
+  workspace: string;
+  repo: string;
+  currentBranch: string;
+  upstream: string | null;
+  commitsAhead: number;
+  commitsBehind: number;
+  headSha: string | null;
+  baseSha: string;
+  snapshotSha256: string;
+  reviewId: number;
+  diff: string;
+  diffstat: DiffstatEntry[];
+  layers: LocalReviewDiffLayer[];
+  previewOid: Record<string, string>;
+  warnings: string[];
+}
+
+export interface LocalReviewDiffLayer {
+  kind: "staged" | "unstaged";
+  diff: string;
+  diffstat: DiffstatEntry[];
 }
 
 export interface PrFilePreview {

@@ -17,6 +17,7 @@ const BROWSER_IMAGE_EXTENSIONS = [".gif", ".jpeg", ".jpg", ".png", ".webp"];
 
 export interface BrowserDiffState {
   version: number;
+  targetKind: "pullRequest" | "local";
   workspace: string;
   repo: string;
   prId: number;
@@ -24,6 +25,7 @@ export interface BrowserDiffState {
   prAuthor: string;
   sourceBranch: string;
   targetBranch: string;
+  baseSha: string | null;
   diff: string | null;
   diffstat: DiffstatEntry[] | null;
   populationFailed: boolean;
@@ -101,8 +103,8 @@ export function BrowserDiffApp() {
 
   useEffect(() => {
     const controller = new AbortController();
-    // The server owns a session-scoped monotonic version that advances whenever the PR identity
-    // or its content changes, so one cursor safely covers PR switches within this session.
+    // The server owns a session-scoped monotonic version that advances whenever the review target
+    // or its content changes, so one cursor safely covers target switches within this session.
     let version = -1;
     let timeout: number | undefined;
 
@@ -117,9 +119,7 @@ export function BrowserDiffApp() {
         }
       } catch (cause) {
         if (!controller.signal.aborted) {
-          setError(
-            cause instanceof Error ? cause.message : "Could not load the pull request diff.",
-          );
+          setError(cause instanceof Error ? cause.message : "Could not load the review diff.");
         }
       } finally {
         if (!controller.signal.aborted) timeout = window.setTimeout(poll, POLL_INTERVAL_MS);
@@ -177,10 +177,14 @@ export function BrowserDiffApp() {
           <div className="min-w-0">
             <div className="flex min-w-0 items-baseline gap-2">
               <span className="shrink-0 text-sm font-semibold text-[var(--norn-accent-strong)]">
-                #{remoteState?.prId ?? "…"}
+                {remoteState?.targetKind === "local"
+                  ? "LOCAL"
+                  : remoteState
+                    ? `#${remoteState.prId}`
+                    : "…"}
               </span>
               <h1 className="truncate text-sm font-semibold">
-                {remoteState?.prTitle ?? "Loading pull request…"}
+                {remoteState?.prTitle ?? "Loading review target…"}
               </h1>
             </div>
             <div className="mt-0.5 flex flex-wrap items-center gap-x-2 text-xs text-muted-foreground">
@@ -233,6 +237,11 @@ export function BrowserDiffApp() {
         }}
         loading={!remoteState && !stateError}
         error={stateError}
+        emptyMessage={
+          remoteState?.targetKind === "local"
+            ? "No unpublished local changes."
+            : "No changes in this pull request."
+        }
       />
     </main>
   );

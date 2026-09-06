@@ -12,6 +12,7 @@ import type {
   FindingReconciliationAction,
   FindingReconciliationRequest,
   FindingReconciliationSummary,
+  LocalReviewSnapshot,
   PrComment,
   PrFilePreview,
   PrListFilter,
@@ -1279,6 +1280,28 @@ export const mockHandlers: Record<string, Handler> = {
     },
   get_diffstat: () => mockDiffstat,
   get_pr_diff: () => mockRawDiff,
+  get_local_review_snapshot: (args) =>
+    ({
+      provider: args?.provider === "github" ? "github" : "bitbucket",
+      workspace: String(args?.workspace ?? "example-workspace"),
+      repo: String(args?.repo ?? "frontend-app"),
+      currentBranch: "feature/local-review",
+      upstream: "origin/main",
+      commitsAhead: 1,
+      commitsBehind: 0,
+      headSha: "6f52c9a1cf5cd075762f13d0b0f8bf8d0f4f3f7d",
+      baseSha: "75f1fc8355b2743b06a30c4bb413f513b45e8af0",
+      snapshotSha256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      reviewId: 2147483649,
+      diff: mockRawDiff,
+      diffstat: mockDiffstat,
+      layers: [
+        { kind: "staged", diff: mockRawDiff, diffstat: mockDiffstat },
+        { kind: "unstaged", diff: "", diffstat: [] },
+      ],
+      previewOid: {},
+      warnings: [],
+    }) satisfies LocalReviewSnapshot,
   get_pr_file_preview: (args) => {
     const path = String(args?.path ?? "public/review-preview.svg");
     const mimeType = path.toLowerCase().endsWith(".svg") ? "image/svg+xml" : "image/png";

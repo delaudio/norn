@@ -1,4 +1,5 @@
 use std::{
+    collections::BTreeMap,
     collections::HashMap,
     fs,
     io::{Read, Write},
@@ -18,10 +19,19 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     config::ReviewProvider,
+    local_review::get_local_file_preview_native,
     services::bitbucket::{
         get_diffstat_native, get_pr_diff_native, get_pr_file_preview_native, DiffstatEntry,
     },
 };
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum WebDiffTargetKind {
+    #[default]
+    PullRequest,
+    Local,
+}
 
 const MAX_REQUEST_HEAD_BYTES: usize = 16 * 1024;
 const MAX_ACTIVE_CONNECTIONS: usize = 16;
@@ -206,6 +216,7 @@ fn browser_asset_content_type(path: &Path) -> Option<&'static str> {
 pub struct WebDiffState {
     pub version: usize,
     pub provider: Option<ReviewProvider>,
+    pub target_kind: WebDiffTargetKind,
     pub workspace: String,
     pub repo: String,
     pub pr_id: u32,
@@ -213,8 +224,13 @@ pub struct WebDiffState {
     pub pr_author: String,
     pub source_branch: String,
     pub target_branch: String,
+    pub base_sha: Option<String>,
     pub diff: Option<String>,
     pub diffstat: Option<Vec<DiffstatEntry>>,
+    #[serde(skip)]
+    pub local_preview_oid: BTreeMap<String, String>,
+    #[serde(skip)]
+    pub local_snapshot_sha256: Option<String>,
     pub population_failed: bool,
 }
 
@@ -303,6 +319,7 @@ impl WebDiffServer {
         if let Ok(mut lock) = self.state.write() {
             next.version = lock.version;
             let content_changed = lock.provider != next.provider
+                || lock.target_kind != next.target_kind
                 || lock.workspace != next.workspace
                 || lock.repo != next.repo
                 || lock.pr_id != next.pr_id
@@ -310,7 +327,10 @@ impl WebDiffServer {
                 || lock.pr_title != next.pr_title
                 || lock.pr_author != next.pr_author
                 || lock.source_branch != next.source_branch
-                || lock.target_branch != next.target_branch;
+                || lock.target_branch != next.target_branch
+                || lock.base_sha != next.base_sha
+                || lock.local_preview_oid != next.local_preview_oid
+                || lock.local_snapshot_sha256 != next.local_snapshot_sha256;
             if !content_changed && next.diffstat.is_none() {
                 next.diffstat = lock.diffstat.clone();
             }
@@ -517,7 +537,8 @@ fn handle_connection(
                 .clone();
             if initial_state.workspace.is_empty()
                 || initial_state.repo.is_empty()
-                || initial_state.pr_id == 0
+                || (initial_state.target_kind == WebDiffTargetKind::PullRequest
+                    && initial_state.pr_id == 0)
             {
                 return write_empty_response(&mut stream, "400 Bad Request");
             }
@@ -535,14 +556,41 @@ fn handle_connection(
                 return write_empty_response(&mut stream, "404 Not Found");
             }
 
-            match get_pr_file_preview_native(
-                state_data.provider,
-                &state_data.workspace,
-                &state_data.repo,
-                state_data.pr_id,
-                &file_path,
-                &side,
-            ) {
+            let preview = match state_data.target_kind {
+                WebDiffTargetKind::PullRequest => get_pr_file_preview_native(
+                    state_data.provider,
+                    &state_data.workspace,
+                    &state_data.repo,
+                    state_data.pr_id,
+                    &file_path,
+                    &side,
+                ),
+                WebDiffTargetKind::Local => state_data
+                    .provider
+                    .ok_or_else(|| "Local diff provider is unavailable.".to_string())
+                    .and_then(|provider| {
+                        state_data
+                            .base_sha
+                            .as_deref()
+                            .ok_or_else(|| "Local diff base is unavailable.".to_string())
+                            .and_then(|base_sha| {
+                                get_local_file_preview_native(
+                                    provider,
+                                    &state_data.workspace,
+                                    &state_data.repo,
+                                    base_sha,
+                                    state_data.diffstat.as_deref().unwrap_or(&[]),
+                                    state_data
+                                        .local_preview_oid
+                                        .get(&file_path)
+                                        .map(String::as_str),
+                                    &file_path,
+                                    &side,
+                                )
+                            })
+                    }),
+            };
+            match preview {
                 Ok(preview) => {
                     let Some((mime_part, base64_data)) = preview.data_url.split_once(',') else {
                         return write_empty_response(&mut stream, "415 Unsupported Media Type");
@@ -849,7 +897,8 @@ fn get_or_populate_state(
 }
 
 fn needs_population(state: &WebDiffState) -> bool {
-    !state.workspace.is_empty()
+    state.target_kind == WebDiffTargetKind::PullRequest
+        && !state.workspace.is_empty()
         && !state.repo.is_empty()
         && state.pr_id > 0
         && !state.population_failed
@@ -863,9 +912,13 @@ fn state_is_unchanged_and_settled(state: &WebDiffState, known_version: Option<us
 fn same_pull_request(current: &WebDiffState, snapshot: &WebDiffState) -> bool {
     current.version == snapshot.version
         && current.provider == snapshot.provider
+        && current.target_kind == snapshot.target_kind
         && current.workspace == snapshot.workspace
         && current.repo == snapshot.repo
         && current.pr_id == snapshot.pr_id
+        && current.base_sha == snapshot.base_sha
+        && current.local_preview_oid == snapshot.local_preview_oid
+        && current.local_snapshot_sha256 == snapshot.local_snapshot_sha256
 }
 
 fn parse_query(query: &str) -> std::collections::HashMap<String, String> {
@@ -945,11 +998,55 @@ mod tests {
         stream
             .write_all(request.as_bytes())
             .expect("write HTTP request");
-        let mut response = String::new();
-        stream
-            .read_to_string(&mut response)
-            .expect("read HTTP response");
-        response
+        let expect_body = !request.starts_with("HEAD ");
+        let mut response = Vec::new();
+        let mut chunk = [0u8; 4_096];
+        loop {
+            match stream.read(&mut chunk) {
+                Ok(0) => break,
+                Ok(bytes_read) => {
+                    response.extend_from_slice(&chunk[..bytes_read]);
+                    if complete_http_response(&response, expect_body) {
+                        break;
+                    }
+                }
+                Err(error)
+                    if error.kind() == std::io::ErrorKind::ConnectionReset
+                        && complete_http_response(&response, expect_body) =>
+                {
+                    break;
+                }
+                Err(error) => panic!("read HTTP response: {error}"),
+            }
+        }
+        assert!(
+            complete_http_response(&response, expect_body),
+            "server closed before returning a complete HTTP response"
+        );
+        String::from_utf8(response).expect("HTTP response is UTF-8")
+    }
+
+    fn complete_http_response(response: &[u8], expect_body: bool) -> bool {
+        let Some(header_end) = response
+            .windows(4)
+            .position(|window| window == b"\r\n\r\n")
+            .map(|index| index + 4)
+        else {
+            return false;
+        };
+        if !expect_body {
+            return true;
+        }
+        let Ok(headers) = std::str::from_utf8(&response[..header_end]) else {
+            return false;
+        };
+        let Some(content_length) = headers.lines().find_map(|line| {
+            line.strip_prefix("Content-Length: ")
+                .and_then(|value| value.parse::<usize>().ok())
+        }) else {
+            return false;
+        };
+        response.len() >= header_end.saturating_add(content_length)
     }
 
     #[test]
@@ -1203,6 +1300,7 @@ mod tests {
         server.update_pr(WebDiffState {
             version: 0,
             provider: None,
+            target_kind: WebDiffTargetKind::PullRequest,
             workspace: "my-workspace".to_string(),
             repo: "my-repo".to_string(),
             pr_id: 42,
@@ -1210,8 +1308,11 @@ mod tests {
             pr_author: "test-user".to_string(),
             source_branch: "feature".to_string(),
             target_branch: "main".to_string(),
+            base_sha: None,
             diff: Some("diff --git a/a b/a".to_string()),
             diffstat: None,
+            local_preview_oid: Default::default(),
+            local_snapshot_sha256: None,
             population_failed: false,
         });
 
@@ -1257,6 +1358,28 @@ mod tests {
         };
 
         assert!(!state_is_unchanged_and_settled(&state, Some(9)));
+    }
+
+    #[test]
+    fn local_state_is_already_populated_without_a_provider_pr_identifier() {
+        let state = WebDiffState {
+            version: 9,
+            provider: Some(ReviewProvider::Github),
+            target_kind: WebDiffTargetKind::Local,
+            workspace: "workspace".to_string(),
+            repo: "repo".to_string(),
+            pr_id: 0,
+            base_sha: Some("0000000000000000000000000000000000000000".to_string()),
+            diff: Some("diff --git a/a b/a".to_string()),
+            diffstat: Some(Vec::new()),
+            ..WebDiffState::default()
+        };
+
+        assert!(!needs_population(&state));
+        assert!(state_is_unchanged_and_settled(&state, Some(9)));
+        let serialized = serde_json::to_string(&state).expect("serialize local state");
+        assert!(serialized.contains("\"targetKind\":\"local\""));
+        assert!(serialized.contains("\"prId\":0"));
     }
 
     #[test]
@@ -1322,6 +1445,7 @@ mod tests {
         server.update_pr(WebDiffState {
             version: 0,
             provider: None,
+            target_kind: WebDiffTargetKind::PullRequest,
             workspace: "workspace".to_string(),
             repo: "repo".to_string(),
             pr_id: 7,
@@ -1329,14 +1453,18 @@ mod tests {
             pr_author: "author".to_string(),
             source_branch: "feature".to_string(),
             target_branch: "main".to_string(),
+            base_sha: None,
             diff: diff.clone(),
             diffstat: None,
+            local_preview_oid: Default::default(),
+            local_snapshot_sha256: None,
             population_failed: false,
         });
         let initial_version = state.read().unwrap().version;
         server.update_pr(WebDiffState {
             version: 0,
             provider: None,
+            target_kind: WebDiffTargetKind::PullRequest,
             workspace: "workspace".to_string(),
             repo: "repo".to_string(),
             pr_id: 7,
@@ -1344,12 +1472,40 @@ mod tests {
             pr_author: "author".to_string(),
             source_branch: "feature".to_string(),
             target_branch: "main".to_string(),
+            base_sha: None,
             diff,
             diffstat: Some(vec![diffstat(Some("a.png"), Some("a.png"))]),
+            local_preview_oid: Default::default(),
+            local_snapshot_sha256: None,
             population_failed: false,
         });
 
         assert_eq!(state.read().unwrap().version, initial_version + 1);
+    }
+
+    #[test]
+    fn local_snapshot_changes_increment_the_state_version() {
+        let state = Arc::new(RwLock::new(WebDiffState::default()));
+        let server = WebDiffServer::start(Arc::clone(&state)).expect("server should start");
+        let local = |snapshot_sha256: &str, diff: &str| WebDiffState {
+            provider: Some(ReviewProvider::Github),
+            target_kind: WebDiffTargetKind::Local,
+            workspace: "workspace".to_string(),
+            repo: "repo".to_string(),
+            pr_id: 0,
+            diff: Some(diff.to_string()),
+            diffstat: Some(Vec::new()),
+            local_snapshot_sha256: Some(snapshot_sha256.to_string()),
+            ..WebDiffState::default()
+        };
+
+        server.update_pr(local("first", "+first"));
+        let first_version = state.read().unwrap().version;
+        server.update_pr(local("second", "+second"));
+
+        let current = state.read().unwrap();
+        assert_eq!(current.version, first_version + 1);
+        assert_eq!(current.diff.as_deref(), Some("+second"));
     }
 
     #[test]

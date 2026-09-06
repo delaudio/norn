@@ -413,6 +413,8 @@ pub enum AiReviewRunStatus {
 pub struct AiReviewRunState {
     pub pr_key: String,
     pub pr_title: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reviewed_head_sha: Option<String>,
     pub thread_id: Option<String>,
     pub turn_kind: Option<AiReviewTurnKind>,
     pub status: AiReviewRunStatus,
@@ -660,6 +662,55 @@ fn pr_key(workspace: &str, repo: &str, id: u32) -> String {
     format!("{workspace}/{repo}/{id}")
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum ReviewStoreTarget {
+    PullRequest {
+        id: u32,
+    },
+    Local {
+        snapshot_sha256: String,
+        legacy_id: u32,
+    },
+}
+
+impl ReviewStoreTarget {
+    fn local(snapshot_sha256: String, legacy_id: u32) -> Result<Self, String> {
+        if snapshot_sha256.len() != 64
+            || !snapshot_sha256
+                .bytes()
+                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+        {
+            return Err(
+                "Local review snapshot identity must be a lowercase SHA-256 value.".to_string(),
+            );
+        }
+        Ok(Self::Local {
+            snapshot_sha256,
+            legacy_id,
+        })
+    }
+
+    fn legacy_id(&self) -> u32 {
+        match self {
+            Self::PullRequest { id } => *id,
+            Self::Local { legacy_id, .. } => *legacy_id,
+        }
+    }
+
+    fn session_key(&self, workspace: &str, repo: &str) -> String {
+        match self {
+            Self::PullRequest { id } => pr_key(workspace, repo, *id),
+            Self::Local {
+                snapshot_sha256, ..
+            } => format!(
+                "local/{}/{workspace}/{}/{repo}/{snapshot_sha256}",
+                workspace.len(),
+                repo.len()
+            ),
+        }
+    }
+}
+
 fn fix_key(workspace: &str, repo: &str, id: u32, thread_id: Option<&str>) -> String {
     match thread_id.filter(|value| !value.trim().is_empty()) {
         Some(thread_id) => format!("{}/{thread_id}", pr_key(workspace, repo, id)),
@@ -722,12 +773,28 @@ fn load_review_store(
     let Some(json) = review_storage::load_review_json(workspace, repo, id)? else {
         return Ok(None);
     };
-    if let Ok(mut store) = serde_json::from_str::<AiReviewStoreData>(&json) {
+    decode_review_store(&json).map(Some)
+}
+
+fn load_local_review_store(
+    workspace: &str,
+    repo: &str,
+    snapshot_sha256: &str,
+) -> Result<Option<AiReviewStoreData>, String> {
+    let Some(json) = review_storage::load_local_review_json(workspace, repo, snapshot_sha256)?
+    else {
+        return Ok(None);
+    };
+    decode_review_store(&json).map(Some)
+}
+
+fn decode_review_store(json: &str) -> Result<AiReviewStoreData, String> {
+    if let Ok(mut store) = serde_json::from_str::<AiReviewStoreData>(json) {
         normalize_review_store(&mut store);
-        return Ok(Some(store));
+        return Ok(store);
     }
-    let legacy = serde_json::from_str::<LegacySavedReview>(&json).map_err(|e| e.to_string())?;
-    Ok(Some(legacy_review_to_store(legacy)))
+    let legacy = serde_json::from_str::<LegacySavedReview>(json).map_err(|e| e.to_string())?;
+    Ok(legacy_review_to_store(legacy))
 }
 
 fn save_review_store(
@@ -738,6 +805,73 @@ fn save_review_store(
 ) -> Result<(), String> {
     let json = serde_json::to_string(store).map_err(|e| e.to_string())?;
     review_storage::save_review_json(workspace, repo, id, &json)
+}
+
+fn load_review_store_for_target(
+    workspace: &str,
+    repo: &str,
+    target: &ReviewStoreTarget,
+) -> Result<Option<AiReviewStoreData>, String> {
+    match target {
+        ReviewStoreTarget::PullRequest { id } => load_review_store(workspace, repo, *id),
+        ReviewStoreTarget::Local {
+            snapshot_sha256, ..
+        } => load_local_review_store(workspace, repo, snapshot_sha256),
+    }
+}
+
+fn save_review_store_for_target(
+    workspace: &str,
+    repo: &str,
+    target: &ReviewStoreTarget,
+    store: &AiReviewStoreData,
+    run_store: &AiReviewRunStore,
+) -> Result<(), String> {
+    match target {
+        ReviewStoreTarget::PullRequest { id } => save_review_store(workspace, repo, *id, store),
+        ReviewStoreTarget::Local {
+            snapshot_sha256,
+            legacy_id,
+        } => {
+            let json = serde_json::to_string(store).map_err(|error| error.to_string())?;
+            let protected_snapshots = active_local_snapshot_sha256s(run_store, workspace, repo);
+            review_storage::save_local_review_json_with_protected(
+                workspace,
+                repo,
+                *legacy_id,
+                snapshot_sha256,
+                &json,
+                &protected_snapshots,
+            )
+        }
+    }
+}
+
+fn active_local_snapshot_sha256s(
+    store: &AiReviewRunStore,
+    workspace: &str,
+    repo: &str,
+) -> Vec<String> {
+    let prefix = format!(
+        "local/{}/{workspace}/{}/{repo}/",
+        workspace.len(),
+        repo.len()
+    );
+    with_review_run_store(store, |inner| {
+        inner
+            .sessions
+            .iter()
+            .filter(|(_, session)| session.public.status == AiReviewRunStatus::Running)
+            .filter_map(|(key, _)| key.strip_prefix(&prefix))
+            .filter(|snapshot| {
+                snapshot.len() == 64
+                    && snapshot
+                        .bytes()
+                        .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+            })
+            .map(ToOwned::to_owned)
+            .collect()
+    })
 }
 
 fn analyzer_source(id: &str) -> ReviewEvidenceSource {
@@ -2298,6 +2432,7 @@ fn begin_inline_review_run(
     thread_id: String,
     turn_kind: AiReviewTurnKind,
     review_kind: Option<&str>,
+    reviewed_head_sha: Option<&str>,
 ) -> Result<(AiReviewRunState, u64), String> {
     with_review_run_store(store, |inner| {
         if matches!(
@@ -2315,6 +2450,7 @@ fn begin_inline_review_run(
         session.public = AiReviewRunState {
             pr_key: key.to_string(),
             pr_title: Some(title.clone()),
+            reviewed_head_sha: reviewed_head_sha.map(ToOwned::to_owned),
             thread_id: Some(thread_id.clone()),
             turn_kind: Some(turn_kind),
             status: AiReviewRunStatus::Running,
@@ -2411,6 +2547,19 @@ pub fn get_ai_review_run_state_native(
     id: u32,
 ) -> Option<AiReviewRunState> {
     clone_inline_review_state(store, &pr_key(workspace, repo, id))
+}
+
+pub fn get_local_ai_review_run_state_native(
+    store: &AiReviewRunStore,
+    workspace: &str,
+    repo: &str,
+    snapshot_sha256: &str,
+) -> Result<Option<AiReviewRunState>, String> {
+    let target = ReviewStoreTarget::local(snapshot_sha256.to_string(), 0)?;
+    Ok(clone_inline_review_state(
+        store,
+        &target.session_key(workspace, repo),
+    ))
 }
 
 fn append_inline_review_log(
@@ -4694,7 +4843,7 @@ fn run_inline_review_pipeline(
     run_id: u64,
     workspace: String,
     repo: String,
-    id: u32,
+    target: ReviewStoreTarget,
     source_branch: String,
     destination_branch: String,
     reviewed_base_sha: Option<String>,
@@ -4721,6 +4870,7 @@ fn run_inline_review_pipeline(
     repo_path_override: Option<PathBuf>,
     review_provider_override: Option<ReviewProvider>,
 ) -> Result<(), ReviewPipelineFailure> {
+    let id = target.legacy_id();
     let provider_label = match ai_provider {
         AiProvider::Claude => "Claude",
         AiProvider::Codex => "Codex",
@@ -5211,7 +5361,7 @@ fn run_inline_review_pipeline(
     }
 
     let generated_at = now_ms();
-    let mut review_store = load_review_store(&workspace, &repo, id)
+    let mut review_store = load_review_store_for_target(&workspace, &repo, &target)
         .map_err(ReviewPipelineFailure::internal)?
         .ok_or_else(|| {
             ReviewPipelineFailure::internal("The AI review store could not be loaded.")
@@ -5250,7 +5400,7 @@ fn run_inline_review_pipeline(
     }
     review_store.active_thread_id = Some(thread_id);
     review_store.review_runs.push(review_run);
-    save_review_store(&workspace, &repo, id, &review_store)
+    save_review_store_for_target(&workspace, &repo, &target, &review_store, &store)
         .map_err(ReviewPipelineFailure::internal)?;
 
     finish_inline_review_success(&store, &key, run_id, generated_at, provider_label);
@@ -5284,6 +5434,15 @@ pub fn load_ai_review_store_native(
     load_review_store(workspace, repo, id)
 }
 
+pub fn load_local_ai_review_store_native(
+    workspace: &str,
+    repo: &str,
+    snapshot_sha256: &str,
+) -> Result<Option<AiReviewStoreData>, String> {
+    let _ = ReviewStoreTarget::local(snapshot_sha256.to_string(), 0)?;
+    load_local_review_store(workspace, repo, snapshot_sha256)
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn start_inline_review_native(
     store: AiReviewRunStore,
@@ -5307,7 +5466,101 @@ pub fn start_inline_review_native(
     codex_effort: Option<String>,
     review_profile: Option<String>,
 ) -> Result<AiReviewRunState, String> {
-    let key = pr_key(&workspace, &repo, id);
+    start_inline_review_for_target(
+        store,
+        workspace,
+        repo,
+        ReviewStoreTarget::PullRequest { id },
+        title,
+        source_branch,
+        destination_branch,
+        reviewed_base_sha,
+        reviewed_head_sha,
+        payload,
+        display_message,
+        review_kind,
+        thread_title,
+        skip_analyzers,
+        ai_provider,
+        claude_model,
+        claude_effort,
+        codex_model,
+        codex_effort,
+        review_profile,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn start_local_inline_review_native(
+    store: AiReviewRunStore,
+    workspace: String,
+    repo: String,
+    legacy_id: u32,
+    snapshot_sha256: String,
+    title: String,
+    source_branch: String,
+    destination_branch: String,
+    reviewed_base_sha: Option<String>,
+    payload: String,
+    display_message: Option<String>,
+    thread_title: Option<String>,
+    skip_analyzers: bool,
+    ai_provider: AiProvider,
+    claude_model: Option<String>,
+    claude_effort: Option<String>,
+    codex_model: Option<String>,
+    codex_effort: Option<String>,
+    review_profile: Option<String>,
+) -> Result<AiReviewRunState, String> {
+    let target = ReviewStoreTarget::local(snapshot_sha256.clone(), legacy_id)?;
+    start_inline_review_for_target(
+        store,
+        workspace,
+        repo,
+        target,
+        title,
+        source_branch,
+        destination_branch,
+        reviewed_base_sha,
+        Some(snapshot_sha256),
+        payload,
+        display_message,
+        Some("localReview".to_string()),
+        thread_title,
+        skip_analyzers,
+        ai_provider,
+        claude_model,
+        claude_effort,
+        codex_model,
+        codex_effort,
+        review_profile,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn start_inline_review_for_target(
+    store: AiReviewRunStore,
+    workspace: String,
+    repo: String,
+    target: ReviewStoreTarget,
+    title: String,
+    source_branch: String,
+    destination_branch: String,
+    reviewed_base_sha: Option<String>,
+    reviewed_head_sha: Option<String>,
+    payload: String,
+    display_message: Option<String>,
+    review_kind: Option<String>,
+    thread_title: Option<String>,
+    skip_analyzers: bool,
+    ai_provider: AiProvider,
+    claude_model: Option<String>,
+    claude_effort: Option<String>,
+    codex_model: Option<String>,
+    codex_effort: Option<String>,
+    review_profile: Option<String>,
+) -> Result<AiReviewRunState, String> {
+    let key = target.session_key(&workspace, &repo);
     let thread_id = now_id("thread");
     let (initial, run_id) = begin_inline_review_run(
         &store,
@@ -5316,10 +5569,12 @@ pub fn start_inline_review_native(
         thread_id.clone(),
         AiReviewTurnKind::Initial,
         review_kind.as_deref(),
+        reviewed_head_sha.as_deref(),
     )?;
     let started_at = initial.started_at.clone().unwrap_or_else(now_ms);
     let created_at = now_ms();
-    let mut review_store = load_review_store(&workspace, &repo, id)?.unwrap_or_default();
+    let mut review_store =
+        load_review_store_for_target(&workspace, &repo, &target)?.unwrap_or_default();
     review_store.active_thread_id = Some(thread_id.clone());
     let mut thread = AiReviewThread {
         id: thread_id.clone(),
@@ -5347,7 +5602,9 @@ pub fn start_inline_review_native(
         );
     }
     review_store.threads.push(thread);
-    if let Err(error) = save_review_store(&workspace, &repo, id, &review_store) {
+    if let Err(error) =
+        save_review_store_for_target(&workspace, &repo, &target, &review_store, &store)
+    {
         set_inline_review_failed(&store, &key, run_id, error.clone());
         return Err(error);
     }
@@ -5359,7 +5616,7 @@ pub fn start_inline_review_native(
             run_id,
             workspace,
             repo,
-            id,
+            target,
             source_branch,
             destination_branch,
             reviewed_base_sha,
@@ -5429,6 +5686,7 @@ pub fn run_headless_review_native(
         thread_id.clone(),
         AiReviewTurnKind::Initial,
         Some("headless"),
+        reviewed_head_sha.as_deref(),
     )
     .map_err(HeadlessNativeReviewError::Internal)?;
     let started_at = initial.started_at.clone().unwrap_or_else(now_ms);
@@ -5454,7 +5712,7 @@ pub fn run_headless_review_native(
         run_id,
         workspace.clone(),
         repo.clone(),
-        pr_id,
+        ReviewStoreTarget::PullRequest { id: pr_id },
         source_branch,
         destination_branch,
         reviewed_base_sha,
@@ -5741,6 +5999,7 @@ pub async fn reply_inline_review(
         thread_id.clone(),
         AiReviewTurnKind::Reply,
         None,
+        reviewed_head_sha.as_deref(),
     )?;
     let started_at = initial.started_at.clone().unwrap_or_else(now_ms);
     let thread = find_review_thread_mut(&mut review_store, &thread_id)?;
@@ -5772,7 +6031,7 @@ pub async fn reply_inline_review(
             run_id,
             workspace,
             repo,
-            id,
+            ReviewStoreTarget::PullRequest { id },
             source_branch,
             destination_branch,
             reviewed_base_sha,
@@ -6245,21 +6504,21 @@ fn review_provider_for_repo(workspace: &str, repo: &str) -> ReviewProvider {
 #[cfg(test)]
 mod tests {
     use super::{
-        ai_provider_timeout_from, analyzer_specs_from_config, append_execution_policy_to_payloads,
-        apply_review_finding_publication_event, begin_inline_review_run, build_claude_text_command,
-        build_codex_text_command, extract_review_findings, format_claude_stream_log_line,
-        get_ai_review_run_state_native, human_duration, materialize_review_run,
-        normalize_codex_effort, normalize_codex_model, parse_claude_fix_result,
-        parse_claude_structured_json, parse_claude_text_result, parse_review_resources,
-        resolve_gui_skip_analyzers, review_analyzer_specs, review_findings_from_output,
-        review_profile_for_thread, should_execute_analyzers, trim_evidence_output,
-        user_installed_cli_command, validate_isolated_provider_cli,
+        active_local_snapshot_sha256s, ai_provider_timeout_from, analyzer_specs_from_config,
+        append_execution_policy_to_payloads, apply_review_finding_publication_event,
+        begin_inline_review_run, build_claude_text_command, build_codex_text_command,
+        extract_review_findings, format_claude_stream_log_line, get_ai_review_run_state_native,
+        human_duration, materialize_review_run, normalize_codex_effort, normalize_codex_model,
+        parse_claude_fix_result, parse_claude_structured_json, parse_claude_text_result,
+        parse_review_resources, resolve_gui_skip_analyzers, review_analyzer_specs,
+        review_findings_from_output, review_profile_for_thread, should_execute_analyzers,
+        trim_evidence_output, user_installed_cli_command, validate_isolated_provider_cli,
         validate_organization_policy_repo_path, wait_for_ai_provider, AiReviewDraftCommentResult,
         AiReviewRunStatus, AiReviewRunStore, AiReviewStoreData, AiReviewTurnKind,
         ProviderExecutionContext, ReviewEvidenceArtifact, ReviewEvidenceKind, ReviewEvidenceSource,
         ReviewFindingCategory, ReviewFindingConfidence, ReviewFindingPublication,
         ReviewFindingPublicationEvent, ReviewFindingPublicationEventKind, ReviewFindingSeverity,
-        ReviewProvider, ReviewPublicationMode, STRUCTURED_REVIEW_SCHEMA_VERSION,
+        ReviewProvider, ReviewPublicationMode, ReviewStoreTarget, STRUCTURED_REVIEW_SCHEMA_VERSION,
     };
     use serde_json::json;
 
@@ -6669,6 +6928,7 @@ mod tests {
             "thread-1".to_string(),
             AiReviewTurnKind::Initial,
             None,
+            None,
         )
         .expect("first review should start");
         let (second, second_run_id) = begin_inline_review_run(
@@ -6677,6 +6937,7 @@ mod tests {
             "Second".to_string(),
             "thread-2".to_string(),
             AiReviewTurnKind::Initial,
+            None,
             None,
         )
         .expect("second PR review should start concurrently");
@@ -6709,6 +6970,7 @@ mod tests {
             "thread-1".to_string(),
             AiReviewTurnKind::Initial,
             None,
+            None,
         )
         .expect("first review should start");
         let error = begin_inline_review_run(
@@ -6717,6 +6979,7 @@ mod tests {
             "Duplicate".to_string(),
             "thread-2".to_string(),
             AiReviewTurnKind::Initial,
+            None,
             None,
         )
         .expect_err("same PR should still be locked");
@@ -7283,5 +7546,57 @@ Fix: invalidate the query after the mutation succeeds."#;
         }))
         .expect("legacy numeric event id");
         assert_eq!(event.remote_comment_id.as_deref(), Some("42"));
+    }
+
+    #[test]
+    fn local_review_session_keys_use_the_full_snapshot_identity() {
+        let pull_request = ReviewStoreTarget::PullRequest { id: 42 };
+        let first = ReviewStoreTarget::local("a".repeat(64), 42).expect("first local target");
+        let second = ReviewStoreTarget::local("b".repeat(64), 42).expect("second local target");
+
+        assert_ne!(
+            pull_request.session_key("workspace", "repo"),
+            first.session_key("workspace", "repo")
+        );
+        assert_ne!(
+            first.session_key("workspace", "repo"),
+            second.session_key("workspace", "repo")
+        );
+    }
+
+    #[test]
+    fn active_local_snapshot_collection_is_repository_scoped() {
+        let store = AiReviewRunStore::default();
+        let active_snapshot = "a".repeat(64);
+        let other_snapshot = "b".repeat(64);
+        let active_target =
+            ReviewStoreTarget::local(active_snapshot.clone(), 1).expect("active target");
+        let other_target =
+            ReviewStoreTarget::local(other_snapshot, 2).expect("other repository target");
+        begin_inline_review_run(
+            &store,
+            &active_target.session_key("workspace", "repo"),
+            "Active".to_string(),
+            "thread-active".to_string(),
+            AiReviewTurnKind::Initial,
+            None,
+            None,
+        )
+        .expect("start active review");
+        begin_inline_review_run(
+            &store,
+            &other_target.session_key("workspace", "other"),
+            "Other".to_string(),
+            "thread-other".to_string(),
+            AiReviewTurnKind::Initial,
+            None,
+            None,
+        )
+        .expect("start other review");
+
+        assert_eq!(
+            active_local_snapshot_sha256s(&store, "workspace", "repo"),
+            vec![active_snapshot]
+        );
     }
 }

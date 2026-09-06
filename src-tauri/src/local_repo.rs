@@ -1,9 +1,24 @@
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
+#[cfg(test)]
 use std::process::Command;
+use std::sync::OnceLock;
+use std::time::Duration;
 
 use crate::config::{self, RepoRef, ReviewProvider};
+use crate::local_review::{run_git_bounded_with_control, GitRunControl, LocalReviewCancellation};
+
+const LOCAL_REPO_GIT_TIMEOUT: Duration = Duration::from_secs(5);
+const MAX_LOCAL_REPO_GIT_OUTPUT_BYTES: usize = 64 * 1024;
+
+pub(crate) fn eligibility_control(cancellation: LocalReviewCancellation) -> GitRunControl {
+    GitRunControl::new(
+        LOCAL_REPO_GIT_TIMEOUT,
+        cancellation,
+        "Local repository eligibility",
+    )
+}
 
 const SKIP_DIRS: &[&str] = &[
     "node_modules",
@@ -19,7 +34,7 @@ const SKIP_DIRS: &[&str] = &[
     "Applications",
 ];
 
-fn matches_remote(
+pub(crate) fn matches_remote(
     config_contents: &str,
     provider: ReviewProvider,
     workspace: &str,
@@ -111,14 +126,29 @@ pub fn git_origin_matches(
     workspace: &str,
     repo: &str,
 ) -> Result<bool, String> {
-    let output = Command::new("/usr/bin/git")
-        .arg("-C")
-        .arg(path)
-        .arg("remote")
-        .arg("get-url")
-        .arg("origin")
-        .output()
-        .map_err(|e| format!("failed to inspect git remote for {}: {e}", path.display()))?;
+    let control = GitRunControl::new(
+        LOCAL_REPO_GIT_TIMEOUT,
+        LocalReviewCancellation::new(),
+        "Local repository inspection",
+    );
+    git_origin_matches_with_control(path, provider, workspace, repo, &control)
+}
+
+fn git_origin_matches_with_control(
+    path: &Path,
+    provider: ReviewProvider,
+    workspace: &str,
+    repo: &str,
+    control: &GitRunControl,
+) -> Result<bool, String> {
+    let output = run_git_bounded_with_control(
+        path,
+        &["remote", "get-url", "origin"],
+        None,
+        MAX_LOCAL_REPO_GIT_OUTPUT_BYTES,
+        "Git remote output",
+        control,
+    )?;
     if !output.status.success() {
         return Ok(false);
     }
@@ -204,12 +234,19 @@ fn redact_git_remote(remote: &str) -> String {
 }
 
 fn git_output(args: &[&str], working_dir: &Path) -> Result<String, String> {
-    let output = Command::new("/usr/bin/git")
-        .arg("-C")
-        .arg(working_dir)
-        .args(args)
-        .output()
-        .map_err(|e| format!("failed to run git in {}: {e}", working_dir.display()))?;
+    let control = GitRunControl::new(
+        LOCAL_REPO_GIT_TIMEOUT,
+        LocalReviewCancellation::new(),
+        "Local repository inspection",
+    );
+    let output = run_git_bounded_with_control(
+        working_dir,
+        args,
+        None,
+        MAX_LOCAL_REPO_GIT_OUTPUT_BYTES,
+        "Git repository metadata",
+        &control,
+    )?;
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
         return Err(if stderr.is_empty() {
@@ -219,6 +256,138 @@ fn git_output(args: &[&str], working_dir: &Path) -> Result<String, String> {
         });
     }
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
+#[cfg(not(windows))]
+pub(crate) fn trusted_git_path() -> Result<PathBuf, String> {
+    static TRUSTED_GIT_PATH: OnceLock<Result<PathBuf, String>> = OnceLock::new();
+    TRUSTED_GIT_PATH
+        .get_or_init(resolve_trusted_unix_git)
+        .clone()
+}
+
+#[cfg(not(windows))]
+fn resolve_trusted_unix_git() -> Result<PathBuf, String> {
+    let fixed_candidates = [
+        (Path::new("/usr"), Path::new("/usr/bin/git")),
+        (Path::new("/usr/local"), Path::new("/usr/local/bin/git")),
+        (
+            Path::new("/opt/homebrew"),
+            Path::new("/opt/homebrew/bin/git"),
+        ),
+        (Path::new("/opt/local"), Path::new("/opt/local/bin/git")),
+        (
+            Path::new("/home/linuxbrew/.linuxbrew"),
+            Path::new("/home/linuxbrew/.linuxbrew/bin/git"),
+        ),
+        (
+            Path::new("/nix/store"),
+            Path::new("/run/current-system/sw/bin/git"),
+        ),
+        (
+            Path::new("/nix/store"),
+            Path::new("/nix/var/nix/profiles/default/bin/git"),
+        ),
+    ];
+
+    for (root, candidate) in fixed_candidates {
+        if let Some(path) = validated_trusted_executable(root, candidate) {
+            return Ok(path);
+        }
+    }
+
+    Err("Cannot locate Git in a trusted system, Homebrew, MacPorts, Linuxbrew, or Nix installation directory. Install Git in a supported location, then restart Norn.".to_string())
+}
+
+#[cfg(windows)]
+pub(crate) fn trusted_git_path() -> Result<PathBuf, String> {
+    static TRUSTED_GIT_PATH: OnceLock<Result<PathBuf, String>> = OnceLock::new();
+    TRUSTED_GIT_PATH
+        .get_or_init(resolve_trusted_windows_git)
+        .clone()
+}
+
+#[cfg(windows)]
+fn resolve_trusted_windows_git() -> Result<PathBuf, String> {
+    use windows_sys::Win32::UI::Shell::{
+        FOLDERID_LocalAppData, FOLDERID_ProgramFiles, FOLDERID_ProgramFilesX64,
+        FOLDERID_ProgramFilesX86,
+    };
+
+    let mut candidates = Vec::new();
+    for folder_id in [
+        &FOLDERID_ProgramFiles,
+        &FOLDERID_ProgramFilesX64,
+        &FOLDERID_ProgramFilesX86,
+    ] {
+        if let Some(root) = windows_known_folder(folder_id) {
+            candidates.push((root.clone(), root.join("Git/cmd/git.exe")));
+            candidates.push((root.clone(), root.join("Git/bin/git.exe")));
+        }
+    }
+    if let Some(root) = windows_known_folder(&FOLDERID_LocalAppData) {
+        candidates.push((root.clone(), root.join("Programs/Git/cmd/git.exe")));
+        candidates.push((root.clone(), root.join("Programs/Git/bin/git.exe")));
+    }
+
+    candidates
+        .into_iter()
+        .find_map(|(root, candidate)| validated_trusted_executable(&root, &candidate))
+        .ok_or_else(|| {
+            "Cannot locate Git for Windows in a trusted installation directory. Install Git for Windows under Program Files or Local AppData, then restart Norn."
+                .to_string()
+        })
+}
+
+#[cfg(windows)]
+fn windows_known_folder(folder_id: &windows_sys::core::GUID) -> Option<PathBuf> {
+    use std::ffi::OsString;
+    use std::os::windows::ffi::OsStringExt;
+    use std::ptr::null_mut;
+    use windows_sys::Win32::System::Com::CoTaskMemFree;
+    use windows_sys::Win32::UI::Shell::SHGetKnownFolderPath;
+
+    let mut raw_path = null_mut();
+    let result = unsafe { SHGetKnownFolderPath(folder_id, 0, null_mut(), &mut raw_path) };
+    if result < 0 || raw_path.is_null() {
+        if !raw_path.is_null() {
+            unsafe { CoTaskMemFree(raw_path.cast()) };
+        }
+        return None;
+    }
+    let mut length = 0;
+    unsafe {
+        while *raw_path.add(length) != 0 {
+            length += 1;
+        }
+    }
+    let path = PathBuf::from(OsString::from_wide(unsafe {
+        std::slice::from_raw_parts(raw_path, length)
+    }));
+    unsafe { CoTaskMemFree(raw_path.cast()) };
+    Some(path)
+}
+
+fn validated_trusted_executable(root: &Path, candidate: &Path) -> Option<PathBuf> {
+    let canonical_root = fs::canonicalize(root).ok()?;
+    let canonical_candidate = fs::canonicalize(candidate).ok()?;
+    if !canonical_candidate.starts_with(canonical_root) || !canonical_candidate.is_file() {
+        return None;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if fs::metadata(&canonical_candidate)
+            .ok()?
+            .permissions()
+            .mode()
+            & 0o111
+            == 0
+        {
+            return None;
+        }
+    }
+    Some(canonical_candidate)
 }
 
 fn current_repo_remote(root: &Path) -> Result<(String, String), String> {
@@ -271,6 +440,26 @@ pub fn configured_repo_path(repo_ref: &RepoRef) -> Option<PathBuf> {
         .as_ref()
         .map(|path| PathBuf::from(path.trim()))
         .filter(|path| !path.as_os_str().is_empty())
+}
+
+pub(crate) fn has_usable_configured_path_with_control(
+    repo_ref: &RepoRef,
+    control: &GitRunControl,
+) -> Result<bool, String> {
+    control.check()?;
+    let Some(path) = configured_repo_path(repo_ref) else {
+        return Ok(false);
+    };
+    if !path.is_dir() || !path.join(".git").exists() {
+        return Ok(false);
+    }
+    git_origin_matches_with_control(
+        &path,
+        repo_ref.provider,
+        &repo_ref.workspace,
+        &repo_ref.repo,
+        control,
+    )
 }
 
 pub fn configured_or_discovered_repo(workspace: &str, repo: &str) -> Option<PathBuf> {
@@ -387,6 +576,10 @@ mod tests {
         ))
     }
 
+    fn test_git() -> PathBuf {
+        trusted_git_path().expect("trusted Git installation")
+    }
+
     #[test]
     fn parses_github_and_bitbucket_remote_urls() {
         assert_eq!(
@@ -425,12 +618,12 @@ mod tests {
     fn resolves_current_repo_from_git_remote() {
         let path = temp_path("current");
         fs::create_dir_all(&path).expect("temp repo dir");
-        Command::new("/usr/bin/git")
+        Command::new(test_git())
             .arg("init")
             .arg(&path)
             .output()
             .expect("git init");
-        Command::new("/usr/bin/git")
+        Command::new(test_git())
             .arg("-C")
             .arg(&path)
             .arg("remote")
@@ -454,15 +647,60 @@ mod tests {
     }
 
     #[test]
-    fn resolves_configured_repo_for_explicit_provider() {
-        let path = temp_path("configured-provider");
+    fn git_origin_output_is_bounded() {
+        let path = temp_path("bounded-origin");
         fs::create_dir_all(&path).expect("temp repo dir");
-        Command::new("/usr/bin/git")
+        Command::new(test_git())
             .arg("init")
             .arg(&path)
             .output()
             .expect("git init");
-        Command::new("/usr/bin/git")
+        let oversized_repo = "x".repeat(MAX_LOCAL_REPO_GIT_OUTPUT_BYTES + 1);
+        let remote = format!("https://github.com/delaudio/{oversized_repo}");
+        Command::new(test_git())
+            .arg("-C")
+            .arg(&path)
+            .args(["remote", "add", "origin", &remote])
+            .output()
+            .expect("git remote add");
+
+        let error = git_origin_matches(&path, ReviewProvider::Github, "delaudio", &oversized_repo)
+            .expect_err("oversized remote output");
+
+        assert!(error.contains("exceeds the 65536-byte limit"));
+        fs::remove_dir_all(path).expect("cleanup temp repo");
+    }
+
+    #[test]
+    fn cancelled_eligibility_stops_before_running_git() {
+        let path = temp_path("cancelled-eligibility");
+        fs::create_dir_all(path.join(".git")).expect("git marker");
+        let repo = RepoRef {
+            provider: ReviewProvider::Github,
+            workspace: "delaudio".to_string(),
+            repo: "norn".to_string(),
+            local_path: Some(path.display().to_string()),
+        };
+        let cancellation = LocalReviewCancellation::new();
+        cancellation.cancel();
+        let control = eligibility_control(cancellation);
+
+        let error = has_usable_configured_path_with_control(&repo, &control)
+            .expect_err("cancelled eligibility propagates");
+        assert!(error.contains("cancelled"));
+        fs::remove_dir_all(path).expect("cleanup temp repo");
+    }
+
+    #[test]
+    fn resolves_configured_repo_for_explicit_provider() {
+        let path = temp_path("configured-provider");
+        fs::create_dir_all(&path).expect("temp repo dir");
+        Command::new(test_git())
+            .arg("init")
+            .arg(&path)
+            .output()
+            .expect("git init");
+        Command::new(test_git())
             .arg("-C")
             .arg(&path)
             .args([
@@ -518,7 +756,7 @@ mod tests {
     fn resolving_current_repo_reports_missing_remote() {
         let path = temp_path("no-remote");
         fs::create_dir_all(&path).expect("temp repo dir");
-        Command::new("/usr/bin/git")
+        Command::new(test_git())
             .arg("init")
             .arg(&path)
             .output()
@@ -540,5 +778,88 @@ mod tests {
 
         assert!(error.contains("<redacted>@github.com"));
         assert!(!error.contains("secret"));
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn trusted_git_resolver_accepts_a_supported_unix_installation() {
+        let resolved = trusted_git_path().expect("trusted Git installation");
+
+        assert!(resolved.is_absolute());
+        assert!(resolved.is_file());
+        assert!(
+            resolved.starts_with("/usr")
+                || resolved.starts_with("/opt/homebrew")
+                || resolved.starts_with("/opt/local")
+                || resolved.starts_with("/home/linuxbrew/.linuxbrew")
+                || resolved.starts_with("/nix/store")
+        );
+    }
+
+    #[test]
+    fn trusted_executable_validation_accepts_only_files_inside_the_install_root() {
+        let root = temp_path("trusted-git-root");
+        let candidate = root.join("Git/cmd/git.exe");
+        fs::create_dir_all(candidate.parent().expect("candidate parent"))
+            .expect("trusted Git directory");
+        fs::write(&candidate, b"fixture").expect("trusted Git fixture");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut permissions = fs::metadata(&candidate)
+                .expect("trusted Git fixture metadata")
+                .permissions();
+            permissions.set_mode(0o700);
+            fs::set_permissions(&candidate, permissions).expect("executable Git fixture");
+        }
+
+        let resolved =
+            validated_trusted_executable(&root, &candidate).expect("candidate inside trusted root");
+
+        assert_eq!(
+            resolved,
+            fs::canonicalize(&candidate).expect("canonical path")
+        );
+        fs::remove_dir_all(root).expect("cleanup trusted root");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn trusted_executable_validation_rejects_symlink_escape() {
+        use std::os::unix::fs::symlink;
+
+        let root = temp_path("trusted-git-symlink-root");
+        let outside = temp_path("untrusted-git-target");
+        let candidate = root.join("Git/cmd/git.exe");
+        fs::create_dir_all(candidate.parent().expect("candidate parent"))
+            .expect("trusted Git directory");
+        fs::write(&outside, b"fixture").expect("untrusted Git fixture");
+        symlink(&outside, &candidate).expect("Git symlink fixture");
+
+        assert!(validated_trusted_executable(&root, &candidate).is_none());
+
+        fs::remove_dir_all(root).expect("cleanup trusted root");
+        fs::remove_file(outside).expect("cleanup untrusted target");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn trusted_executable_validation_rejects_non_executable_files() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = temp_path("trusted-non-executable-root");
+        let candidate = root.join("bin/git");
+        fs::create_dir_all(candidate.parent().expect("candidate parent"))
+            .expect("trusted Git directory");
+        fs::write(&candidate, b"fixture").expect("trusted Git fixture");
+        let mut permissions = fs::metadata(&candidate)
+            .expect("trusted Git fixture metadata")
+            .permissions();
+        permissions.set_mode(0o600);
+        fs::set_permissions(&candidate, permissions).expect("non-executable Git fixture");
+
+        assert!(validated_trusted_executable(&root, &candidate).is_none());
+
+        fs::remove_dir_all(root).expect("cleanup trusted root");
     }
 }

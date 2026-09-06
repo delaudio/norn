@@ -17,7 +17,8 @@ tags: [local, review, git, tui, desktop, diff]
 Norn currently presents provider pull requests as its primary interactive
 review targets. Developers also need to review work before it becomes a pull
 request: commits that exist only on the current branch, staged and unstaged
-changes, and eligible untracked files. The headless CLI can already review a
+changes, and untracked files that may not yet have received any repository
+visibility decision. The headless CLI can already review a
 working tree, and the repository explorer can inspect individual local files,
 but neither the terminal nor desktop review workspace presents the complete
 unpublished state as a first-class target.
@@ -32,8 +33,10 @@ desktop app follows as a second consumer of the same native capability.
 
 Norn exposes unpublished local repository work as a first-class review target,
 combining commits ahead of the configured upstream with staged, unstaged, and
-eligible untracked changes into one bounded snapshot that the terminal UI and
+tracked working-tree changes into one bounded snapshot that the terminal UI and
 desktop app can inspect and submit to the existing local AI-review workflow.
+Untracked content is excluded until it is staged or committed so a filename
+heuristic cannot silently authorize external AI processing.
 
 ## User stories / scenarios
 
@@ -54,12 +57,12 @@ desktop app can inspect and submit to the existing local AI-review workflow.
    the repository.
 2. With an upstream configured, the snapshot contains tracked changes between
    the upstream tree and the current working tree exactly once, including
-   committed-but-unpushed, staged, and unstaged changes; eligible untracked text
-   files are appended under the existing bounded and sensitive-path rules.
+   committed-but-unpushed, staged, and unstaged tracked changes; untracked
+   content is excluded and the snapshot reports that exclusion without
+   revealing untracked filenames.
 3. Without an upstream, Norn reports the condition explicitly and still shows
-   staged, unstaged, and eligible untracked working-tree changes relative to
-   `HEAD`; repositories without commits receive a deterministic supported
-   fallback.
+   staged and unstaged tracked working-tree changes relative to `HEAD`;
+   repositories without commits receive a deterministic supported fallback.
 4. The terminal UI presents Local alongside Open, Draft, and Merged, supports
    keyboard and mouse selection, lists only configured local repositories with
    usable paths, and refreshes the selected snapshot on demand.
@@ -73,9 +76,11 @@ desktop app can inspect and submit to the existing local AI-review workflow.
 7. The desktop app consumes the same native snapshot and shared diff renderer,
    exposes Local alongside provider states, and applies the same provider-action
    restrictions and empty/error states.
-8. Snapshot size, file count, binary handling, path validation, sensitive
-   untracked-file exclusion, cancellation, and stale asynchronous result
-   fencing remain bounded and covered by automated tests.
+8. Snapshot size, file count, binary handling, path validation, untracked-file
+   exclusion, cancellation, filesystem special-file handling, preview-content
+   verification, Git subprocess output and duration, persisted local-snapshot
+   retention, and stale asynchronous result fencing remain bounded and covered
+   by automated tests.
 9. Existing provider pull-request review behavior, browser-diff authentication,
    headless working-tree and branch scopes, and GitHub/Bitbucket integrations
    remain backward compatible.
@@ -87,6 +92,8 @@ desktop app can inspect and submit to the existing local AI-review workflow.
 - Publishing comments or approvals before a provider pull request exists.
 - Treating the shared or self-hosted review service as an execution target for
   an uncommitted working tree.
+- Including untracked content before a future local, explicit per-file consent
+  flow exists.
 - Watching the filesystem continuously; explicit refresh is sufficient for the
   initial capability.
 
@@ -108,9 +115,13 @@ desktop app can inspect and submit to the existing local AI-review workflow.
 |------|----------|--------|--------|
 | 2026-09-03 | r1 | codex | Initial draft. |
 | 2026-09-03 | r2 | codex | Accepted the TUI-first local review target contract after maintainer approval. |
+| 2026-09-03 | r3 | codex | Required untracked content to remain excluded pending explicit local per-file consent, and strengthened snapshot identity and verification boundaries. |
+| 2026-09-04 | r4 | codex | Bounded Git subprocess lifetime and diagnostics, required preview authorization before reads, and capped persisted local snapshot history per repository. |
 
 ## Approvals
 
 | Role | Name | Date | Signature |
 |------|------|------|-----------|
 | Maintainer | delaudio | 2026-09-03 | approved implementation in chat |
+| Maintainer | delaudio | 2026-09-03 | approved security remediation in chat |
+| Maintainer | delaudio | 2026-09-04 | approved bounded execution and retention remediation in chat |

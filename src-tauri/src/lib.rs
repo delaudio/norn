@@ -12,6 +12,7 @@ mod headless_review;
 pub mod incremental_review;
 mod launch;
 mod local_repo;
+mod local_review;
 pub mod operational_telemetry;
 pub mod organization_policy;
 pub mod readiness;
@@ -156,6 +157,7 @@ pub fn run() {
             bitbucket::get_diffstat,
             bitbucket::get_pr_diff,
             bitbucket::get_pr_file_preview,
+            local_review::get_local_review_snapshot,
             bitbucket::list_comments,
             bitbucket::publish_review_finding,
             bitbucket::reconcile_review_findings,

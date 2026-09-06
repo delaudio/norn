@@ -1,11 +1,17 @@
 use std::{
-    sync::mpsc::{self, Receiver, Sender},
+    sync::{
+        mpsc::{self, Receiver, Sender},
+        Mutex,
+    },
     thread,
 };
 
 use crate::{
     config::{RepoRef, ReviewProvider},
     local_repo,
+    local_review::{
+        local_review_snapshot_for_configured_path, LocalReviewCancellation, LocalReviewSnapshot,
+    },
     services::{
         bitbucket::{
             get_pr_diff_native, get_pull_request_native, list_comments_native,
@@ -13,7 +19,8 @@ use crate::{
             PullRequestSummary,
         },
         review::{
-            get_ai_review_run_state_native, load_ai_review_store_native, AiReviewRunState,
+            get_ai_review_run_state_native, get_local_ai_review_run_state_native,
+            load_ai_review_store_native, load_local_ai_review_store_native, AiReviewRunState,
             AiReviewRunStatus, AiReviewRunStore,
         },
     },
@@ -49,6 +56,15 @@ pub(super) enum LoadEvent {
         request_id: u64,
         result: Result<Vec<PullRequestSummary>, String>,
     },
+    LocalSnapshot {
+        request_id: u64,
+        result: Result<LocalReviewSnapshot, String>,
+    },
+    LocalRepoEligibility {
+        request_id: u64,
+        repo_generation: u64,
+        result: Result<Vec<RepoEligibilityIdentity>, String>,
+    },
     Detail {
         request_id: u64,
         result: Result<PullRequestDetail, String>,
@@ -75,15 +91,48 @@ pub(super) enum LoadEvent {
     },
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct RepoEligibilityIdentity {
+    provider: ReviewProvider,
+    workspace: String,
+    repo: String,
+    local_path: Option<String>,
+}
+
+impl RepoEligibilityIdentity {
+    pub(super) fn from_repo(repo: &RepoRef) -> Self {
+        Self {
+            provider: repo.provider,
+            workspace: repo.workspace.clone(),
+            repo: repo.repo.clone(),
+            local_path: repo.local_path.clone(),
+        }
+    }
+
+    pub(super) fn matches(&self, repo: &RepoRef) -> bool {
+        self.provider == repo.provider
+            && self.workspace == repo.workspace
+            && self.repo == repo.repo
+            && self.local_path == repo.local_path
+    }
+}
+
 pub(super) struct Loader {
     sender: Sender<LoadEvent>,
     receiver: Receiver<LoadEvent>,
+    local_snapshot_cancellation: Mutex<Option<LocalReviewCancellation>>,
+    local_repo_eligibility_cancellation: Mutex<Option<LocalReviewCancellation>>,
 }
 
 impl Loader {
     pub(super) fn new() -> Self {
         let (sender, receiver) = mpsc::channel();
-        Self { sender, receiver }
+        Self {
+            sender,
+            receiver,
+            local_snapshot_cancellation: Mutex::new(None),
+            local_repo_eligibility_cancellation: Mutex::new(None),
+        }
     }
 
     pub(super) fn try_recv(&self) -> Option<LoadEvent> {
@@ -122,6 +171,81 @@ impl Loader {
                     .map(|page| page.values);
             let _ = sender.send(LoadEvent::PullRequests { request_id, result });
         });
+    }
+
+    pub(super) fn local_snapshot(
+        &self,
+        request_id: u64,
+        provider: ReviewProvider,
+        workspace: String,
+        repo: String,
+        local_path: String,
+    ) {
+        self.cancel_local_snapshot();
+        let cancellation = LocalReviewCancellation::new();
+        if let Ok(mut active) = self.local_snapshot_cancellation.lock() {
+            *active = Some(cancellation.clone());
+        }
+        let sender = self.sender.clone();
+        thread::spawn(move || {
+            let result = local_review_snapshot_for_configured_path(
+                provider,
+                workspace.as_str(),
+                repo.as_str(),
+                std::path::Path::new(local_path.as_str()),
+                cancellation,
+            );
+            let _ = sender.send(LoadEvent::LocalSnapshot { request_id, result });
+        });
+    }
+
+    pub(super) fn local_repo_eligibility(
+        &self,
+        request_id: u64,
+        repo_generation: u64,
+        repos: Vec<RepoRef>,
+    ) {
+        self.cancel_local_repo_eligibility();
+        let cancellation = LocalReviewCancellation::new();
+        if let Ok(mut active) = self.local_repo_eligibility_cancellation.lock() {
+            *active = Some(cancellation.clone());
+        }
+        let control = local_repo::eligibility_control(cancellation);
+        let sender = self.sender.clone();
+        thread::spawn(move || {
+            let result = (|| {
+                let mut eligible_repositories = Vec::new();
+                for repo in &repos {
+                    control.check()?;
+                    if local_repo::has_usable_configured_path_with_control(repo, &control)? {
+                        eligible_repositories.push(RepoEligibilityIdentity::from_repo(repo));
+                    }
+                }
+                control.check()?;
+                Ok(eligible_repositories)
+            })();
+            let _ = sender.send(LoadEvent::LocalRepoEligibility {
+                request_id,
+                repo_generation,
+                result,
+            });
+        });
+    }
+
+    pub(super) fn cancel_local_snapshot(&self) {
+        if let Ok(mut active) = self.local_snapshot_cancellation.lock() {
+            if let Some(cancellation) = active.take() {
+                cancellation.cancel();
+            }
+        }
+    }
+
+    pub(super) fn cancel_local_repo_eligibility(&self) {
+        if let Ok(mut active) = self.local_repo_eligibility_cancellation.lock() {
+            if let Some(cancellation) = active.take() {
+                cancellation.cancel();
+            }
+        }
     }
 
     #[allow(
@@ -188,16 +312,66 @@ impl Loader {
         pr_id: u32,
         store: AiReviewRunStore,
     ) {
+        self.ai_review_matching(request_id, workspace, repo, pr_id, store, None);
+    }
+
+    pub(super) fn ai_review_for_snapshot(
+        &self,
+        request_id: u64,
+        workspace: String,
+        repo: String,
+        pr_id: u32,
+        store: AiReviewRunStore,
+        snapshot_sha256: String,
+    ) {
+        self.ai_review_matching(
+            request_id,
+            workspace,
+            repo,
+            pr_id,
+            store,
+            Some(snapshot_sha256),
+        );
+    }
+
+    fn ai_review_matching(
+        &self,
+        request_id: u64,
+        workspace: String,
+        repo: String,
+        pr_id: u32,
+        store: AiReviewRunStore,
+        expected_head_sha: Option<String>,
+    ) {
         let sender = self.sender.clone();
         thread::spawn(move || {
-            let state = get_ai_review_run_state_native(&store, &workspace, &repo, pr_id);
-            let output = load_ai_review_store_native(&workspace, &repo, pr_id).map(|store| {
+            let state = if let Some(snapshot_sha256) = expected_head_sha.as_deref() {
+                get_local_ai_review_run_state_native(&store, &workspace, &repo, snapshot_sha256)
+                    .unwrap_or(None)
+            } else {
+                get_ai_review_run_state_native(&store, &workspace, &repo, pr_id)
+            }
+            .filter(|state| {
+                reviewed_head_matches(
+                    state.reviewed_head_sha.as_deref(),
+                    expected_head_sha.as_deref(),
+                )
+            });
+            let loaded_store = if let Some(snapshot_sha256) = expected_head_sha.as_deref() {
+                load_local_ai_review_store_native(&workspace, &repo, snapshot_sha256)
+            } else {
+                load_ai_review_store_native(&workspace, &repo, pr_id)
+            };
+            let output = loaded_store.map(|store| {
                 store.and_then(|store| {
-                    store
-                        .review_runs
-                        .iter()
-                        .rev()
-                        .find_map(|run| run.summary_markdown.clone())
+                    store.review_runs.iter().rev().find_map(|run| {
+                        reviewed_head_matches(
+                            run.reviewed_head_sha.as_deref(),
+                            expected_head_sha.as_deref(),
+                        )
+                        .then(|| run.summary_markdown.clone())
+                        .flatten()
+                    })
                 })
             });
             let _ = sender.send(LoadEvent::AiReview {
@@ -244,5 +418,29 @@ impl Loader {
                 running,
             });
         });
+    }
+}
+
+impl Drop for Loader {
+    fn drop(&mut self) {
+        self.cancel_local_snapshot();
+        self.cancel_local_repo_eligibility();
+    }
+}
+
+fn reviewed_head_matches(actual: Option<&str>, expected: Option<&str>) -> bool {
+    expected.is_none_or(|expected| actual == Some(expected))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::reviewed_head_matches;
+
+    #[test]
+    fn local_review_state_requires_the_full_snapshot_identity() {
+        assert!(reviewed_head_matches(Some("current"), Some("current")));
+        assert!(!reviewed_head_matches(Some("previous"), Some("current")));
+        assert!(!reviewed_head_matches(None, Some("current")));
+        assert!(reviewed_head_matches(Some("provider-head"), None));
     }
 }
