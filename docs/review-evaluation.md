@@ -1,9 +1,9 @@
 # Review quality evaluation
 
-`norn evaluate` evaluates a versioned, sanitized corpus without contacting a
-provider, an AI model, or a customer repository. It reads checked-in review
-snapshots and expected results, emits JSON, and exits with status `1` if the
-explicit baseline is not met.
+`norn evaluate` evaluates a versioned, sanitized corpus. Offline mode reads
+checked-in review snapshots and expected results. `--live` reruns each case through
+the current local review pipeline and records provider/model/config execution metadata
+and raw artifacts (payload redacted) for inspection.
 
 ```sh
 pnpm run evaluate
@@ -32,6 +32,21 @@ Use `--corpus` and `--baseline` to evaluate a proposed new corpus version.
 Corpus and baseline versions must match. Raising or lowering thresholds requires
 an intentional baseline change in review; the runner never changes production
 prompts, policies, or model configuration.
+
+`--live` is opt-in and requires `--allow-provider-diff` because it sends corpus
+diffs to configured providers. It accepts either:
+
+```sh
+norn evaluate --live --allow-provider-diff --prompt-profile minimal
+# or
+norn evaluate --live --allow-provider-diff --minimal
+```
+
+The default prompt profile mirrors the regular review pipeline, while `minimal`
+builds a tight JSON-only prompt to isolate model effects in a controlled comparison.
+
+Offline scoring is deterministic and useful for stable regression checks, but it is
+not itself a guarantee of current live review quality.
 
 Fixtures must remain sanitized and reviewable. Do not add customer code,
 credentials, proprietary identifiers, or live provider data.
