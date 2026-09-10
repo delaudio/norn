@@ -3078,6 +3078,70 @@ profiles:
     }
 
     #[test]
+    fn evaluate_with_failing_regressions_returns_nonzero() {
+        let temp_dir = tempfile::tempdir().expect("temp eval dir");
+        let corpus_path = temp_dir.path().join("corpus.json");
+        let baseline_path = temp_dir.path().join("baseline.json");
+
+        let corpus = r#"{
+  "schemaVersion": "norn.review-evaluation-corpus.v1",
+  "corpusVersion": "2026.9",
+  "cases": [
+    {
+      "id": "missing-finding-1",
+      "area": "quality",
+      "diffPath": "fixtures/review-evaluation/v1/diffs/sample.diff",
+      "provider": "bitbucket",
+      "model": "test-model",
+      "configVersion": "test-config",
+      "durationMs": 10,
+      "expected": [
+        {
+          "id": "expected-1",
+          "disposition": "expected",
+          "anchor": {
+            "path": "src/app.rs",
+            "line": 42,
+            "side": "new"
+          }
+        }
+      ],
+      "observed": []
+    }
+  ]
+}"#;
+        let baseline = r#"{
+  "schemaVersion": "norn.review-evaluation-result.v1",
+  "corpusVersion": "2026.9",
+  "minimumPrecisionMilli": 1000,
+  "maximumMissedExpected": 0,
+  "minimumAnchorAccuracyMilli": 1000
+}"#;
+
+        fs::write(&corpus_path, corpus).expect("write corpus fixture");
+        fs::write(&baseline_path, baseline).expect("write baseline fixture");
+
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+        let code = run_args(
+            &[
+                "evaluate".to_string(),
+                "--corpus".to_string(),
+                corpus_path.to_string_lossy().to_string(),
+                "--baseline".to_string(),
+                baseline_path.to_string_lossy().to_string(),
+            ],
+            &mut stdout,
+            &mut stderr,
+        );
+
+        assert_eq!(code, 1);
+        assert!(stderr.is_empty());
+        let output: Value = serde_json::from_slice(&stdout).expect("evaluation output");
+        assert!(output["regressions"].as_array().is_some_and(|r| !r.is_empty()));
+    }
+
+    #[test]
     fn service_command_routes_to_the_self_hosted_runtime() {
         let mut stdout = Vec::new();
         let mut stderr = Vec::new();
