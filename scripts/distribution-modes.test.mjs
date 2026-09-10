@@ -22,9 +22,10 @@ test("desktop routing is the safe default for package builds", () => {
 });
 
 test("command distributions explicitly disable desktop routing", () => {
-  for (const scriptName of ["install:build", "cli:build", "tui:build"]) {
+  for (const scriptName of ["install:build", "cli:build", "tui:build", "evaluate"]) {
     assert.match(packageManifest.scripts[scriptName], /--no-default-features/);
   }
+  assert.match(packageManifest.scripts.evaluate, /--features custom-protocol/);
   assert.match(serviceDockerfile, /cargo build .*--no-default-features.*--bin norn/);
   assert.match(
     releaseWorkflow,

@@ -1,6 +1,7 @@
 #![cfg(not(feature = "desktop-bundle"))]
 
 use std::process::Command;
+use std::{fs, path::PathBuf};
 
 fn norn(args: &[&str]) -> std::process::Output {
     Command::new(env!("CARGO_BIN_EXE_norn"))
@@ -80,4 +81,74 @@ fn auth_rejects_token_command_arguments_without_echoing_the_value() {
     let stderr = String::from_utf8(output.stderr).expect("auth stderr");
     assert!(stderr.contains("not accepted as command arguments"));
     assert!(!stderr.contains(secret));
+}
+
+#[test]
+fn evaluate_runs_in_command_distribution_and_returns_baseline_regressions() {
+    let corpus = "../fixtures/review-evaluation/v1/corpus.json";
+    let baseline = "../fixtures/review-evaluation/v1/baseline.json";
+
+    let passing = norn(&["evaluate", "--corpus", corpus, "--baseline", baseline]);
+    assert!(passing.status.success());
+    assert!(String::from_utf8(passing.stdout)
+        .expect("evaluation output")
+        .contains("norn.review-evaluation-result.v1"));
+    assert!(passing.stderr.is_empty());
+
+    let failing_corpus = unique_temp_path("norn-evaluate-failing-corpus", "json");
+    fs::write(
+        &failing_corpus,
+        r#"{
+  "schemaVersion": "norn.review-evaluation-corpus.v1",
+  "corpusVersion": "2026.1",
+  "cases": [{
+    "id": "missed-finding",
+    "area": "logic",
+    "diffPath": "cases/missed-finding.diff",
+    "provider": "codex",
+    "model": "gpt-5.5",
+    "configVersion": "balanced-v1",
+    "durationMs": 1,
+    "expected": [{
+      "id": "missing",
+      "disposition": "expected",
+      "anchor": { "path": "src/lib.rs", "line": 1, "side": "new" }
+    }],
+    "observed": []
+  }]
+}"#,
+    )
+    .expect("failing corpus");
+
+    let failing_baseline = unique_temp_path("norn-evaluate-failing-baseline", "json");
+    fs::write(
+        &failing_baseline,
+        r#"{
+  "schemaVersion": "norn.review-evaluation-result.v1",
+  "corpusVersion": "2026.1",
+  "minimumPrecisionMilli": 0,
+  "maximumMissedExpected": 0,
+  "minimumAnchorAccuracyMilli": 0
+}"#,
+    )
+    .expect("failing baseline");
+
+    let failing = norn(&[
+        "evaluate",
+        "--corpus",
+        failing_corpus.to_str().expect("corpus path"),
+        "--baseline",
+        failing_baseline.to_str().expect("baseline path"),
+    ]);
+    assert_eq!(failing.status.code(), Some(1));
+    assert!(String::from_utf8(failing.stdout)
+        .expect("evaluation output")
+        .contains("precisionMilli"));
+    assert!(failing.stderr.is_empty());
+    let _ = fs::remove_file(failing_corpus);
+    let _ = fs::remove_file(failing_baseline);
+}
+
+fn unique_temp_path(prefix: &str, extension: &str) -> PathBuf {
+    std::env::temp_dir().join(format!("{prefix}-{}.{extension}", std::process::id()))
 }
