@@ -101,6 +101,10 @@ struct EvaluateArgs {
     corpus: PathBuf,
     baseline: PathBuf,
     output: Option<PathBuf>,
+    live: bool,
+    allow_provider_diff: bool,
+    repo_path: PathBuf,
+    prompt_profile: review_evaluation::EvaluationPromptProfile,
 }
 
 #[derive(Serialize)]
@@ -416,6 +420,10 @@ fn parse_evaluate_args(args: &[String]) -> Result<EvaluateArgs, String> {
         corpus: PathBuf::from("fixtures/review-evaluation/v1/corpus.json"),
         baseline: PathBuf::from("fixtures/review-evaluation/v1/baseline.json"),
         output: None,
+        live: false,
+        allow_provider_diff: false,
+        repo_path: PathBuf::from("."),
+        prompt_profile: review_evaluation::EvaluationPromptProfile::Default,
     };
     let mut index = 1;
     while index < args.len() {
@@ -423,9 +431,34 @@ fn parse_evaluate_args(args: &[String]) -> Result<EvaluateArgs, String> {
             "--corpus" => parsed.corpus = PathBuf::from(next_value(args, &mut index)?),
             "--baseline" => parsed.baseline = PathBuf::from(next_value(args, &mut index)?),
             "--output" => parsed.output = Some(PathBuf::from(next_value(args, &mut index)?)),
+            "--live" => parsed.live = true,
+            "--allow-provider-diff" => parsed.allow_provider_diff = true,
+            "--repo-path" => {
+                parsed.repo_path = PathBuf::from(next_value(args, &mut index)?);
+            }
+            "--prompt-profile" => {
+                parsed.prompt_profile = match next_value(args, &mut index)?.as_str() {
+                    "default" => review_evaluation::EvaluationPromptProfile::Default,
+                    "minimal" => review_evaluation::EvaluationPromptProfile::Minimal,
+                    _ => {
+                        return Err(
+                            "`--prompt-profile` must be `default` or `minimal`.".to_string()
+                        );
+                    }
+                };
+            }
+            "--minimal" => {
+                parsed.prompt_profile = review_evaluation::EvaluationPromptProfile::Minimal;
+            }
             unknown => return Err(format!("Unknown evaluate option `{unknown}`.")),
         }
         index += 1;
+    }
+    if parsed.live && !parsed.allow_provider_diff {
+        return Err(
+            "`--live` requires `--allow-provider-diff` because it sends corpus diffs to providers."
+                .to_string(),
+        );
     }
     Ok(parsed)
 }
@@ -1033,7 +1066,22 @@ impl AiProviderName for AiProvider {
 }
 
 fn run_evaluate(args: EvaluateArgs, stdout: &mut dyn Write, stderr: &mut dyn Write) -> i32 {
-    let result = match review_evaluation::load_and_evaluate(&args.corpus, &args.baseline) {
+    let result = match if args.live {
+        let corpus_root = args
+            .corpus
+            .parent()
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from("."));
+        let options = review_evaluation::EvaluationLiveOptions {
+            repo_path: args.repo_path,
+            corpus_root,
+            allow_provider_diff: args.allow_provider_diff,
+            prompt_profile: args.prompt_profile,
+        };
+        review_evaluation::load_and_evaluate_live(&args.corpus, &args.baseline, options)
+    } else {
+        review_evaluation::load_and_evaluate(&args.corpus, &args.baseline)
+    } {
         Ok(result) => result,
         Err(error) => {
             let _ = writeln!(stderr, "Evaluation failed: {error}");
@@ -1847,9 +1895,13 @@ The default tenant is `local`."
 
 fn evaluate_usage() -> &'static str {
     "Usage:
-  norn evaluate [--corpus <path>] [--baseline <path>] [--output <path>]
+  norn evaluate [--corpus <path>] [--baseline <path>] [--repo-path <path>]
+                 [--live] [--allow-provider-diff] [--prompt-profile default|minimal|--minimal]
+                 [--output <path>]
 
-Runs the versioned offline review-quality corpus and emits JSON.
+Runs the versioned review-quality corpus and emits JSON.
+Without --live, runs offline scoring only. With --live, each case is rerun through
+the current review pipeline (after explicit opt-in).
 The command exits 1 when a configured baseline regression is detected."
 }
 
@@ -3075,6 +3127,105 @@ profiles:
             PathBuf::from("fixtures/review-evaluation/v1/baseline.json")
         );
         assert!(args.output.is_none());
+        assert!(!args.live);
+        assert!(!args.allow_provider_diff);
+        assert_eq!(args.repo_path, PathBuf::from("."));
+        assert!(matches!(
+            args.prompt_profile,
+            crate::review_evaluation::EvaluationPromptProfile::Default
+        ));
+    }
+
+    #[test]
+    fn evaluate_live_requires_provider_diff_opt_in() {
+        let error = parse_evaluate_args(&["evaluate".to_string(), "--live".to_string()])
+            .expect_err("live evaluation requires opt-in");
+
+        assert!(error.contains("`--live` requires `--allow-provider-diff`"));
+    }
+
+    #[test]
+    fn evaluate_live_accepts_minimal_profile_alias() {
+        let args = parse_evaluate_args(&[
+            "evaluate".to_string(),
+            "--live".to_string(),
+            "--allow-provider-diff".to_string(),
+            "--minimal".to_string(),
+        ])
+        .expect("parse minimal evaluate mode");
+
+        assert!(args.live);
+        assert!(args.allow_provider_diff);
+        assert!(matches!(
+            args.prompt_profile,
+            crate::review_evaluation::EvaluationPromptProfile::Minimal
+        ));
+    }
+
+    #[test]
+    fn evaluate_with_failing_regressions_returns_nonzero() {
+        let temp_dir = tempfile::tempdir().expect("temp eval dir");
+        let corpus_path = temp_dir.path().join("corpus.json");
+        let baseline_path = temp_dir.path().join("baseline.json");
+
+        let corpus = r#"{
+  "schemaVersion": "norn.review-evaluation-corpus.v1",
+  "corpusVersion": "2026.9",
+  "cases": [
+    {
+      "id": "missing-finding-1",
+      "area": "quality",
+      "diffPath": "fixtures/review-evaluation/v1/diffs/sample.diff",
+      "provider": "bitbucket",
+      "model": "test-model",
+      "configVersion": "test-config",
+      "durationMs": 10,
+      "expected": [
+        {
+          "id": "expected-1",
+          "disposition": "expected",
+          "anchor": {
+            "path": "src/app.rs",
+            "line": 42,
+            "side": "new"
+          }
+        }
+      ],
+      "observed": []
+    }
+  ]
+}"#;
+        let baseline = r#"{
+  "schemaVersion": "norn.review-evaluation-result.v1",
+  "corpusVersion": "2026.9",
+  "minimumPrecisionMilli": 1000,
+  "maximumMissedExpected": 0,
+  "minimumAnchorAccuracyMilli": 1000
+}"#;
+
+        fs::write(&corpus_path, corpus).expect("write corpus fixture");
+        fs::write(&baseline_path, baseline).expect("write baseline fixture");
+
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+        let code = run_args(
+            &[
+                "evaluate".to_string(),
+                "--corpus".to_string(),
+                corpus_path.to_string_lossy().to_string(),
+                "--baseline".to_string(),
+                baseline_path.to_string_lossy().to_string(),
+            ],
+            &mut stdout,
+            &mut stderr,
+        );
+
+        assert_eq!(code, 1);
+        assert!(stderr.is_empty());
+        let output: Value = serde_json::from_slice(&stdout).expect("evaluation output");
+        assert!(output["regressions"]
+            .as_array()
+            .is_some_and(|r| !r.is_empty()));
     }
 
     #[test]
