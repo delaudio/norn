@@ -2155,6 +2155,81 @@ mod tests {
     }
 
     #[test]
+    fn init_renders_analyzer_timeout_with_schema_spelling_in_all_outputs() {
+        let repo = temp_repo();
+        fs::write(
+            repo.join("package.json"),
+            r#"{"scripts":{"lint":"eslint ."}}"#,
+        )
+        .expect("package");
+
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+        let code = run_args(
+            &[
+                "init".to_string(),
+                "--repo-path".to_string(),
+                repo.display().to_string(),
+                "--dry-run".to_string(),
+                "--json".to_string(),
+            ],
+            &mut stdout,
+            &mut stderr,
+        );
+
+        assert_eq!(code, 0);
+        assert!(stderr.is_empty());
+        let output: Value = serde_json::from_slice(&stdout).expect("json output");
+        let analyzer = &output["proposal"]["analyzerCandidates"][0];
+        assert_eq!(analyzer["timeoutSeconds"], 120);
+        assert!(analyzer.get("timeout_seconds").is_none());
+        let preview = output["proposal"]["configPreview"]
+            .as_str()
+            .expect("config preview");
+        assert!(preview.contains("timeoutSeconds: 120"));
+        assert!(!preview.contains("timeout_seconds"));
+
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+        let code = run_args(
+            &[
+                "init".to_string(),
+                "--repo-path".to_string(),
+                repo.display().to_string(),
+                "--dry-run".to_string(),
+            ],
+            &mut stdout,
+            &mut stderr,
+        );
+
+        assert_eq!(code, 0);
+        assert!(stderr.is_empty());
+        assert!(String::from_utf8_lossy(&stdout).contains("timeoutSeconds: 120"));
+
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+        let code = run_args(
+            &[
+                "init".to_string(),
+                "--repo-path".to_string(),
+                repo.display().to_string(),
+                "--guided".to_string(),
+                "--yes".to_string(),
+            ],
+            &mut stdout,
+            &mut stderr,
+        );
+
+        assert_eq!(code, 0);
+        assert!(stderr.is_empty());
+        let written = fs::read_to_string(repo.join(".norn.yaml")).expect("written config");
+        assert!(written.contains("timeoutSeconds: 120"));
+        assert!(!written.contains("timeout_seconds"));
+        assert!(String::from_utf8_lossy(&stdout).contains("timeoutSeconds: 120"));
+        let _ = fs::remove_dir_all(repo);
+    }
+
+    #[test]
     fn init_run_yes_writes_default_repo_config() {
         let repo = temp_repo();
         let mut stdout = Vec::new();
