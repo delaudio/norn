@@ -257,7 +257,7 @@ pub struct AnalyzerConfig {
     pub enabled: bool,
     #[serde(default)]
     pub command: Option<String>,
-    #[serde(default)]
+    #[serde(default, alias = "timeout_seconds")]
     pub timeout_seconds: Option<u64>,
     #[serde(default)]
     pub required: bool,
@@ -723,7 +723,7 @@ fn render_default_repo_config_contents(proposal: &RepoInitProposal) -> String {
                 "    required: {}",
                 if analyzer.required { "true" } else { "false" }
             ));
-            lines.push(format!("    timeout_seconds: {}", analyzer.timeout_seconds));
+            lines.push(format!("    timeoutSeconds: {}", analyzer.timeout_seconds));
             lines.push(format!("    command: {}", yaml_scalar(&analyzer.command)));
         }
     }
@@ -2445,7 +2445,14 @@ fn known_keys(context: Option<&str>, key: &str) -> Option<&'static [&'static str
         ]),
         Some("selector") => Some(&["kind", "callee", "argumentContains"]),
         Some("suppression") => Some(&["ruleId", "paths", "reason", "expiresAt"]),
-        Some("analyzer") => Some(&["enabled", "command", "timeoutSeconds", "required", "config"]),
+        Some("analyzer") => Some(&[
+            "enabled",
+            "command",
+            "timeoutSeconds",
+            "timeout_seconds",
+            "required",
+            "config",
+        ]),
         Some("publish") => Some(&["defaultMode", "requireManualSubmit", "allowGeneralComments"]),
         Some("analyzerMap") => {
             let _ = key;
@@ -2677,6 +2684,8 @@ mod tests {
             .analyzer_candidates
             .iter()
             .any(|a| a.id == "cargo-check"));
+        assert!(proposal.config_contents.contains("timeoutSeconds: 120"));
+        assert!(!proposal.config_contents.contains("timeout_seconds"));
         assert!(proposal.suggested_excludes.contains(&"dist/**".to_string()));
         assert!(proposal
             .suggested_excludes
@@ -2864,6 +2873,31 @@ provider:
             .expect_err("raw organization merge layer must reject credentials");
         assert!(error.contains("$.provider.apiToken"));
         assert!(error.contains("$.provider.password"));
+        let _ = fs::remove_dir_all(repo);
+    }
+
+    #[test]
+    fn analyzer_timeout_accepts_canonical_and_legacy_spellings() {
+        let repo = temp_repo();
+        for key in ["timeoutSeconds", "timeout_seconds"] {
+            let result = load_test_config(
+                &repo,
+                &format!(
+                    "version: 0.1\nanalyzers:\n  lint:\n    enabled: true\n    command: eslint .\n    {key}: 45\n"
+                ),
+            );
+
+            assert!(result.errors.is_empty(), "{key} should deserialize");
+            assert!(result.warnings.is_empty(), "{key} should be recognized");
+            assert_eq!(
+                result
+                    .config
+                    .as_ref()
+                    .and_then(|config| config.analyzers.get("lint"))
+                    .and_then(|analyzer| analyzer.timeout_seconds),
+                Some(45)
+            );
+        }
         let _ = fs::remove_dir_all(repo);
     }
 
