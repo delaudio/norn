@@ -5,14 +5,19 @@ class Norn < Formula
 
   depends_on :macos
 
-  on_macos do
-    if Hardware::CPU.arm?
-      url "https://github.com/delaudio/norn/releases/download/v#{version}/norn-#{version}-macos-arm64.tar.gz"
-      sha256 "{{ARM64_SHA256}}"
-    else
-      url "https://github.com/delaudio/norn/releases/download/v#{version}/norn-#{version}-macos-x86_64.tar.gz"
-      sha256 "{{X86_64_SHA256}}"
-    end
+  # NOTE: url/sha256 must stay unconditional (not wrapped in `on_macos do`).
+  # Homebrew loads/validates this formula against every supported OS+arch
+  # bottle tag, including Linux, when a tap is added — even on a macOS host.
+  # A url only reachable inside `on_macos` leaves the Linux evaluation with
+  # no url at all, and `brew tap` fails the whole tap with
+  # "formula requires at least a URL". `depends_on :macos` still blocks
+  # actual installation on Linux; it does not exempt this load-time check.
+  if Hardware::CPU.arm?
+    url "https://github.com/delaudio/norn/releases/download/v#{version}/norn-#{version}-macos-arm64.tar.gz"
+    sha256 "{{ARM64_SHA256}}"
+  else
+    url "https://github.com/delaudio/norn/releases/download/v#{version}/norn-#{version}-macos-x86_64.tar.gz"
+    sha256 "{{X86_64_SHA256}}"
   end
 
   def install
