@@ -196,3 +196,15 @@ wrong binary inside the package. The bundled app therefore stays the `norn`
 binary and is compiled with `desktop-bundle`; runtime environment and terminal
 heuristics are not portable enough to distinguish a package launch from the
 command distribution.
+
+In `packaging/homebrew/norn.rb.template` (and any Homebrew formula), the
+arch-specific `url`/`sha256` calls must stay unconditional at the class-body
+level — never nested inside an `on_macos do ... end` block. Homebrew validates
+a tapped formula against every supported bottle tag, including
+`arm64_linux`/`x86_64_linux`, at `brew tap` time, even from a macOS host. A
+`url` reachable only inside `on_macos` leaves the Linux evaluation with no url
+at all, so the whole tap fails to load with "formula requires at least a URL"
+— for every formula in the tap, not just this one. `depends_on :macos` gates
+installation, not this load-time validation, so it does not help. Keep the
+`if Hardware::CPU.arm? ... else ... end` arch branch, just drop the
+`on_macos` wrapper around it.
