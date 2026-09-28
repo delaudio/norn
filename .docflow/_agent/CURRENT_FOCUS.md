@@ -8,58 +8,39 @@ If status files and git disagree, git is authoritative; correct this file.
 
 ## Active state
 
-- **Branch:** `main`.
-- **Active item:** publish the prepared command-only `v0.3.0` release.
-- **Plan items:** `.docflow/plan/todo/0014-local-review-target-desktop.md`
-  remains queued because the desktop acceptance criterion is not part of the
-  terminal-first release.
-- **Verification:** 625 Rust library tests pass with 2 ignored and 32
-  keychain-dependent tests filtered after the macOS Keychain blocked the full
-  local run; all 17 affected Git, retention, migration, and active-session
-  regressions pass. This is alongside 110 frontend tests plus tooling,
-  all-target Clippy, typecheck, lint, and Archgate 17/17.
-  The local Windows cross-target check reaches native dependency compilation
-  but currently lacks the MinGW C compiler. Local snapshots share one end-to-end
-  deadline, superseded TUI loads cancel their process trees, and every local
-  review Git process uses the platform's trusted executable resolver. Preview
-  fingerprints come from immutable Git index object IDs, and preview bytes are
-  served from the matching bounded `git cat-file` object rather than read from
-  the working tree. Images with unstaged content remain in the diff but omit
-  their optional preview with an explicit warning. Local repository eligibility
-  is computed off the render thread, fenced by stable repository identities and
-  repository generation, and now shares one cancellable five-second Git
-  deadline with bounded output. Git commands bind their canonical configured
-  repository as the worktree, and an empty Local eligibility result settles the
-  TUI out of its loading state. Git input is written by a supervised worker, so
-  blocked writes remain subject to process-tree cancellation and the shared
-  deadline. Eligibility failures are propagated without accepting partial
-  repository lists, and trusted Unix Git discovery is restricted to exact
-  validated system, Homebrew, MacPorts, Linuxbrew, and Nix entrypoints. Review
-  persistence now records the target kind explicitly, and local retention
-  preserves stores referenced by running reviews before pruning inactive
-  snapshots. Repository changes now clear all previous local review state
-  before asynchronous loading begins, and untracked-file detection terminates
-  its contained Git process immediately after the first output byte. Norn
-  snapshots also ignore global and system Git configuration and neutralize
-  every repository-defined clean/process filter before any working-tree
-  comparison, including required and long-running process drivers. Local review
-  snapshots now preserve base-to-index and index-to-worktree layers separately,
-  expose their file counts in the TUI, and bind both layer identities into the
-  snapshot hash. Canceled eligibility requests are invalidated before leaving
-  Local mode. Norn branch reviews through `run-1788699087691905000` drove these
-  remediations. Two final pre-push attempts timed out at the configured AI
-  provider boundary; the maintainer explicitly authorised publication without
-  a completed Norn gate. PR #247 passed its `verify` workflow and was squash
-  merged as `64b9f36`. All version sources are aligned at `0.3.0`, and the
-  release guard accepts candidate tag `v0.3.0`. `HOMEBREW_TAP_TOKEN` is
-  configured, the desktop release variable is absent, and the release workflow
-  will therefore skip Apple signing, notarisation, DMG, and cask jobs.
+- **Branch:** `main` (uncommitted working tree).
+- **Active item:** ship the OpenCode AI review provider (ADR 0018) in release
+  0.3.1 across all surfaces. Authored
+  `.docflow/adr/0018-opencode-ai-review-provider.md` and
+  `.docflow/plan/todo/0015-opencode-ai-review-provider.md`; regenerated
+  `.docflow/INDEX.md`. Bumped `package.json`, `src-tauri/tauri.conf.json`,
+  `src-tauri/Cargo.toml`, and the locked `norn` entry in
+  `src-tauri/Cargo.lock` to `0.3.1`; `pnpm run version:verify` reports the
+  sources aligned at `0.3.1`. `v0.3.0` is already tagged.
+- **Plan items:** `.docflow/plan/todo/0015-opencode-ai-review-provider.md` is
+  active. `.docflow/plan/todo/0014-local-review-target-desktop.md` remains
+  queued; `.docflow/plan/todo/0001` and `0004` remain queued.
+- **Verification:** `pnpm run typecheck`, `pnpm run test` (frontend + tooling),
+  `pnpm run test:tauri` (4 IPC smoke tests), `pnpm run lint`, all-target
+  `cargo clippy -D warnings`, `cargo fmt --check`, the full Rust library suite
+  (664 passed, 2 ignored), and Archgate 17/17 all pass on the current tree.
+- **Not yet done:** the change is not committed; ADR 0018 stays `Accepted`
+  until the work ships and the plan item moves to `plan/done/`.
 
-## Last shipped
+## What changed
 
-`64b9f36` - ship the terminal-first Local review target through PR #247.
+Norn now supports a third AI review provider, OpenCode, executed through the
+installed `opencode` CLI. Provider selection, model, and effort flow through
+config, the headless `norn review` CLI, desktop settings, and the terminal UI.
+DeepSeek models (`deepseek/deepseek-flash`, `deepseek/deepseek-v4-pro`) are the
+default catalog. Execution delivers the payload on stdin, constrains tools
+through an inline runtime config for read-only review, parses the JSON event
+stream, reuses the bounded/cancellable provider path, and reports through the
+existing sanitized error taxonomy. Claude and Codex behavior is unchanged.
 
 ## Next item
 
+- Commit and open the PR for ADR 0018 / plan item 0015, then move the plan item
+  to `plan/done/` and advance ADR 0018 to `Implemented` on merge.
 - Implement the desktop Local review target without changing the shipped TUI
   snapshot contract.
