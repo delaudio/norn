@@ -1,7 +1,7 @@
 ---
 adr: 0018
 title: Run AI reviews through an OpenCode provider
-status: Accepted
+status: Implemented
 date: 2026-09-28
 owner: default-agent
 supersedes:
@@ -125,6 +125,7 @@ DeepSeek models as the default catalog.
 |------|----------|--------|--------|
 | 2026-09-28 | r1 | default-agent | Initial draft and acceptance of an OpenCode-backed AI review provider. |
 | 2026-09-28 | r2 | default-agent | Strengthened isolation to default-deny all tools, reject invalid model/variant settings, and fail on stream error events after partial output following a pre-push review. |
+| 2026-09-28 | r3 | default-agent | Marked implemented after the provider shipped in `v0.3.1` through PR #264. |
 
 ## Approvals
 

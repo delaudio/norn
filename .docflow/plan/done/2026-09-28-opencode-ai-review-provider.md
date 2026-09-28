@@ -43,3 +43,8 @@ execution.
 
 - `../../adr/0007-headless-review-cli.md`
 - `../../adr/0018-opencode-ai-review-provider.md`
+
+Shipped at HEAD `a3bc562c5952ae06e9e0f9af7ca661d6a6438d8b` through
+[PR #264](https://github.com/delaudio/norn/pull/264) and released as
+`v0.3.1`.
+
