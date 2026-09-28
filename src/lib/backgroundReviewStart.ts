@@ -3,6 +3,7 @@ import type {
   ClaudeReviewEffort,
   ClaudeReviewModel,
   CodexReviewEffort,
+  OpenCodeReviewEffort,
   PullRequestDetail,
 } from "@/types";
 
@@ -17,6 +18,8 @@ export interface BackgroundReviewStartInput {
   claudeEffort: ClaudeReviewEffort | null;
   codexModel: string | null;
   codexEffort: CodexReviewEffort | null;
+  opencodeModel: string | null;
+  opencodeEffort: OpenCodeReviewEffort | null;
 }
 
 export function buildBackgroundReviewStartArgs({
@@ -30,6 +33,8 @@ export function buildBackgroundReviewStartArgs({
   claudeEffort,
   codexModel,
   codexEffort,
+  opencodeModel,
+  opencodeEffort,
 }: BackgroundReviewStartInput) {
   return {
     workspace,
@@ -46,6 +51,8 @@ export function buildBackgroundReviewStartArgs({
     claudeEffort,
     codexModel,
     codexEffort,
+    opencodeModel,
+    opencodeEffort,
     reviewProfile: null,
     skipAnalyzers: true,
   };

@@ -33,7 +33,7 @@ missing credentials, incomplete repo state, or declined repo edits.
 
 ### Machine setup command (`norn setup`)
 
-- Detect available review providers (`claude`, `codex`) and validate CLI presence.
+- Detect available review providers (`claude`, `codex`, `opencode`) and validate CLI presence.
 - Probe available provider credential sources without copying tokens.
 - Resolve GitHub/Bitbucket account context and map provider credentials to
   reusable application config or explicit status diagnostics.

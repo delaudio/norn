@@ -35,7 +35,7 @@ Machine checks should include:
 - OS config directory exists and writable
 - default data directory path
 - presence of optional migration alias compatibility
-- availability/version for `norn`-adjacent CLIs (`claude`, `codex`) when configured
+- availability/version for `norn`-adjacent CLIs (`claude`, `codex`, `opencode`) when configured
 - provider credential availability by provider (`github`, `bitbucket`, `jira`, `notion`)
 
 Repository checks should include:

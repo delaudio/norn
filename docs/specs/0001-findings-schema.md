@@ -159,6 +159,8 @@ interface EvidenceArtifact {
   kind: "conversation" | "diff" | "analyzer" | "doc" | "manual";
   source:
     | "claude"
+    | "codex"
+    | "opencode"
     | "bitbucket-diff"
     | "jira"
     | "notion"

@@ -275,6 +275,8 @@ export default function App() {
             claudeEffort: config?.claudeEffort ?? null,
             codexModel: config?.codexModel ?? null,
             codexEffort: config?.codexEffort ?? null,
+            opencodeModel: config?.opencodeModel ?? null,
+            opencodeEffort: config?.opencodeEffort ?? null,
           }),
           skipAnalyzers: true,
         });
@@ -337,6 +339,8 @@ export default function App() {
       config?.claudeModel,
       config?.codexEffort,
       config?.codexModel,
+      config?.opencodeEffort,
+      config?.opencodeModel,
       config?.hasJira,
       config?.jiraBaseUrl,
       notifyReviewFinished,
@@ -965,6 +969,8 @@ export default function App() {
           claudeEffort: config?.claudeEffort ?? null,
           codexModel: config?.codexModel ?? null,
           codexEffort: config?.codexEffort ?? null,
+          opencodeModel: config?.opencodeModel ?? null,
+          opencodeEffort: config?.opencodeEffort ?? null,
           reviewProfile: options.reviewProfile ?? null,
         });
 
@@ -1023,6 +1029,8 @@ export default function App() {
           claudeEffort: config?.claudeEffort ?? null,
           codexModel: config?.codexModel ?? null,
           codexEffort: config?.codexEffort ?? null,
+          opencodeModel: config?.opencodeModel ?? null,
+          opencodeEffort: config?.opencodeEffort ?? null,
         });
       } else {
         handleRunInlineReview(request.pr, request.payload, request.displayMessage, {
@@ -1083,6 +1091,8 @@ export default function App() {
         claudeEffort: config?.claudeEffort ?? null,
         codexModel: config?.codexModel ?? null,
         codexEffort: config?.codexEffort ?? null,
+        opencodeModel: config?.opencodeModel ?? null,
+        opencodeEffort: config?.opencodeEffort ?? null,
       });
     } catch (error) {
       window.alert(error instanceof Error ? error.message : String(error));
@@ -1311,6 +1321,8 @@ export default function App() {
     claudeEffort,
     codexModel,
     codexEffort,
+    opencodeModel,
+    opencodeEffort,
     jiraBaseUrl,
     automaticSyncIntervalSeconds,
     menuBarSyncEnabled,
@@ -1340,6 +1352,8 @@ export default function App() {
       claudeEffort,
       codexModel,
       codexEffort,
+      opencodeModel,
+      opencodeEffort,
       jiraBaseUrl,
       automaticSyncIntervalSeconds,
       menuBarSyncEnabled,
@@ -1363,6 +1377,8 @@ export default function App() {
       claudeEffort: config.claudeEffort,
       codexModel: config.codexModel,
       codexEffort: config.codexEffort,
+      opencodeModel: config.opencodeModel,
+      opencodeEffort: config.opencodeEffort,
       jiraBaseUrl: config.jiraBaseUrl,
       automaticSyncIntervalSeconds: config.automaticSyncIntervalSeconds,
       menuBarSyncEnabled: config.menuBarSyncEnabled,
@@ -1532,6 +1548,8 @@ export default function App() {
               claudeEffort={config?.claudeEffort ?? null}
               codexModel={config?.codexModel ?? null}
               codexEffort={config?.codexEffort ?? null}
+              opencodeModel={config?.opencodeModel ?? null}
+              opencodeEffort={config?.opencodeEffort ?? null}
               reviewTerminalOptions={reviewTerminalOptions}
               jiraBaseUrl={config?.jiraBaseUrl ?? null}
               automaticSyncIntervalSeconds={config?.automaticSyncIntervalSeconds ?? null}

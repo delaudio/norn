@@ -9,9 +9,10 @@ Run Norn as an independent, read-only reviewer after the repository's normal
 validation commands pass. Headless review skips repository analyzers by default
 because this workflow has already run the task's validation gate.
 
-Use `--ai-provider claude` or `--ai-provider codex` when the task or user
-request requires one provider. The command will use the configured default when
-omitted.
+Use `--ai-provider claude`, `--ai-provider codex`, or `--ai-provider opencode`
+when the task or user request requires one provider. The command will use the
+configured default when omitted. The `opencode` provider selects a model such
+as `deepseek/deepseek-flash` through `--model`.
 
 ## Pre-Push Requirement
 
@@ -134,6 +135,14 @@ or
 norn review --repo-path . --scope working-tree \
   --format json --fail-on-findings --allow-provider-diff \
   --ai-provider claude
+```
+
+or
+
+```bash
+norn review --repo-path . --scope working-tree \
+  --format json --fail-on-findings --allow-provider-diff \
+  --ai-provider opencode --model deepseek/deepseek-flash
 ```
 
 If `norn` is unavailable from `PATH`, report setup failure.

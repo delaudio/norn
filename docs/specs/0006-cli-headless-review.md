@@ -132,7 +132,7 @@ norn review \
   [--provider github|bitbucket] \
   [--format markdown|json] \
   [--profile <name>] \
-  [--ai-provider codex|claude] \
+  [--ai-provider codex|claude|opencode] \
   [--model <name>] \
   [--effort <level>] \
   [--output <path>] \

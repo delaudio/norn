@@ -8,6 +8,7 @@ import type {
   ClaudeReviewEffort,
   ClaudeReviewModel,
   CodexReviewEffort,
+  OpenCodeReviewEffort,
   ReviewRun,
 } from "@/types";
 
@@ -26,6 +27,8 @@ interface StartReviewArgs {
   claudeEffort: ClaudeReviewEffort | null;
   codexModel: string | null;
   codexEffort: CodexReviewEffort | null;
+  opencodeModel: string | null;
+  opencodeEffort: OpenCodeReviewEffort | null;
   reviewProfile?: string | null;
 }
 
@@ -43,6 +46,8 @@ interface ReplyReviewArgs {
   claudeEffort: ClaudeReviewEffort | null;
   codexModel: string | null;
   codexEffort: CodexReviewEffort | null;
+  opencodeModel: string | null;
+  opencodeEffort: OpenCodeReviewEffort | null;
 }
 
 interface UseAiReviewResult {
@@ -182,6 +187,8 @@ export function useAiReview(
       claudeEffort,
       codexModel,
       codexEffort,
+      opencodeModel,
+      opencodeEffort,
       reviewProfile,
     }: StartReviewArgs) => {
       if (!workspace || !repo || prId == null) return;
@@ -208,6 +215,8 @@ export function useAiReview(
           claudeEffort,
           codexModel,
           codexEffort,
+          opencodeModel,
+          opencodeEffort,
           reviewProfile: reviewProfile?.trim() || null,
           skipAnalyzers: true,
         });
@@ -243,6 +252,8 @@ export function useAiReview(
       claudeEffort,
       codexModel,
       codexEffort,
+      opencodeModel,
+      opencodeEffort,
     }: ReplyReviewArgs) => {
       if (!workspace || !repo || prId == null) return;
       const key = `${workspace}/${repo}/${prId}`;
@@ -267,6 +278,8 @@ export function useAiReview(
           claudeEffort,
           codexModel,
           codexEffort,
+          opencodeModel,
+          opencodeEffort,
         });
         if (keyRef.current === key) {
           setState(result);

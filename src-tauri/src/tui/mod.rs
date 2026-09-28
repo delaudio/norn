@@ -57,12 +57,16 @@ const CLAUDE_MODELS: [&str; 4] = ["", "sonnet", "opus", "fable"];
 const CLAUDE_EFFORTS: [&str; 6] = ["", "low", "medium", "high", "xhigh", "max"];
 const CODEX_MODELS: [&str; 3] = ["", "gpt-5.4", "gpt-5.5"];
 const CODEX_EFFORTS: [&str; 4] = ["", "low", "medium", "high"];
-const SETTING_FIELDS: [&str; 7] = [
+const OPENCODE_MODELS: [&str; 3] = ["", "deepseek/deepseek-flash", "deepseek/deepseek-v4-pro"];
+const OPENCODE_EFFORTS: [&str; 5] = ["", "low", "medium", "high", "max"];
+const SETTING_FIELDS: [&str; 9] = [
     "AI provider",
     "Claude model",
     "Claude effort",
     "Codex model",
     "Codex effort",
+    "OpenCode model",
+    "OpenCode effort",
     "GitHub credential",
     "Bitbucket credential",
 ];
@@ -273,6 +277,8 @@ enum SettingsField {
     ClaudeEffort,
     CodexModel,
     CodexEffort,
+    OpencodeModel,
+    OpencodeEffort,
     GithubCredential,
     BitbucketCredential,
 }
@@ -285,22 +291,33 @@ impl SettingsField {
             Self::ClaudeEffort => 2,
             Self::CodexModel => 3,
             Self::CodexEffort => 4,
-            Self::GithubCredential => 5,
-            Self::BitbucketCredential => 6,
+            Self::OpencodeModel => 5,
+            Self::OpencodeEffort => 6,
+            Self::GithubCredential => 7,
+            Self::BitbucketCredential => 8,
         }
     }
+}
 
-    fn from_index(index: usize) -> Self {
-        match index % SETTING_FIELDS.len() {
-            0 => Self::AiProvider,
-            1 => Self::ClaudeModel,
-            2 => Self::ClaudeEffort,
-            3 => Self::CodexModel,
-            4 => Self::CodexEffort,
-            5 => Self::GithubCredential,
-            _ => Self::BitbucketCredential,
+/// The settings fields shown for the selected AI provider, in navigation order.
+/// Only the active provider's model and effort are offered so the overview fits
+/// short terminals.
+fn visible_settings_fields(provider: AiProvider) -> Vec<SettingsField> {
+    let mut fields = vec![SettingsField::AiProvider];
+    match provider {
+        AiProvider::Claude => {
+            fields.extend([SettingsField::ClaudeModel, SettingsField::ClaudeEffort]);
+        }
+        AiProvider::Codex => {
+            fields.extend([SettingsField::CodexModel, SettingsField::CodexEffort]);
+        }
+        AiProvider::Opencode => {
+            fields.extend([SettingsField::OpencodeModel, SettingsField::OpencodeEffort]);
         }
     }
+    fields.push(SettingsField::GithubCredential);
+    fields.push(SettingsField::BitbucketCredential);
+    fields
 }
 
 // Intentionally omit Debug and Clone: token-bearing variants must not be
@@ -551,20 +568,26 @@ fn render_settings_overview(frame: &mut Frame<'_>, area: Rect, app: &TuiApp) {
         return;
     };
 
-    let lines = vec![
-        settings_section_line("AI review"),
-        app.settings_field_line(SettingsField::AiProvider),
-        app.settings_field_line(SettingsField::ClaudeModel),
-        app.settings_field_line(SettingsField::ClaudeEffort),
-        app.settings_field_line(SettingsField::CodexModel),
-        app.settings_field_line(SettingsField::CodexEffort),
-        settings_section_line("Provider credentials"),
-        app.settings_field_line(SettingsField::GithubCredential),
-        app.settings_field_line(SettingsField::BitbucketCredential),
-        settings_section_line("CLI readiness"),
-        settings_readiness_line("Claude Code CLI", app.claude_cli_available),
-        settings_readiness_line("Codex CLI", app.codex_cli_available),
-    ];
+    let mut lines = vec![settings_section_line("AI review")];
+    for field in visible_settings_fields(app.settings_ai_provider) {
+        if field == SettingsField::GithubCredential {
+            lines.push(settings_section_line("Provider credentials"));
+        }
+        lines.push(app.settings_field_line(field));
+    }
+    lines.push(settings_section_line("CLI readiness"));
+    lines.push(settings_readiness_line(
+        "Claude Code CLI",
+        app.claude_cli_available,
+    ));
+    lines.push(settings_readiness_line(
+        "Codex CLI",
+        app.codex_cli_available,
+    ));
+    lines.push(settings_readiness_line(
+        "OpenCode CLI",
+        app.opencode_cli_available,
+    ));
     frame.render_widget(Paragraph::new(lines).style(render::panel_style()), content);
 
     let context_lines = vec![
@@ -803,6 +826,8 @@ struct TuiApp {
     claude_effort: Option<String>,
     codex_model: Option<String>,
     codex_effort: Option<String>,
+    opencode_model: Option<String>,
+    opencode_effort: Option<String>,
     settings_open: bool,
     settings_field: SettingsField,
     settings_ai_provider: AiProvider,
@@ -810,11 +835,14 @@ struct TuiApp {
     settings_claude_effort: Option<String>,
     settings_codex_model: Option<String>,
     settings_codex_effort: Option<String>,
+    settings_opencode_model: Option<String>,
+    settings_opencode_effort: Option<String>,
     settings_editor: Option<SettingsEditor>,
     github_credential_status: CredentialStatus,
     bitbucket_credential_status: CredentialStatus,
     claude_cli_available: bool,
     codex_cli_available: bool,
+    opencode_cli_available: bool,
     ai_review_store: AiReviewRunStore,
     active_ai_target: Option<(String, String, u32)>,
     pr_resource_target: Option<(String, String, u32)>,
@@ -869,23 +897,30 @@ impl TuiApp {
         let claude_effort = config.claude_effort.clone();
         let codex_model = config.codex_model.clone();
         let codex_effort = config.codex_effort.clone();
+        let opencode_model = config.opencode_model.clone();
+        let opencode_effort = config.opencode_effort.clone();
         Self {
             ai_provider: config.ai_provider,
             claude_model: claude_model.clone(),
             claude_effort: claude_effort.clone(),
             codex_model: codex_model.clone(),
             codex_effort: codex_effort.clone(),
+            opencode_model: opencode_model.clone(),
+            opencode_effort: opencode_effort.clone(),
             settings_ai_provider: config.ai_provider,
             settings_claude_model: claude_model,
             settings_claude_effort: claude_effort,
             settings_codex_model: codex_model,
             settings_codex_effort: codex_effort,
+            settings_opencode_model: opencode_model,
+            settings_opencode_effort: opencode_effort,
             github_credential_status: credentials::credential_status(CredentialProvider::Github),
             bitbucket_credential_status: credentials::credential_status(
                 CredentialProvider::Bitbucket,
             ),
             claude_cli_available: user_cli_available_in_path("claude"),
             codex_cli_available: user_cli_available_in_path("codex"),
+            opencode_cli_available: user_cli_available_in_path("opencode"),
             ..Self::from_repos(config.repos)
         }
     }
@@ -904,6 +939,8 @@ impl TuiApp {
             settings_claude_effort: None,
             settings_codex_model: None,
             settings_codex_effort: None,
+            settings_opencode_model: None,
+            settings_opencode_effort: None,
             settings_editor: None,
             github_credential_status: CredentialStatus {
                 provider: CredentialProvider::Github,
@@ -917,6 +954,7 @@ impl TuiApp {
             },
             claude_cli_available: false,
             codex_cli_available: false,
+            opencode_cli_available: false,
             focus: FocusPane::Repositories,
             pull_requests: Vec::new(),
             local_snapshot: None,
@@ -935,6 +973,8 @@ impl TuiApp {
             claude_effort: None,
             codex_model: None,
             codex_effort: None,
+            opencode_model: None,
+            opencode_effort: None,
             ai_review_store: AiReviewRunStore::default(),
             active_ai_target: None,
             pr_resource_target: None,
@@ -1336,6 +1376,8 @@ impl TuiApp {
         self.settings_claude_effort = self.claude_effort.clone();
         self.settings_codex_model = self.codex_model.clone();
         self.settings_codex_effort = self.codex_effort.clone();
+        self.settings_opencode_model = self.opencode_model.clone();
+        self.settings_opencode_effort = self.opencode_effort.clone();
         self.settings_editor = None;
         self.refresh_credential_statuses();
         self.refresh_cli_readiness();
@@ -1375,12 +1417,14 @@ impl TuiApp {
     fn cycle_settings_value(&mut self, forward: bool) {
         match self.settings_field {
             SettingsField::AiProvider => {
-                self.settings_ai_provider =
-                    if matches!(self.settings_ai_provider, AiProvider::Claude) {
-                        AiProvider::Codex
-                    } else {
-                        AiProvider::Claude
-                    };
+                self.settings_ai_provider = match (self.settings_ai_provider, forward) {
+                    (AiProvider::Claude, true) => AiProvider::Codex,
+                    (AiProvider::Codex, true) => AiProvider::Opencode,
+                    (AiProvider::Opencode, true) => AiProvider::Claude,
+                    (AiProvider::Claude, false) => AiProvider::Opencode,
+                    (AiProvider::Codex, false) => AiProvider::Claude,
+                    (AiProvider::Opencode, false) => AiProvider::Codex,
+                };
             }
             SettingsField::ClaudeModel => {
                 self.settings_claude_model =
@@ -1397,6 +1441,17 @@ impl TuiApp {
             SettingsField::CodexEffort => {
                 self.settings_codex_effort =
                     Self::cycle_or_value(&CODEX_EFFORTS, &self.settings_codex_effort, forward);
+            }
+            SettingsField::OpencodeModel => {
+                self.settings_opencode_model =
+                    Self::cycle_or_value(&OPENCODE_MODELS, &self.settings_opencode_model, forward);
+            }
+            SettingsField::OpencodeEffort => {
+                self.settings_opencode_effort = Self::cycle_or_value(
+                    &OPENCODE_EFFORTS,
+                    &self.settings_opencode_effort,
+                    forward,
+                );
             }
             SettingsField::GithubCredential | SettingsField::BitbucketCredential => {}
         }
@@ -1419,6 +1474,7 @@ impl TuiApp {
         // may use a login shell on macOS to discover shell-managed tool paths.
         self.claude_cli_available = user_cli_available("claude");
         self.codex_cli_available = user_cli_available("codex");
+        self.opencode_cli_available = user_cli_available("opencode");
     }
 
     fn open_settings_editor(&mut self) {
@@ -1439,6 +1495,14 @@ impl TuiApp {
             SettingsField::CodexEffort => Some(SettingsEditor::Text {
                 field: self.settings_field,
                 value: self.settings_codex_effort.clone().unwrap_or_default(),
+            }),
+            SettingsField::OpencodeModel => Some(SettingsEditor::Text {
+                field: self.settings_field,
+                value: self.settings_opencode_model.clone().unwrap_or_default(),
+            }),
+            SettingsField::OpencodeEffort => Some(SettingsEditor::Text {
+                field: self.settings_field,
+                value: self.settings_opencode_effort.clone().unwrap_or_default(),
             }),
             SettingsField::GithubCredential => Some(SettingsEditor::GithubToken {
                 token: Zeroizing::new(String::new()),
@@ -1480,6 +1544,8 @@ impl TuiApp {
                     SettingsField::ClaudeEffort => self.settings_claude_effort = value,
                     SettingsField::CodexModel => self.settings_codex_model = value,
                     SettingsField::CodexEffort => self.settings_codex_effort = value,
+                    SettingsField::OpencodeModel => self.settings_opencode_model = value,
+                    SettingsField::OpencodeEffort => self.settings_opencode_effort = value,
                     _ => {}
                 }
                 self.status = "Custom setting updated; press s to save".to_string();
@@ -1572,14 +1638,21 @@ impl TuiApp {
     }
 
     fn next_settings_field(&mut self) {
-        let index = self.settings_field.as_index();
-        self.settings_field = SettingsField::from_index((index + 1) % SETTING_FIELDS.len());
+        let fields = visible_settings_fields(self.settings_ai_provider);
+        let index = fields
+            .iter()
+            .position(|field| *field == self.settings_field)
+            .unwrap_or(0);
+        self.settings_field = fields[(index + 1) % fields.len()];
     }
 
     fn previous_settings_field(&mut self) {
-        let index = self.settings_field.as_index();
-        self.settings_field =
-            SettingsField::from_index((index + SETTING_FIELDS.len() - 1) % SETTING_FIELDS.len());
+        let fields = visible_settings_fields(self.settings_ai_provider);
+        let index = fields
+            .iter()
+            .position(|field| *field == self.settings_field)
+            .unwrap_or(0);
+        self.settings_field = fields[(index + fields.len() - 1) % fields.len()];
     }
 
     fn persist_settings(&mut self) -> Result<(), String> {
@@ -1589,12 +1662,16 @@ impl TuiApp {
         cfg.claude_effort = self.settings_claude_effort.clone();
         cfg.codex_model = self.settings_codex_model.clone();
         cfg.codex_effort = self.settings_codex_effort.clone();
+        cfg.opencode_model = self.settings_opencode_model.clone();
+        cfg.opencode_effort = self.settings_opencode_effort.clone();
         config::save(&cfg)?;
         self.ai_provider = self.settings_ai_provider;
         self.claude_model = self.settings_claude_model.clone();
         self.claude_effort = self.settings_claude_effort.clone();
         self.codex_model = self.settings_codex_model.clone();
         self.codex_effort = self.settings_codex_effort.clone();
+        self.opencode_model = self.settings_opencode_model.clone();
+        self.opencode_effort = self.settings_opencode_effort.clone();
         Ok(())
     }
 
@@ -1620,11 +1697,14 @@ impl TuiApp {
             SettingsField::AiProvider => match self.settings_ai_provider {
                 AiProvider::Claude => "Claude".to_string(),
                 AiProvider::Codex => "Codex".to_string(),
+                AiProvider::Opencode => "OpenCode".to_string(),
             },
             SettingsField::ClaudeModel => Self::option_label(&self.settings_claude_model),
             SettingsField::ClaudeEffort => Self::option_label(&self.settings_claude_effort),
             SettingsField::CodexModel => Self::option_label(&self.settings_codex_model),
             SettingsField::CodexEffort => Self::option_label(&self.settings_codex_effort),
+            SettingsField::OpencodeModel => Self::option_label(&self.settings_opencode_model),
+            SettingsField::OpencodeEffort => Self::option_label(&self.settings_opencode_effort),
             SettingsField::GithubCredential => {
                 credential_status_label(self.github_credential_status)
             }
@@ -1704,7 +1784,9 @@ impl TuiApp {
             SettingsField::ClaudeModel
             | SettingsField::ClaudeEffort
             | SettingsField::CodexModel
-            | SettingsField::CodexEffort => {
+            | SettingsField::CodexEffort
+            | SettingsField::OpencodeModel
+            | SettingsField::OpencodeEffort => {
                 "Use ←/→ for presets or e to enter a custom value.".to_string()
             }
             SettingsField::GithubCredential | SettingsField::BitbucketCredential => {
@@ -2405,6 +2487,8 @@ impl TuiApp {
             self.claude_effort.clone(),
             self.codex_model.clone(),
             self.codex_effort.clone(),
+            self.opencode_model.clone(),
+            self.opencode_effort.clone(),
             None,
         ) {
             Ok(state) => {
@@ -2469,6 +2553,8 @@ impl TuiApp {
             self.claude_effort.clone(),
             self.codex_model.clone(),
             self.codex_effort.clone(),
+            self.opencode_model.clone(),
+            self.opencode_effort.clone(),
             None,
         ) {
             Ok(state) => {
@@ -3242,6 +3328,7 @@ fn ai_provider_label(provider: AiProvider) -> &'static str {
     match provider {
         AiProvider::Claude => "Claude",
         AiProvider::Codex => "Codex",
+        AiProvider::Opencode => "OpenCode",
     }
 }
 
@@ -3557,6 +3644,25 @@ mod tests {
         assert!(!app.settings_open);
         assert_eq!(app.ai_provider, AiProvider::Claude);
         assert_eq!(app.status, "Settings cancelled");
+    }
+
+    #[test]
+    fn settings_ai_provider_cycles_forward_and_backward() {
+        let mut app = TuiApp::from_repos(Vec::new());
+        app.settings_field = SettingsField::AiProvider;
+        app.settings_ai_provider = AiProvider::Claude;
+
+        app.cycle_settings_value(true);
+        assert_eq!(app.settings_ai_provider, AiProvider::Codex);
+        app.cycle_settings_value(true);
+        assert_eq!(app.settings_ai_provider, AiProvider::Opencode);
+        app.cycle_settings_value(true);
+        assert_eq!(app.settings_ai_provider, AiProvider::Claude);
+
+        app.cycle_settings_value(false);
+        assert_eq!(app.settings_ai_provider, AiProvider::Opencode);
+        app.cycle_settings_value(false);
+        assert_eq!(app.settings_ai_provider, AiProvider::Codex);
     }
 
     #[test]

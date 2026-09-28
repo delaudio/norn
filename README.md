@@ -39,7 +39,7 @@ It brings together:
 - a diff-first desktop interface (unified + split views, image previews);
 - both interfaces: a Tauri desktop app and a terminal user interface (`norn-tui`);
 - reviewer-owned draft comments and publish controls;
-- AI-assist runs (Claude or Codex) with local persistence;
+- AI-assist runs (Claude, Codex, or OpenCode/DeepSeek) with local persistence;
 - local clone operations for branch sync, fixing, commit, and push flows;
 - local review artifacts (runs, findings, evidence, publication state);
 - closed-PR analytics and review quality signals.

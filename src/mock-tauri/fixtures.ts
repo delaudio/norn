@@ -29,6 +29,8 @@ export const mockConfig: AppConfig = {
   claudeEffort: "high",
   codexModel: null,
   codexEffort: null,
+  opencodeModel: null,
+  opencodeEffort: null,
   jiraBaseUrl: "https://example.atlassian.net",
   automaticSyncIntervalSeconds: null,
   menuBarSyncEnabled: true,

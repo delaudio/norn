@@ -29,6 +29,7 @@ import type {
   ClaudeReviewModel,
   CodexReviewEffort,
   DiffViewMode,
+  OpenCodeReviewEffort,
   RepoRef,
   ReviewProvider,
   ReviewTerminal,
@@ -59,6 +60,8 @@ export interface SettingsSaveInput {
   claudeEffort: ClaudeReviewEffort | null;
   codexModel: string | null;
   codexEffort: CodexReviewEffort | null;
+  opencodeModel: string | null;
+  opencodeEffort: OpenCodeReviewEffort | null;
   jiraBaseUrl: string | null;
   automaticSyncIntervalSeconds: AutomaticSyncIntervalSeconds | null;
   menuBarSyncEnabled: boolean;
@@ -80,6 +83,8 @@ export interface SettingsFormProps {
   claudeEffort: ClaudeReviewEffort | null;
   codexModel: string | null;
   codexEffort: CodexReviewEffort | null;
+  opencodeModel: string | null;
+  opencodeEffort: OpenCodeReviewEffort | null;
   reviewTerminalOptions: ReviewTerminalOption[];
   jiraBaseUrl: string | null;
   automaticSyncIntervalSeconds: AutomaticSyncIntervalSeconds | null;
@@ -119,6 +124,8 @@ function SettingsForm({
   claudeEffort: initialClaudeEffort,
   codexModel: initialCodexModel,
   codexEffort: initialCodexEffort,
+  opencodeModel: initialOpenCodeModel,
+  opencodeEffort: initialOpenCodeEffort,
   reviewTerminalOptions,
   jiraBaseUrl: initialJiraBaseUrl,
   automaticSyncIntervalSeconds: initialAutomaticSyncIntervalSeconds,
@@ -152,6 +159,10 @@ function SettingsForm({
   const [claudeEffort, setClaudeEffort] = useState<ClaudeReviewEffort | null>(initialClaudeEffort);
   const [codexModel, setCodexModel] = useState(initialCodexModel ?? "");
   const [codexEffort, setCodexEffort] = useState<CodexReviewEffort | null>(initialCodexEffort);
+  const [opencodeModel, setOpenCodeModel] = useState(initialOpenCodeModel ?? "");
+  const [opencodeEffort, setOpenCodeEffort] = useState<OpenCodeReviewEffort | null>(
+    initialOpenCodeEffort,
+  );
   const [jiraBaseUrl, setJiraBaseUrl] = useState(initialJiraBaseUrl ?? "");
   const [automaticSyncIntervalSeconds, setAutomaticSyncIntervalSeconds] =
     useState<AutomaticSyncIntervalSeconds | null>(initialAutomaticSyncIntervalSeconds);
@@ -215,6 +226,8 @@ function SettingsForm({
         claudeEffort,
         codexModel: codexModel.trim() || null,
         codexEffort,
+        opencodeModel: opencodeModel.trim() || null,
+        opencodeEffort,
         jiraBaseUrl: jiraBaseUrl.trim() || null,
         automaticSyncIntervalSeconds,
         menuBarSyncEnabled,
@@ -419,9 +432,10 @@ function SettingsForm({
           >
             <option value="claude">Claude</option>
             <option value="codex">Codex</option>
+            <option value="opencode">OpenCode</option>
           </select>
         </div>
-        {aiProvider === "claude" ? (
+        {aiProvider === "claude" && (
           <div className="grid gap-3 md:grid-cols-2">
             <div className="grid gap-1.5">
               <Label htmlFor="settings-claude-model">Claude review model</Label>
@@ -466,7 +480,8 @@ function SettingsForm({
               </p>
             </div>
           </div>
-        ) : (
+        )}
+        {aiProvider === "codex" && (
           <div className="grid gap-3 md:grid-cols-2">
             <div className="grid gap-1.5">
               <Label htmlFor="settings-codex-model">Codex review model</Label>
@@ -501,6 +516,47 @@ function SettingsForm({
               </select>
               <p className="text-xs text-muted-foreground">
                 Passed to Codex as <span className="font-mono">model_reasoning_effort</span>.
+              </p>
+            </div>
+          </div>
+        )}
+        {aiProvider === "opencode" && (
+          <div className="grid gap-3 md:grid-cols-2">
+            <div className="grid gap-1.5">
+              <Label htmlFor="settings-opencode-model">OpenCode review model</Label>
+              <select
+                id="settings-opencode-model"
+                className="h-9 rounded-md border border-input bg-background px-3 text-sm text-foreground"
+                value={opencodeModel}
+                onChange={(event) => setOpenCodeModel(event.target.value)}
+              >
+                <option value="">Default (OpenCode's configured model)</option>
+                <option value="deepseek/deepseek-flash">deepseek/deepseek-flash</option>
+                <option value="deepseek/deepseek-v4-pro">deepseek/deepseek-v4-pro</option>
+              </select>
+              <p className="text-xs text-muted-foreground">
+                Passed to OpenCode as <span className="font-mono">--model</span> in
+                <span className="font-mono"> provider/model</span> form.
+              </p>
+            </div>
+            <div className="grid gap-1.5">
+              <Label htmlFor="settings-opencode-effort">OpenCode variant</Label>
+              <select
+                id="settings-opencode-effort"
+                className="h-9 rounded-md border border-input bg-background px-3 text-sm text-foreground"
+                value={opencodeEffort ?? ""}
+                onChange={(event) =>
+                  setOpenCodeEffort((event.target.value || null) as OpenCodeReviewEffort | null)
+                }
+              >
+                <option value="">Default</option>
+                <option value="low">Low</option>
+                <option value="medium">Medium</option>
+                <option value="high">High</option>
+                <option value="max">Max</option>
+              </select>
+              <p className="text-xs text-muted-foreground">
+                Passed to OpenCode as <span className="font-mono">--variant</span>.
               </p>
             </div>
           </div>
@@ -678,6 +734,8 @@ export function SettingsPage({ onBack, ...props }: SettingsPageProps) {
     props.claudeEffort ?? "",
     props.codexModel ?? "",
     props.codexEffort ?? "",
+    props.opencodeModel ?? "",
+    props.opencodeEffort ?? "",
     props.jiraBaseUrl ?? "",
     props.automaticSyncIntervalSeconds ?? "sync-off",
     props.menuBarSyncEnabled ? "menu-on" : "menu-off",

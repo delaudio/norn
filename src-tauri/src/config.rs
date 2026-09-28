@@ -43,6 +43,7 @@ pub enum AiProvider {
     #[default]
     Claude,
     Codex,
+    Opencode,
 }
 
 /// Non-secret application configuration, persisted as JSON in the OS config dir.
@@ -68,6 +69,10 @@ pub struct AppConfig {
     pub codex_model: Option<String>,
     #[serde(default)]
     pub codex_effort: Option<String>,
+    #[serde(default)]
+    pub opencode_model: Option<String>,
+    #[serde(default)]
+    pub opencode_effort: Option<String>,
     /// Local consent for headless review to send the selected diff to the
     /// configured AI provider. Desktop and TUI review have their own explicit
     /// user actions and do not use this automation-specific setting.
@@ -115,6 +120,8 @@ impl Default for AppConfig {
             claude_effort: None,
             codex_model: None,
             codex_effort: None,
+            opencode_model: None,
+            opencode_effort: None,
             headless_ai_diff_sharing_allowed: false,
             jira_base_url: None,
             automatic_sync_interval_seconds: None,
@@ -245,6 +252,36 @@ mod tests {
         assert_eq!(parsed.codex_model.as_deref(), Some("gpt-5-codex"));
         assert_eq!(parsed.codex_effort.as_deref(), Some("high"));
         assert!(!parsed.headless_ai_diff_sharing_allowed);
+    }
+
+    #[test]
+    fn serializes_opencode_provider_settings_and_defaults_missing_fields() {
+        let config = AppConfig {
+            ai_provider: AiProvider::Opencode,
+            opencode_model: Some("deepseek/deepseek-flash".to_string()),
+            opencode_effort: Some("high".to_string()),
+            ..AppConfig::default()
+        };
+
+        let json = serde_json::to_string(&config).expect("config should serialize");
+        assert!(json.contains(r#""aiProvider":"opencode""#));
+        assert!(json.contains(r#""opencodeModel":"deepseek/deepseek-flash""#));
+        assert!(json.contains(r#""opencodeEffort":"high""#));
+
+        let parsed: AppConfig = serde_json::from_str(&json).expect("config should deserialize");
+        assert_eq!(parsed.ai_provider, AiProvider::Opencode);
+        assert_eq!(
+            parsed.opencode_model.as_deref(),
+            Some("deepseek/deepseek-flash")
+        );
+        assert_eq!(parsed.opencode_effort.as_deref(), Some("high"));
+
+        let legacy: AppConfig =
+            serde_json::from_str(r#"{"defaultDiffView":"unified","theme":"dark","repos":[]}"#)
+                .expect("config without opencode fields should deserialize");
+        assert_eq!(legacy.ai_provider, AiProvider::Claude);
+        assert_eq!(legacy.opencode_model, None);
+        assert_eq!(legacy.opencode_effort, None);
     }
 
     #[test]

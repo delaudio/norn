@@ -478,7 +478,8 @@ export function AiReviewPanel({
   const commitDraftKeyRef = useRef(fixState?.suggestedCommitMessage ?? "");
 
   const fixRunning = fixState?.status === "running";
-  const providerLabel = aiProvider === "codex" ? "Codex" : "Claude";
+  const providerLabel =
+    aiProvider === "codex" ? "Codex" : aiProvider === "opencode" ? "OpenCode" : "Claude";
   const hasThreads = Boolean(store?.threads.length);
   const hasReview = Boolean(hasThreads || loading || error || onRun);
   const canCommit =

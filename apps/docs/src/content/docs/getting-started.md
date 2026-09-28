@@ -9,7 +9,7 @@ description: Install dependencies and run Norn locally.
 - Rust toolchain.
 - Tauri v2 prerequisites for your operating system.
 - Bitbucket Cloud API token and/or GitHub token for real provider usage.
-- Claude CLI and/or Codex CLI for AI review flows.
+- Claude CLI, Codex CLI, and/or OpenCode CLI for AI review flows.
 
 ## Install
 
