@@ -22,4 +22,4 @@ metadata.
 | 0015 | Distribute managed agent review skills with installed Norn | Implemented | 2026-09-01 | codex | distribution, skills, codex, claude, cli, homebrew |
 | 0016 | Offer an authenticated browser diff viewer from the terminal UI | Implemented | 2026-09-02 | default-agent | tui, diff, browser, security, rust |
 | 0017 | Review local changes before publication | Accepted | 2026-09-03 | codex | local, review, git, tui, desktop, diff |
-| 0018 | Run AI reviews through an OpenCode provider | Accepted | 2026-09-28 | default-agent | ai, provider, opencode, deepseek, cli, review |
+| 0018 | Run AI reviews through an OpenCode provider | Implemented | 2026-09-28 | default-agent | ai, provider, opencode, deepseek, cli, review |
