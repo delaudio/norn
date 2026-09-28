@@ -153,6 +153,7 @@ pub enum ReviewEvidenceKind {
 pub enum ReviewEvidenceSource {
     Claude,
     Codex,
+    Opencode,
     BitbucketDiff,
     Jira,
     Notion,
@@ -339,6 +340,8 @@ pub struct HeadlessNativeReviewRequest {
     pub claude_effort: Option<String>,
     pub codex_model: Option<String>,
     pub codex_effort: Option<String>,
+    pub opencode_model: Option<String>,
+    pub opencode_effort: Option<String>,
     pub review_profile: Option<String>,
     pub policy_sources: Vec<ResolvedPolicySourceVersion>,
     pub required_policy_analyzers: Vec<String>,
@@ -3505,6 +3508,12 @@ fn validate_isolated_provider_cli(ai_provider: AiProvider) -> Result<(), String>
                     "--ignore-rules",
                 ],
             ),
+            AiProvider::Opencode => (
+                "OpenCode",
+                "opencode",
+                &["run", "--help"],
+                &["--format", "--model", "--variant"],
+            ),
         };
     // Exercise the exact isolation option combination. A CLI that rejects this
     // parser contract is unsupported even if each flag appears in its help.
@@ -3628,6 +3637,232 @@ fn normalize_codex_effort(value: &str) -> Option<&'static str> {
         "high" => Some("high"),
         _ => None,
     }
+}
+
+fn normalize_opencode_model(value: &str) -> Option<String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let has_separator = trimmed.contains('/');
+    if has_separator
+        && trimmed
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.' | '/'))
+    {
+        Some(trimmed.to_string())
+    } else {
+        None
+    }
+}
+
+fn normalize_opencode_effort(value: &str) -> Option<String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    if trimmed
+        .chars()
+        .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.'))
+    {
+        Some(trimmed.to_string())
+    } else {
+        None
+    }
+}
+
+/// Build the inline OpenCode runtime configuration that keeps a review
+/// read-only. Permissions default to deny so custom or MCP-provided tools
+/// cannot bypass the boundary; mutation, shell, subagent, and network tools are
+/// always denied. Repository-backed reviews re-enable read-only inspection
+/// tools, while isolated diff-only reviews deny every tool because the complete
+/// diff is already in the prompt payload.
+fn opencode_isolation_config(repository_access: bool) -> String {
+    let permission = if repository_access {
+        serde_json::json!({
+            "*": "deny",
+            "read": "allow",
+            "glob": "allow",
+            "grep": "allow",
+        })
+    } else {
+        serde_json::json!({ "*": "deny" })
+    };
+    let mut tools = serde_json::json!({
+        "write": false,
+        "edit": false,
+        "patch": false,
+        "bash": false,
+        "task": false,
+        "webfetch": false,
+        "websearch": false,
+        "skill": false,
+    });
+    if !repository_access {
+        for tool in ["read", "glob", "grep", "lsp"] {
+            tools[tool] = serde_json::Value::Bool(false);
+        }
+    }
+    serde_json::json!({
+        "permission": permission,
+        "tools": tools,
+        "share": "disabled",
+        "autoupdate": false,
+    })
+    .to_string()
+}
+
+fn build_opencode_text_command(
+    repo_path: Option<&Path>,
+    execution_context: ProviderExecutionContext,
+    payload: &str,
+    opencode_model: Option<&str>,
+    opencode_effort: Option<&str>,
+) -> Result<(Command, tempfile::TempDir), String> {
+    // Reject invalid settings instead of silently letting OpenCode fall back to
+    // its own default model or variant.
+    let model = match opencode_model
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        Some(value) => Some(normalize_opencode_model(value).ok_or_else(|| {
+            format!("Invalid OpenCode model `{value}`; expected provider/model.")
+        })?),
+        None => None,
+    };
+    let effort = match opencode_effort
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        Some(value) => Some(
+            normalize_opencode_effort(value)
+                .ok_or_else(|| format!("Invalid OpenCode variant `{value}`."))?,
+        ),
+        None => None,
+    };
+
+    let temp_dir = private_provider_temp_dir("norn-opencode-review-")?;
+    let tmp_path = temp_dir.path().join("prompt.md");
+    fs::write(&tmp_path, payload).map_err(|e| e.to_string())?;
+    let prompt_file = fs::File::open(&tmp_path)
+        .map_err(|error| format!("Failed to open OpenCode review prompt: {error}"))?;
+
+    let repository_access =
+        execution_context == ProviderExecutionContext::Repository && repo_path.is_some();
+    let mut command = user_installed_cli_command("opencode");
+    command
+        .args(["run", "--format", "json"])
+        .env("NORN_REVIEW_CHILD", "1")
+        .env(
+            "OPENCODE_CONFIG_CONTENT",
+            opencode_isolation_config(repository_access),
+        );
+    if let Some(model) = model {
+        command.args(["--model", &model]);
+    }
+    if let Some(effort) = effort {
+        command.args(["--variant", &effort]);
+    }
+    if repository_access {
+        command.current_dir(repo_path.expect("repository access requires a path"));
+    } else {
+        command.current_dir(temp_dir.path());
+    }
+    command
+        .stdin(Stdio::from(prompt_file))
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    Ok((command, temp_dir))
+}
+
+/// Reconstruct the assistant text from OpenCode's newline-delimited JSON event
+/// stream. Malformed or unrecognized lines are ignored so a provider version
+/// change cannot turn a valid review into a hard parse failure, but an explicit
+/// error event always fails the review even when earlier events carried text.
+fn parse_opencode_text_result(stdout: &str) -> Result<ParsedClaudeTextResponse, String> {
+    let mut content = String::new();
+    let mut session_id: Option<String> = None;
+    let mut saw_error = false;
+    for line in stdout.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(trimmed) else {
+            continue;
+        };
+        if session_id.is_none() {
+            if let Some(id) = value.get("sessionID").and_then(|value| value.as_str()) {
+                session_id = Some(id.to_string());
+            }
+        }
+        match value.get("type").and_then(|value| value.as_str()) {
+            Some("text") => {
+                if let Some(text) = value
+                    .get("part")
+                    .and_then(|part| part.get("text"))
+                    .and_then(|value| value.as_str())
+                {
+                    content.push_str(text);
+                }
+            }
+            Some("error") => saw_error = true,
+            _ => {}
+        }
+    }
+    if saw_error {
+        return Err("OpenCode reported an error while producing the review.".to_string());
+    }
+    if content.trim().is_empty() {
+        return Err("OpenCode returned an empty review response.".to_string());
+    }
+    Ok(ParsedClaudeTextResponse {
+        content,
+        duration_ms: None,
+        session_id,
+        permission_denials: 0,
+    })
+}
+
+fn format_opencode_stream_log_line(stream_name: &'static str, line: &str) -> Vec<String> {
+    let trimmed = line.trim();
+    if trimmed.is_empty() {
+        return Vec::new();
+    }
+    if stream_name == "stderr" {
+        return vec![format!("[stderr] {trimmed}")];
+    }
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(trimmed) else {
+        return Vec::new();
+    };
+    match value.get("type").and_then(|value| value.as_str()) {
+        Some("step_start") => vec!["OpenCode review started.".to_string()],
+        Some("text") => vec!["OpenCode is drafting the review…".to_string()],
+        Some("tool") => vec!["OpenCode used a tool.".to_string()],
+        Some("step_finish") => vec!["OpenCode produced a result.".to_string()],
+        Some("error") => vec!["OpenCode reported an error.".to_string()],
+        Some(other) => vec![format!("OpenCode event: {other}")],
+        None => Vec::new(),
+    }
+}
+
+fn read_opencode_inline_review_stream<R: std::io::Read + Send + 'static>(
+    reader: R,
+    store: AiReviewRunStore,
+    key: String,
+    run_id: u64,
+    stream_name: &'static str,
+    sink: Arc<Mutex<String>>,
+) -> thread::JoinHandle<()> {
+    read_inline_review_stream_with_formatter(
+        reader,
+        store,
+        key,
+        run_id,
+        stream_name,
+        sink,
+        format_opencode_stream_log_line,
+    )
 }
 
 fn run_claude_fix(
@@ -4860,6 +5095,8 @@ fn run_inline_review_pipeline(
     claude_effort: Option<String>,
     codex_model: Option<String>,
     codex_effort: Option<String>,
+    opencode_model: Option<String>,
+    opencode_effort: Option<String>,
     skip_analyzers: bool,
     mut review_profile: Option<String>,
     mut policy_sources: Vec<ResolvedPolicySourceVersion>,
@@ -4874,10 +5111,12 @@ fn run_inline_review_pipeline(
     let provider_label = match ai_provider {
         AiProvider::Claude => "Claude",
         AiProvider::Codex => "Codex",
+        AiProvider::Opencode => "OpenCode",
     };
     let assistant_evidence_source = match ai_provider {
         AiProvider::Claude => ReviewEvidenceSource::Claude,
         AiProvider::Codex => ReviewEvidenceSource::Codex,
+        AiProvider::Opencode => ReviewEvidenceSource::Opencode,
     };
     let repo_path = repo_path_override.or_else(|| resolve_local_repo(&workspace, &repo).ok());
     let provider_execution_context = if isolate_provider {
@@ -5099,6 +5338,22 @@ fn run_inline_review_pipeline(
                 append_inline_review_log(&store, &key, run_id, format!("Codex effort: {effort}"));
             }
         }
+        AiProvider::Opencode => {
+            if let Some(model) = opencode_model.as_deref().and_then(normalize_opencode_model) {
+                append_inline_review_log(&store, &key, run_id, format!("OpenCode model: {model}"));
+            }
+            if let Some(effort) = opencode_effort
+                .as_deref()
+                .and_then(normalize_opencode_effort)
+            {
+                append_inline_review_log(
+                    &store,
+                    &key,
+                    run_id,
+                    format!("OpenCode variant: {effort}"),
+                );
+            }
+        }
     }
 
     let attempt_claude = |prompt: &str,
@@ -5280,6 +5535,87 @@ fn run_inline_review_pipeline(
         }))
     };
 
+    let attempt_opencode = |prompt: &str| -> Result<Option<ParsedClaudeTextResponse>, String> {
+        let (mut command, _temp_dir) = build_opencode_text_command(
+            repo_path.as_deref(),
+            provider_execution_context,
+            prompt,
+            opencode_model.as_deref(),
+            opencode_effort.as_deref(),
+        )?;
+        let mut child = command
+            .spawn()
+            .map_err(|e| format!("Failed to run opencode: {e}"))?;
+        let pid = child.id();
+        set_inline_review_process_pid(&store, &key, run_id, pid, "OpenCode");
+        let stdout = child
+            .stdout
+            .take()
+            .ok_or_else(|| "opencode stdout was not captured".to_string())?;
+        let stderr = child
+            .stderr
+            .take()
+            .ok_or_else(|| "opencode stderr was not captured".to_string())?;
+        let stdout_buf = Arc::new(Mutex::new(String::new()));
+        let stderr_buf = Arc::new(Mutex::new(String::new()));
+        let stdout_thread = read_opencode_inline_review_stream(
+            stdout,
+            store.clone(),
+            key.clone(),
+            run_id,
+            "stdout",
+            stdout_buf.clone(),
+        );
+        let stderr_thread = read_opencode_inline_review_stream(
+            stderr,
+            store.clone(),
+            key.clone(),
+            run_id,
+            "stderr",
+            stderr_buf.clone(),
+        );
+        if inline_review_cancel_requested(&store, &key, run_id) {
+            let _ = kill_process(pid);
+        }
+
+        let started = Instant::now();
+        let status = match wait_for_ai_provider(&mut child, "OpenCode", ai_provider_timeout()) {
+            Ok(status) => status,
+            Err(error) => {
+                clear_inline_review_pid(&store, &key, run_id);
+                return Err(error);
+            }
+        };
+        let duration_ms = started.elapsed().as_millis() as u64;
+        let _ = stdout_thread.join();
+        let _ = stderr_thread.join();
+        clear_inline_review_pid(&store, &key, run_id);
+
+        let output = CommandOutput {
+            code: status.code(),
+            stdout: stdout_buf.lock().map(|buf| buf.clone()).unwrap_or_default(),
+            stderr: stderr_buf.lock().map(|buf| buf.clone()).unwrap_or_default(),
+        };
+
+        if inline_review_cancel_requested(&store, &key, run_id) {
+            mark_inline_review_cancelled(&store, &key, run_id);
+            return Ok(None);
+        }
+
+        if output.code != Some(0) {
+            return Err(format!(
+                "opencode exited with code {:?}.\nstderr: {stderr}\nstdout: {stdout}",
+                output.code,
+                stderr = output.stderr.trim(),
+                stdout = output.stdout.trim(),
+            ));
+        }
+
+        let mut parsed = parse_opencode_text_result(&output.stdout)?;
+        parsed.duration_ms = Some(duration_ms);
+        Ok(Some(parsed))
+    };
+
     let response = (|| -> Result<Option<ParsedClaudeTextResponse>, String> {
         match ai_provider {
             AiProvider::Claude => {
@@ -5313,6 +5649,7 @@ fn run_inline_review_pipeline(
                 }
             }
             AiProvider::Codex => attempt_codex(&effective_payload),
+            AiProvider::Opencode => attempt_opencode(&effective_payload),
         }
     })()
     .map_err(ReviewPipelineFailure::provider)?;
@@ -5464,6 +5801,8 @@ pub fn start_inline_review_native(
     claude_effort: Option<String>,
     codex_model: Option<String>,
     codex_effort: Option<String>,
+    opencode_model: Option<String>,
+    opencode_effort: Option<String>,
     review_profile: Option<String>,
 ) -> Result<AiReviewRunState, String> {
     start_inline_review_for_target(
@@ -5486,6 +5825,8 @@ pub fn start_inline_review_native(
         claude_effort,
         codex_model,
         codex_effort,
+        opencode_model,
+        opencode_effort,
         review_profile,
     )
 }
@@ -5510,6 +5851,8 @@ pub fn start_local_inline_review_native(
     claude_effort: Option<String>,
     codex_model: Option<String>,
     codex_effort: Option<String>,
+    opencode_model: Option<String>,
+    opencode_effort: Option<String>,
     review_profile: Option<String>,
 ) -> Result<AiReviewRunState, String> {
     let target = ReviewStoreTarget::local(snapshot_sha256.clone(), legacy_id)?;
@@ -5533,6 +5876,8 @@ pub fn start_local_inline_review_native(
         claude_effort,
         codex_model,
         codex_effort,
+        opencode_model,
+        opencode_effort,
         review_profile,
     )
 }
@@ -5558,6 +5903,8 @@ fn start_inline_review_for_target(
     claude_effort: Option<String>,
     codex_model: Option<String>,
     codex_effort: Option<String>,
+    opencode_model: Option<String>,
+    opencode_effort: Option<String>,
     review_profile: Option<String>,
 ) -> Result<AiReviewRunState, String> {
     let key = target.session_key(&workspace, &repo);
@@ -5633,6 +5980,8 @@ fn start_inline_review_for_target(
             claude_effort,
             codex_model,
             codex_effort,
+            opencode_model,
+            opencode_effort,
             skip_analyzers,
             review_profile,
             Vec::new(),
@@ -5669,6 +6018,8 @@ pub fn run_headless_review_native(
         claude_effort,
         codex_model,
         codex_effort,
+        opencode_model,
+        opencode_effort,
         review_profile,
         policy_sources,
         required_policy_analyzers,
@@ -5729,6 +6080,8 @@ pub fn run_headless_review_native(
         claude_effort,
         codex_model,
         codex_effort,
+        opencode_model,
+        opencode_effort,
         !run_analyzers,
         review_profile,
         policy_sources,
@@ -5911,6 +6264,8 @@ pub async fn start_inline_review(
     claude_effort: Option<String>,
     codex_model: Option<String>,
     codex_effort: Option<String>,
+    opencode_model: Option<String>,
+    opencode_effort: Option<String>,
     review_profile: Option<String>,
 ) -> Result<AiReviewRunState, String> {
     let ai_provider = ai_provider.unwrap_or_default();
@@ -5935,6 +6290,8 @@ pub async fn start_inline_review(
         claude_effort,
         codex_model,
         codex_effort,
+        opencode_model,
+        opencode_effort,
         review_profile,
     )
 }
@@ -5975,6 +6332,8 @@ pub async fn reply_inline_review(
     claude_effort: Option<String>,
     codex_model: Option<String>,
     codex_effort: Option<String>,
+    opencode_model: Option<String>,
+    opencode_effort: Option<String>,
 ) -> Result<AiReviewRunState, String> {
     let ai_provider = ai_provider.unwrap_or_default();
     let trimmed_message = user_message.trim();
@@ -6048,6 +6407,8 @@ pub async fn reply_inline_review(
             claude_effort,
             codex_model,
             codex_effort,
+            opencode_model,
+            opencode_effort,
             true,
             review_profile,
             Vec::new(),
@@ -6507,12 +6868,14 @@ mod tests {
         active_local_snapshot_sha256s, ai_provider_timeout_from, analyzer_specs_from_config,
         append_execution_policy_to_payloads, apply_review_finding_publication_event,
         begin_inline_review_run, build_claude_text_command, build_codex_text_command,
-        extract_review_findings, format_claude_stream_log_line, get_ai_review_run_state_native,
-        human_duration, materialize_review_run, normalize_codex_effort, normalize_codex_model,
-        parse_claude_fix_result, parse_claude_structured_json, parse_claude_text_result,
-        parse_review_resources, resolve_gui_skip_analyzers, review_analyzer_specs,
-        review_findings_from_output, review_profile_for_thread, should_execute_analyzers,
-        trim_evidence_output, user_installed_cli_command, validate_isolated_provider_cli,
+        build_opencode_text_command, extract_review_findings, format_claude_stream_log_line,
+        get_ai_review_run_state_native, human_duration, materialize_review_run,
+        normalize_codex_effort, normalize_codex_model, normalize_opencode_effort,
+        normalize_opencode_model, parse_claude_fix_result, parse_claude_structured_json,
+        parse_claude_text_result, parse_opencode_text_result, parse_review_resources,
+        resolve_gui_skip_analyzers, review_analyzer_specs, review_findings_from_output,
+        review_profile_for_thread, should_execute_analyzers, trim_evidence_output,
+        user_installed_cli_command, validate_isolated_provider_cli,
         validate_organization_policy_repo_path, wait_for_ai_provider, AiReviewDraftCommentResult,
         AiReviewRunStatus, AiReviewRunStore, AiReviewStoreData, AiReviewTurnKind,
         ProviderExecutionContext, ReviewEvidenceArtifact, ReviewEvidenceKind, ReviewEvidenceSource,
@@ -6796,6 +7159,139 @@ mod tests {
     }
 
     #[test]
+    fn normalizes_opencode_model_and_effort_settings() {
+        assert_eq!(
+            normalize_opencode_model("deepseek/deepseek-flash").as_deref(),
+            Some("deepseek/deepseek-flash")
+        );
+        assert_eq!(
+            normalize_opencode_model("deepseek/deepseek-v4-pro").as_deref(),
+            Some("deepseek/deepseek-v4-pro")
+        );
+        // OpenCode requires a provider-qualified model.
+        assert_eq!(normalize_opencode_model("deepseek-flash"), None);
+        assert_eq!(normalize_opencode_model("deepseek/ bad"), None);
+        assert_eq!(normalize_opencode_effort("high").as_deref(), Some("high"));
+        assert_eq!(normalize_opencode_effort("not a variant"), None);
+    }
+
+    #[test]
+    fn builds_isolated_opencode_review_command_with_model_and_variant() {
+        let (command, temp_dir) = build_opencode_text_command(
+            Some(std::path::Path::new("/reviewed/repository")),
+            ProviderExecutionContext::Isolated,
+            "review prompt",
+            Some("deepseek/deepseek-flash"),
+            Some("high"),
+        )
+        .expect("opencode command should build");
+        let args = command
+            .get_args()
+            .map(|arg| arg.to_string_lossy().to_string())
+            .collect::<Vec<_>>();
+
+        assert!(args.iter().any(|arg| arg == "run"));
+        assert!(args.windows(2).any(|pair| pair == ["--format", "json"]));
+        assert!(args
+            .windows(2)
+            .any(|pair| pair == ["--model", "deepseek/deepseek-flash"]));
+        assert!(args.windows(2).any(|pair| pair == ["--variant", "high"]));
+        assert!(command.get_envs().any(|(key, value)| {
+            key == "NORN_REVIEW_CHILD" && value.is_some_and(|value| value.to_string_lossy() == "1")
+        }));
+        let isolation = opencode_isolation_from(&command);
+        assert_eq!(isolation["permission"]["*"], json!("deny"));
+        assert_eq!(isolation["tools"]["write"], json!(false));
+        assert_eq!(isolation["tools"]["bash"], json!(false));
+        assert_eq!(isolation["tools"]["read"], json!(false));
+        assert_eq!(isolation["share"], json!("disabled"));
+        assert!(temp_dir.path().join("prompt.md").is_file());
+        assert_eq!(command.get_current_dir(), Some(temp_dir.path()));
+        assert_private_temp_dir(&temp_dir);
+    }
+
+    #[test]
+    fn repository_opencode_review_command_keeps_repository_read_tools() {
+        let (command, _temp_dir) = build_opencode_text_command(
+            Some(std::path::Path::new("/reviewed/repository")),
+            ProviderExecutionContext::Repository,
+            "review prompt",
+            None,
+            None,
+        )
+        .expect("opencode command should build");
+
+        let isolation = opencode_isolation_from(&command);
+        assert_eq!(isolation["permission"]["*"], json!("deny"));
+        assert_eq!(isolation["permission"]["read"], json!("allow"));
+        assert_eq!(isolation["tools"]["write"], json!(false));
+        assert_eq!(isolation["tools"]["bash"], json!(false));
+        assert!(isolation["tools"].get("read").is_none());
+        assert_eq!(
+            command.get_current_dir(),
+            Some(std::path::Path::new("/reviewed/repository"))
+        );
+    }
+
+    #[test]
+    fn parses_assistant_text_from_opencode_json_event_stream() {
+        let stdout = concat!(
+            r#"{"type":"step_start","sessionID":"ses_abc"}"#,
+            "\n",
+            r###"{"type":"text","sessionID":"ses_abc","part":{"type":"text","text":"## Review\n"}}"###,
+            "\n",
+            r#"{"type":"text","sessionID":"ses_abc","part":{"type":"text","text":"- Looks correct."}}"#,
+            "\n",
+            r#"{"type":"step_finish","sessionID":"ses_abc","part":{"reason":"stop"}}"#,
+        );
+
+        let parsed = parse_opencode_text_result(stdout).expect("parse opencode stream");
+        assert_eq!(parsed.content, "## Review\n- Looks correct.");
+        assert_eq!(parsed.session_id.as_deref(), Some("ses_abc"));
+    }
+
+    #[test]
+    fn opencode_stream_without_assistant_text_fails_as_empty_response() {
+        let stdout = r#"{"type":"step_start","sessionID":"ses_abc"}"#;
+        let error = parse_opencode_text_result(stdout).expect_err("no text should fail");
+        assert!(error.contains("empty review response"));
+    }
+
+    #[test]
+    fn opencode_stream_rejects_an_error_after_partial_text() {
+        let stdout = concat!(
+            r#"{"type":"text","sessionID":"ses_abc","part":{"type":"text","text":"partial"}}"#,
+            "\n",
+            r#"{"type":"error","sessionID":"ses_abc","part":{"type":"error","message":"boom"}}"#,
+        );
+        let error = parse_opencode_text_result(stdout).expect_err("error event should fail");
+        assert!(error.contains("reported an error"));
+    }
+
+    #[test]
+    fn rejects_invalid_opencode_model_and_variant_before_spawning() {
+        let model_error = build_opencode_text_command(
+            None,
+            ProviderExecutionContext::Isolated,
+            "review prompt",
+            Some("not-a-provider-model"),
+            None,
+        )
+        .expect_err("unqualified model should be rejected");
+        assert!(model_error.contains("Invalid OpenCode model"));
+
+        let variant_error = build_opencode_text_command(
+            None,
+            ProviderExecutionContext::Isolated,
+            "review prompt",
+            Some("deepseek/deepseek-flash"),
+            Some("not a variant"),
+        )
+        .expect_err("invalid variant should be rejected");
+        assert!(variant_error.contains("Invalid OpenCode variant"));
+    }
+
+    #[test]
     fn builds_isolated_claude_review_command_without_repository_tools() {
         let (command, temp_dir) = build_claude_text_command(
             Some(std::path::Path::new("/reviewed/repository")),
@@ -6908,6 +7404,15 @@ mod tests {
                 .mode();
             assert_eq!(mode & 0o777, 0o700);
         }
+    }
+
+    fn opencode_isolation_from(command: &std::process::Command) -> serde_json::Value {
+        let raw = command
+            .get_envs()
+            .find(|(key, _)| *key == "OPENCODE_CONFIG_CONTENT")
+            .and_then(|(_, value)| value)
+            .expect("opencode inline config should be set");
+        serde_json::from_str(&raw.to_string_lossy()).expect("inline config should be valid JSON")
     }
 
     #[test]

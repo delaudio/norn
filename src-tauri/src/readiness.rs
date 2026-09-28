@@ -496,14 +496,15 @@ fn collect_machine_state(issues: &mut Vec<ReadinessIssue>) -> MachineState {
     }
 
     let app_cfg = config::load();
-    let requested_tool = if app_cfg.ai_provider == config::AiProvider::Codex {
-        "codex"
-    } else {
-        "claude"
+    let requested_tool = match app_cfg.ai_provider {
+        config::AiProvider::Codex => "codex",
+        config::AiProvider::Claude => "claude",
+        config::AiProvider::Opencode => "opencode",
     };
 
     let codex = probe_cli_tool("codex", requested_tool == "codex");
     let claude = probe_cli_tool("claude", requested_tool == "claude");
+    let opencode = probe_cli_tool("opencode", requested_tool == "opencode");
     if !codex.available {
         issues.push(ReadinessIssue {
             severity: ReadinessIssueSeverity::Info,
@@ -523,6 +524,17 @@ fn collect_machine_state(issues: &mut Vec<ReadinessIssue>) -> MachineState {
             message: "Claude CLI is not configured/available.".to_string(),
             remediation:
                 "Install `claude` CLI if you want to use it as your configured review provider."
+                    .to_string(),
+        });
+    }
+    if !opencode.available {
+        issues.push(ReadinessIssue {
+            severity: ReadinessIssueSeverity::Info,
+            scope: ReadinessIssueScope::Machine,
+            code: "machine.opencodeToolUnavailable".to_string(),
+            message: "OpenCode CLI is not configured/available.".to_string(),
+            remediation:
+                "Install `opencode` CLI if you want to use it as your configured review provider."
                     .to_string(),
         });
     }
@@ -589,7 +601,7 @@ fn collect_machine_state(issues: &mut Vec<ReadinessIssue>) -> MachineState {
                 available: credentials::has_notion(),
             },
         ],
-        cliTools: vec![codex, claude],
+        cliTools: vec![codex, claude, opencode],
     }
 }
 

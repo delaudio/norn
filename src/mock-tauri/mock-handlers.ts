@@ -1451,8 +1451,13 @@ export const mockHandlers: Record<string, Handler> = {
     const threadId = nowId("thread");
     const now = String(Date.now());
     const displayMessage = String(args?.displayMessage ?? "").trim();
-    const aiProvider = String(args?.aiProvider ?? "claude") === "codex" ? "codex" : "claude";
-    const providerLabel = aiProvider === "codex" ? "Codex" : "Claude";
+    const requestedProvider = String(args?.aiProvider ?? "claude");
+    const aiProvider =
+      requestedProvider === "codex" || requestedProvider === "opencode"
+        ? requestedProvider
+        : "claude";
+    const providerLabel =
+      aiProvider === "codex" ? "Codex" : aiProvider === "opencode" ? "OpenCode" : "Claude";
     const reviewProfile = String(args?.reviewProfile ?? "").trim();
     const nextStore: AiReviewStore = {
       activeThreadId: threadId,
@@ -1493,6 +1498,12 @@ export const mockHandlers: Record<string, Handler> = {
           : []),
         ...(aiProvider === "claude" && args?.claudeEffort
           ? [`Claude effort: ${String(args.claudeEffort)}`]
+          : []),
+        ...(aiProvider === "opencode" && args?.opencodeModel
+          ? [`OpenCode model: ${String(args.opencodeModel)}`]
+          : []),
+        ...(aiProvider === "opencode" && args?.opencodeEffort
+          ? [`OpenCode variant: ${String(args.opencodeEffort)}`]
           : []),
       ],
       startedAt: String(Date.now()),

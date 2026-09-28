@@ -8,6 +8,7 @@ import type {
   ClaudeReviewModel,
   CodexReviewEffort,
   DiffViewMode,
+  OpenCodeReviewEffort,
   RepoRef,
   ReviewProvider,
   ReviewTerminal,
@@ -24,6 +25,8 @@ export type SaveConfigInput = {
   claudeEffort: ClaudeReviewEffort | null;
   codexModel: string | null;
   codexEffort: CodexReviewEffort | null;
+  opencodeModel: string | null;
+  opencodeEffort: OpenCodeReviewEffort | null;
   jiraBaseUrl: string | null;
   automaticSyncIntervalSeconds: AutomaticSyncIntervalSeconds | null;
   menuBarSyncEnabled: boolean;

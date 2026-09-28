@@ -281,20 +281,33 @@ pub fn run(request: HeadlessReviewRequest) -> Result<HeadlessReviewExecution, He
     )?;
     let analyzers_ran = effective_analyzers_ran(request.run_analyzers, &required_policy_analyzers);
     let ai_provider = request.ai_provider.unwrap_or(app_config.ai_provider);
-    let (claude_model, claude_effort, codex_model, codex_effort) = match ai_provider {
-        AiProvider::Claude => (
-            request.model.or(app_config.claude_model),
-            request.effort.or(app_config.claude_effort),
-            None,
-            None,
-        ),
-        AiProvider::Codex => (
-            None,
-            None,
-            request.model.or(app_config.codex_model),
-            request.effort.or(app_config.codex_effort),
-        ),
-    };
+    let (claude_model, claude_effort, codex_model, codex_effort, opencode_model, opencode_effort) =
+        match ai_provider {
+            AiProvider::Claude => (
+                request.model.or(app_config.claude_model),
+                request.effort.or(app_config.claude_effort),
+                None,
+                None,
+                None,
+                None,
+            ),
+            AiProvider::Codex => (
+                None,
+                None,
+                request.model.or(app_config.codex_model),
+                request.effort.or(app_config.codex_effort),
+                None,
+                None,
+            ),
+            AiProvider::Opencode => (
+                None,
+                None,
+                None,
+                None,
+                request.model.or(app_config.opencode_model),
+                request.effort.or(app_config.opencode_effort),
+            ),
+        };
     let payload = build_review_payload(
         &prompt,
         &resolved.title,
@@ -321,6 +334,8 @@ pub fn run(request: HeadlessReviewRequest) -> Result<HeadlessReviewExecution, He
         claude_effort,
         codex_model,
         codex_effort,
+        opencode_model,
+        opencode_effort,
         review_profile: selected_profile,
         policy_sources,
         required_policy_analyzers,

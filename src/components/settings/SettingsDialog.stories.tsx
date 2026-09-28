@@ -42,6 +42,8 @@ const meta = {
     claudeEffort: "high",
     codexModel: null,
     codexEffort: null,
+    opencodeModel: null,
+    opencodeEffort: null,
     reviewTerminalOptions: REVIEW_TERMINAL_OPTIONS,
     jiraBaseUrl: "https://example.atlassian.net",
     automaticSyncIntervalSeconds: null,
@@ -90,6 +92,8 @@ function Harness({
         claudeEffort={null}
         codexModel={null}
         codexEffort={null}
+        opencodeModel={null}
+        opencodeEffort={null}
         reviewTerminalOptions={REVIEW_TERMINAL_OPTIONS}
         jiraBaseUrl="https://example.atlassian.net"
         automaticSyncIntervalSeconds={null}

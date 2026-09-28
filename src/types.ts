@@ -287,6 +287,8 @@ export type ReviewFindingSource = "llm" | "analyzer" | "merged";
 export type ReviewEvidenceKind = "conversation" | "diff" | "analyzer" | "doc" | "manual";
 export type ReviewEvidenceSource =
   | "claude"
+  | "codex"
+  | "opencode"
   | "bitbucket-diff"
   | "jira"
   | "notion"
@@ -721,10 +723,12 @@ export interface ReviewEffectivenessReport {
 
 export type DiffViewMode = "unified" | "split" | "conversation";
 export type ReviewTerminal = "wezterm" | "iterm" | "terminal";
-export type AiProvider = "claude" | "codex";
+export type AiProvider = "claude" | "codex" | "opencode";
 export type ClaudeReviewModel = "sonnet" | "opus" | "fable";
 export type ClaudeReviewEffort = "low" | "medium" | "high" | "xhigh" | "max";
 export type CodexReviewEffort = "low" | "medium" | "high";
+export type OpenCodeReviewModel = "deepseek/deepseek-flash" | "deepseek/deepseek-v4-pro";
+export type OpenCodeReviewEffort = "low" | "medium" | "high" | "max";
 export type AutomaticSyncIntervalSeconds = 30 | 60 | 300 | 600;
 
 export interface ReviewTerminalOption {
@@ -744,6 +748,8 @@ export interface AppConfig {
   claudeEffort: ClaudeReviewEffort | null;
   codexModel: string | null;
   codexEffort: CodexReviewEffort | null;
+  opencodeModel: string | null;
+  opencodeEffort: OpenCodeReviewEffort | null;
   jiraBaseUrl: string | null;
   automaticSyncIntervalSeconds: AutomaticSyncIntervalSeconds | null;
   menuBarSyncEnabled: boolean;

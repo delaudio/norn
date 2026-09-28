@@ -777,6 +777,7 @@ fn run_setup_with_inventory(
     let selected_provider = match selected_ai_provider {
         AiProvider::Codex => "codex",
         AiProvider::Claude => "claude",
+        AiProvider::Opencode => "opencode",
     };
     i32::from(!output.machine_tools.iter().any(|tool| {
         tool.provider == selected_provider
@@ -955,6 +956,7 @@ fn detect_tool_version(provider: &str) -> Option<String> {
 fn collect_setup_tools(selected: AiProvider) -> Vec<SetupToolReport> {
     let codex = detect_tool_version("codex");
     let claude = detect_tool_version("claude");
+    let opencode = detect_tool_version("opencode");
     vec![
         SetupToolReport {
             provider: "codex".to_string(),
@@ -967,6 +969,12 @@ fn collect_setup_tools(selected: AiProvider) -> Vec<SetupToolReport> {
             available: claude.is_some(),
             version: claude,
             required: selected == AiProvider::Claude,
+        },
+        SetupToolReport {
+            provider: "opencode".to_string(),
+            available: opencode.is_some(),
+            version: opencode,
+            required: selected == AiProvider::Opencode,
         },
     ]
 }
@@ -982,6 +990,11 @@ fn select_quick_ai_provider(tools: &[SetupToolReport], configured: AiProvider) -
         .any(|tool| tool.provider == "claude" && tool.available)
     {
         AiProvider::Claude
+    } else if tools
+        .iter()
+        .any(|tool| tool.provider == "opencode" && tool.available)
+    {
+        AiProvider::Opencode
     } else {
         configured
     }
@@ -1028,6 +1041,7 @@ impl AiProviderName for AiProvider {
         match self {
             AiProvider::Claude => "claude",
             AiProvider::Codex => "codex",
+            AiProvider::Opencode => "opencode",
         }
     }
 }
@@ -1180,7 +1194,12 @@ fn parse_review_args(args: &[String]) -> Result<ReviewArgs, String> {
                 parsed.ai_provider = Some(match next_value(args, &mut index)?.as_str() {
                     "codex" => AiProvider::Codex,
                     "claude" => AiProvider::Claude,
-                    _ => return Err("`--ai-provider` must be `codex` or `claude`.".to_string()),
+                    "opencode" => AiProvider::Opencode,
+                    _ => {
+                        return Err(
+                            "`--ai-provider` must be `codex`, `claude`, or `opencode`.".to_string()
+                        )
+                    }
                 });
             }
             "--model" => parsed.model = Some(next_value(args, &mut index)?),
@@ -1782,7 +1801,7 @@ Review:
   norn review [--repo-path <path>] [--scope working-tree|branch|pr]
                  [--base <ref>] [--pr <id>] [--workspace <name>] [--repo <slug>]
                  [--provider github|bitbucket] [--profile <name>]
-                 [--ai-provider codex|claude] [--model <name>] [--effort <level>]
+                 [--ai-provider codex|claude|opencode] [--model <name>] [--effort <level>]
                  [--format markdown|json] [--json] [--output <path>]
                  [--fail-on-findings] [--min-severity info|low|medium|high|critical]
                  [--run-analyzers] [--allow-provider-diff]
@@ -1828,7 +1847,7 @@ fn review_usage() -> &'static str {
   norn review [--repo-path <path>] [--scope working-tree|branch|pr]
                  [--base <ref>] [--pr <id>] [--workspace <name>] [--repo <slug>]
                  [--provider github|bitbucket] [--profile <name>]
-                 [--ai-provider codex|claude] [--model <name>] [--effort <level>]
+                 [--ai-provider codex|claude|opencode] [--model <name>] [--effort <level>]
                  [--format markdown|json] [--json] [--output <path>]
                  [--fail-on-findings] [--min-severity info|low|medium|high|critical]
                  [--run-analyzers] [--allow-provider-diff]"
@@ -2833,6 +2852,21 @@ profiles:
         assert!(args.fail_on_findings);
         assert_eq!(args.min_severity, Some(ReviewFindingSeverity::Medium));
         assert!(args.allow_provider_diff);
+    }
+
+    #[test]
+    fn review_accepts_the_opencode_provider_with_a_model() {
+        let args = parse_review_args(&[
+            "review".to_string(),
+            "--ai-provider".to_string(),
+            "opencode".to_string(),
+            "--model".to_string(),
+            "deepseek/deepseek-flash".to_string(),
+        ])
+        .expect("parse review args");
+
+        assert_eq!(args.ai_provider, Some(AiProvider::Opencode));
+        assert_eq!(args.model.as_deref(), Some("deepseek/deepseek-flash"));
     }
 
     #[test]

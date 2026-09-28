@@ -14,7 +14,7 @@ It keeps the code host as the source of truth, while moving high-context review 
 - Unified and split diff review.
 - Image previews for changed PNG, JPEG, SVG, GIF, and WebP files.
 - Local draft comments and explicit publication.
-- AI review runs with Claude or Codex.
+- AI review runs with Claude, Codex, or OpenCode (for example DeepSeek models).
 - Local clone integration for branch sync, fix, commit, and push workflows.
 - Closed PR analytics for author, repository, churn, lead time, risk, and review coverage.
 

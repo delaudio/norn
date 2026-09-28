@@ -32,6 +32,8 @@ describe("buildBackgroundReviewStartArgs", () => {
         claudeEffort: null,
         codexModel: "gpt-5",
         codexEffort: "high",
+        opencodeModel: null,
+        opencodeEffort: null,
       }),
     ).toMatchObject({
       workspace: "acme",

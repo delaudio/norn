@@ -9,7 +9,7 @@ Norn separates review generation from publication.
 
 1. Select a pull request.
 2. Inspect metadata, branch status, comments, files, and image previews.
-3. Run an AI review with Claude or Codex.
+3. Run an AI review with Claude, Codex, or OpenCode.
 4. Read the generated review thread and structured findings.
 5. Convert useful findings into local draft comments.
 6. Publish only the comments you explicitly approve.
