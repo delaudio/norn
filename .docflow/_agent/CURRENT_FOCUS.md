@@ -8,20 +8,18 @@ If status files and git disagree, git is authoritative; correct this file.
 
 ## Active state
 
-- **Branch:** `fix/tui-opencode-cli-readiness` (release prep pending commit).
-- **Active item:** ship `v0.3.4`, fixing the terminal UI CLI readiness display.
-- **Change:** the TUI CLI detector (`user_cli_available_in_path` and
-  `user_cli_available`) only mapped `claude` and `codex`, so `opencode` fell
-  through to the unknown-provider branch and always showed **Missing** under
-  "CLI readiness" even though OpenCode-backed reviews worked. The detector now
-  maps every AI provider through a shared `cli_executable_names` helper, with a
-  test covering the mapping and the first-entry ordering macOS detection relies
-  on.
-- **Version:** sources aligned at `0.3.4`.
-- **Verification:** 674 Rust library tests pass with 2 ignored; typecheck,
-  lint, frontend tests, build, formatting, all-feature Clippy,
-  `version:verify`, and Archgate 17/17 pass. Pre-push Norn review through
-  OpenCode/DeepSeek was clean.
+- **Branch:** `main` (current tree).
+- **Last shipped:** `v0.3.4` through
+  [PR #276](https://github.com/delaudio/norn/pull/276). The terminal UI CLI
+  readiness detector now maps every AI provider, so OpenCode no longer shows
+  **Missing** when installed; both the PATH-only startup scan and the login-shell
+  refresh resolve `opencode`.
+- **Preceding releases:** `v0.3.3` fixed DeepSeek-through-OpenCode leaking
+  tool-call markup (PR #274); `v0.3.2` fixed the readiness legacy-name scan
+  (PR #272); `v0.3.1` shipped the OpenCode DeepSeek provider (ADR 0018,
+  Implemented, PR #264).
+- **Queued:** `.docflow/plan/todo/0014-local-review-target-desktop.md`
+  alongside `0001` and `0004`.
 
 ## Residual
 
@@ -33,7 +31,5 @@ If status files and git disagree, git is authoritative; correct this file.
 
 ## Next item
 
-- Open and merge the PR, tag `v0.3.4`, and confirm the release workflow and the
-  Homebrew tap update.
 - Implement the desktop Local review target without changing the shipped TUI
   snapshot contract.
