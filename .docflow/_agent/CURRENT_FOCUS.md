@@ -8,33 +8,32 @@ If status files and git disagree, git is authoritative; correct this file.
 
 ## Active state
 
-- **Branch:** `main` (current tree).
-- **Last shipped:** `v0.3.3` through
-  [PR #274](https://github.com/delaudio/norn/pull/274). Diff-only reviews no
-  longer disable every OpenCode tool, so DeepSeek uses OpenCode's native
-  tool-call channel instead of leaking raw markup into the review. Read-only
-  tools stay registered; mutation, shell, subagent, and network tools stay
-  disabled; `lsp` and reads outside the working directory are denied; a
-  line-anchored leaked-markup response is rejected; and an empty or leaked
-  response is retried once. The release workflow published both macOS
-  architecture archives, the formula smoke passed on both architectures, and
-  the Homebrew tap advanced automatically.
-- **Preceding releases:** `v0.3.2` fixed the readiness legacy-name scan
-  (PR #272); `v0.3.1` shipped the OpenCode DeepSeek provider (ADR 0018,
-  Implemented, PR #264).
-- **Queued:** `.docflow/plan/todo/0014-local-review-target-desktop.md`
-  alongside `0001` and `0004`.
+- **Branch:** `fix/tui-opencode-cli-readiness` (release prep pending commit).
+- **Active item:** ship `v0.3.4`, fixing the terminal UI CLI readiness display.
+- **Change:** the TUI CLI detector (`user_cli_available_in_path` and
+  `user_cli_available`) only mapped `claude` and `codex`, so `opencode` fell
+  through to the unknown-provider branch and always showed **Missing** under
+  "CLI readiness" even though OpenCode-backed reviews worked. The detector now
+  maps every AI provider through a shared `cli_executable_names` helper, with a
+  test covering the mapping and the first-entry ordering macOS detection relies
+  on.
+- **Version:** sources aligned at `0.3.4`.
+- **Verification:** 674 Rust library tests pass with 2 ignored; typecheck,
+  lint, frontend tests, build, formatting, all-feature Clippy,
+  `version:verify`, and Archgate 17/17 pass. Pre-push Norn review through
+  OpenCode/DeepSeek was clean.
 
 ## Residual
 
-- Isolated isolation relies on OpenCode enforcing
-  `permission.external_directory = "deny"` (plus `permission["*"] = "deny"`).
-  Verified empirically against OpenCode 1.18.31; an automated integration
-  assertion would need to invoke the installed CLI.
+- Isolated OpenCode isolation relies on OpenCode enforcing
+  `permission.external_directory = "deny"` (verified empirically against
+  OpenCode 1.18.31).
 - Low: desktop OpenCode model `<select>` exposes only the two DeepSeek presets;
   a custom `provider/model` set via the TUI is not shown as selected.
 
 ## Next item
 
+- Open and merge the PR, tag `v0.3.4`, and confirm the release workflow and the
+  Homebrew tap update.
 - Implement the desktop Local review target without changing the shipped TUI
   snapshot contract.
