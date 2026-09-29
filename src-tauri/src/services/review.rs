@@ -3671,41 +3671,43 @@ fn normalize_opencode_effort(value: &str) -> Option<String> {
     }
 }
 
+const OPENCODE_EMPTY_RESPONSE: &str = "OpenCode returned an empty review response.";
+const OPENCODE_LEAKED_MARKUP: &str =
+    "OpenCode returned raw tool-call markup instead of a review response.";
+
 /// Build the inline OpenCode runtime configuration that keeps a review
 /// read-only. Permissions default to deny so custom or MCP-provided tools
-/// cannot bypass the boundary; mutation, shell, subagent, and network tools are
-/// always denied. Repository-backed reviews re-enable read-only inspection
-/// tools, while isolated diff-only reviews deny every tool because the complete
-/// diff is already in the prompt payload.
-fn opencode_isolation_config(repository_access: bool) -> String {
-    let permission = if repository_access {
-        serde_json::json!({
+/// cannot bypass the boundary, while the read-only inspection tools stay
+/// registered and usable.
+///
+/// At least one usable tool must remain registered: when every tool is
+/// disabled, DeepSeek serializes its tool calls as raw markup in the assistant
+/// text instead of going through OpenCode's tool-call channel, and that markup
+/// would otherwise become the review. Isolation between repository-backed and
+/// diff-only reviews comes from the working directory, not from disabling
+/// tools: diff-only reviews run in a private temporary directory with the full
+/// diff in the prompt payload, and OpenCode's `external_directory` guard denies
+/// reads outside that directory.
+fn opencode_isolation_config() -> String {
+    serde_json::json!({
+        "permission": {
             "*": "deny",
             "read": "allow",
             "glob": "allow",
             "grep": "allow",
-        })
-    } else {
-        serde_json::json!({ "*": "deny" })
-    };
-    let mut tools = serde_json::json!({
-        "write": false,
-        "edit": false,
-        "patch": false,
-        "bash": false,
-        "task": false,
-        "webfetch": false,
-        "websearch": false,
-        "skill": false,
-    });
-    if !repository_access {
-        for tool in ["read", "glob", "grep", "lsp"] {
-            tools[tool] = serde_json::Value::Bool(false);
-        }
-    }
-    serde_json::json!({
-        "permission": permission,
-        "tools": tools,
+            "lsp": "deny",
+            "external_directory": "deny",
+        },
+        "tools": {
+            "write": false,
+            "edit": false,
+            "patch": false,
+            "bash": false,
+            "task": false,
+            "webfetch": false,
+            "websearch": false,
+            "skill": false,
+        },
         "share": "disabled",
         "autoupdate": false,
     })
@@ -3753,10 +3755,7 @@ fn build_opencode_text_command(
     command
         .args(["run", "--format", "json"])
         .env("NORN_REVIEW_CHILD", "1")
-        .env(
-            "OPENCODE_CONFIG_CONTENT",
-            opencode_isolation_config(repository_access),
-        );
+        .env("OPENCODE_CONFIG_CONTENT", opencode_isolation_config());
     if let Some(model) = model {
         command.args(["--model", &model]);
     }
@@ -3813,8 +3812,11 @@ fn parse_opencode_text_result(stdout: &str) -> Result<ParsedClaudeTextResponse, 
     if saw_error {
         return Err("OpenCode reported an error while producing the review.".to_string());
     }
+    if opencode_leaked_tool_markup(&content) {
+        return Err(OPENCODE_LEAKED_MARKUP.to_string());
+    }
     if content.trim().is_empty() {
-        return Err("OpenCode returned an empty review response.".to_string());
+        return Err(OPENCODE_EMPTY_RESPONSE.to_string());
     }
     Ok(ParsedClaudeTextResponse {
         content,
@@ -3822,6 +3824,24 @@ fn parse_opencode_text_result(stdout: &str) -> Result<ParsedClaudeTextResponse, 
         session_id,
         permission_denials: 0,
     })
+}
+
+/// DeepSeek serializes tool calls with a fullwidth-vertical-bar markup
+/// (`\u{ff5c}`) when OpenCode exposes no usable tool. A leaked tool call starts
+/// a line with `<` followed by the DSML token, or with the bare token; anchor
+/// detection there so a review that quotes the marker inline is preserved.
+fn opencode_leaked_tool_markup(content: &str) -> bool {
+    content.lines().any(|line| {
+        let trimmed = line.trim_start();
+        trimmed.starts_with("<\u{ff5c}\u{ff5c}DSML") || trimmed.starts_with("\u{ff5c}\u{ff5c}DSML")
+    })
+}
+
+/// OpenCode with DeepSeek occasionally returns no assistant text, or only leaked
+/// tool-call markup, for an otherwise successful run. Retry those responses
+/// once before failing; setup and process errors are not retried.
+fn opencode_response_is_retryable(error: &str) -> bool {
+    error == OPENCODE_EMPTY_RESPONSE || error == OPENCODE_LEAKED_MARKUP
 }
 
 fn format_opencode_stream_log_line(stream_name: &'static str, line: &str) -> Vec<String> {
@@ -5649,7 +5669,18 @@ fn run_inline_review_pipeline(
                 }
             }
             AiProvider::Codex => attempt_codex(&effective_payload),
-            AiProvider::Opencode => attempt_opencode(&effective_payload),
+            AiProvider::Opencode => match attempt_opencode(&effective_payload) {
+                Err(error) if opencode_response_is_retryable(&error) => {
+                    append_inline_review_log(
+                        &store,
+                        &key,
+                        run_id,
+                        "OpenCode returned no usable review text; retrying once.".to_string(),
+                    );
+                    attempt_opencode(&effective_payload)
+                }
+                other => other,
+            },
         }
     })()
     .map_err(ReviewPipelineFailure::provider)?;
@@ -6871,11 +6902,11 @@ mod tests {
         build_opencode_text_command, extract_review_findings, format_claude_stream_log_line,
         get_ai_review_run_state_native, human_duration, materialize_review_run,
         normalize_codex_effort, normalize_codex_model, normalize_opencode_effort,
-        normalize_opencode_model, parse_claude_fix_result, parse_claude_structured_json,
-        parse_claude_text_result, parse_opencode_text_result, parse_review_resources,
-        resolve_gui_skip_analyzers, review_analyzer_specs, review_findings_from_output,
-        review_profile_for_thread, should_execute_analyzers, trim_evidence_output,
-        user_installed_cli_command, validate_isolated_provider_cli,
+        normalize_opencode_model, opencode_response_is_retryable, parse_claude_fix_result,
+        parse_claude_structured_json, parse_claude_text_result, parse_opencode_text_result,
+        parse_review_resources, resolve_gui_skip_analyzers, review_analyzer_specs,
+        review_findings_from_output, review_profile_for_thread, should_execute_analyzers,
+        trim_evidence_output, user_installed_cli_command, validate_isolated_provider_cli,
         validate_organization_policy_repo_path, wait_for_ai_provider, AiReviewDraftCommentResult,
         AiReviewRunStatus, AiReviewRunStore, AiReviewStoreData, AiReviewTurnKind,
         ProviderExecutionContext, ReviewEvidenceArtifact, ReviewEvidenceKind, ReviewEvidenceSource,
@@ -7201,9 +7232,20 @@ mod tests {
         }));
         let isolation = opencode_isolation_from(&command);
         assert_eq!(isolation["permission"]["*"], json!("deny"));
+        assert_eq!(isolation["permission"]["read"], json!("allow"));
+        assert_eq!(isolation["permission"]["glob"], json!("allow"));
+        assert_eq!(isolation["permission"]["grep"], json!("allow"));
+        assert_eq!(isolation["permission"]["external_directory"], json!("deny"));
+        // Mutating, shell, subagent, and network tools stay explicitly disabled,
+        // but the read-only tools must remain registered: that is what makes
+        // DeepSeek use OpenCode's tool-call channel instead of leaking raw
+        // markup as text.
         assert_eq!(isolation["tools"]["write"], json!(false));
         assert_eq!(isolation["tools"]["bash"], json!(false));
-        assert_eq!(isolation["tools"]["read"], json!(false));
+        assert_eq!(isolation["tools"]["task"], json!(false));
+        assert!(isolation["tools"].get("read").is_none());
+        assert!(isolation["tools"].get("glob").is_none());
+        assert!(isolation["tools"].get("grep").is_none());
         assert_eq!(isolation["share"], json!("disabled"));
         assert!(temp_dir.path().join("prompt.md").is_file());
         assert_eq!(command.get_current_dir(), Some(temp_dir.path()));
@@ -7224,11 +7266,41 @@ mod tests {
         let isolation = opencode_isolation_from(&command);
         assert_eq!(isolation["permission"]["*"], json!("deny"));
         assert_eq!(isolation["permission"]["read"], json!("allow"));
-        assert_eq!(isolation["tools"]["write"], json!(false));
+        assert_eq!(isolation["permission"]["external_directory"], json!("deny"));
         assert_eq!(isolation["tools"]["bash"], json!(false));
         assert!(isolation["tools"].get("read").is_none());
         assert_eq!(
             command.get_current_dir(),
+            Some(std::path::Path::new("/reviewed/repository"))
+        );
+    }
+
+    #[test]
+    fn opencode_isolation_differs_only_by_working_directory() {
+        let (isolated, temp_dir) = build_opencode_text_command(
+            Some(std::path::Path::new("/reviewed/repository")),
+            ProviderExecutionContext::Isolated,
+            "review prompt",
+            None,
+            None,
+        )
+        .expect("isolated command should build");
+        let (repository, _repo_temp_dir) = build_opencode_text_command(
+            Some(std::path::Path::new("/reviewed/repository")),
+            ProviderExecutionContext::Repository,
+            "review prompt",
+            None,
+            None,
+        )
+        .expect("repository command should build");
+
+        assert_eq!(
+            opencode_isolation_from(&isolated),
+            opencode_isolation_from(&repository)
+        );
+        assert_eq!(isolated.get_current_dir(), Some(temp_dir.path()));
+        assert_eq!(
+            repository.get_current_dir(),
             Some(std::path::Path::new("/reviewed/repository"))
         );
     }
@@ -7266,6 +7338,61 @@ mod tests {
         );
         let error = parse_opencode_text_result(stdout).expect_err("error event should fail");
         assert!(error.contains("reported an error"));
+    }
+
+    #[test]
+    fn opencode_stream_rejects_leaked_tool_call_markup() {
+        let marker = '\u{ff5c}';
+        // Real leaks begin the line with '<' followed by the DSML token.
+        let markup = format!(
+            "<{marker}{marker}DSML{marker}{marker}Tool>\n<BashCommand>pwd</BashCommand>\n</{marker}{marker}DSML{marker}{marker}Tool>"
+        );
+        let event = serde_json::json!({
+            "type": "text",
+            "sessionID": "ses_abc",
+            "part": { "type": "text", "text": markup },
+        });
+
+        let error = parse_opencode_text_result(&event.to_string()).expect_err("markup should fail");
+        assert!(error.contains("tool-call markup"));
+
+        let bare = format!("{marker}{marker}DSML{marker}{marker} calls>");
+        let bare_event = serde_json::json!({
+            "type": "text",
+            "sessionID": "ses_abc",
+            "part": { "type": "text", "text": bare },
+        });
+        assert!(parse_opencode_text_result(&bare_event.to_string()).is_err());
+    }
+
+    #[test]
+    fn opencode_review_quoting_the_marker_is_preserved() {
+        let marker = '\u{ff5c}';
+        let review = format!(
+            "## Review\n\nThe guard rejects the {marker}{marker}DSML{marker}{marker} marker shape.\n\n- Looks correct."
+        );
+        let event = serde_json::json!({
+            "type": "text",
+            "sessionID": "ses_abc",
+            "part": { "type": "text", "text": review },
+        });
+
+        let parsed =
+            parse_opencode_text_result(&event.to_string()).expect("quoted marker should parse");
+        assert!(parsed.content.contains("Looks correct."));
+    }
+
+    #[test]
+    fn retries_opencode_only_for_empty_or_markup_responses() {
+        assert!(opencode_response_is_retryable(
+            "OpenCode returned an empty review response."
+        ));
+        assert!(opencode_response_is_retryable(
+            "OpenCode returned raw tool-call markup instead of a review response."
+        ));
+        assert!(!opencode_response_is_retryable(
+            "opencode exited with code Some(1)."
+        ));
     }
 
     #[test]
