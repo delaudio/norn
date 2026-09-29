@@ -70,10 +70,13 @@ DeepSeek models as the default catalog.
    storage and delivered on standard input, the selected model passed as
    `--model`, and the effort/variant passed as `--variant`.
 4. OpenCode execution is read-only with respect to the reviewed repository. An
-   inline runtime configuration defaults every tool to deny and only re-enables
-   repository-reading tools for repository-backed reviews; mutation, shell,
-   subagent, and network tools stay denied. Isolated diff-only execution runs
-   in a private temporary working directory with every tool denied.
+   inline runtime configuration defaults every tool to deny and keeps the
+   read-only inspection tools registered, so DeepSeek uses OpenCode's native
+   tool-call channel instead of leaking raw tool-call markup into the response;
+   mutation, shell, subagent, and network tools stay explicitly disabled, and
+   reads outside the working directory are denied. Isolated diff-only execution
+   runs in a private temporary working directory with the full diff in the
+   prompt, so the only readable content is the prompt itself.
 5. OpenCode execution is bounded by the existing AI provider timeout, is
    cancellable through the existing process-tree mechanism, and maps failures
    onto the existing sanitized provider error taxonomy without exposing
@@ -81,8 +84,10 @@ DeepSeek models as the default catalog.
 6. The assistant response is reconstructed from the OpenCode JSON event stream,
    and the session identifier is captured in the run log. The event stream is
    parsed defensively: malformed or unrecognized events are ignored, an explicit
-   error event fails the review even after partial text, and a run that produces
-   no assistant text fails with the empty-response error.
+   error event fails the review even after partial text, a line beginning with
+   the leaked tool-call markup token is rejected rather than persisted, and a run
+   that produces no assistant text fails with the empty-response error. An empty
+   or leaked response is retried once before it is surfaced.
 7. Model and effort values are validated against a safe character set before
    invocation; an invalid value fails with the existing configuration error
    instead of being passed to the process.
@@ -126,6 +131,7 @@ DeepSeek models as the default catalog.
 | 2026-09-28 | r1 | default-agent | Initial draft and acceptance of an OpenCode-backed AI review provider. |
 | 2026-09-28 | r2 | default-agent | Strengthened isolation to default-deny all tools, reject invalid model/variant settings, and fail on stream error events after partial output following a pre-push review. |
 | 2026-09-28 | r3 | default-agent | Marked implemented after the provider shipped in `v0.3.1` through PR #264. |
+| 2026-09-29 | r4 | default-agent | Corrected isolated execution after DeepSeek leaked raw tool-call markup: keep read-only tools registered so the provider uses its native tool-call channel, deny reads outside the working directory, reject leaked-markup responses, and retry empty or leaked responses once. |
 
 ## Approvals
 
