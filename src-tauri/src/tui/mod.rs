@@ -735,11 +735,18 @@ fn mask_secret(value: &str) -> String {
     "•".repeat(value.chars().count())
 }
 
+fn cli_executable_names(name: &str) -> Option<&'static [&'static str]> {
+    match name {
+        "claude" => Some(&["claude", "claude.exe"]),
+        "codex" => Some(&["codex", "codex.exe"]),
+        "opencode" => Some(&["opencode", "opencode.exe"]),
+        _ => None,
+    }
+}
+
 fn user_cli_available_in_path(name: &str) -> bool {
-    let executable_names: &[&str] = match name {
-        "claude" => &["claude", "claude.exe"],
-        "codex" => &["codex", "codex.exe"],
-        _ => return false,
+    let Some(executable_names) = cli_executable_names(name) else {
+        return false;
     };
     std::env::var_os("PATH")
         .map(|path| {
@@ -755,11 +762,10 @@ fn user_cli_available_in_path(name: &str) -> bool {
 fn user_cli_available(name: &str) -> bool {
     #[cfg(target_os = "macos")]
     {
-        let command = match name {
-            "claude" => "command -v claude >/dev/null 2>&1",
-            "codex" => "command -v codex >/dev/null 2>&1",
-            _ => return false,
+        let Some(binary) = cli_executable_names(name).and_then(<[&str]>::first) else {
+            return false;
         };
+        let command = format!("command -v {binary} >/dev/null 2>&1");
         Command::new("/bin/zsh")
             .arg("-lc")
             .arg(command)
@@ -3644,6 +3650,16 @@ mod tests {
         assert!(!app.settings_open);
         assert_eq!(app.ai_provider, AiProvider::Claude);
         assert_eq!(app.status, "Settings cancelled");
+    }
+
+    #[test]
+    fn cli_executable_names_cover_every_ai_provider() {
+        for name in ["claude", "codex", "opencode"] {
+            let names = cli_executable_names(name).expect("provider should be recognized");
+            // macOS detection resolves the shell command from the first entry.
+            assert_eq!(names.first(), Some(&name));
+        }
+        assert_eq!(cli_executable_names("unknown"), None);
     }
 
     #[test]
