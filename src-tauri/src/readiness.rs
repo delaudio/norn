@@ -29,6 +29,8 @@ const LEGACY_SCAN_SKIP_DIRS: &[&str] = &[
     "dist",
     "build",
     "out",
+    "storybook-static",
+    ".astro",
     ".next",
     ".nuxt",
     ".gradle",
@@ -1901,6 +1903,32 @@ mod tests {
             .issues
             .iter()
             .all(|issue| issue.code != "repository.legacyNameNotAllowed"));
+    }
+
+    #[test]
+    fn doctor_skips_generated_build_and_cache_outputs() {
+        let repo = temp_repo();
+        init_git_repo(&repo);
+
+        fs::create_dir_all(repo.join("storybook-static/assets")).expect("storybook output");
+        fs::write(
+            repo.join("storybook-static/index.html"),
+            "<title>Lachesi Design System</title>\n",
+        )
+        .expect("storybook index");
+        fs::create_dir_all(repo.join("apps/web/.astro")).expect("astro cache");
+        fs::write(
+            repo.join("apps/web/.astro/data-store.json"),
+            "Lachesi design system cache\n",
+        )
+        .expect("astro data store");
+        fs::write(repo.join("notes.md"), "The current product is Lachesi.\n").expect("real hit");
+
+        let hits = find_unapproved_legacy_references(&repo);
+
+        assert!(hits.iter().all(|hit| !hit.contains("storybook-static")));
+        assert!(hits.iter().all(|hit| !hit.contains(".astro")));
+        assert!(hits.iter().any(|hit| hit.starts_with("notes.md:")));
     }
 
     #[test]
