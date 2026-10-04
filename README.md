@@ -110,6 +110,8 @@ Most workflows are documented in-repo:
 - [Review evaluation](docs/review-evaluation.md): closed-PR quality gate and score.
 - [Dogfooding private policy packs](docs/guides/dogfooding-private-policy-packs.md):
   exercise external or private packs locally without leaking client context.
+- [Native capability ownership](docs/native-capabilities.md): current Tauri
+  permissions, owners, and the checklist for adding more.
 - [Architecture and migration specs](docs/specs): policy engine, findings schema,
   repository config, publication model.
 
