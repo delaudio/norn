@@ -257,7 +257,7 @@ pub struct AnalyzerConfig {
     pub enabled: bool,
     #[serde(default)]
     pub command: Option<String>,
-    #[serde(default)]
+    #[serde(default, alias = "timeout_seconds")]
     pub timeout_seconds: Option<u64>,
     #[serde(default)]
     pub required: bool,
@@ -723,7 +723,7 @@ fn render_default_repo_config_contents(proposal: &RepoInitProposal) -> String {
                 "    required: {}",
                 if analyzer.required { "true" } else { "false" }
             ));
-            lines.push(format!("    timeout_seconds: {}", analyzer.timeout_seconds));
+            lines.push(format!("    timeoutSeconds: {}", analyzer.timeout_seconds));
             lines.push(format!("    command: {}", yaml_scalar(&analyzer.command)));
         }
     }
@@ -2325,6 +2325,15 @@ fn collect_unknown_fields(
             continue;
         };
         let child_path = format!("{path}.{key}");
+        if context == Some("analyzer") && key == "timeout_seconds" {
+            warnings.push(message(
+                config_path,
+                format!(
+                    "Repo config field `{child_path}` is deprecated; use `timeoutSeconds`. The legacy spelling is still accepted but will be rejected no earlier than v0.4.0."
+                ),
+            ));
+            continue;
+        }
         if let Some(known) = known_keys(context, key) {
             if !known.contains(&key) && !key.starts_with("x-") {
                 warnings.push(message(
@@ -2698,6 +2707,89 @@ mod tests {
         assert!(contents.contains("review:\n  mode: balanced"));
 
         assert!(!write_default_repo_config_if_missing(&repo).expect("second write"));
+        let _ = fs::remove_dir_all(repo);
+    }
+
+    #[test]
+    fn generated_repo_config_uses_camel_case_analyzer_timeout() {
+        let repo = temp_repo();
+        fs::write(
+            repo.join("package.json"),
+            "{\"name\":\"root\",\"scripts\":{\"lint\":\"eslint .\"}}",
+        )
+        .expect("write package");
+
+        let proposal =
+            super::proposal_for_repo_init(&repo, super::InitMode::Quick).expect("quick proposal");
+        assert!(
+            proposal.analyzer_candidates.iter().any(|a| a.id == "lint"),
+            "expected a lint analyzer candidate"
+        );
+        assert!(proposal.config_contents.contains("timeoutSeconds: 120"));
+        assert!(!proposal.config_contents.contains("timeout_seconds"));
+
+        let result = load_test_config(&repo, &proposal.config_contents);
+        assert!(
+            result.errors.is_empty(),
+            "generated config produced errors: {:?}",
+            result.errors
+        );
+        assert!(
+            result.warnings.is_empty(),
+            "generated config produced warnings: {:?}",
+            result.warnings
+        );
+        let config = result.config.expect("generated config parses");
+        assert_eq!(
+            config.analyzers.get("lint").and_then(|a| a.timeout_seconds),
+            Some(120)
+        );
+
+        let guided =
+            super::proposal_for_repo_init(&repo, super::InitMode::Guided).expect("guided proposal");
+        assert!(guided.config_contents.contains("timeoutSeconds: 120"));
+        assert!(!guided.config_contents.contains("timeout_seconds"));
+
+        let _ = fs::remove_dir_all(repo);
+    }
+
+    #[test]
+    fn legacy_snake_case_analyzer_timeout_loads_with_deprecation_warning() {
+        let repo = temp_repo();
+        let result = load_test_config(
+            &repo,
+            "version: 0.1\nanalyzers:\n  lint:\n    enabled: true\n    required: false\n    timeout_seconds: 90\n    command: \"pnpm run lint\"\n",
+        );
+
+        assert!(
+            result.errors.is_empty(),
+            "legacy config produced errors: {:?}",
+            result.errors
+        );
+        assert!(
+            result
+                .warnings
+                .iter()
+                .any(|warning| warning.message.contains("deprecated")
+                    && warning.message.contains("timeoutSeconds")),
+            "expected a deprecation warning: {:?}",
+            result.warnings
+        );
+        assert!(
+            !result
+                .warnings
+                .iter()
+                .any(|warning| warning.message.contains("Unknown repo config field")),
+            "legacy key should not be reported as unknown: {:?}",
+            result.warnings
+        );
+
+        let config = result.config.expect("legacy config parses");
+        assert_eq!(
+            config.analyzers.get("lint").and_then(|a| a.timeout_seconds),
+            Some(90)
+        );
+
         let _ = fs::remove_dir_all(repo);
     }
 
