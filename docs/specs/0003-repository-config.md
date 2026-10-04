@@ -360,11 +360,19 @@ Each analyzer has:
 
 - `enabled`: boolean
 - `command`: local shell command for analyzers that run in the repo
+- `required`: boolean; analyzer failures block review completion when true
+- `timeoutSeconds`: integer seconds for the analyzer run (clamped to 1-900)
 - `config`: analyzer-specific non-secret configuration
 
 Commands run only in local or CI contexts that explicitly enable analyzer
 execution. GUI review may still read this config without executing every
 analyzer.
+
+Releases before v0.3.5 rendered the timeout field as `timeout_seconds`.
+Norn still accepts that legacy spelling, emits a deprecation warning, and
+deserializes the value; new and generated configuration must use
+`timeoutSeconds`. The legacy spelling is deprecated and will be rejected no
+earlier than v0.4.0; generators must never emit it.
 
 ### `publish`
 
