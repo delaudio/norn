@@ -1,0 +1,79 @@
+id: react-basic
+name: React Review Basics
+review:
+  prompt:
+    extend: |
+      Review React changes for effect lifecycle, stable list keys, state
+      ownership, and hook correctness. Prefer findings anchored to the changed
+      component or hook.
+  findings:
+    minSeverity: low
+    requireAnchors: false
+policy:
+  rules:
+    - id: react.effect-cleanup
+      severity: high
+      confidence: medium
+      enforcement: prompt
+      instruction: >
+        Flag effects that subscribe, listen, start timers, or open resources
+        without a matching cleanup function.
+      rationale: >
+        Missing cleanup leaks subscriptions and produces stale updates.
+      remediation: >
+        Return a cleanup function that unsubscribes or cancels the resource.
+    - id: react.stable-list-keys
+      severity: medium
+      confidence: medium
+      enforcement: prompt
+      instruction: >
+        Flag list rendering that uses array indexes or unstable values as keys.
+      remediation: >
+        Use a stable identifier from the data.
+    - id: react.state-ownership
+      severity: medium
+      confidence: medium
+      enforcement: prompt
+      instruction: >
+        Flag state lifted to a broad shell when the workflow is owned by one
+        component or hook.
+      remediation: >
+        Keep state in the smallest component, hook, or service that owns it.
+    - id: react.hooks-rules
+      severity: high
+      confidence: high
+      enforcement: prompt
+      instruction: >
+        Flag conditional hook calls, hooks in loops, or hooks outside
+        components and custom hooks.
+      remediation: >
+        Move the hook to the top level and preserve call order.
+  pathRules:
+    - id: react.presentational-boundary
+      severity: low
+      paths:
+        include:
+          - "src/components/**"
+          - "apps/**/components/**"
+      instruction: >
+        Components should compose UI and dispatch intent; move data fetching,
+        publication, and selection orchestration to hooks or services.
+      remediation: >
+        Extract the orchestration into a focused hook and keep the component
+        presentational.
+analyzers:
+  typecheck:
+    enabled: true
+    required: true
+    command: "pnpm run typecheck"
+    timeoutSeconds: 120
+  tests:
+    enabled: true
+    required: false
+    command: "pnpm run test"
+    timeoutSeconds: 180
+  lint:
+    enabled: false
+    required: false
+    command: "pnpm run lint"
+    timeoutSeconds: 120

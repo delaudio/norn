@@ -1,0 +1,94 @@
+id: bitbucket-tauri-basic
+name: Tauri Provider Boundary Basics
+review:
+  prompt:
+    extend: |
+      Review changes at the Tauri boundary: provider HTTP, credential
+      handling, IPC command/mock parity, and native error mapping. Prefer
+      findings that cite the changed command or service module.
+  findings:
+    minSeverity: low
+    requireAnchors: false
+policy:
+  rules:
+    - id: boundary.provider-http-in-rust
+      severity: critical
+      confidence: high
+      enforcement: prompt
+      appliesTo:
+        include:
+          - "src/**"
+          - "src-tauri/src/**"
+      instruction: >
+        Flag provider REST calls issued from the webview. Bitbucket and GitHub
+        HTTP must run in Rust behind Tauri commands.
+      rationale: >
+        Provider tokens must not reach the webview and requests must share one
+        native boundary.
+      remediation: >
+        Move the call into a Rust service and expose a typed DTO over IPC.
+    - id: boundary.no-secrets-in-frontend
+      severity: critical
+      confidence: high
+      enforcement: prompt
+      appliesTo:
+        include:
+          - "src/**"
+      instruction: >
+        Flag credentials, tokens, or password values read into frontend state,
+        localStorage, or repo config.
+      remediation: >
+        Resolve secrets through the credentials module and OS keychain.
+    - id: boundary.ipc-command-mock-parity
+      severity: high
+      confidence: high
+      enforcement: prompt
+      appliesTo:
+        include:
+          - "src-tauri/src/lib.rs"
+          - "src/mock-tauri/**"
+      instruction: >
+        Flag a new or renamed Tauri command without a matching mock handler, or
+        a mock without a registered command.
+      remediation: >
+        Update both surfaces in the same change and add a parity or smoke test.
+  pathRules:
+    - id: boundary.rust-error-mapping
+      severity: high
+      paths:
+        include:
+          - "src-tauri/src/**"
+      instruction: >
+        Native errors crossing IPC must map to user-actionable strings without
+        exposing sensitive local details.
+      remediation: >
+        Map errors at the command or service boundary and cover the failure
+        path with a test.
+  astRules:
+    - id: boundary.rust-no-unwrap-in-commands
+      language: rust
+      severity: high
+      selector:
+        kind: methodCallExpression
+        callee: unwrap
+      instruction: >
+        Flag `unwrap()` in command paths where malformed input or IO failure
+        should return an IPC-safe error.
+      remediation: >
+        Use `?`, `map_err`, or explicit validation and add a failure-path test.
+analyzers:
+  typecheck:
+    enabled: true
+    required: true
+    command: "pnpm run typecheck"
+    timeoutSeconds: 120
+  tests:
+    enabled: true
+    required: false
+    command: "pnpm run test"
+    timeoutSeconds: 180
+  lint:
+    enabled: false
+    required: false
+    command: "pnpm run lint"
+    timeoutSeconds: 120

@@ -1,0 +1,95 @@
+id: typescript-basic
+name: TypeScript Review Basics
+review:
+  prompt:
+    extend: |
+      Review TypeScript changes for type-safety regressions: widened types,
+      unsound assertions, swallowed errors, and exported API drift. Prefer
+      findings that cite the changed annotation or export.
+  findings:
+    minSeverity: low
+    requireAnchors: false
+policy:
+  rules:
+    - id: ts.no-explicit-any
+      severity: medium
+      confidence: high
+      enforcement: prompt
+      appliesTo:
+        include:
+          - "src/**/*.ts"
+          - "src/**/*.tsx"
+          - "apps/**/*.ts"
+          - "apps/**/*.tsx"
+      instruction: >
+        Flag new `any` annotations, casts, or generic parameters that weaken a
+        type boundary to make the change compile.
+      rationale: >
+        Broad `any` hides contract drift and defeats downstream type checks.
+      remediation: >
+        Model the expected shape explicitly or narrow the generic boundary.
+    - id: ts.no-non-null-assertion
+      severity: medium
+      confidence: medium
+      enforcement: prompt
+      instruction: >
+        Flag non-null assertions on values that can be missing at runtime.
+      rationale: >
+        `!` bypasses the compiler where a real runtime check is required.
+      remediation: >
+        Narrow the value with a guard or return an explicit error.
+    - id: ts.surface-caught-errors
+      severity: high
+      confidence: medium
+      enforcement: prompt
+      instruction: >
+        Flag caught errors that are swallowed or rethrown without context.
+      remediation: >
+        Surface the failure or wrap it with actionable context.
+    - id: ts.prefer-unknown-over-any
+      severity: low
+      confidence: medium
+      enforcement: prompt
+      instruction: >
+        Prefer `unknown` for values of uncertain shape and narrow before use.
+      remediation: >
+        Replace `any` inputs with `unknown` and validate the shape.
+  pathRules:
+    - id: ts.public-api-docs
+      severity: low
+      paths:
+        include:
+          - "src/**/index.ts"
+          - "apps/**/index.ts"
+      instruction: >
+        Changes to a public entry point should update its documentation or
+        changelog when the exported shape changes.
+      remediation: >
+        Document the new export and note any breaking change.
+  astRules:
+    - id: ts.no-empty-catch
+      language: typescript
+      severity: high
+      selector:
+        kind: catchClause
+        bodyContainsOnlyComment: true
+      instruction: >
+        Flag empty or comment-only catch blocks that hide failures.
+      remediation: >
+        Handle the error or rethrow it with context.
+analyzers:
+  typecheck:
+    enabled: true
+    required: true
+    command: "pnpm run typecheck"
+    timeoutSeconds: 120
+  tests:
+    enabled: false
+    required: false
+    command: "pnpm run test"
+    timeoutSeconds: 180
+  lint:
+    enabled: false
+    required: false
+    command: "pnpm run lint"
+    timeoutSeconds: 120
