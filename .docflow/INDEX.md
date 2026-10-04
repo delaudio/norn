@@ -23,3 +23,4 @@ metadata.
 | 0016 | Offer an authenticated browser diff viewer from the terminal UI | Implemented | 2026-09-02 | default-agent | tui, diff, browser, security, rust |
 | 0017 | Review local changes before publication | Accepted | 2026-09-03 | codex | local, review, git, tui, desktop, diff |
 | 0018 | Run AI reviews through an OpenCode provider | Implemented | 2026-09-28 | default-agent | ai, provider, opencode, deepseek, cli, review |
+| 0019 | Produce evidence-backed repository health audits from a stable snapshot | Accepted | 2026-10-04 | default-agent | audit, repository, inventory, evidence, security, cli, tui |
