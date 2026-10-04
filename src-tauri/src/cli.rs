@@ -67,6 +67,12 @@ struct ConfigMigrateArgs {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+struct PolicyDoctorArgs {
+    repo_path: PathBuf,
+    format: OutputFormat,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct SetupArgs {
     format: OutputFormat,
     dry_run: bool,
@@ -115,6 +121,16 @@ struct ConfigValidateOutput {
     loaded_policy_packs: Vec<LoadedPolicyPack>,
     warnings: Vec<RepoConfigValidationMessage>,
     errors: Vec<RepoConfigValidationMessage>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PolicyDoctorOutput {
+    repo_path: String,
+    config_path: String,
+    exists: bool,
+    #[serde(flatten)]
+    report: crate::policy_doctor::PolicyDoctorReport,
 }
 
 #[derive(Serialize)]
@@ -269,6 +285,7 @@ fn is_cli_command(args: &[String]) -> bool {
             "auth"
                 | "skills"
                 | "config"
+                | "policy"
                 | "doctor"
                 | "evaluate"
                 | "init"
@@ -323,6 +340,15 @@ fn run_args(args: &[String], stdout: &mut dyn Write, stderr: &mut dyn Write) -> 
             .any(|arg| arg == "--help" || arg == "-h")
     {
         let _ = writeln!(stdout, "{}", doctor_usage());
+        return 0;
+    }
+    if args.first().map(String::as_str) == Some("policy")
+        && args
+            .iter()
+            .skip(1)
+            .any(|arg| arg == "--help" || arg == "-h")
+    {
+        let _ = writeln!(stdout, "{}", policy_doctor_usage());
         return 0;
     }
     if args.first().map(String::as_str) == Some("auth")
@@ -384,6 +410,13 @@ fn run_args(args: &[String], stdout: &mut dyn Write, stderr: &mut dyn Write) -> 
                 }
             }
         }
+        Some("policy") => match parse_policy_doctor_args(args) {
+            Ok(args) => run_policy_doctor(args, stdout, stderr),
+            Err(error) => {
+                let _ = writeln!(stderr, "{error}\n\n{}", policy_doctor_usage());
+                2
+            }
+        },
         Some("setup") => match parse_setup_args(args) {
             Ok(args) => run_setup(args, stdout, stderr),
             Err(error) => {
@@ -1795,6 +1828,133 @@ fn write_human_output(output: &ConfigValidateOutput, out: &mut dyn Write) -> io:
     Ok(())
 }
 
+fn parse_policy_doctor_args(args: &[String]) -> Result<PolicyDoctorArgs, String> {
+    if args.first().map(String::as_str) != Some("policy")
+        || args.get(1).map(String::as_str) != Some("doctor")
+    {
+        return Err("Expected `norn policy doctor`.".to_string());
+    }
+
+    let mut repo_path = PathBuf::from(".");
+    let mut format = OutputFormat::Human;
+    let mut index = 2;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--repo-path" => {
+                index += 1;
+                let value = args
+                    .get(index)
+                    .ok_or_else(|| "`--repo-path` requires a value.".to_string())?;
+                repo_path = PathBuf::from(value);
+            }
+            "--format" => {
+                index += 1;
+                let value = args
+                    .get(index)
+                    .ok_or_else(|| "`--format` requires a value.".to_string())?;
+                format = match value.as_str() {
+                    "human" | "text" | "markdown" | "md" => OutputFormat::Human,
+                    "json" => OutputFormat::Json,
+                    _ => {
+                        return Err("`--format` must be `human`, `markdown`, or `json`.".to_string())
+                    }
+                };
+            }
+            "--json" => {
+                format = OutputFormat::Json;
+            }
+            unknown => return Err(format!("Unknown option `{unknown}`.")),
+        }
+        index += 1;
+    }
+
+    Ok(PolicyDoctorArgs { repo_path, format })
+}
+
+fn run_policy_doctor(
+    args: PolicyDoctorArgs,
+    stdout: &mut dyn Write,
+    stderr: &mut dyn Write,
+) -> i32 {
+    let result = match repo_config::load_from_repo_path(&args.repo_path) {
+        Ok(result) => result,
+        Err(error) => {
+            let _ = writeln!(stderr, "{error}");
+            return 1;
+        }
+    };
+    let output = PolicyDoctorOutput {
+        repo_path: result.repo_path.clone(),
+        config_path: result.config_path.clone(),
+        exists: result.exists,
+        report: crate::policy_doctor::analyze(&result),
+    };
+
+    match args.format {
+        OutputFormat::Human => {
+            let _ = write_policy_doctor_human(&output, stdout);
+        }
+        OutputFormat::Json => match serde_json::to_string_pretty(&output) {
+            Ok(json) => {
+                let _ = writeln!(stdout, "{json}");
+            }
+            Err(error) => {
+                let _ = writeln!(stderr, "Failed to serialize policy doctor output: {error}");
+                return 1;
+            }
+        },
+    }
+
+    0
+}
+
+fn write_policy_doctor_human(output: &PolicyDoctorOutput, out: &mut dyn Write) -> io::Result<()> {
+    writeln!(
+        out,
+        "Policy coverage: {} (score {})",
+        output.report.coverage, output.report.score
+    )?;
+    writeln!(out, "Repo: {}", output.repo_path)?;
+    writeln!(out, "Config: {}", output.config_path)?;
+    if !output.exists {
+        writeln!(
+            out,
+            "No repository configuration found; coverage reflects built-in defaults."
+        )?;
+    }
+    if !output.report.covered.is_empty() {
+        writeln!(out, "Covered:")?;
+        for item in &output.report.covered {
+            writeln!(out, "- {item}")?;
+        }
+    }
+    if !output.report.missing.is_empty() {
+        writeln!(out, "Missing:")?;
+        for gap in &output.report.missing {
+            writeln!(out, "- {}", gap.message)?;
+        }
+    }
+    if !output.report.suggested_packs.is_empty() {
+        writeln!(out, "Suggested packs:")?;
+        for pack in &output.report.suggested_packs {
+            writeln!(out, "- {pack}")?;
+        }
+    }
+    if !output.report.warnings.is_empty() {
+        writeln!(out, "Warnings:")?;
+        for warning in &output.report.warnings {
+            writeln!(out, "- {}: {}", warning.path, warning.message)?;
+        }
+    }
+    if !output.report.errors.is_empty() {
+        writeln!(out, "Errors:")?;
+        for error in &output.report.errors {
+            writeln!(out, "- {}: {}", error.path, error.message)?;
+        }
+    }
+    Ok(())
+}
+
 fn usage() -> &'static str {
     "Usage:
 Review:
@@ -1816,6 +1976,8 @@ Config validation:
 Config migration:
   norn config migrate [--repo-path <path>] [--dry-run]
                          [--format human|json] [--json]
+Policy coverage:
+  norn policy doctor [--repo-path <path>] [--format human|json] [--json]
 Onboarding:
   norn setup [--allow-provider-diff|--deny-provider-diff]
                [--format human|json] [--json] [--dry-run] [--yes]
@@ -1840,6 +2002,17 @@ fn doctor_usage() -> &'static str {
 
 `doctor` reports read-only machine and repository readiness, including
 provider tooling, credential state, analyzer setup, and git metadata."
+}
+
+fn policy_doctor_usage() -> &'static str {
+    "Usage:
+  norn policy doctor [--repo-path <path>] [--format human|json] [--json]
+
+`policy doctor` inspects the effective repository review configuration and
+reports policy coverage by category, missing categories, and example packs
+that would fill the gaps. Category detection is heuristic: it reads rule ids,
+instructions, and analyzer commands. It never calls a model or a provider, and
+it does not read secret material."
 }
 
 fn review_usage() -> &'static str {
@@ -2559,6 +2732,176 @@ token: unsafe
         let output = String::from_utf8(stdout).expect("stdout");
         assert!(output.contains("\"valid\": false"));
         assert!(output.contains("looks like a credential"));
+        let _ = fs::remove_dir_all(repo);
+    }
+
+    #[test]
+    fn policy_doctor_reports_gaps_for_empty_config() {
+        let repo = temp_repo();
+
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+        let code = run_args(
+            &[
+                "policy".to_string(),
+                "doctor".to_string(),
+                "--repo-path".to_string(),
+                repo.display().to_string(),
+                "--json".to_string(),
+            ],
+            &mut stdout,
+            &mut stderr,
+        );
+
+        assert_eq!(code, 0);
+        assert!(stderr.is_empty());
+        let output: Value = serde_json::from_slice(&stdout).expect("policy doctor json");
+        assert_eq!(output["schemaVersion"], "norn.policy-doctor.v1");
+        assert_eq!(output["coverage"], "none");
+        assert_eq!(output["score"], 0);
+        assert_eq!(output["ruleCount"], 0);
+        assert!(output["missing"]
+            .as_array()
+            .expect("missing")
+            .iter()
+            .any(|gap| gap["category"] == "security"));
+        assert!(output["suggestedPacks"]
+            .as_array()
+            .expect("suggested packs")
+            .iter()
+            .any(|pack| pack == "agentic-code"));
+
+        let _ = fs::remove_dir_all(repo);
+    }
+
+    #[test]
+    fn policy_doctor_reports_high_coverage_for_full_config() {
+        let repo = temp_repo();
+        let repo_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("repo root");
+        let pack_dir = repo_root.join("examples/policy-packs/typescript-basic");
+
+        fs::write(
+            repo.join(".norn.yaml"),
+            format!(
+                r#"
+version: 0.1
+review:
+  mode: balanced
+policy:
+  packs:
+    - {}
+  rules:
+    - id: sec.no-secrets
+      severity: high
+      instruction: Flag secrets and credentials in committed files.
+    - id: arch.boundary
+      severity: medium
+      instruction: Keep provider API calls behind the native boundary.
+    - id: dependency.no-drift
+      severity: medium
+      instruction: Flag dependency drift without a documented need.
+    - id: docs.match
+      severity: low
+      instruction: Keep documentation aligned with behavior.
+  pathRules:
+    - id: path.src
+      severity: low
+      paths:
+        include:
+          - "src/**"
+      instruction: Apply to src only.
+  astRules:
+    - id: ast.no-any
+      language: typescript
+      severity: medium
+      selector:
+        kind: tsAnyKeyword
+      instruction: Flag broad any usage.
+  suppressions:
+    - ruleId: path.src
+      paths:
+        include:
+          - "src/legacy/**"
+      reason: Legacy migration window.
+profiles:
+  strict:
+    mode: strict
+analyzers:
+  typecheck:
+    enabled: true
+    command: "pnpm run typecheck"
+    timeoutSeconds: 120
+  tests:
+    enabled: true
+    command: "pnpm run test"
+    timeoutSeconds: 180
+  lint:
+    enabled: true
+    command: "pnpm run lint"
+    timeoutSeconds: 120
+"#,
+                pack_dir.display()
+            ),
+        )
+        .expect("write full config");
+
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+        let code = run_args(
+            &[
+                "policy".to_string(),
+                "doctor".to_string(),
+                "--repo-path".to_string(),
+                repo.display().to_string(),
+                "--json".to_string(),
+            ],
+            &mut stdout,
+            &mut stderr,
+        );
+
+        assert_eq!(code, 0, "{}", String::from_utf8_lossy(&stderr));
+        let output: Value = serde_json::from_slice(&stdout).expect("policy doctor json");
+        assert_eq!(output["coverage"], "high");
+        assert_eq!(output["score"], 100);
+        assert!(output["ruleCount"].as_u64().unwrap_or(0) >= 4);
+        assert!(output["pathRuleCount"].as_u64().unwrap_or(0) >= 1);
+        assert!(output["astRuleCount"].as_u64().unwrap_or(0) >= 1);
+        assert_eq!(output["loadedPolicyPacks"][0], "typescript-basic");
+        assert!(
+            output["missing"].as_array().expect("missing").is_empty(),
+            "expected no gaps: {:?}",
+            output["missing"]
+        );
+
+        let _ = fs::remove_dir_all(repo);
+    }
+
+    #[test]
+    fn policy_doctor_human_output_lists_suggested_packs() {
+        let repo = temp_repo();
+
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+        let code = run_args(
+            &[
+                "policy".to_string(),
+                "doctor".to_string(),
+                "--repo-path".to_string(),
+                repo.display().to_string(),
+            ],
+            &mut stdout,
+            &mut stderr,
+        );
+
+        assert_eq!(code, 0);
+        let output = String::from_utf8(stdout).expect("human output");
+        assert!(output.contains("Policy coverage: none"));
+        assert!(output.contains("Missing:"));
+        assert!(output.contains("Suggested packs:"));
+        assert!(output.contains("- agentic-code"));
+
         let _ = fs::remove_dir_all(repo);
     }
 
