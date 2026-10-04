@@ -11,6 +11,10 @@ pnpm run evaluate
 make evaluate
 ```
 
+The script builds the `norn` binary with command-distribution Cargo features
+(`--no-default-features --features custom-protocol`) so evaluation routes to
+the CLI and never opens a desktop window.
+
 The default corpus is `fixtures/review-evaluation/v1/corpus.json`; its matching
 baseline is `fixtures/review-evaluation/v1/baseline.json`. The corpus includes
 sanitized logic, security, persistence, concurrency, API-contract, frontend,

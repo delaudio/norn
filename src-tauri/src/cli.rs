@@ -3112,6 +3112,100 @@ profiles:
     }
 
     #[test]
+    fn evaluate_command_exits_nonzero_on_baseline_regression() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+        let corpus = root.join("fixtures/review-evaluation/v1/corpus.json");
+        let baseline = root.join("fixtures/review-evaluation/v1/baseline.json");
+
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+        let code = run_args(
+            &[
+                "evaluate".to_string(),
+                "--corpus".to_string(),
+                corpus.display().to_string(),
+                "--baseline".to_string(),
+                baseline.display().to_string(),
+            ],
+            &mut stdout,
+            &mut stderr,
+        );
+        assert_eq!(code, 0, "{}", String::from_utf8_lossy(&stderr));
+        let report: Value = serde_json::from_slice(&stdout).expect("evaluation report");
+        assert_eq!(report["regressions"].as_array().map(Vec::len), Some(0));
+
+        let temp = std::env::temp_dir().join(format!(
+            "norn-evaluate-regression-{}-{}",
+            std::process::id(),
+            TEMP_REPO_COUNTER.fetch_add(1, Ordering::Relaxed)
+        ));
+        fs::create_dir_all(&temp).expect("temp dir");
+        let strict_corpus = temp.join("corpus.json");
+        fs::write(
+            &strict_corpus,
+            r#"{
+  "schemaVersion": "norn.review-evaluation-corpus.v1",
+  "corpusVersion": "regression-test",
+  "cases": [{
+    "id": "missed",
+    "area": "test",
+    "diffPath": "cases/missed.diff",
+    "provider": "codex",
+    "model": "gpt-5",
+    "configVersion": "v1",
+    "durationMs": 10,
+    "expected": [
+      {"id": "must-find", "disposition": "expected", "anchor": {"path": "src/lib.rs", "line": 1, "side": "new"}}
+    ],
+    "observed": []
+  }]
+}
+"#,
+        )
+        .expect("strict corpus");
+        let strict_baseline = temp.join("baseline.json");
+        fs::write(
+            &strict_baseline,
+            r#"{
+  "schemaVersion": "norn.review-evaluation-result.v1",
+  "corpusVersion": "regression-test",
+  "minimumPrecisionMilli": 1000,
+  "maximumMissedExpected": 0,
+  "minimumAnchorAccuracyMilli": 0
+}
+"#,
+        )
+        .expect("strict baseline");
+
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+        let code = run_args(
+            &[
+                "evaluate".to_string(),
+                "--corpus".to_string(),
+                strict_corpus.display().to_string(),
+                "--baseline".to_string(),
+                strict_baseline.display().to_string(),
+            ],
+            &mut stdout,
+            &mut stderr,
+        );
+        assert_eq!(
+            code,
+            1,
+            "expected regression exit; stderr={}",
+            String::from_utf8_lossy(&stderr)
+        );
+        let report: Value = serde_json::from_slice(&stdout).expect("evaluation report");
+        assert!(!report["regressions"]
+            .as_array()
+            .expect("regressions")
+            .is_empty());
+
+        let _ = fs::remove_dir_all(temp);
+    }
+
+    #[test]
     fn service_command_routes_to_the_self_hosted_runtime() {
         let mut stdout = Vec::new();
         let mut stderr = Vec::new();
