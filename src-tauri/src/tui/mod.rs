@@ -818,6 +818,10 @@ struct TuiApp {
     pull_requests: Vec<PullRequestSummary>,
     local_snapshot: Option<LocalReviewSnapshot>,
     local_review_stale: Option<String>,
+    local_branch_base: Option<String>,
+    branch_base_candidates: Vec<String>,
+    branch_base_index: usize,
+    branch_base_repo: Option<(String, String)>,
     pr_filter: PrListFilter,
     selected_pr: usize,
     detail: Option<PullRequestDetail>,
@@ -966,6 +970,10 @@ impl TuiApp {
             pull_requests: Vec::new(),
             local_snapshot: None,
             local_review_stale: None,
+            local_branch_base: None,
+            branch_base_candidates: Vec::new(),
+            branch_base_index: 0,
+            branch_base_repo: None,
             pr_filter: PrListFilter::Open,
             selected_pr: 0,
             detail: None,
@@ -1174,6 +1182,10 @@ impl TuiApp {
                         let snapshot_sha256 = snapshot.snapshot_sha256.clone();
                         let review_workspace = snapshot.workspace.clone();
                         let review_repo = snapshot.repo.clone();
+                        let branch_review = snapshot
+                            .layers
+                            .iter()
+                            .any(|layer| layer.kind == LocalReviewDiffLayerKind::Committed);
                         self.local_review_stale =
                             latest_local_review_snapshot_native(&review_workspace, &review_repo)
                                 .ok()
@@ -1200,10 +1212,17 @@ impl TuiApp {
                         );
                         self.reset_diff_state();
                         self.error = None;
-                        self.status = format!(
-                            "Loaded local changes: {changed_files} file(s), {commits_ahead} unpushed commit(s){}",
-                            self.stale_local_review_suffix()
-                        );
+                        self.status = if branch_review {
+                            format!(
+                                "Loaded branch review: {changed_files} file(s), {commits_ahead} commit(s){}",
+                                self.stale_local_review_suffix()
+                            )
+                        } else {
+                            format!(
+                                "Loaded local changes: {changed_files} file(s), {commits_ahead} unpushed commit(s){}",
+                                self.stale_local_review_suffix()
+                            )
+                        };
                     }
                     Err(error) => {
                         self.local_snapshot = None;
@@ -1378,11 +1397,18 @@ impl TuiApp {
         }
         if self.pr_filter == PrListFilter::Local && self.local_snapshot.is_some() {
             let stale_suffix = self.stale_local_review_suffix();
+            let branch_review = self.local_snapshot.as_ref().is_some_and(|snapshot| {
+                snapshot
+                    .layers
+                    .iter()
+                    .any(|layer| layer.kind == LocalReviewDiffLayerKind::Committed)
+            });
             self.status = match self.ai_review_state.as_ref() {
                 Some(state) if state.status == AiReviewRunStatus::Running => format!(
                     "AI review running: {}",
                     state.logs.last().map(String::as_str).unwrap_or("started")
                 ),
+                _ if branch_review => format!("Loaded branch review{stale_suffix}"),
                 _ => format!("Loaded local changes{stale_suffix}"),
             };
         } else if let Some((_, _, pr_id)) = self.pr_resource_target.as_ref() {
@@ -1911,6 +1937,9 @@ impl TuiApp {
             KeyCode::Char('f') => self.cycle_pr_filter(),
             KeyCode::Char('g') => self.prompt_or_toggle_diff(),
             KeyCode::Char('b') => self.open_browser_diff(),
+            KeyCode::Char('B') if self.pr_filter == PrListFilter::Local => {
+                self.cycle_local_review_base()
+            }
             KeyCode::Char('u') => self.toggle_diff_view_mode(),
             KeyCode::Char('i') => self.toggle_image_side(),
             KeyCode::Char('v') => self.toggle_detail_view(),
@@ -2213,6 +2242,54 @@ impl TuiApp {
         }
     }
 
+    /// Cycles the branch-review base ref for the selected local repository:
+    /// working tree -> each candidate ref -> back to working tree. Each change
+    /// reloads the target so the revisions and exclusion warnings are explicit.
+    fn cycle_local_review_base(&mut self) {
+        if self.pr_filter != PrListFilter::Local {
+            return;
+        }
+        let Some(repo) = self.repos.get(self.selected_repo).cloned() else {
+            self.status = "No repository selected".to_string();
+            return;
+        };
+        let Some(local_path) = repo.local_path.clone() else {
+            self.status = "Selected repository has no usable local path".to_string();
+            return;
+        };
+        let identity = (repo.workspace.clone(), repo.repo.clone());
+        if self.branch_base_repo.as_ref() != Some(&identity) {
+            self.branch_base_repo = Some(identity);
+            self.branch_base_candidates.clear();
+            self.branch_base_index = 0;
+            self.local_branch_base = None;
+        }
+        if self.branch_base_candidates.is_empty() {
+            match crate::local_review::list_branch_base_candidates(std::path::Path::new(
+                &local_path,
+            )) {
+                Ok(candidates) if candidates.is_empty() => {
+                    self.status = "No base refs are available for branch review".to_string();
+                    return;
+                }
+                Ok(candidates) => self.branch_base_candidates = candidates,
+                Err(error) => {
+                    self.error = Some(error);
+                    self.status = "Failed to list base refs".to_string();
+                    return;
+                }
+            }
+        }
+        let options = self.branch_base_candidates.len() + 1;
+        self.branch_base_index = (self.branch_base_index + 1) % options;
+        self.local_branch_base = if self.branch_base_index == 0 {
+            None
+        } else {
+            Some(self.branch_base_candidates[self.branch_base_index - 1].clone())
+        };
+        self.load_selected_repo();
+    }
+
     fn load_selected_repo(&mut self) {
         self.loader.cancel_local_snapshot();
         self.clear_pr_context_for_repo_load();
@@ -2246,9 +2323,28 @@ impl TuiApp {
         };
         self.error = None;
         if self.pr_filter == PrListFilter::Local {
+            let identity = (workspace.clone(), repo_name.clone());
+            if self.branch_base_repo.as_ref() != Some(&identity) {
+                self.branch_base_repo = Some(identity);
+                self.branch_base_candidates.clear();
+                self.branch_base_index = 0;
+                self.local_branch_base = None;
+            }
             let local_path = repo.local_path.unwrap_or_default();
-            self.loader
-                .local_snapshot(request_id, provider, workspace, repo_name, local_path);
+            match self.local_branch_base.clone() {
+                Some(base) => {
+                    self.status = format!(
+                        "Loading branch review against {base} for {workspace}/{repo_name}..."
+                    );
+                    self.loader.local_branch_snapshot(
+                        request_id, provider, workspace, repo_name, local_path, base,
+                    );
+                }
+                None => {
+                    self.loader
+                        .local_snapshot(request_id, provider, workspace, repo_name, local_path);
+                }
+            }
         } else {
             self.loader.pull_requests(
                 request_id,
@@ -3340,6 +3436,9 @@ fn build_local_review_payload(prompt: &str, snapshot: &LocalReviewSnapshot) -> S
                 LocalReviewDiffLayerKind::Unstaged => {
                     "### Unstaged layer (index to working tree)".to_string()
                 }
+                LocalReviewDiffLayerKind::Committed => {
+                    "### Committed layer (merge base to head)".to_string()
+                }
             },
             "```diff".to_string(),
             layer.diff.trim().to_string(),
@@ -4157,6 +4256,24 @@ review:
         app.local_review_stale = None;
         app.finish_pr_load_status();
         assert!(!app.status.contains("stale"), "status: {}", app.status);
+    }
+
+    #[test]
+    fn branch_snapshot_status_is_reported_as_branch_review() {
+        let mut app = TuiApp::from_repos(Vec::new());
+        app.pr_filter = PrListFilter::Local;
+        let mut snapshot = local_snapshot("feature/work");
+        snapshot.layers = vec![crate::local_review::LocalReviewDiffLayer {
+            kind: crate::local_review::LocalReviewDiffLayerKind::Committed,
+            diff: "diff --git a/tracked.txt b/tracked.txt\n".to_string(),
+            diffstat: vec![],
+        }];
+        snapshot.upstream = Some("main".to_string());
+        app.local_snapshot = Some(snapshot);
+
+        app.finish_pr_load_status();
+
+        assert_eq!(app.status, "Loaded branch review");
     }
 
     #[test]

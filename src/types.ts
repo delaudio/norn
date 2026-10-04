@@ -564,7 +564,7 @@ export interface LocalReviewSnapshot {
 }
 
 export interface LocalReviewDiffLayer {
-  kind: "staged" | "unstaged";
+  kind: "staged" | "unstaged" | "committed";
   diff: string;
   diffstat: DiffstatEntry[];
 }

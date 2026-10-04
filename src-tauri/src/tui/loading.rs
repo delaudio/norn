@@ -10,6 +10,7 @@ use crate::{
     config::{RepoRef, ReviewProvider},
     local_repo,
     local_review::{
+        local_branch_review_snapshot_for_configured_path,
         local_review_snapshot_for_configured_path, LocalReviewCancellation, LocalReviewSnapshot,
     },
     services::{
@@ -193,6 +194,34 @@ impl Loader {
                 workspace.as_str(),
                 repo.as_str(),
                 std::path::Path::new(local_path.as_str()),
+                cancellation,
+            );
+            let _ = sender.send(LoadEvent::LocalSnapshot { request_id, result });
+        });
+    }
+
+    pub(super) fn local_branch_snapshot(
+        &self,
+        request_id: u64,
+        provider: ReviewProvider,
+        workspace: String,
+        repo: String,
+        local_path: String,
+        base_ref: String,
+    ) {
+        self.cancel_local_snapshot();
+        let cancellation = LocalReviewCancellation::new();
+        if let Ok(mut active) = self.local_snapshot_cancellation.lock() {
+            *active = Some(cancellation.clone());
+        }
+        let sender = self.sender.clone();
+        thread::spawn(move || {
+            let result = local_branch_review_snapshot_for_configured_path(
+                provider,
+                workspace.as_str(),
+                repo.as_str(),
+                std::path::Path::new(local_path.as_str()),
+                base_ref.as_str(),
                 cancellation,
             );
             let _ = sender.send(LoadEvent::LocalSnapshot { request_id, result });
