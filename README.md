@@ -108,6 +108,8 @@ Most workflows are documented in-repo:
 - [Homebrew distribution and release runbook](docs/homebrew-distribution.md): install,
   upgrade, rollback guidance.
 - [Review evaluation](docs/review-evaluation.md): closed-PR quality gate and score.
+- [Dogfooding private policy packs](docs/guides/dogfooding-private-policy-packs.md):
+  exercise external or private packs locally without leaking client context.
 - [Architecture and migration specs](docs/specs): policy engine, findings schema,
   repository config, publication model.
 
