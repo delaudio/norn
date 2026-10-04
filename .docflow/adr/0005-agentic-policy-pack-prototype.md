@@ -1,7 +1,7 @@
 ---
 adr: 0005
 title: Publish an agentic code review policy pack prototype
-status: Accepted
+status: Implemented
 date: 2026-07-10
 owner: default-agent
 supersedes:
@@ -65,13 +65,14 @@ review output while staying installable from a local path.
 - ../../docs/strategy/open-core-boundary.md
 - ../../docs/specs/0003-repository-config.md
 - ../../docs/specs/0004-policy-engine.md
-- https://github.com/lachesi-hq/lachesi/issues/43
+- https://github.com/delaudio/norn/issues/43
 
 ## Revision History
 
 | Date | Revision | Author | Change |
 |------|----------|--------|--------|
 | 2026-07-10 | r1 | default-agent | Accepted the public agentic policy pack prototype. |
+| 2026-10-04 | r2 | default-agent | Marked Implemented; the pack, profiles, examples, and loader coverage shipped. |
 
 ## Approvals
 

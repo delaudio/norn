@@ -31,3 +31,12 @@ new static-analysis runtime.
 
 - `../../adr/0005-agentic-policy-pack-prototype.md`
 - GitHub issue #43
+
+## Shipped
+
+- PR: `docs/ship-agentic-policy-pack` (GitHub issue #43).
+- Pack manifest, profiles, examples, adaptation guidance, and loader coverage
+  landed in commit `36353fb` and are verified by the pack-loader test in
+  `src-tauri/src/repo_config.rs`.
+- This change closes the queue item, advances ADR 0005 to `Implemented`, and
+  regenerates the ADR index.
