@@ -4042,6 +4042,36 @@ pub fn load_local_review_json(
     load_review_json_by_key(&local_review_key(workspace, repo, snapshot_sha256)?)
 }
 
+/// Returns the snapshot identity of the most recently stored local review for a
+/// repository, if any. Used to detect that a prior local review no longer
+/// matches the current working tree or branch.
+pub fn latest_local_review_snapshot(workspace: &str, repo: &str) -> Result<Option<String>, String> {
+    let conn = open()?;
+    let key = conn
+        .query_row(
+            r#"
+            SELECT review_key
+            FROM ai_review_stores
+            WHERE tenant_id = 'local'
+              AND target_kind = 'local'
+              AND workspace = ?1 COLLATE NOCASE
+              AND repo = ?2 COLLATE NOCASE
+            ORDER BY retention_generation DESC, updated_at DESC
+            LIMIT 1
+            "#,
+            params![workspace, repo],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()
+        .map_err(|error| error.to_string())?;
+    Ok(key.and_then(|key| local_review_snapshot_from_key(&key)))
+}
+
+fn local_review_snapshot_from_key(key: &str) -> Option<String> {
+    let snapshot = key.rsplit(':').next()?;
+    (snapshot.len() == 64).then(|| snapshot.to_string())
+}
+
 #[cfg(test)]
 fn save_local_review_json(
     workspace: &str,
@@ -5426,6 +5456,40 @@ mod tests {
                 load_local_review_json("workspace", "repo", &snapshot_sha256)
                     .expect("load local snapshot store"),
                 Some(r#"{"kind":"local"}"#.to_string())
+            );
+        });
+    }
+
+    #[test]
+    fn latest_local_review_snapshot_tracks_the_most_recent_repository_review() {
+        with_test_data_dir("local-latest-snapshot", |_| {
+            assert_eq!(
+                latest_local_review_snapshot("workspace", "repo").expect("query empty"),
+                None
+            );
+
+            let first = "1".repeat(64);
+            let second = "2".repeat(64);
+            save_local_review_json("workspace", "repo", 0, &first, r#"{"kind":"first"}"#)
+                .expect("save first");
+            assert_eq!(
+                latest_local_review_snapshot("workspace", "repo").expect("first query"),
+                Some(first.clone())
+            );
+
+            save_local_review_json("workspace", "repo", 0, &second, r#"{"kind":"second"}"#)
+                .expect("save second");
+            assert_eq!(
+                latest_local_review_snapshot("workspace", "repo").expect("second query"),
+                Some(second)
+            );
+
+            // A different repository is tracked independently.
+            save_local_review_json("workspace", "other-repo", 0, &first, r#"{"kind":"other"}"#)
+                .expect("save other");
+            assert_eq!(
+                latest_local_review_snapshot("workspace", "other-repo").expect("other query"),
+                Some(first)
             );
         });
     }

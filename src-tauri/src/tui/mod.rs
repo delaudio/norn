@@ -37,8 +37,8 @@ use crate::services::bitbucket::{
     PullRequestDetail, PullRequestSummary,
 };
 use crate::services::review::{
-    start_inline_review_native, start_local_inline_review_native, AiReviewRunState,
-    AiReviewRunStatus, AiReviewRunStore,
+    latest_local_review_snapshot_native, start_inline_review_native,
+    start_local_inline_review_native, AiReviewRunState, AiReviewRunStatus, AiReviewRunStore,
 };
 
 use image_diff::{image_candidate_from_patch, ImageDiffState, TerminalImageSupport};
@@ -817,6 +817,7 @@ struct TuiApp {
     focus: FocusPane,
     pull_requests: Vec<PullRequestSummary>,
     local_snapshot: Option<LocalReviewSnapshot>,
+    local_review_stale: Option<String>,
     pr_filter: PrListFilter,
     selected_pr: usize,
     detail: Option<PullRequestDetail>,
@@ -964,6 +965,7 @@ impl TuiApp {
             focus: FocusPane::Repositories,
             pull_requests: Vec::new(),
             local_snapshot: None,
+            local_review_stale: None,
             pr_filter: PrListFilter::Open,
             selected_pr: 0,
             detail: None,
@@ -1172,6 +1174,11 @@ impl TuiApp {
                         let snapshot_sha256 = snapshot.snapshot_sha256.clone();
                         let review_workspace = snapshot.workspace.clone();
                         let review_repo = snapshot.repo.clone();
+                        self.local_review_stale =
+                            latest_local_review_snapshot_native(&review_workspace, &review_repo)
+                                .ok()
+                                .flatten()
+                                .filter(|previous| previous != &snapshot_sha256);
                         self.diff = Some(snapshot.diff.clone());
                         self.active_ai_target =
                             Some((review_workspace.clone(), review_repo.clone(), review_id));
@@ -1194,11 +1201,13 @@ impl TuiApp {
                         self.reset_diff_state();
                         self.error = None;
                         self.status = format!(
-                            "Loaded local changes: {changed_files} file(s), {commits_ahead} unpushed commit(s)"
+                            "Loaded local changes: {changed_files} file(s), {commits_ahead} unpushed commit(s){}",
+                            self.stale_local_review_suffix()
                         );
                     }
                     Err(error) => {
                         self.local_snapshot = None;
+                        self.local_review_stale = None;
                         self.pr_list_load = LoadState::Failed(error.clone());
                         self.detail_load = LoadState::Failed(error);
                         self.comments_load = LoadState::Idle;
@@ -1343,6 +1352,18 @@ impl TuiApp {
         }
     }
 
+    /// A human-readable suffix describing a previous local review that no
+    /// longer matches the current snapshot, or an empty string when fresh.
+    fn stale_local_review_suffix(&self) -> String {
+        match self.local_review_stale.as_deref() {
+            Some(previous) => format!(
+                "; previous review {} is stale - press a to rerun",
+                &previous[..previous.len().min(8)]
+            ),
+            None => String::new(),
+        }
+    }
+
     fn finish_pr_load_status(&mut self) {
         if [
             &self.detail_load,
@@ -1356,12 +1377,13 @@ impl TuiApp {
             return;
         }
         if self.pr_filter == PrListFilter::Local && self.local_snapshot.is_some() {
+            let stale_suffix = self.stale_local_review_suffix();
             self.status = match self.ai_review_state.as_ref() {
                 Some(state) if state.status == AiReviewRunStatus::Running => format!(
                     "AI review running: {}",
                     state.logs.last().map(String::as_str).unwrap_or("started")
                 ),
-                _ => "Loaded local changes".to_string(),
+                _ => format!("Loaded local changes{stale_suffix}"),
             };
         } else if let Some((_, _, pr_id)) = self.pr_resource_target.as_ref() {
             self.status = match self.ai_review_state.as_ref() {
@@ -2573,6 +2595,8 @@ impl TuiApp {
                 self.detail_view = DetailView::AiReview;
                 self.ai_review_scroll = 0;
                 self.error = None;
+                // The current snapshot is now the reviewed one.
+                self.local_review_stale = None;
                 self.status = format!(
                     "Started {} local AI review",
                     ai_provider_label(self.ai_provider)
@@ -4112,6 +4136,27 @@ review:
                 .map(|snapshot| snapshot.current_branch.as_str()),
             Some("current")
         );
+    }
+
+    #[test]
+    fn stale_local_review_status_mentions_the_previous_snapshot() {
+        let mut app = TuiApp::from_repos(Vec::new());
+        app.pr_filter = PrListFilter::Local;
+        app.local_snapshot = Some(local_snapshot("current"));
+        app.local_review_stale = Some("abcdef0123456789".to_string());
+
+        app.finish_pr_load_status();
+        assert!(app.status.contains("stale"), "status: {}", app.status);
+        assert!(app.status.contains("abcdef01"), "status: {}", app.status);
+        assert!(
+            app.status.contains("press a to rerun"),
+            "status: {}",
+            app.status
+        );
+
+        app.local_review_stale = None;
+        app.finish_pr_load_status();
+        assert!(!app.status.contains("stale"), "status: {}", app.status);
     }
 
     #[test]
