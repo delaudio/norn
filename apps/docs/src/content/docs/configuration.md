@@ -71,7 +71,14 @@ repository roots instead of merging them. Preview a safe migration with
 `norn config migrate --dry-run`; omit `--dry-run` to execute it without
 overwriting an existing canonical target.
 
-The repository includes a loadable prototype pack at `examples/policy-packs/agentic-code`. Use it as a local-path example for agentic-code review rules, named profiles, analyzer defaults, and structured output samples.
+The repository includes loadable example packs under `examples/policy-packs/`. Use them as local-path examples for review rules, profiles, analyzer defaults, and structured output samples:
+
+- `agentic-code` - agent-authored change rules with `agentic-fast`, `agentic-balanced`, and `agentic-strict` profiles.
+- `typescript-basic` - type-safety prompt rules, a public API path rule, and a catch-clause AST rule declaration.
+- `react-basic` - effect lifecycle, list-key, state-ownership, and hook rules with a component path rule.
+- `bitbucket-tauri-basic` - provider HTTP, secret, IPC command/mock parity, and native error mapping rules.
+
+Each pack includes a `README.md` explaining how to install and adapt it.
 
 Validate repo config locally before running a review:
 

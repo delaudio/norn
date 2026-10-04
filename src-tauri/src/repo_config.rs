@@ -3790,6 +3790,51 @@ policy:
     }
 
     #[test]
+    fn loads_checked_in_example_policy_packs() {
+        let repo = temp_repo();
+        let repo_root = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("repo root");
+        let examples = repo_root.join("examples/policy-packs");
+
+        for id in [
+            "agentic-code",
+            "typescript-basic",
+            "react-basic",
+            "bitbucket-tauri-basic",
+        ] {
+            let pack_dir = examples.join(id);
+            assert!(pack_dir.join("pack.yaml").is_file(), "{id}: pack.yaml");
+            assert!(pack_dir.join("README.md").is_file(), "{id}: README.md");
+
+            let result = load_test_config(
+                &repo,
+                &format!(
+                    "version: 0.1\npolicy:\n  packs:\n    - {}\n",
+                    pack_dir.display()
+                ),
+            );
+
+            assert!(result.errors.is_empty(), "{id}: {:?}", result.errors);
+            assert!(result.warnings.is_empty(), "{id}: {:?}", result.warnings);
+            assert_eq!(result.loaded_policy_packs.len(), 1, "{id}");
+            assert_eq!(result.loaded_policy_packs[0].id, id);
+
+            let config = result.config.expect("config");
+            let policy = config.policy.expect("policy");
+            let declaration_count =
+                policy.rules.len() + policy.path_rules.len() + policy.ast_rules.len();
+            assert!(declaration_count >= 3, "{id}: too few declarations");
+            assert!(
+                !config.analyzers.is_empty(),
+                "{id}: expected analyzer defaults"
+            );
+        }
+
+        let _ = fs::remove_dir_all(repo);
+    }
+
+    #[test]
     fn missing_policy_pack_warns_without_blocking() {
         let repo = temp_repo();
         let result = load_test_config(
