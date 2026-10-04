@@ -18,6 +18,7 @@ pub mod organization_policy;
 pub mod policy_doctor;
 pub mod readiness;
 pub mod repo_config;
+pub mod repository_audit;
 pub mod review_evaluation;
 pub mod review_event;
 pub mod review_feedback;
