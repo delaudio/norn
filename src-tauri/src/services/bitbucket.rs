@@ -1975,6 +1975,9 @@ pub async fn approve_pull_request(
     repo: String,
     id: u32,
 ) -> Result<PullRequestDetail, String> {
+    if let Err(error) = ensure_pull_request_publication_target(u64::from(id)) {
+        return Err(error.message);
+    }
     run(move || match provider_for(provider, &workspace, &repo) {
         ReviewProvider::Bitbucket => {
             let client = BitbucketClient::from_stored()?;
@@ -2644,9 +2647,26 @@ fn github_reconciliation_update_body(markdown: &str) -> serde_json::Value {
     json!({ "body": markdown })
 }
 
+const LOCAL_PUBLICATION_REJECTION: &str =
+    "Provider publication is unavailable for local review targets. Open or select a pull request to publish comments.";
+
+/// Rejects provider publication for local review identities. Local reviews are
+/// not pull requests and have no provider target to publish against.
+fn ensure_pull_request_publication_target(id: u64) -> Result<(), FindingPublicationError> {
+    if crate::local_review::is_local_review_id(id) {
+        return Err(FindingPublicationError {
+            code: FindingPublicationErrorCode::InvalidRequest,
+            retryable: false,
+            message: LOCAL_PUBLICATION_REJECTION.to_string(),
+        });
+    }
+    Ok(())
+}
+
 pub fn reconcile_review_findings_native(
     request: &FindingReconciliationRequest,
 ) -> Result<FindingReconciliationSummary, FindingPublicationError> {
+    ensure_pull_request_publication_target(request.pull_request_id)?;
     if dry_run() {
         eprintln!(
             "[dry-run] reconcile {} structured findings on PR #{}",
@@ -2681,6 +2701,7 @@ pub async fn reconcile_review_findings(
 pub fn publish_review_finding_native(
     request: &FindingPublicationRequest,
 ) -> Result<PublishedCommentIdentity, FindingPublicationError> {
+    ensure_pull_request_publication_target(request.pull_request_id)?;
     if dry_run() {
         eprintln!(
             "[dry-run] structured inline finding on PR #{} {}:{}-{}",
@@ -3157,6 +3178,9 @@ pub fn create_general_comment_native(
     raw: String,
     parent_id: Option<String>,
 ) -> Result<PrComment, String> {
+    if let Err(error) = ensure_pull_request_publication_target(u64::from(id)) {
+        return Err(error.message);
+    }
     if dry_run() {
         eprintln!("[dry-run] general comment on PR #{id}: {raw}");
         return Ok(PrComment {
@@ -3209,6 +3233,9 @@ pub async fn delete_comment(
     id: u32,
     comment_id: String,
 ) -> Result<(), String> {
+    if let Err(error) = ensure_pull_request_publication_target(u64::from(id)) {
+        return Err(error.message);
+    }
     run(move || match provider_for(provider, &workspace, &repo) {
         ReviewProvider::Bitbucket => {
             let client = BitbucketClient::from_stored()?;
@@ -3245,6 +3272,47 @@ mod tests {
     use std::sync::atomic::{AtomicU64, Ordering};
 
     static TEMP_REPO_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+    #[test]
+    fn local_review_ids_are_rejected_as_publication_targets() {
+        let local_id = u64::from(crate::local_review::LOCAL_REVIEW_ID_FLAG) | 42;
+        assert!(crate::local_review::is_local_review_id(local_id));
+        assert!(!crate::local_review::is_local_review_id(42));
+
+        let error =
+            ensure_pull_request_publication_target(local_id).expect_err("local id rejected");
+        assert_eq!(error.code, FindingPublicationErrorCode::InvalidRequest);
+        assert!(!error.retryable);
+        assert!(
+            error
+                .message
+                .contains("unavailable for local review targets"),
+            "{}",
+            error.message
+        );
+
+        assert!(ensure_pull_request_publication_target(42).is_ok());
+    }
+
+    #[test]
+    fn general_comment_rejects_a_local_review_target_before_any_provider_call() {
+        let local_id = crate::local_review::LOCAL_REVIEW_ID_FLAG | 7;
+        let result = create_general_comment_native(
+            Some(ReviewProvider::Github),
+            "workspace",
+            "repo",
+            local_id,
+            "hello".to_string(),
+            None,
+        );
+        match result {
+            Ok(_) => panic!("expected local publication to be rejected"),
+            Err(error) => assert!(
+                error.contains("unavailable for local review targets"),
+                "{error}"
+            ),
+        }
+    }
 
     #[test]
     fn diffstat_statuses_are_normalized_to_the_public_contract() {

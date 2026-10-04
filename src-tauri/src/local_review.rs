@@ -31,6 +31,16 @@ const NULL_GIT_CONFIG_PATH: &str = "/dev/null";
 #[cfg(windows)]
 const NULL_GIT_CONFIG_PATH: &str = "NUL";
 
+/// Local review identities set the high bit so they can never collide with a
+/// provider pull-request number. Provider publication must reject them.
+pub const LOCAL_REVIEW_ID_FLAG: u32 = 0x8000_0000;
+
+/// Returns true when `id` is a local review identity rather than a provider
+/// pull-request number.
+pub fn is_local_review_id(id: u64) -> bool {
+    id & u64::from(LOCAL_REVIEW_ID_FLAG) != 0
+}
+
 #[derive(Clone, Debug, Default)]
 pub(crate) struct LocalReviewCancellation(Arc<AtomicBool>);
 
@@ -706,7 +716,8 @@ fn local_review_identity(
         }
     }
     let digest = hasher.finalize();
-    let review_id = u32::from_be_bytes([digest[0], digest[1], digest[2], digest[3]]) | 0x8000_0000;
+    let review_id =
+        u32::from_be_bytes([digest[0], digest[1], digest[2], digest[3]]) | LOCAL_REVIEW_ID_FLAG;
     (hex::encode(digest), review_id)
 }
 
