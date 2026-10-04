@@ -2565,6 +2565,16 @@ pub fn get_local_ai_review_run_state_native(
     ))
 }
 
+/// Returns the snapshot identity of the most recently completed local review
+/// for a repository, so callers can detect that a prior review no longer
+/// matches the current working tree or branch.
+pub fn latest_local_review_snapshot_native(
+    workspace: &str,
+    repo: &str,
+) -> Result<Option<String>, String> {
+    review_storage::latest_local_review_snapshot(workspace, repo)
+}
+
 fn append_inline_review_log(
     store: &AiReviewRunStore,
     key: &str,
