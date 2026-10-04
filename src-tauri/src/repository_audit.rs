@@ -9,7 +9,9 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
-use std::time::Duration;
+use std::process::Stdio;
+use std::thread;
+use std::time::{Duration, Instant};
 
 use serde::Serialize;
 use sha2::{Digest, Sha256};
@@ -662,9 +664,408 @@ fn optional_text(
     ))
 }
 
+pub const REPOSITORY_AUDIT_EVIDENCE_SCHEMA_VERSION: &str = "norn.repository-audit-evidence.v1";
+const DEFAULT_ANALYZER_TIMEOUT_SECONDS: u64 = 120;
+const MAX_ANALYZER_TIMEOUT_SECONDS: u64 = 900;
+const MAX_ANALYZER_OUTPUT_BYTES: usize = 256 * 1024;
+const LARGE_MODULE_SOURCE_FILES: usize = 20;
+
+/// Deterministic evidence for a repository health audit: the inventory
+/// fingerprint, analyzer provenance, and inventory-derived health signals.
+#[derive(Serialize, Debug, Clone, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct RepositoryAuditEvidence {
+    pub schema_version: &'static str,
+    pub inventory_fingerprint: String,
+    pub analyzers: Vec<AnalyzerEvidence>,
+    pub signals: Vec<HealthSignal>,
+    pub warnings: Vec<String>,
+}
+
+#[derive(Serialize, Debug, Clone, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AnalyzerEvidence {
+    pub id: String,
+    pub command: Option<String>,
+    pub applicability: AnalyzerApplicability,
+    pub status: AnalyzerOutcome,
+    pub exit_status: Option<i32>,
+    pub duration_ms: u64,
+    pub truncated: bool,
+    pub evidence_id: String,
+    pub message: String,
+}
+
+#[derive(Serialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum AnalyzerApplicability {
+    Applicable,
+    Disabled,
+    Unavailable,
+}
+
+#[derive(Serialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum AnalyzerOutcome {
+    Ran,
+    Failed,
+    TimedOut,
+    Skipped,
+}
+
+#[derive(Serialize, Debug, Clone, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct HealthSignal {
+    pub id: String,
+    pub kind: HealthSignalKind,
+    pub value: u64,
+    pub summary: String,
+    pub evidence_id: String,
+}
+
+#[derive(Serialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum HealthSignalKind {
+    TestGaps,
+    LargeModules,
+    LegacyMarkers,
+    DependencyManifests,
+}
+
+/// Collects deterministic audit evidence for a repository snapshot: the
+/// inventory, configured analyzer evidence, and inventory-derived signals.
+/// Analyzers only run when explicitly enabled; they are bounded by timeout and
+/// output limits, and a failure never invalidates unrelated evidence.
+pub fn collect_repository_audit_evidence(
+    repo_path: &Path,
+    analyzers: &BTreeMap<String, crate::repo_config::AnalyzerConfig>,
+    options: &InventoryOptions,
+) -> Result<RepositoryAuditEvidence, String> {
+    let inventory = build_repository_inventory(repo_path, options)?;
+    let mut warnings = inventory.warnings.clone();
+
+    let mut analyzer_evidence = Vec::new();
+    for (id, analyzer) in analyzers {
+        analyzer_evidence.push(run_analyzer_evidence(repo_path, id, analyzer));
+    }
+
+    let mut signals = derive_health_signals(&inventory);
+    match legacy_marker_count(repo_path) {
+        Ok(count) if count > 0 => signals.push(HealthSignal {
+            id: "audit.legacy-markers".to_string(),
+            kind: HealthSignalKind::LegacyMarkers,
+            value: count,
+            summary: format!("{count} legacy marker comment(s) (TODO/FIXME/HACK/XXX)"),
+            evidence_id: "signal:audit.legacy-markers".to_string(),
+        }),
+        Ok(_) => {}
+        Err(error) => warnings.push(format!("Legacy marker scan unavailable: {error}")),
+    }
+
+    signals.sort_by(|left, right| left.id.cmp(&right.id));
+
+    Ok(RepositoryAuditEvidence {
+        schema_version: REPOSITORY_AUDIT_EVIDENCE_SCHEMA_VERSION,
+        inventory_fingerprint: inventory.fingerprint,
+        analyzers: analyzer_evidence,
+        signals,
+        warnings,
+    })
+}
+
+fn run_analyzer_evidence(
+    repo_path: &Path,
+    id: &str,
+    analyzer: &crate::repo_config::AnalyzerConfig,
+) -> AnalyzerEvidence {
+    let evidence_id = format!("analyzer:{id}");
+    if !analyzer.enabled {
+        return AnalyzerEvidence {
+            id: id.to_string(),
+            command: analyzer.command.clone(),
+            applicability: AnalyzerApplicability::Disabled,
+            status: AnalyzerOutcome::Skipped,
+            exit_status: None,
+            duration_ms: 0,
+            truncated: false,
+            evidence_id,
+            message: "Analyzer is disabled in repository configuration.".to_string(),
+        };
+    }
+    let Some(command) = analyzer
+        .command
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    else {
+        return AnalyzerEvidence {
+            id: id.to_string(),
+            command: None,
+            applicability: AnalyzerApplicability::Unavailable,
+            status: AnalyzerOutcome::Skipped,
+            exit_status: None,
+            duration_ms: 0,
+            truncated: false,
+            evidence_id,
+            message: "Analyzer has no command configured.".to_string(),
+        };
+    };
+
+    let timeout_seconds = analyzer
+        .timeout_seconds
+        .unwrap_or(DEFAULT_ANALYZER_TIMEOUT_SECONDS)
+        .clamp(1, MAX_ANALYZER_TIMEOUT_SECONDS);
+    let result = run_bounded_command(repo_path, command, timeout_seconds);
+    let (status, message) = match result.status {
+        CommandStatus::Ran(Some(0)) => (
+            AnalyzerOutcome::Ran,
+            "Analyzer completed successfully.".to_string(),
+        ),
+        CommandStatus::Ran(code) => (
+            AnalyzerOutcome::Failed,
+            format!(
+                "Analyzer exited with status {}.",
+                code.map(|code| code.to_string())
+                    .unwrap_or_else(|| "unknown".to_string())
+            ),
+        ),
+        CommandStatus::TimedOut => (
+            AnalyzerOutcome::TimedOut,
+            format!("Analyzer timed out after {timeout_seconds}s."),
+        ),
+        CommandStatus::SpawnFailed(error) => (
+            AnalyzerOutcome::Failed,
+            format!("Analyzer could not start: {error}"),
+        ),
+    };
+
+    AnalyzerEvidence {
+        id: id.to_string(),
+        command: Some(command.to_string()),
+        applicability: AnalyzerApplicability::Applicable,
+        status,
+        exit_status: result.exit_status,
+        duration_ms: result.duration_ms,
+        truncated: result.truncated,
+        evidence_id,
+        message,
+    }
+}
+
+struct BoundedCommandResult {
+    status: CommandStatus,
+    exit_status: Option<i32>,
+    duration_ms: u64,
+    truncated: bool,
+}
+
+enum CommandStatus {
+    Ran(Option<i32>),
+    TimedOut,
+    SpawnFailed(String),
+}
+
+fn run_bounded_command(
+    repo_path: &Path,
+    command: &str,
+    timeout_seconds: u64,
+) -> BoundedCommandResult {
+    let started = Instant::now();
+    let mut child = match std::process::Command::new("/bin/sh")
+        .arg("-lc")
+        .arg(command)
+        .current_dir(repo_path)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+    {
+        Ok(child) => child,
+        Err(error) => {
+            return BoundedCommandResult {
+                status: CommandStatus::SpawnFailed(error.to_string()),
+                exit_status: None,
+                duration_ms: started.elapsed().as_millis() as u64,
+                truncated: false,
+            }
+        }
+    };
+
+    let stdout_reader = child
+        .stdout
+        .take()
+        .map(|reader| thread::spawn(move || read_capped(reader, MAX_ANALYZER_OUTPUT_BYTES)));
+    let stderr_reader = child
+        .stderr
+        .take()
+        .map(|reader| thread::spawn(move || read_capped(reader, MAX_ANALYZER_OUTPUT_BYTES)));
+
+    let timeout = Duration::from_secs(timeout_seconds);
+    let (status, exit_status) = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break (CommandStatus::Ran(status.code()), status.code()),
+            Ok(None) if started.elapsed() >= timeout => {
+                let _ = child.kill();
+                let _ = child.wait();
+                break (CommandStatus::TimedOut, None);
+            }
+            Ok(None) => thread::sleep(Duration::from_millis(50)),
+            Err(error) => {
+                let _ = child.kill();
+                break (CommandStatus::SpawnFailed(error.to_string()), None);
+            }
+        }
+    };
+
+    let mut truncated = false;
+    if let Some(reader) = stdout_reader {
+        truncated |= reader.join().unwrap_or(false);
+    }
+    if let Some(reader) = stderr_reader {
+        truncated |= reader.join().unwrap_or(false);
+    }
+
+    BoundedCommandResult {
+        status,
+        exit_status,
+        duration_ms: started.elapsed().as_millis() as u64,
+        truncated,
+    }
+}
+
+fn read_capped<R: std::io::Read>(mut reader: R, limit: usize) -> bool {
+    let mut buffer = Vec::new();
+    let mut chunk = [0u8; 8192];
+    let mut truncated = false;
+    loop {
+        match reader.read(&mut chunk) {
+            Ok(0) => break,
+            Ok(read) => {
+                if buffer.len() < limit {
+                    let remaining = limit - buffer.len();
+                    let take = read.min(remaining);
+                    buffer.extend_from_slice(&chunk[..take]);
+                    truncated |= take < read;
+                } else {
+                    truncated = true;
+                }
+            }
+            Err(_) => break,
+        }
+    }
+    truncated
+}
+
+fn derive_health_signals(inventory: &RepositoryInventory) -> Vec<HealthSignal> {
+    let mut signals = Vec::new();
+
+    let mut source_modules = BTreeSet::new();
+    let mut test_modules = BTreeSet::new();
+    let mut source_files_by_module: BTreeMap<&str, u64> = BTreeMap::new();
+    for file in &inventory.files {
+        match file.kind {
+            InventoryFileKind::Source => {
+                source_modules.insert(file.module.as_str());
+                *source_files_by_module
+                    .entry(file.module.as_str())
+                    .or_insert(0) += 1;
+            }
+            InventoryFileKind::Test => {
+                test_modules.insert(file.module.as_str());
+            }
+            _ => {}
+        }
+    }
+
+    let test_gaps = source_modules
+        .iter()
+        .filter(|module| !test_modules.contains(*module))
+        .count();
+    if test_gaps > 0 {
+        signals.push(HealthSignal {
+            id: "audit.test-gaps".to_string(),
+            kind: HealthSignalKind::TestGaps,
+            value: test_gaps as u64,
+            summary: format!("{test_gaps} module(s) contain source files without a test file"),
+            evidence_id: "signal:audit.test-gaps".to_string(),
+        });
+    }
+
+    let large_modules = source_files_by_module
+        .values()
+        .filter(|count| **count as usize >= LARGE_MODULE_SOURCE_FILES)
+        .count();
+    if large_modules > 0 {
+        signals.push(HealthSignal {
+            id: "audit.large-modules".to_string(),
+            kind: HealthSignalKind::LargeModules,
+            value: large_modules as u64,
+            summary: format!(
+                "{large_modules} module(s) have at least {LARGE_MODULE_SOURCE_FILES} source files"
+            ),
+            evidence_id: "signal:audit.large-modules".to_string(),
+        });
+    }
+
+    let manifests = inventory
+        .files
+        .iter()
+        .filter(|file| file.kind == InventoryFileKind::Manifest)
+        .count();
+    if manifests > 0 {
+        signals.push(HealthSignal {
+            id: "audit.dependency-manifests".to_string(),
+            kind: HealthSignalKind::DependencyManifests,
+            value: manifests as u64,
+            summary: format!("{manifests} dependency manifest(s) detected"),
+            evidence_id: "signal:audit.dependency-manifests".to_string(),
+        });
+    }
+
+    signals
+}
+
+fn legacy_marker_count(repo_path: &Path) -> Result<u64, String> {
+    let control = GitRunControl::new(
+        Duration::from_secs(30),
+        LocalReviewCancellation::new(),
+        "Repository audit legacy markers",
+    );
+    let output = run_git_bounded_with_control(
+        repo_path,
+        &[
+            "grep", "-I", "--count", "-e", "TODO", "-e", "FIXME", "-e", "HACK", "-e", "XXX", "HEAD",
+        ],
+        None,
+        8 * 1024 * 1024,
+        "Repository audit legacy markers",
+        &control,
+    )?;
+    // `git grep` exits 1 when there are no matches; that is not an error.
+    if !output.status.success() && output.status.code() != Some(1) {
+        return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
+    }
+    let mut total = 0_u64;
+    for line in output.stdout.split(|byte| *byte == b'\n') {
+        if line.is_empty() {
+            continue;
+        }
+        if let Some(count) = line.rsplit(|byte| *byte == b':').next() {
+            if let Ok(count) = std::str::from_utf8(count)
+                .unwrap_or_default()
+                .trim()
+                .parse::<u64>()
+            {
+                total = total.saturating_add(count);
+            }
+        }
+    }
+    Ok(total)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::repo_config;
     use std::fs;
     use std::process::Command;
 
@@ -931,5 +1332,144 @@ mod tests {
             .iter()
             .any(|exclusion| exclusion.reason == InventoryExclusionReason::Symlink));
         assert!(!inventory.files.iter().any(|file| file.path == "link.rs"));
+    }
+
+    fn analyzer(
+        enabled: bool,
+        command: Option<&str>,
+        timeout_seconds: u64,
+    ) -> repo_config::AnalyzerConfig {
+        repo_config::AnalyzerConfig {
+            enabled,
+            command: command.map(str::to_string),
+            timeout_seconds: Some(timeout_seconds),
+            required: false,
+            config: None,
+        }
+    }
+
+    #[test]
+    fn analyzer_evidence_records_provenance_and_outcomes() {
+        let fixture = Fixture::new("analyzer-outcomes");
+        fixture.write("src/lib.rs", "pub fn one() {}\n");
+        fixture.commit_all("seed");
+
+        let mut analyzers = BTreeMap::new();
+        analyzers.insert("clean".to_string(), analyzer(true, Some("echo ok"), 30));
+        analyzers.insert("failing".to_string(), analyzer(true, Some("exit 3"), 30));
+        analyzers.insert("timeout".to_string(), analyzer(true, Some("sleep 5"), 1));
+        analyzers.insert(
+            "truncated".to_string(),
+            analyzer(true, Some("yes a | head -c 400000"), 30),
+        );
+        analyzers.insert(
+            "disabled".to_string(),
+            analyzer(false, Some("echo nope"), 30),
+        );
+        analyzers.insert("missing".to_string(), analyzer(true, None, 30));
+
+        let evidence = collect_repository_audit_evidence(
+            &fixture.path,
+            &analyzers,
+            &InventoryOptions::default(),
+        )
+        .expect("evidence");
+        let by_id: BTreeMap<&str, &AnalyzerEvidence> = evidence
+            .analyzers
+            .iter()
+            .map(|entry| (entry.id.as_str(), entry))
+            .collect();
+
+        assert_eq!(by_id["clean"].status, AnalyzerOutcome::Ran);
+        assert_eq!(by_id["clean"].exit_status, Some(0));
+        assert_eq!(
+            by_id["clean"].applicability,
+            AnalyzerApplicability::Applicable
+        );
+        assert_eq!(by_id["failing"].status, AnalyzerOutcome::Failed);
+        assert_eq!(by_id["failing"].exit_status, Some(3));
+        assert_eq!(by_id["timeout"].status, AnalyzerOutcome::TimedOut);
+        assert!(by_id["truncated"].truncated);
+        assert_eq!(
+            by_id["disabled"].applicability,
+            AnalyzerApplicability::Disabled
+        );
+        assert_eq!(by_id["disabled"].status, AnalyzerOutcome::Skipped);
+        assert_eq!(
+            by_id["missing"].applicability,
+            AnalyzerApplicability::Unavailable
+        );
+        assert!(evidence
+            .analyzers
+            .iter()
+            .all(|entry| entry.evidence_id == format!("analyzer:{}", entry.id)));
+    }
+
+    #[test]
+    fn analyzer_failure_does_not_invalidate_other_evidence() {
+        let fixture = Fixture::new("analyzer-isolation");
+        fixture.write("src/app.ts", "export const a = 1;\n");
+        fixture.commit_all("seed");
+
+        let mut analyzers = BTreeMap::new();
+        analyzers.insert("bad".to_string(), analyzer(true, Some("exit 1"), 30));
+        analyzers.insert("good".to_string(), analyzer(true, Some("echo ok"), 30));
+
+        let evidence = collect_repository_audit_evidence(
+            &fixture.path,
+            &analyzers,
+            &InventoryOptions::default(),
+        )
+        .expect("evidence");
+
+        let by_id: BTreeMap<&str, &AnalyzerEvidence> = evidence
+            .analyzers
+            .iter()
+            .map(|entry| (entry.id.as_str(), entry))
+            .collect();
+        assert_eq!(by_id["good"].status, AnalyzerOutcome::Ran);
+        assert_eq!(by_id["bad"].status, AnalyzerOutcome::Failed);
+        assert!(evidence
+            .signals
+            .iter()
+            .any(|signal| signal.kind == HealthSignalKind::TestGaps));
+        assert!(!evidence.inventory_fingerprint.is_empty());
+    }
+
+    #[test]
+    fn evidence_derives_inventory_signals() {
+        let fixture = Fixture::new("evidence-signals");
+        fixture.write("src/app.ts", "export const a = 1; // TODO: split\n");
+        fixture.write("lib/mod.ts", "export const b = 1;\n");
+        fixture.write("package.json", "{}\n");
+        fixture.commit_all("seed");
+
+        let evidence = collect_repository_audit_evidence(
+            &fixture.path,
+            &BTreeMap::new(),
+            &InventoryOptions::default(),
+        )
+        .expect("evidence");
+
+        assert_eq!(
+            evidence.schema_version,
+            REPOSITORY_AUDIT_EVIDENCE_SCHEMA_VERSION
+        );
+        assert_eq!(evidence.inventory_fingerprint.len(), 64);
+        let signal = |kind: HealthSignalKind| {
+            evidence
+                .signals
+                .iter()
+                .find(|signal| signal.kind == kind)
+                .unwrap_or_else(|| panic!("missing signal {kind:?}"))
+        };
+        // `src` and `lib` contain source but no tests.
+        assert_eq!(signal(HealthSignalKind::TestGaps).value, 2);
+        assert_eq!(signal(HealthSignalKind::DependencyManifests).value, 1);
+        assert_eq!(signal(HealthSignalKind::LegacyMarkers).value, 1);
+        assert!(evidence
+            .signals
+            .iter()
+            .all(|signal| signal.evidence_id.starts_with("signal:")));
     }
 }
