@@ -343,6 +343,10 @@ pub fn diff_image_area_for_area(area: Rect, has_detail: bool) -> Rect {
     image_render_areas(diff_area, has_detail).1
 }
 
+fn short_sha(sha: &str) -> String {
+    sha.chars().take(8).collect()
+}
+
 fn rect_contains(area: Rect, x: u16, y: u16) -> bool {
     x >= area.x
         && x < area.x.saturating_add(area.width)
@@ -937,16 +941,44 @@ fn render_pull_requests(frame: &mut Frame<'_>, area: Rect, state: TuiState<'_>) 
             let selected = state.focus == FocusPane::PullRequests;
             let marker = if selected { ">" } else { " " };
             let upstream = snapshot.upstream.as_deref().unwrap_or("no upstream");
-            let staged_files = snapshot
+            let branch_review = snapshot
                 .layers
                 .iter()
-                .find(|layer| layer.kind == LocalReviewDiffLayerKind::Staged)
-                .map_or(0, |layer| layer.diffstat.len());
-            let unstaged_files = snapshot
-                .layers
-                .iter()
-                .find(|layer| layer.kind == LocalReviewDiffLayerKind::Unstaged)
-                .map_or(0, |layer| layer.diffstat.len());
+                .any(|layer| layer.kind == LocalReviewDiffLayerKind::Committed);
+            let (label, details) = if branch_review {
+                (
+                    "BRANCH ",
+                    format!(
+                        "  {} file(s) · {} commit(s) · base {} -> head {}",
+                        snapshot.diffstat.len(),
+                        snapshot.commits_ahead,
+                        short_sha(&snapshot.base_sha),
+                        short_sha(snapshot.head_sha.as_deref().unwrap_or("HEAD"))
+                    ),
+                )
+            } else {
+                let staged_files = snapshot
+                    .layers
+                    .iter()
+                    .find(|layer| layer.kind == LocalReviewDiffLayerKind::Staged)
+                    .map_or(0, |layer| layer.diffstat.len());
+                let unstaged_files = snapshot
+                    .layers
+                    .iter()
+                    .find(|layer| layer.kind == LocalReviewDiffLayerKind::Unstaged)
+                    .map_or(0, |layer| layer.diffstat.len());
+                (
+                    "LOCAL ",
+                    format!(
+                        "  {} file(s): {} staged, {} unstaged · {} ahead, {} behind",
+                        snapshot.diffstat.len(),
+                        staged_files,
+                        unstaged_files,
+                        snapshot.commits_ahead,
+                        snapshot.commits_behind
+                    ),
+                )
+            };
             vec![ListItem::new(Line::from(vec![
                 Span::styled(
                     marker,
@@ -957,21 +989,11 @@ fn render_pull_requests(frame: &mut Frame<'_>, area: Rect, state: TuiState<'_>) 
                     },
                 ),
                 Span::raw(" "),
-                Span::styled("LOCAL ", accent_style().add_modifier(Modifier::BOLD)),
+                Span::styled(label, accent_style().add_modifier(Modifier::BOLD)),
                 Span::styled(snapshot.current_branch.clone(), branch_style()),
                 Span::styled(" -> ", muted_style()),
                 Span::styled(upstream.to_string(), branch_style()),
-                Span::styled(
-                    format!(
-                        "  {} file(s): {} staged, {} unstaged · {} ahead, {} behind",
-                        snapshot.diffstat.len(),
-                        staged_files,
-                        unstaged_files,
-                        snapshot.commits_ahead,
-                        snapshot.commits_behind
-                    ),
-                    text_style(),
-                ),
+                Span::styled(details, text_style()),
             ]))]
         } else {
             vec![ListItem::new("No local review target loaded")]
@@ -1105,8 +1127,15 @@ fn render_pull_request_detail(frame: &mut Frame<'_>, area: Rect, state: TuiState
 
     if state.pr_filter == PrListFilter::Local {
         if let Some(snapshot) = state.local_snapshot {
+            let branch_review = snapshot
+                .layers
+                .iter()
+                .any(|layer| layer.kind == LocalReviewDiffLayerKind::Committed);
             lines.push(Line::from(vec![
-                Span::styled("LOCAL ", accent_style().add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    if branch_review { "BRANCH " } else { "LOCAL " },
+                    accent_style().add_modifier(Modifier::BOLD),
+                ),
                 Span::styled(
                     format!("{}/{}", snapshot.workspace, snapshot.repo),
                     text_style().add_modifier(Modifier::BOLD),
@@ -1116,18 +1145,43 @@ fn render_pull_request_detail(frame: &mut Frame<'_>, area: Rect, state: TuiState
                 Span::styled(snapshot.current_branch.as_str(), branch_style()),
                 Span::styled(" -> ", muted_style()),
                 Span::styled(
-                    snapshot.upstream.as_deref().unwrap_or("no upstream"),
+                    snapshot.upstream.as_deref().unwrap_or(if branch_review {
+                        "select a base"
+                    } else {
+                        "no upstream"
+                    }),
                     branch_style(),
                 ),
             ]));
-            lines.push(Line::from(vec![
-                Span::styled("Unpushed commits: ", muted_style()),
-                Span::styled(snapshot.commits_ahead.to_string(), text_style()),
-                Span::styled(" | Behind upstream: ", muted_style()),
-                Span::styled(snapshot.commits_behind.to_string(), text_style()),
-                Span::styled(" | Changed files: ", muted_style()),
-                Span::styled(snapshot.diffstat.len().to_string(), text_style()),
-            ]));
+            if branch_review {
+                lines.push(Line::from(vec![
+                    Span::styled("Base ", muted_style()),
+                    Span::styled(
+                        short_sha(snapshot.upstream.as_deref().unwrap_or("base")),
+                        text_style(),
+                    ),
+                    Span::styled(" | Merge base ", muted_style()),
+                    Span::styled(short_sha(&snapshot.base_sha), text_style()),
+                    Span::styled(" | Head ", muted_style()),
+                    Span::styled(
+                        short_sha(snapshot.head_sha.as_deref().unwrap_or("HEAD")),
+                        text_style(),
+                    ),
+                    Span::styled(" | Commits ", muted_style()),
+                    Span::styled(snapshot.commits_ahead.to_string(), text_style()),
+                    Span::styled(" | Changed files ", muted_style()),
+                    Span::styled(snapshot.diffstat.len().to_string(), text_style()),
+                ]));
+            } else {
+                lines.push(Line::from(vec![
+                    Span::styled("Unpushed commits: ", muted_style()),
+                    Span::styled(snapshot.commits_ahead.to_string(), text_style()),
+                    Span::styled(" | Behind upstream: ", muted_style()),
+                    Span::styled(snapshot.commits_behind.to_string(), text_style()),
+                    Span::styled(" | Changed files: ", muted_style()),
+                    Span::styled(snapshot.diffstat.len().to_string(), text_style()),
+                ]));
+            }
             for warning in &snapshot.warnings {
                 lines.push(Line::from(vec![
                     Span::styled("Warning: ", accent_style()),
@@ -1472,6 +1526,11 @@ fn render_footer(frame: &mut Frame<'_>, area: Rect, state: TuiState<'_>) {
                 Span::styled("x", accent_style()),
                 Span::styled(" drop ", muted_style()),
             ]);
+        } else {
+            secondary_spans.extend([
+                Span::styled("B", accent_style()),
+                Span::styled(" base ", muted_style()),
+            ]);
         }
         secondary_spans.extend([
             Span::styled("a", accent_style()),
@@ -1514,6 +1573,11 @@ fn render_footer(frame: &mut Frame<'_>, area: Rect, state: TuiState<'_>) {
                 Span::styled(" publish  ", muted_style()),
                 Span::styled("x", accent_style()),
                 Span::styled(" discard  ", muted_style()),
+            ]);
+        } else {
+            spans.extend([
+                Span::styled("B", accent_style()),
+                Span::styled(" branch base  ", muted_style()),
             ]);
         }
         spans.extend([

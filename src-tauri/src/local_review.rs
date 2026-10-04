@@ -117,6 +117,7 @@ pub struct LocalReviewSnapshot {
 pub enum LocalReviewDiffLayerKind {
     Staged,
     Unstaged,
+    Committed,
 }
 
 impl LocalReviewDiffLayerKind {
@@ -124,6 +125,7 @@ impl LocalReviewDiffLayerKind {
         match self {
             Self::Staged => "staged",
             Self::Unstaged => "unstaged",
+            Self::Committed => "committed",
         }
     }
 }
@@ -424,6 +426,209 @@ fn local_review_snapshot_for_path_with_control(
     })
 }
 
+/// Resolves a branch review snapshot for committed changes between a selected
+/// base ref and `HEAD`. Working-tree and untracked content are excluded: the
+/// review covers the merge base of the base ref with `HEAD` through `HEAD`.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn local_branch_review_snapshot_for_configured_path(
+    provider: ReviewProvider,
+    workspace: &str,
+    repo: &str,
+    repo_path: &Path,
+    base_ref: &str,
+    cancellation: LocalReviewCancellation,
+) -> Result<LocalReviewSnapshot, String> {
+    let control = GitRunControl::new(
+        LOCAL_GIT_TIMEOUT,
+        cancellation,
+        "Local branch review snapshot",
+    );
+
+    let base_ref = base_ref.trim();
+    if base_ref.is_empty() {
+        return Err("A base ref is required for a branch review.".to_string());
+    }
+
+    let head_sha =
+        optional_git_text_with_control(repo_path, &["rev-parse", "--verify", "HEAD"], &control)?
+            .ok_or_else(|| "Cannot review a branch in a repository without commits.".to_string())?;
+    let base_sha = optional_git_text_with_control(
+        repo_path,
+        &["rev-parse", "--verify", &format!("{base_ref}^{{commit}}")],
+        &control,
+    )?
+    .ok_or_else(|| {
+        format!("Base ref `{base_ref}` was not found. Fetch it or choose another base.")
+    })?;
+    let merge_base = git_text_with_control(
+        repo_path,
+        &["merge-base", &base_sha, &head_sha],
+        &control,
+    )
+    .map_err(|_| {
+        format!("Base ref `{base_ref}` shares no common history with HEAD; choose another base.")
+    })?;
+    let current_branch = optional_git_text_with_control(
+        repo_path,
+        &["symbolic-ref", "--quiet", "--short", "HEAD"],
+        &control,
+    )?
+    .unwrap_or_else(|| "detached HEAD".to_string());
+
+    let commits_ahead = count_commits(repo_path, &merge_base, &head_sha, &control)?;
+    let layer = collect_committed_diff_layer(repo_path, &merge_base, &head_sha, &control)?;
+    let diffstat = layer.diffstat.clone();
+    if diffstat.len() > MAX_LOCAL_CHANGED_FILES {
+        return Err(format!(
+            "Branch review contains {} changed files, exceeding the {}-file limit.",
+            diffstat.len(),
+            MAX_LOCAL_CHANGED_FILES
+        ));
+    }
+    let diff = layer.diff.trim().to_string();
+    if diff.len() > MAX_LOCAL_DIFF_BYTES {
+        return Err(format!(
+            "Branch review diff exceeds the {} MiB limit.",
+            MAX_LOCAL_DIFF_BYTES / (1024 * 1024)
+        ));
+    }
+
+    let mut warnings = Vec::new();
+    let dirty = git_bytes_limited_with_control(
+        repo_path,
+        &["status", "--porcelain=v1", "-z", "--untracked-files=no"],
+        MAX_GIT_METADATA_BYTES,
+        "Local repository status",
+        &control,
+    )?;
+    if !dirty.is_empty() {
+        warnings.push(
+            "Staged and unstaged changes are excluded from a branch review; use the working-tree review to include them."
+                .to_string(),
+        );
+    }
+    if has_untracked_files(repo_path, &control)? {
+        warnings.push("Untracked files are excluded from branch review.".to_string());
+    }
+
+    let layers = vec![layer];
+    let preview_oid = BTreeMap::new();
+    let (snapshot_sha256, review_id) = local_review_identity(
+        provider,
+        workspace,
+        repo,
+        &current_branch,
+        Some(base_ref),
+        Some(base_sha.as_str()),
+        Some(head_sha.as_str()),
+        &merge_base,
+        commits_ahead,
+        0,
+        &layers,
+        &preview_oid,
+    );
+
+    Ok(LocalReviewSnapshot {
+        provider,
+        workspace: workspace.to_string(),
+        repo: repo.to_string(),
+        current_branch,
+        upstream: Some(base_ref.to_string()),
+        commits_ahead,
+        commits_behind: 0,
+        head_sha: Some(head_sha),
+        base_sha: merge_base,
+        snapshot_sha256,
+        review_id,
+        diff,
+        diffstat,
+        layers,
+        preview_oid,
+        warnings,
+    })
+}
+
+/// Lists candidate base refs (local and remote-tracking branches) for a branch
+/// review, excluding the current branch and symbolic `*/HEAD` refs.
+pub(crate) fn list_branch_base_candidates(repo_path: &Path) -> Result<Vec<String>, String> {
+    let control = GitRunControl::new(
+        LOCAL_GIT_TIMEOUT,
+        LocalReviewCancellation::new(),
+        "Local branch base refs",
+    );
+    let output = git_text_with_control(
+        repo_path,
+        &[
+            "for-each-ref",
+            "--format=%(refname:short)",
+            "refs/heads",
+            "refs/remotes",
+        ],
+        &control,
+    )?;
+    let current = optional_git_text_with_control(
+        repo_path,
+        &["symbolic-ref", "--quiet", "--short", "HEAD"],
+        &control,
+    )?;
+    let mut refs = output
+        .lines()
+        .map(str::trim)
+        .filter(|reference| !reference.is_empty())
+        .filter(|reference| !reference.ends_with("/HEAD"))
+        .filter(|reference| Some(*reference) != current.as_deref())
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+    refs.sort();
+    refs.dedup();
+    Ok(refs)
+}
+
+fn count_commits(
+    repo_path: &Path,
+    base_sha: &str,
+    head_sha: &str,
+    control: &GitRunControl,
+) -> Result<u32, String> {
+    let range = format!("{base_sha}..{head_sha}");
+    let output = git_text_with_control(repo_path, &["rev-list", "--count", &range], control)?;
+    output
+        .trim()
+        .parse::<u32>()
+        .map_err(|_| "Git returned an invalid commit count for the branch review.".to_string())
+}
+
+fn collect_committed_diff_layer(
+    repo_path: &Path,
+    base_sha: &str,
+    head_sha: &str,
+    control: &GitRunControl,
+) -> Result<LocalReviewDiffLayer, String> {
+    let comparison = [base_sha, head_sha];
+    let diffstat = tracked_diffstat(repo_path, &comparison, control)?;
+    let diff = git_text_raw_limited_with_control(
+        repo_path,
+        &[
+            "diff",
+            "--no-ext-diff",
+            "--no-textconv",
+            "--find-renames",
+            "--no-color",
+            base_sha,
+            head_sha,
+            "--",
+        ],
+        MAX_LOCAL_DIFF_BYTES,
+        "Committed local review diff",
+        control,
+    )?;
+    Ok(LocalReviewDiffLayer {
+        kind: LocalReviewDiffLayerKind::Committed,
+        diff,
+        diffstat,
+    })
+}
+
 fn ahead_behind(
     repo_path: &Path,
     upstream: &str,
@@ -579,6 +784,7 @@ fn collect_local_diff_layer(
         match kind {
             LocalReviewDiffLayerKind::Staged => "Staged local review diff",
             LocalReviewDiffLayerKind::Unstaged => "Unstaged local review diff",
+            LocalReviewDiffLayerKind::Committed => "Committed local review diff",
         },
         control,
     )?;
@@ -2929,5 +3135,104 @@ mod tests {
         );
 
         assert_ne!(first, second);
+    }
+
+    #[test]
+    fn branch_review_covers_only_committed_changes() {
+        let fixture = Fixture::new("branch-review-clean");
+        fixture.write("tracked.txt", "base\n");
+        fixture.commit_all("base");
+        run(&fixture.path, &["branch", "-M", "main"]);
+        run(&fixture.path, &["checkout", "-q", "-b", "feature/work"]);
+        fixture.write("tracked.txt", "committed change\n");
+        fixture.commit_all("feature change");
+        // Dirty tracked change and an untracked file must stay out of the diff.
+        fixture.write("tracked.txt", "worktree change\n");
+        fixture.write("untracked.txt", "untracked\n");
+
+        let snapshot = local_branch_review_snapshot_for_configured_path(
+            ReviewProvider::Github,
+            "acme",
+            "demo",
+            &fixture.path,
+            "main",
+            LocalReviewCancellation::new(),
+        )
+        .expect("branch snapshot");
+
+        assert_eq!(snapshot.current_branch, "feature/work");
+        assert_eq!(snapshot.upstream.as_deref(), Some("main"));
+        assert_eq!(snapshot.commits_ahead, 1);
+        assert_eq!(snapshot.commits_behind, 0);
+        assert!(snapshot.diff.contains("+committed change"));
+        assert!(!snapshot.diff.contains("worktree change"));
+        assert!(!snapshot.diff.contains("untracked.txt"));
+        assert_eq!(snapshot.layers.len(), 1);
+        assert_eq!(snapshot.layers[0].kind, LocalReviewDiffLayerKind::Committed);
+        assert!(snapshot
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("Staged and unstaged changes are excluded")));
+        assert!(snapshot
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("Untracked files are excluded")));
+    }
+
+    #[test]
+    fn branch_review_without_new_commits_is_empty() {
+        let fixture = Fixture::new("branch-review-empty");
+        fixture.write("tracked.txt", "base\n");
+        fixture.commit_all("base");
+        run(&fixture.path, &["branch", "-M", "main"]);
+        run(&fixture.path, &["checkout", "-q", "-b", "feature/empty"]);
+
+        let snapshot = local_branch_review_snapshot_for_configured_path(
+            ReviewProvider::Github,
+            "acme",
+            "demo",
+            &fixture.path,
+            "main",
+            LocalReviewCancellation::new(),
+        )
+        .expect("branch snapshot");
+
+        assert_eq!(snapshot.commits_ahead, 0);
+        assert!(snapshot.diff.trim().is_empty());
+        assert!(snapshot.diffstat.is_empty());
+    }
+
+    #[test]
+    fn branch_review_rejects_an_unknown_base_ref() {
+        let fixture = Fixture::new("branch-review-invalid-base");
+        fixture.write("tracked.txt", "base\n");
+        fixture.commit_all("base");
+
+        let error = local_branch_review_snapshot_for_configured_path(
+            ReviewProvider::Github,
+            "acme",
+            "demo",
+            &fixture.path,
+            "does-not-exist",
+            LocalReviewCancellation::new(),
+        )
+        .expect_err("unknown base should fail");
+
+        assert!(error.contains("was not found"), "{error}");
+        assert!(error.contains("does-not-exist"), "{error}");
+    }
+
+    #[test]
+    fn list_branch_base_candidates_excludes_the_current_branch() {
+        let fixture = Fixture::new("branch-base-candidates");
+        fixture.write("tracked.txt", "base\n");
+        fixture.commit_all("base");
+        run(&fixture.path, &["branch", "-M", "feature/current"]);
+        run(&fixture.path, &["branch", "feature/base-target"]);
+
+        let candidates = list_branch_base_candidates(&fixture.path).expect("list base candidates");
+
+        assert!(candidates.contains(&"feature/base-target".to_string()));
+        assert!(!candidates.contains(&"feature/current".to_string()));
     }
 }
