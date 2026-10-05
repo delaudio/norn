@@ -61,6 +61,13 @@ norn skills install --agent all
 norn setup --allow-provider-diff --yes
 ```
 
+The command-line binaries (`norn`, `norn-tui`) are not code-signed or
+notarized — only the desktop channel below is. On first run, macOS Gatekeeper
+may block them as coming from an unidentified developer. If that happens,
+approve the binary once in **System Settings → Privacy & Security → Open
+Anyway**, then rerun the command. This is expected for the CLI-only
+distribution; do not strip the quarantine attribute or signature yourself.
+
 When a release includes the signed and notarized desktop channel, install it
 alongside the command tools with:
 
