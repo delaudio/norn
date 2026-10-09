@@ -52,6 +52,10 @@ name = "norn-app"
 path = "src/bin/norn-app.rs"
 
 [[bin]]
+name = "norn-backend"
+path = "src/bin/norn-backend.rs"
+
+[[bin]]
 name = "lachesi"
 path = "src/bin/lachesi.rs"
 

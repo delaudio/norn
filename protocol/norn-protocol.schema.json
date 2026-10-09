@@ -165,7 +165,26 @@
         "error": { "$ref": "#/definitions/ProtocolError" }
       }
     },
-    "EmptyResult": { "type": "object", "additionalProperties": false }
+    "EmptyResult": { "type": "object", "additionalProperties": false },
+    "RepoSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["provider", "workspace", "repo"],
+      "properties": {
+        "provider": { "enum": ["github", "bitbucket"] },
+        "workspace": { "type": "string" },
+        "repo": { "type": "string" },
+        "localPath": { "type": ["string", "null"] }
+      }
+    },
+    "RepositoriesResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repos"],
+      "properties": {
+        "repos": { "type": "array", "items": { "$ref": "#/definitions/RepoSummary" } }
+      }
+    }
   },
   "oneOf": [
     {
@@ -258,6 +277,7 @@
             { "$ref": "#/definitions/DiffFileResult" },
             { "$ref": "#/definitions/ReviewStartResult" },
             { "$ref": "#/definitions/OperationStatusResult" },
+            { "$ref": "#/definitions/RepositoriesResult" },
             { "$ref": "#/definitions/EmptyResult" }
           ]
         }

@@ -104,7 +104,7 @@ export interface ResponseOk {
   type: "response";
   id: RequestId;
   ok: true;
-  result: DiffFileResult | ReviewStartResult | OperationStatusResult | EmptyResult;
+  result: DiffFileResult | ReviewStartResult | OperationStatusResult | RepositoriesResult | EmptyResult;
 }
 export interface DiffFileResult {
   target: TargetIdentity;
@@ -127,6 +127,15 @@ export interface ProtocolError {
   code: ErrorCode;
   message: string;
   retryable?: boolean;
+}
+export interface RepositoriesResult {
+  repos: RepoSummary[];
+}
+export interface RepoSummary {
+  provider: "github" | "bitbucket";
+  workspace: string;
+  repo: string;
+  localPath?: string | null;
 }
 export interface EmptyResult {}
 export interface ResponseError {

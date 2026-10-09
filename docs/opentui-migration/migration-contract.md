@@ -40,6 +40,10 @@ Rules:
   standard error carries diagnostics. Framing and queues are bounded; the
   workspace and backend each validate protocol version and degrade with a clear
   error rather than proceeding on a mismatch.
+- The backend is `src-tauri/src/backend.rs`, built as the `norn-backend`
+  binary: one serialized writer thread, a bounded output queue, operations that
+  run on their own threads so cancel/status/shutdown stay responsive, and a
+  graceful shutdown that cancels only the children it started.
 - Compatibility aliases during the transition:
   - `norn-tui` launches the OpenTUI workspace (was the Ratatui TUI); `lac`
     remains its deprecated alias.
