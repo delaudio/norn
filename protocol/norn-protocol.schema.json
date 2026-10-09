@@ -253,7 +253,14 @@
         "type": { "const": "response" },
         "id": { "$ref": "#/definitions/RequestId" },
         "ok": { "const": true },
-        "result": { "type": "object" }
+        "result": {
+          "oneOf": [
+            { "$ref": "#/definitions/DiffFileResult" },
+            { "$ref": "#/definitions/ReviewStartResult" },
+            { "$ref": "#/definitions/OperationStatusResult" },
+            { "$ref": "#/definitions/EmptyResult" }
+          ]
+        }
       }
     },
     {

@@ -44,12 +44,18 @@ export function messageValidationErrors(): string[] {
   );
 }
 
+const encoder = new TextEncoder();
+
+function frameBytes(line: string): number {
+  return encoder.encode(line).length;
+}
+
 /**
  * Decode one newline-delimited frame. Returns null for oversized, empty,
  * malformed, or schema-invalid input instead of throwing.
  */
 export function decodeLine(line: string): NornStdioProtocol | null {
-  if (line.length > MAX_FRAME_BYTES) {
+  if (frameBytes(line) > MAX_FRAME_BYTES) {
     return null;
   }
   const trimmed = line.replace(/[\r\n]+$/, "");
@@ -67,7 +73,11 @@ export function decodeLine(line: string): NornStdioProtocol | null {
 
 /** Encode a message as a single frame (one trailing newline, no embedded one). */
 export function encodeLine(message: NornStdioProtocol): string {
-  return `${JSON.stringify(message)}\n`;
+  const frame = `${JSON.stringify(message)}\n`;
+  if (frameBytes(frame) > MAX_FRAME_BYTES) {
+    throw new Error(`encoded frame exceeds ${MAX_FRAME_BYTES} bytes`);
+  }
+  return frame;
 }
 
 /** Reject an incompatible handshake before any review action is enabled. */

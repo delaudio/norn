@@ -34,6 +34,7 @@ export type RequestId = string;
  * Identity of the review target a request or event applies to.
  */
 export type TargetIdentity = ProviderTarget | LocalTarget;
+export type OperationState = "accepted" | "running" | "succeeded" | "failed" | "cancelled";
 export type ErrorCode =
   | "invalidRequest"
   | "unsupportedVersion"
@@ -61,7 +62,6 @@ export type OperationEvent =
       state: OperationState;
       error?: ProtocolError;
     };
-export type OperationState = "accepted" | "running" | "succeeded" | "failed" | "cancelled";
 
 export interface Hello {
   type: "hello";
@@ -104,18 +104,36 @@ export interface ResponseOk {
   type: "response";
   id: RequestId;
   ok: true;
-  result: {};
+  result: DiffFileResult | ReviewStartResult | OperationStatusResult | EmptyResult;
 }
-export interface ResponseError {
-  type: "response";
-  id: RequestId;
-  ok: false;
-  error: ProtocolError;
+export interface DiffFileResult {
+  target: TargetIdentity;
+  path: string;
+  diff: string;
+  truncated: boolean;
+}
+export interface ReviewStartResult {
+  target: TargetIdentity;
+  operationId: string;
+  state: OperationState;
+}
+export interface OperationStatusResult {
+  operationId: string;
+  state: OperationState;
+  sequence: number;
+  error?: ProtocolError;
 }
 export interface ProtocolError {
   code: ErrorCode;
   message: string;
   retryable?: boolean;
+}
+export interface EmptyResult {}
+export interface ResponseError {
+  type: "response";
+  id: RequestId;
+  ok: false;
+  error: ProtocolError;
 }
 export interface Event {
   type: "event";

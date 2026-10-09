@@ -184,6 +184,77 @@ impl Request {
             Self::Shutdown { .. } => "shutdown",
         }
     }
+
+    /// Enforce the schema rules the envelope types do not express: a non-empty
+    /// id, a valid target, a non-empty path, and the `contextLines` range.
+    fn validate(&self) -> Result<(), ProtocolError> {
+        if self.id().is_empty() {
+            return Err(invalid_request("request id must not be empty"));
+        }
+        match self {
+            Self::DiffFile { params, .. } => {
+                params.target.validate()?;
+                if params.path.is_empty() {
+                    return Err(invalid_request("`diff.file` path must not be empty"));
+                }
+                if params.context_lines.is_some_and(|lines| lines > 100) {
+                    return Err(invalid_request("`diff.file` contextLines must be <= 100"));
+                }
+            }
+            Self::ReviewStart { params, .. } => params.target.validate()?,
+            Self::RepositoryStatus { .. }
+            | Self::OperationStatus { .. }
+            | Self::OperationCancel { .. }
+            | Self::Shutdown { .. } => {}
+        }
+        Ok(())
+    }
+}
+
+impl TargetIdentity {
+    fn validate(&self) -> Result<(), ProtocolError> {
+        match self {
+            Self::Provider {
+                workspace, repo, ..
+            } => {
+                if workspace.is_empty() || repo.is_empty() {
+                    return Err(invalid_request(
+                        "provider target workspace and repo must not be empty",
+                    ));
+                }
+                Ok(())
+            }
+            Self::Local {
+                local_snapshot_sha256,
+            } => {
+                if local_snapshot_sha256.len() != 64 {
+                    return Err(invalid_request(
+                        "local target `localSnapshotSha256` must be 64 characters",
+                    ));
+                }
+                Ok(())
+            }
+        }
+    }
+}
+
+impl Response {
+    /// A success carries exactly a result; a failure carries exactly an error.
+    fn validate(&self) -> Result<(), ProtocolError> {
+        if self.id.is_empty() {
+            return Err(invalid_request("response id must not be empty"));
+        }
+        match (self.ok, self.result.is_some(), self.error.is_some()) {
+            (true, true, false) | (false, false, true) => Ok(()),
+            _ => Err(invalid_request(
+                "response must carry a result when ok and an error otherwise",
+            )),
+        }
+    }
+}
+
+fn invalid_request(message: impl Into<String>) -> ProtocolError {
+    ProtocolError::new(ProtocolErrorCode::InvalidRequest, message)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -320,15 +391,36 @@ fn decode_json<T: serde::de::DeserializeOwned>(line: &[u8]) -> Result<T, Protoco
 /// Decode one client frame, enforcing framing limits and the envelope shape.
 pub fn decode_client_line(line: &[u8]) -> Result<ClientMessage, ProtocolError> {
     let message: ClientMessage = decode_json(line)?;
-    if let ClientMessage::Hello(hello) = &message {
-        validate_handshake(hello)?;
+    match &message {
+        ClientMessage::Hello(hello) => validate_handshake(hello)?,
+        ClientMessage::Request(request) => request.validate()?,
     }
     Ok(message)
 }
 
 /// Decode one server frame, enforcing framing limits and the envelope shape.
 pub fn decode_server_line(line: &[u8]) -> Result<ServerMessage, ProtocolError> {
-    decode_json(line)
+    let message: ServerMessage = decode_json(line)?;
+    match &message {
+        ServerMessage::Ready(ready) => {
+            if ready.protocol_version != PROTOCOL_VERSION {
+                return Err(ProtocolError::new(
+                    ProtocolErrorCode::UnsupportedVersion,
+                    format!(
+                        "unsupported protocol version {}; this build speaks {PROTOCOL_VERSION}",
+                        ready.protocol_version
+                    ),
+                ));
+            }
+        }
+        ServerMessage::Response(response) => response.validate()?,
+        ServerMessage::Event(frame) => {
+            if frame.operation_id.is_empty() {
+                return Err(invalid_request("event operationId must not be empty"));
+            }
+        }
+    }
+    Ok(message)
 }
 
 /// Encode a message as a single protocol frame (one line, no embedded newline).
@@ -339,7 +431,7 @@ pub fn encode_line<T: Serialize>(message: &T) -> Result<String, ProtocolError> {
             format!("failed to encode frame: {error}"),
         )
     })?;
-    if encoded.len() > MAX_FRAME_BYTES {
+    if encoded.len() + 1 > MAX_FRAME_BYTES {
         return Err(frame_too_large());
     }
     encoded.push('\n');

@@ -487,7 +487,20 @@
           "const": true
         },
         "result": {
-          "type": "object"
+          "oneOf": [
+            {
+              "$ref": "#/definitions/DiffFileResult"
+            },
+            {
+              "$ref": "#/definitions/ReviewStartResult"
+            },
+            {
+              "$ref": "#/definitions/OperationStatusResult"
+            },
+            {
+              "$ref": "#/definitions/EmptyResult"
+            }
+          ]
         }
       }
     },
