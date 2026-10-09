@@ -7,6 +7,9 @@ import type { BackendExit, BackendOperationEvent, BackendTransport, ReadyInfo } 
 export interface FakeTransportOptions {
   serverVersion?: string;
   repositories?: Array<Record<string, unknown>>;
+  targets?: Array<Record<string, unknown>>;
+  files?: Array<Record<string, unknown>>;
+  findings?: Array<Record<string, unknown>>;
   /** Artificial latency in milliseconds for every request. */
   delayMs?: number;
 }
@@ -47,6 +50,12 @@ export class FakeBackendTransport implements BackendTransport {
     switch (method) {
       case "repository.status":
         return { repos: this.options.repositories ?? [] };
+      case "review.targets":
+        return { targets: this.options.targets ?? [] };
+      case "review.files":
+        return { target: params.target, files: this.options.files ?? [] };
+      case "review.findings":
+        return { target: params.target, findings: this.options.findings ?? [] };
       case "diff.file":
         return {
           target: params.target,

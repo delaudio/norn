@@ -38,6 +38,7 @@ const MAX_DIFF_BYTES: usize = 256 * 1024;
 const MAX_SYNTHETIC_FILE_BYTES: u64 = 512 * 1024;
 const GIT_TIMEOUT: Duration = Duration::from_secs(10);
 const MAX_CONCURRENT_DIFFS: usize = 4;
+const MAX_CONCURRENT_FILES: usize = 4;
 const MAX_ACTIVE_OPERATIONS: usize = 8;
 
 /// Every operation the backend tracks while it is running.
@@ -57,6 +58,7 @@ struct Backend {
     next_operation: AtomicU64,
     shutdown: Arc<AtomicBool>,
     active_diffs: Arc<AtomicUsize>,
+    active_files: Arc<AtomicUsize>,
     active_operations: Arc<AtomicUsize>,
 }
 
@@ -118,6 +120,7 @@ pub fn run() -> Result<(), i32> {
         next_operation: AtomicU64::new(1),
         shutdown: shutdown.clone(),
         active_diffs: Arc::new(AtomicUsize::new(0)),
+        active_files: Arc::new(AtomicUsize::new(0)),
         active_operations: Arc::new(AtomicUsize::new(0)),
     };
 
@@ -340,6 +343,42 @@ fn dispatch(request: Request, backend: &Backend) -> bool {
             }
             false
         }
+        Request::ReviewFiles { params, .. } => {
+            if backend
+                .active_files
+                .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |current| {
+                    (current < MAX_CONCURRENT_FILES).then_some(current + 1)
+                })
+                .is_err()
+            {
+                backend.fail(
+                    &id,
+                    ProtocolError::new(
+                        ProtocolErrorCode::Internal,
+                        "too many concurrent file requests",
+                    ),
+                );
+                return false;
+            }
+            let control = backend.control.clone();
+            let counter = ActiveCounter(backend.active_files.clone());
+            thread::spawn(move || {
+                review_files_response(&control, &id, params.target);
+                counter.decrement();
+            });
+            false
+        }
+        Request::ReviewFindings { params, .. } => {
+            match findings_response(&params.target) {
+                Ok(value) => backend.respond(&id, value),
+                Err(error) => backend.fail(&id, error),
+            };
+            false
+        }
+        Request::ReviewTargets { .. } => {
+            backend.respond(&id, review_targets_response());
+            false
+        }
         Request::Shutdown { .. } => {
             backend.respond(&id, json!({}));
             backend.shutdown.store(true, Ordering::SeqCst);
@@ -373,6 +412,41 @@ fn repositories() -> Vec<serde_json::Value> {
             })
         })
         .collect()
+}
+
+/// Real, offline review targets: recent review jobs whose workspace/repo match a
+/// configured repository, so the shell can select a stored PR review (with its
+/// `prId`) and reach its persisted findings.
+fn review_targets_response() -> serde_json::Value {
+    let configured = config::load().repos;
+    let mut targets = Vec::new();
+    if let Ok(jobs) = crate::review_storage::list_recent_review_jobs(50) {
+        for job in jobs {
+            if job.pr_id == 0 {
+                continue;
+            }
+            let Some(repo) = configured
+                .iter()
+                .find(|entry| entry.workspace == job.workspace && entry.repo == job.repo)
+            else {
+                continue;
+            };
+            let provider = match repo.provider {
+                config::ReviewProvider::Github => "github",
+                config::ReviewProvider::Bitbucket => "bitbucket",
+            };
+            targets.push(json!({
+                "provider": provider,
+                "workspace": job.workspace,
+                "repo": job.repo,
+                "prId": job.pr_id,
+                "runId": job.id,
+                "title": job.pr_title,
+                "status": serde_json::to_value(&job.status).unwrap_or_else(|_| json!("unknown")),
+            }));
+        }
+    }
+    json!({ "targets": targets })
 }
 
 fn provider_matches(kind: ProviderKind) -> config::ReviewProvider {
@@ -449,7 +523,42 @@ fn diff_file_response(control: &Sender<ServerMessage>, id: &str, params: protoco
         ));
         return;
     }
-    let (diff, truncated) = match file_diff(&repo_path, &params.path) {
+    let range = match reviewed_range(&params.target) {
+        Ok(range) => range,
+        Err(error) => {
+            fail(error);
+            return;
+        }
+    };
+    if target_pr_id(&params.target).is_some() {
+        match range.as_ref() {
+            Some((base, head)) => {
+                if !revisions_available(&repo_path, base, head) {
+                    fail(ProtocolError::new(
+                        ProtocolErrorCode::TargetStale,
+                        "reviewed revisions are not available in the local checkout",
+                    ));
+                    return;
+                }
+            }
+            None => {
+                fail(ProtocolError::new(
+                    ProtocolErrorCode::TargetStale,
+                    "no stored reviewed range for this pull request",
+                ));
+                return;
+            }
+        }
+    }
+    let range_ref = range
+        .as_ref()
+        .map(|(base, head)| (base.as_str(), head.as_str()));
+    let (diff, truncated) = match file_diff(
+        &repo_path,
+        &params.path,
+        range_ref,
+        params.old_path.as_deref(),
+    ) {
         Some(diff) => truncate_diff(diff),
         None => {
             fail(ProtocolError::new(
@@ -478,20 +587,190 @@ fn truncate_diff(diff: String) -> (String, bool) {
     (diff[..boundary].to_string(), true)
 }
 
-fn file_diff(repo_path: &Path, path: &str) -> Option<String> {
+/// Keep only the `diff --git` section whose destination is `path`. Passing a
+/// rename source can make Git emit several sections (for example when the old
+/// path was recreated); anchor line numbers must come from the selected file.
+/// Falls back to the whole diff when no section matches.
+fn scope_to_file(diff: &str, path: &str, old_source: Option<&str>) -> Option<String> {
+    let destination = git_maybe_quote(&format!("b/{path}"));
+    let mut expected = vec![format!(
+        "diff --git {} {}",
+        git_maybe_quote(&format!("a/{path}")),
+        destination
+    )];
+    if let Some(old) = old_source {
+        if old != path {
+            expected.push(format!(
+                "diff --git {} {}",
+                git_maybe_quote(&format!("a/{old}")),
+                destination
+            ));
+        }
+    }
+    let mut result = String::new();
+    let mut current = String::new();
+    let mut current_match = false;
+    let mut matched = false;
+    for line in diff.split_inclusive('\n') {
+        if line.starts_with("diff --git ") {
+            if !current.is_empty() {
+                if current_match {
+                    result.push_str(&current);
+                    matched = true;
+                }
+                current.clear();
+            }
+            let without_newline = line.strip_suffix('\n').unwrap_or(line);
+            let header = without_newline
+                .strip_suffix('\r')
+                .unwrap_or(without_newline);
+            current_match = expected.iter().any(|candidate| candidate == header);
+        }
+        current.push_str(line);
+    }
+    if !current.is_empty() && current_match {
+        result.push_str(&current);
+        matched = true;
+    }
+    matched.then_some(result)
+}
+
+/// Quote a full prefixed path only when Git would (control characters, quotes or
+/// backslashes); with `core.quotePath=false` other characters stay literal.
+fn git_maybe_quote(path: &str) -> String {
+    let needs_quote = path
+        .chars()
+        .any(|character| (character as u32) < 0x20 || character as u32 == 0x7f)
+        || path.contains('"')
+        || path.contains('\\');
+    if needs_quote {
+        git_quoted_path(path)
+    } else {
+        path.to_string()
+    }
+}
+
+/// Git's C-style quoting for a full prefixed path (for example `b/name\t`).
+fn git_quoted_path(path: &str) -> String {
+    let mut quoted = String::from("\"");
+    for character in path.chars() {
+        match character {
+            '\u{7}' => quoted.push_str("\\a"),
+            '\u{8}' => quoted.push_str("\\b"),
+            '\t' => quoted.push_str("\\t"),
+            '\n' => quoted.push_str("\\n"),
+            '\u{b}' => quoted.push_str("\\v"),
+            '\u{c}' => quoted.push_str("\\f"),
+            '\r' => quoted.push_str("\\r"),
+            '"' => quoted.push_str("\\\""),
+            '\\' => quoted.push_str("\\\\"),
+            other if (other as u32) < 0x20 || other as u32 == 0x7f => {
+                quoted.push_str(&format!("\\{:03o}", other as u32));
+            }
+            other => quoted.push(other),
+        }
+    }
+    quoted.push('"');
+    quoted
+}
+
+fn file_diff(
+    repo_path: &Path,
+    path: &str,
+    range: Option<(&str, &str)>,
+    old_path: Option<&str>,
+) -> Option<String> {
     if !is_safe_relative_path(path) {
         return None;
     }
+    // Include the pre-rename source path supplied from `review.files` so Git can
+    // detect the rename; filtering by the destination alone would report an
+    // addition and lose old-side lines.
+    let old_source = old_path
+        .filter(|old| !old.is_empty() && *old != path && is_safe_relative_path(old))
+        .map(str::to_string);
+    let build = |spec: &[&str]| {
+        let mut args: Vec<&str> = spec.to_vec();
+        args.push("--");
+        args.push(path);
+        if let Some(old) = old_source.as_deref() {
+            if old != path {
+                args.push(old);
+            }
+        }
+        git(repo_path, &args)
+    };
+    if let Some((base, head)) = range {
+        let diff = build(&[
+            "diff",
+            "--no-ext-diff",
+            "--no-textconv",
+            "-M",
+            "--src-prefix=a/",
+            "--dst-prefix=b/",
+            base,
+            head,
+        ])?;
+        if diff.trim().is_empty() {
+            return None;
+        }
+        return scope_to_file(&diff, path, old_source.as_deref());
+    }
     // HEAD covers committed, staged, and unstaged tracked changes (including
-    // deletions); the cached and unstaged diffs cover unborn-HEAD repositories.
-    for args in [
-        ["diff", "--no-ext-diff", "HEAD", "--", path].as_slice(),
-        ["diff", "--no-ext-diff", "--", path].as_slice(),
-        ["diff", "--cached", "--no-ext-diff", "--", path].as_slice(),
-    ] {
-        if let Some(diff) = git(repo_path, args) {
+    // deletions). Before the first commit, compare the working tree against the
+    // empty tree so a staged addition followed by an unstaged edit shows as one
+    // net change, matching `review.files`.
+    let head_exists = git(repo_path, &["rev-parse", "--verify", "--quiet", "HEAD"]).is_some();
+    let empty_tree = if head_exists {
+        None
+    } else {
+        empty_tree_oid(repo_path)
+    };
+    let mut specs: Vec<Vec<&str>> = Vec::new();
+    if head_exists {
+        specs.push(vec![
+            "diff",
+            "--no-ext-diff",
+            "--no-textconv",
+            "-M",
+            "--src-prefix=a/",
+            "--dst-prefix=b/",
+            "HEAD",
+        ]);
+    } else if let Some(oid) = empty_tree.as_deref() {
+        specs.push(vec![
+            "diff",
+            "--no-ext-diff",
+            "--no-textconv",
+            "-M",
+            "--src-prefix=a/",
+            "--dst-prefix=b/",
+            oid,
+        ]);
+    }
+    specs.push(vec![
+        "diff",
+        "--no-ext-diff",
+        "--no-textconv",
+        "-M",
+        "--src-prefix=a/",
+        "--dst-prefix=b/",
+    ]);
+    specs.push(vec![
+        "diff",
+        "--cached",
+        "--no-ext-diff",
+        "--no-textconv",
+        "-M",
+        "--src-prefix=a/",
+        "--dst-prefix=b/",
+    ]);
+    for spec in &specs {
+        if let Some(diff) = build(spec) {
             if !diff.trim().is_empty() {
-                return Some(diff);
+                if let Some(scoped) = scope_to_file(&diff, path, old_source.as_deref()) {
+                    return Some(scoped);
+                }
             }
         }
     }
@@ -574,6 +853,365 @@ fn synthetic_new_file_diff(repo_path: &Path, path: &str) -> Option<String> {
     Some(patch)
 }
 
+fn review_files_response(control: &Sender<ServerMessage>, id: &str, target: TargetIdentity) {
+    let respond = |value: serde_json::Value| {
+        let _ = control.send(ServerMessage::Response(Response {
+            id: id.to_string(),
+            ok: true,
+            result: Some(value),
+            error: None,
+        }));
+    };
+    let fail = |error: ProtocolError| {
+        let _ = control.send(ServerMessage::Response(Response {
+            id: id.to_string(),
+            ok: false,
+            result: None,
+            error: Some(error),
+        }));
+    };
+    let Some(repo_path) = resolve_repo_path(&target) else {
+        fail(ProtocolError::new(
+            ProtocolErrorCode::NotFound,
+            "no local repository for this target",
+        ));
+        return;
+    };
+    if !is_git_repo(&repo_path) {
+        fail(ProtocolError::new(
+            ProtocolErrorCode::TargetStale,
+            format!("`{}` is not a git repository", repo_path.display()),
+        ));
+        return;
+    }
+    let range = match reviewed_range(&target) {
+        Ok(range) => range,
+        Err(error) => {
+            fail(error);
+            return;
+        }
+    };
+    if target_pr_id(&target).is_some() {
+        match range.as_ref() {
+            Some((base, head)) => {
+                if !revisions_available(&repo_path, base, head) {
+                    fail(ProtocolError::new(
+                        ProtocolErrorCode::TargetStale,
+                        "reviewed revisions are not available in the local checkout",
+                    ));
+                    return;
+                }
+            }
+            None => {
+                fail(ProtocolError::new(
+                    ProtocolErrorCode::TargetStale,
+                    "no stored reviewed range for this pull request",
+                ));
+                return;
+            }
+        }
+    }
+    let range_ref = range
+        .as_ref()
+        .map(|(base, head)| (base.as_str(), head.as_str()));
+    match changed_file_entries(&repo_path, range_ref) {
+        Ok(files) => respond(json!({ "target": target, "files": files })),
+        Err(error) => fail(error),
+    }
+}
+
+/// The reviewed base/head revisions for a stored PR target, if the stored review
+/// run recorded them. Returns `Ok(None)` for working-tree targets or targets
+/// without a recorded range.
+fn reviewed_range(target: &TargetIdentity) -> Result<Option<(String, String)>, ProtocolError> {
+    let TargetIdentity::Provider {
+        workspace,
+        repo,
+        pr_id: Some(pr_id),
+        run_id,
+        ..
+    } = target
+    else {
+        return Ok(None);
+    };
+    let store = crate::services::review::load_ai_review_store_native(workspace, repo, *pr_id)
+        .map_err(|e| {
+            ProtocolError::new(ProtocolErrorCode::Internal, format!("review store: {e}"))
+        })?;
+    let Some(run) = select_review_run(store, run_id.as_deref()) else {
+        return Ok(None);
+    };
+    match (run.reviewed_base_sha, run.reviewed_head_sha) {
+        (Some(base), Some(head)) => Ok(Some((base, head))),
+        _ => Ok(None),
+    }
+}
+
+/// Select the review run a target is pinned to: the requested `runId` when
+/// present, otherwise the most recent stored run.
+fn select_review_run(
+    store: Option<crate::services::review::AiReviewStoreData>,
+    run_id: Option<&str>,
+) -> Option<crate::services::review::ReviewRun> {
+    let store = store?;
+    match run_id {
+        Some(id) => store.review_runs.into_iter().find(|run| run.id == id),
+        None => store.review_runs.into_iter().next_back(),
+    }
+}
+
+fn revisions_available(repo_path: &Path, base: &str, head: &str) -> bool {
+    let verify = |revision: &str| {
+        let spec = format!("{revision}^{{commit}}");
+        git(
+            repo_path,
+            &["rev-parse", "--verify", "--quiet", spec.as_str()],
+        )
+        .is_some()
+    };
+    verify(base) && verify(head)
+}
+
+fn target_pr_id(target: &TargetIdentity) -> Option<u32> {
+    match target {
+        TargetIdentity::Provider {
+            pr_id: Some(pr_id), ..
+        } => Some(*pr_id),
+        _ => None,
+    }
+}
+
+/// Best-effort changed-file list with status and line counts, covering staged,
+/// unstaged, renamed, deleted and untracked files. All paths are read with
+/// NUL-delimited Git output so renames and unusual filenames survive intact.
+///
+/// When `range` is set the list is the PR diff between two revisions and
+/// untracked files are excluded; otherwise it is the checkout's working-tree
+/// diff against HEAD (or the index before the first commit).
+fn changed_file_entries(
+    repo_path: &Path,
+    range: Option<(&str, &str)>,
+) -> Result<Vec<serde_json::Value>, ProtocolError> {
+    use std::collections::BTreeMap;
+
+    let mut entries: BTreeMap<String, (String, u64, u64, Option<String>)> = BTreeMap::new();
+
+    // Compare against HEAD when it exists. Before the first commit there is no
+    // HEAD, so compare the working tree against Git's empty tree to get the net
+    // staged + unstaged change for each path.
+    let head_exists =
+        range.is_none() && git(repo_path, &["rev-parse", "--verify", "--quiet", "HEAD"]).is_some();
+    let empty_tree = if range.is_none() && !head_exists {
+        empty_tree_oid(repo_path)
+    } else {
+        None
+    };
+    let (specs, include_untracked): (Vec<Vec<&str>>, bool) = match range {
+        Some((base, head)) => (vec![vec![base, head]], false),
+        None => {
+            if head_exists {
+                (vec![vec!["HEAD"]], true)
+            } else if let Some(oid) = empty_tree.as_deref() {
+                (vec![vec![oid]], true)
+            } else {
+                (vec![vec!["--cached"]], true)
+            }
+        }
+    };
+
+    for diff_spec in &specs {
+        let mut name_status_args = vec!["diff", "-z", "-M", "--name-status"];
+        name_status_args.extend_from_slice(diff_spec);
+        let output = git(repo_path, &name_status_args).ok_or_else(|| {
+            ProtocolError::new(ProtocolErrorCode::Internal, "git diff --name-status failed")
+        })?;
+        {
+            let tokens: Vec<&str> = output.split('\0').collect();
+            let mut index = 0;
+            while index < tokens.len() {
+                let code = tokens[index];
+                if code.is_empty() {
+                    index += 1;
+                    continue;
+                }
+                let kind = code.chars().next().unwrap_or('M');
+                if kind == 'R' || kind == 'C' {
+                    if index + 2 >= tokens.len() {
+                        break;
+                    }
+                    let old_path = tokens[index + 1].to_string();
+                    let path = tokens[index + 2].to_string();
+                    entries
+                        .entry(path)
+                        .or_insert(("renamed".to_string(), 0, 0, Some(old_path)));
+                    index += 3;
+                } else {
+                    if index + 1 >= tokens.len() {
+                        break;
+                    }
+                    let status = match kind {
+                        'A' => "added",
+                        'D' => "deleted",
+                        _ => "modified",
+                    };
+                    entries.entry(tokens[index + 1].to_string()).or_insert((
+                        status.to_string(),
+                        0,
+                        0,
+                        None,
+                    ));
+                    index += 2;
+                }
+            }
+        }
+
+        let mut numstat_args = vec!["diff", "-z", "-M", "--numstat"];
+        numstat_args.extend_from_slice(diff_spec);
+        let output = git(repo_path, &numstat_args).ok_or_else(|| {
+            ProtocolError::new(ProtocolErrorCode::Internal, "git diff --numstat failed")
+        })?;
+        {
+            let tokens: Vec<&str> = output.split('\0').collect();
+            let mut index = 0;
+            while index < tokens.len() {
+                let token = tokens[index];
+                if token.is_empty() {
+                    index += 1;
+                    continue;
+                }
+                let parts: Vec<&str> = token.splitn(3, '\t').collect();
+                if parts.len() < 2 {
+                    index += 1;
+                    continue;
+                }
+                let additions = parts[0].parse::<u64>().unwrap_or(0);
+                let deletions = parts[1].parse::<u64>().unwrap_or(0);
+                // A rename records counts, an empty path, then the old and new paths
+                // as separate NUL-delimited fields; key it by the destination.
+                let (path, extra) = if parts.len() >= 3 && !parts[2].is_empty() {
+                    (parts[2].to_string(), 0)
+                } else if index + 2 < tokens.len() {
+                    (tokens[index + 2].to_string(), 2)
+                } else {
+                    break;
+                };
+                entries
+                    .entry(path)
+                    .and_modify(|entry| {
+                        entry.1 = additions;
+                        entry.2 = deletions;
+                    })
+                    .or_insert(("modified".to_string(), additions, deletions, None));
+                index += 1 + extra;
+            }
+        }
+    }
+
+    if include_untracked {
+        let output = git(
+            repo_path,
+            &["ls-files", "-z", "--others", "--exclude-standard"],
+        )
+        .ok_or_else(|| ProtocolError::new(ProtocolErrorCode::Internal, "git ls-files failed"))?;
+        for path in output.split('\0').filter(|entry| !entry.is_empty()) {
+            let (additions, deletions) = untracked_stats(repo_path, path);
+            entries.entry(path.to_string()).or_insert((
+                "untracked".to_string(),
+                additions,
+                deletions,
+                None,
+            ));
+        }
+    }
+
+    Ok(entries
+        .into_iter()
+        .map(|(path, (status, additions, deletions, old_path))| {
+            json!({
+                "path": path,
+                "status": status,
+                "additions": additions,
+                "deletions": deletions,
+                "oldPath": old_path,
+            })
+        })
+        .collect())
+}
+
+/// The object id of Git's empty tree for this repository's hash algorithm.
+fn empty_tree_oid(repo_path: &Path) -> Option<String> {
+    git(repo_path, &["hash-object", "-t", "tree", "--stdin"])
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+/// Additions for an untracked text file, mirroring `synthetic_new_file_diff`:/// bounded, inside the checkout, no symlinks; binary or unreadable files count
+/// as zero.
+fn untracked_stats(repo_path: &Path, path: &str) -> (u64, u64) {
+    let Some(absolute) = safe_canonical_path(repo_path, path) else {
+        return (0, 0);
+    };
+    let Ok(metadata) = std::fs::symlink_metadata(&absolute) else {
+        return (0, 0);
+    };
+    if !metadata.is_file() || metadata.len() > MAX_SYNTHETIC_FILE_BYTES {
+        return (0, 0);
+    }
+    let Ok(contents) = std::fs::read_to_string(&absolute) else {
+        return (0, 0);
+    };
+    if contents.contains('\0') {
+        return (0, 0);
+    }
+    (contents.lines().count() as u64, 0)
+}
+
+fn findings_response(target: &TargetIdentity) -> Result<serde_json::Value, ProtocolError> {
+    let findings = match target {
+        TargetIdentity::Provider {
+            workspace,
+            repo,
+            pr_id: Some(pr_id),
+            run_id,
+            ..
+        } => {
+            let store =
+                crate::services::review::load_ai_review_store_native(workspace, repo, *pr_id)
+                    .map_err(|error| {
+                        ProtocolError::new(
+                            ProtocolErrorCode::Internal,
+                            format!("review store: {error}"),
+                        )
+                    })?;
+            select_review_run(store, run_id.as_deref())
+                .map(|run| run.findings.into_iter().map(finding_json).collect())
+                .unwrap_or_default()
+        }
+        _ => Vec::new(),
+    };
+    Ok(json!({ "target": target, "findings": findings }))
+}
+
+fn finding_json(finding: crate::services::review::ReviewFinding) -> serde_json::Value {
+    let severity = serde_json::to_value(&finding.severity).unwrap_or_else(|_| json!("info"));
+    let anchor = finding.anchor.as_ref().map(|anchor| {
+        let side = serde_json::to_value(&anchor.side).unwrap_or_else(|_| json!("new"));
+        json!({
+            "path": anchor.path,
+            "startLine": anchor.start_line,
+            "endLine": anchor.end_line,
+            "side": side,
+        })
+    });
+    json!({
+        "id": finding.id,
+        "title": finding.title,
+        "severity": severity,
+        "summary": finding.summary,
+        "anchor": anchor,
+    })
+}
+
 fn changed_files(repo_path: &Path) -> Vec<String> {
     let mut files = git_names(repo_path, &["diff", "--name-only", "-z", "HEAD"]);
     if files.is_empty() {
@@ -642,9 +1280,29 @@ fn spawn_git(repo_path: &Path, args: &[&str]) -> Option<Child> {
         return None;
     }
     let child = Command::new("git")
+        .arg("-c")
+        .arg("color.ui=false")
+        .arg("-c")
+        .arg("core.pager=cat")
+        .arg("-c")
+        // Keep a leading space on blank context lines so unified-diff parsers
+        // can advance old/new line counters correctly.
+        .arg("diff.suppressBlankEmpty=false")
+        .arg("-c")
+        // Keep non-ASCII paths literal so diff section headers match the path we
+        // pass in, instead of Git's octal escapes.
+        .arg("core.quotePath=false")
+        .arg("-c")
+        .arg("diff.outputIndicatorNew=+")
+        .arg("-c")
+        .arg("diff.outputIndicatorOld=-")
+        .arg("-c")
+        .arg("diff.outputIndicatorContext= ")
         .arg("-C")
         .arg(repo_path)
         .args(args)
+        // Treat every pathspec literally so a filename containing wildcard
+        // characters cannot match additional files.
         .env("GIT_LITERAL_PATHSPECS", "1")
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -983,5 +1641,293 @@ fn write_frame(stdout: &mut impl Write, message: ServerMessage) {
         Err(error) => {
             eprintln!("norn-backend: failed to encode a frame: {}", error.message);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn init_repo() -> tempfile::TempDir {
+        let dir = tempfile::tempdir().expect("temp repo");
+        let git = |args: &[&str]| {
+            let output = Command::new("git")
+                .arg("-C")
+                .arg(dir.path())
+                .args(args)
+                .output()
+                .expect("run git");
+            assert!(output.status.success(), "git {args:?} failed");
+        };
+        git(&["init", "-q"]);
+        git(&["config", "user.email", "t@t"]);
+        git(&["config", "user.name", "t"]);
+        dir
+    }
+
+    #[test]
+    fn changed_file_entries_uses_the_requested_range() {
+        let dir = init_repo();
+        std::fs::write(dir.path().join("a.txt"), "one\n").expect("write");
+        let git = |args: &[&str]| {
+            let output = Command::new("git")
+                .arg("-C")
+                .arg(dir.path())
+                .args(args)
+                .output()
+                .expect("run git");
+            assert!(output.status.success(), "git {args:?} failed");
+        };
+        git(&["add", "-A"]);
+        git(&["commit", "-qm", "one"]);
+        let base = String::from_utf8(
+            Command::new("git")
+                .arg("-C")
+                .arg(dir.path())
+                .args(["rev-parse", "HEAD"])
+                .output()
+                .expect("rev-parse")
+                .stdout,
+        )
+        .expect("utf8")
+        .trim()
+        .to_string();
+        std::fs::write(dir.path().join("a.txt"), "one\ntwo\n").expect("edit");
+        std::fs::write(dir.path().join("b.txt"), "new\n").expect("add");
+        git(&["add", "-A"]);
+        git(&["commit", "-qm", "two"]);
+        let head = String::from_utf8(
+            Command::new("git")
+                .arg("-C")
+                .arg(dir.path())
+                .args(["rev-parse", "HEAD"])
+                .output()
+                .expect("rev-parse")
+                .stdout,
+        )
+        .expect("utf8")
+        .trim()
+        .to_string();
+
+        // Clean working tree: the working-tree view is empty.
+        assert!(changed_file_entries(dir.path(), None)
+            .expect("entries")
+            .is_empty());
+
+        // The requested range reports the PR diff instead.
+        let entries = changed_file_entries(dir.path(), Some((base.as_str(), head.as_str())))
+            .expect("entries");
+        let paths: Vec<&str> = entries.iter().filter_map(|e| e["path"].as_str()).collect();
+        assert!(paths.contains(&"a.txt"), "paths: {paths:?}");
+        assert!(paths.contains(&"b.txt"), "paths: {paths:?}");
+        let a = entries
+            .iter()
+            .find(|e| e["path"] == "a.txt")
+            .expect("a.txt entry");
+        assert_eq!(a["status"], "modified");
+        assert!(a["additions"].as_u64().unwrap_or(0) >= 1);
+    }
+
+    #[test]
+    fn file_diff_includes_the_rename_source() {
+        let dir = init_repo();
+        std::fs::write(dir.path().join("a.txt"), "one\ntwo\nthree\n").expect("write");
+        let git = |args: &[&str]| {
+            let output = Command::new("git")
+                .arg("-C")
+                .arg(dir.path())
+                .args(args)
+                .output()
+                .expect("run git");
+            assert!(output.status.success(), "git {args:?} failed");
+        };
+        git(&["add", "-A"]);
+        git(&["commit", "-qm", "one"]);
+        git(&["mv", "a.txt", "b.txt"]);
+        std::fs::write(dir.path().join("b.txt"), "one\ntwo\nTHREE\n").expect("edit");
+
+        let Some(diff) = file_diff(dir.path(), "b.txt", None, Some("a.txt")) else {
+            panic!("expected a diff for the renamed file");
+        };
+        assert!(
+            diff.contains("rename from a.txt"),
+            "diff must keep rename context: {diff}"
+        );
+    }
+
+    #[test]
+    fn changed_file_entries_detects_renames_with_detection_disabled() {
+        let dir = init_repo();
+        let git = |args: &[&str]| {
+            let output = Command::new("git")
+                .arg("-C")
+                .arg(dir.path())
+                .args(args)
+                .output()
+                .expect("run git");
+            assert!(output.status.success(), "git {args:?} failed");
+        };
+        git(&["config", "diff.renames", "false"]);
+        std::fs::write(dir.path().join("a.txt"), "one\ntwo\nthree\n").expect("write");
+        git(&["add", "-A"]);
+        git(&["commit", "-qm", "one"]);
+        git(&["mv", "a.txt", "b.txt"]);
+        std::fs::write(dir.path().join("b.txt"), "one\ntwo\nFOUR\n").expect("edit");
+
+        let entries = changed_file_entries(dir.path(), None).expect("entries");
+        let paths: Vec<&str> = entries.iter().filter_map(|e| e["path"].as_str()).collect();
+        assert_eq!(paths, vec!["b.txt"], "paths: {paths:?}");
+        assert_eq!(entries[0]["status"], "renamed");
+        assert_eq!(entries[0]["oldPath"], "a.txt");
+    }
+
+    #[test]
+    fn changed_file_entries_covers_unstaged_changes_before_first_commit() {
+        let dir = init_repo();
+        let git = |args: &[&str]| {
+            let output = Command::new("git")
+                .arg("-C")
+                .arg(dir.path())
+                .args(args)
+                .output()
+                .expect("run git");
+            assert!(output.status.success(), "git {args:?} failed");
+        };
+        std::fs::write(dir.path().join("first.txt"), "one\n").expect("write");
+        git(&["add", "-A"]);
+        std::fs::write(dir.path().join("first.txt"), "one\ntwo\n").expect("edit");
+
+        let entries = changed_file_entries(dir.path(), None).expect("entries");
+        let entry = entries
+            .iter()
+            .find(|e| e["path"] == "first.txt")
+            .expect("first.txt entry");
+        assert_eq!(entry["status"], "added");
+        assert_eq!(entry["additions"], 2);
+    }
+
+    #[test]
+    fn file_diff_treats_the_path_literally() {
+        let dir = init_repo();
+        let git = |args: &[&str]| {
+            let output = Command::new("git")
+                .arg("-C")
+                .arg(dir.path())
+                .args(args)
+                .output()
+                .expect("run git");
+            assert!(output.status.success(), "git {args:?} failed");
+        };
+        std::fs::write(dir.path().join("star*.txt"), "one\n").expect("write");
+        std::fs::write(dir.path().join("other.txt"), "x\n").expect("write");
+        git(&["add", "-A"]);
+        git(&["commit", "-qm", "one"]);
+        std::fs::write(dir.path().join("star*.txt"), "one\ntwo\n").expect("edit");
+
+        let diff = file_diff(dir.path(), "star*.txt", None, None).expect("diff");
+        assert!(diff.contains("star*.txt"), "diff: {diff}");
+        assert!(!diff.contains("other.txt"), "diff: {diff}");
+    }
+
+    #[test]
+    fn file_diff_preserves_blank_context_lines() {
+        let dir = init_repo();
+        let git = |args: &[&str]| {
+            let output = Command::new("git")
+                .arg("-C")
+                .arg(dir.path())
+                .args(args)
+                .output()
+                .expect("run git");
+            assert!(output.status.success(), "git {args:?} failed");
+        };
+        std::fs::write(dir.path().join("f.txt"), "a\n\nb\n").expect("write");
+        git(&["add", "-A"]);
+        git(&["commit", "-qm", "one"]);
+        git(&["config", "diff.suppressBlankEmpty", "true"]);
+        std::fs::write(dir.path().join("f.txt"), "A\n\nb\n").expect("edit");
+
+        let diff = file_diff(dir.path(), "f.txt", None, None).expect("diff");
+        assert!(
+            diff.contains("\n \n"),
+            "blank context line must keep its leading space: {diff}"
+        );
+    }
+
+    #[test]
+    fn scope_to_file_keeps_only_the_destination_section() {
+        let diff = "diff --git a/old b/old\n--- a/old\n+++ b/old\n@@ -1 +1 @@\n-x\n+y\ndiff --git a/old b/new\n--- a/old\n+++ b/new\n@@ -1 +1 @@\n-a\n+b\n";
+        let scoped = scope_to_file(diff, "new", Some("old")).expect("scoped");
+        assert!(scoped.contains("b/new"), "scoped: {scoped}");
+        assert!(!scoped.contains("b/old"), "scoped: {scoped}");
+    }
+
+    #[test]
+    fn scope_to_file_rejects_a_suffix_collision() {
+        let diff = "diff --git a/foo b/x b/x\n--- a/foo b/x\n+++ b/x\n@@ -1 +1 @@\n-a\n+b\ndiff --git a/foo b/x b/foo b/x\n--- a/foo b/x\n+++ b/foo b/x\n@@ -1 +1 @@\n-c\n+d\n";
+        let scoped = scope_to_file(diff, "x", Some("foo b/x")).expect("scoped");
+        assert!(scoped.contains("+++ b/x"), "scoped: {scoped}");
+        assert!(!scoped.contains("+++ b/foo b/x"), "scoped: {scoped}");
+    }
+
+    #[test]
+    fn file_diff_matches_quoted_and_prefixed_headers() {
+        let dir = init_repo();
+        let git = |args: &[&str]| {
+            let output = Command::new("git")
+                .arg("-C")
+                .arg(dir.path())
+                .args(args)
+                .output()
+                .expect("run git");
+            assert!(output.status.success(), "git {args:?} failed");
+        };
+        git(&["config", "diff.noprefix", "true"]);
+        let name = "ta\tb.txt";
+        std::fs::write(dir.path().join(name), "one\n").expect("write");
+        git(&["add", "-A"]);
+        git(&["commit", "-qm", "one"]);
+        std::fs::write(dir.path().join(name), "one\ntwo\n").expect("edit");
+
+        let diff = file_diff(dir.path(), name, None, None).expect("diff");
+        assert!(diff.contains("two"), "diff: {diff}");
+        assert!(!diff.contains("new file mode"), "synthetic: {diff}");
+    }
+
+    #[test]
+    fn select_review_run_prefers_the_requested_run_id() {
+        use crate::services::review::{AiReviewStoreData, ReviewRun};
+        let make = |id: &str| -> ReviewRun {
+            serde_json::from_value(serde_json::json!({
+                "id": id,
+                "schemaVersion": "1",
+                "provider": "github",
+                "workspace": "acme",
+                "repo": "payments",
+                "prId": 42,
+                "sourceBranch": "feat",
+                "destinationBranch": "main",
+                "reviewedBaseSha": "base",
+                "reviewedHeadSha": "head",
+                "status": "succeeded",
+                "turnKind": "initial",
+                "createdAt": "2024-01-01T00:00:00Z",
+                "diffFingerprint": "fp",
+                "findings": []
+            }))
+            .expect("deserialize run")
+        };
+        let store = AiReviewStoreData {
+            review_runs: vec![make("run-1"), make("run-2")],
+            ..Default::default()
+        };
+        assert_eq!(
+            select_review_run(Some(store.clone()), Some("run-1")).map(|run| run.id),
+            Some("run-1".to_string())
+        );
+        assert_eq!(
+            select_review_run(Some(store), None).map(|run| run.id),
+            Some("run-2".to_string())
+        );
     }
 }

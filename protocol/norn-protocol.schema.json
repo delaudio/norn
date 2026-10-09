@@ -16,23 +16,60 @@
           "type": "object",
           "title": "ProviderTarget",
           "additionalProperties": false,
-          "required": ["kind", "provider", "workspace", "repo"],
+          "required": [
+            "kind",
+            "provider",
+            "workspace",
+            "repo"
+          ],
           "properties": {
-            "kind": { "const": "provider" },
-            "provider": { "enum": ["github", "bitbucket"] },
-            "workspace": { "type": "string", "minLength": 1 },
-            "repo": { "type": "string", "minLength": 1 },
-            "prId": { "type": "integer", "minimum": 1 }
+            "kind": {
+              "const": "provider"
+            },
+            "provider": {
+              "enum": [
+                "github",
+                "bitbucket"
+              ]
+            },
+            "workspace": {
+              "type": "string",
+              "minLength": 1
+            },
+            "repo": {
+              "type": "string",
+              "minLength": 1
+            },
+            "prId": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "runId": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "minLength": 1
+            }
           }
         },
         {
           "type": "object",
           "title": "LocalTarget",
           "additionalProperties": false,
-          "required": ["kind", "localSnapshotSha256"],
+          "required": [
+            "kind",
+            "localSnapshotSha256"
+          ],
           "properties": {
-            "kind": { "const": "local" },
-            "localSnapshotSha256": { "type": "string", "minLength": 64, "maxLength": 64 }
+            "kind": {
+              "const": "local"
+            },
+            "localSnapshotSha256": {
+              "type": "string",
+              "minLength": 64,
+              "maxLength": 64
+            }
           }
         }
       ]
@@ -53,50 +90,109 @@
     "ProtocolError": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["code", "message"],
+      "required": [
+        "code",
+        "message"
+      ],
       "properties": {
-        "code": { "$ref": "#/definitions/ErrorCode" },
-        "message": { "type": "string" },
-        "retryable": { "type": "boolean", "default": false }
+        "code": {
+          "$ref": "#/definitions/ErrorCode"
+        },
+        "message": {
+          "type": "string"
+        },
+        "retryable": {
+          "type": "boolean",
+          "default": false
+        }
       }
     },
-    "OperationState": { "enum": ["accepted", "running", "succeeded", "failed", "cancelled"] },
+    "OperationState": {
+      "enum": [
+        "accepted",
+        "running",
+        "succeeded",
+        "failed",
+        "cancelled"
+      ]
+    },
     "OperationEvent": {
       "oneOf": [
         {
           "type": "object",
           "additionalProperties": false,
-          "required": ["kind", "message"],
+          "required": [
+            "kind",
+            "message"
+          ],
           "properties": {
-            "kind": { "const": "progress" },
-            "message": { "type": "string" },
-            "completed": { "type": "integer", "minimum": 0 },
-            "total": { "type": "integer", "minimum": 0 }
+            "kind": {
+              "const": "progress"
+            },
+            "message": {
+              "type": "string"
+            },
+            "completed": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "total": {
+              "type": "integer",
+              "minimum": 0
+            }
           }
         },
         {
           "type": "object",
           "additionalProperties": false,
-          "required": ["kind", "level", "message"],
+          "required": [
+            "kind",
+            "level",
+            "message"
+          ],
           "properties": {
-            "kind": { "const": "log" },
-            "level": { "enum": ["debug", "info", "warn", "error"] },
-            "message": { "type": "string" }
+            "kind": {
+              "const": "log"
+            },
+            "level": {
+              "enum": [
+                "debug",
+                "info",
+                "warn",
+                "error"
+              ]
+            },
+            "message": {
+              "type": "string"
+            }
           }
         },
         {
           "type": "object",
           "additionalProperties": false,
-          "required": ["kind", "state"],
+          "required": [
+            "kind",
+            "state"
+          ],
           "properties": {
-            "kind": { "const": "state" },
-            "state": { "$ref": "#/definitions/OperationState" },
-            "error": { "$ref": "#/definitions/ProtocolError" }
+            "kind": {
+              "const": "state"
+            },
+            "state": {
+              "$ref": "#/definitions/OperationState"
+            },
+            "error": {
+              "$ref": "#/definitions/ProtocolError"
+            }
           }
         }
       ]
     },
-    "RequestId": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "RequestId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
     "Method": {
       "enum": [
         "repository.status",
@@ -104,85 +200,402 @@
         "review.start",
         "operation.status",
         "operation.cancel",
-        "shutdown"
+        "shutdown",
+        "review.files",
+        "review.findings",
+        "review.targets"
       ]
     },
     "DiffFileParams": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["target", "path"],
+      "required": [
+        "target",
+        "path"
+      ],
       "properties": {
-        "target": { "$ref": "#/definitions/TargetIdentity" },
-        "path": { "type": "string", "minLength": 1 },
-        "contextLines": { "type": "integer", "minimum": 0, "maximum": 100 }
+        "target": {
+          "$ref": "#/definitions/TargetIdentity"
+        },
+        "path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "oldPath": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "contextLines": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100
+        }
       }
     },
     "ReviewStartParams": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["target"],
+      "required": [
+        "target"
+      ],
       "properties": {
-        "target": { "$ref": "#/definitions/TargetIdentity" },
-        "profile": { "type": ["string", "null"] }
+        "target": {
+          "$ref": "#/definitions/TargetIdentity"
+        },
+        "profile": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
       }
     },
     "OperationControlParams": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "operationId": { "type": "string", "minLength": 1 }
+        "operationId": {
+          "type": "string",
+          "minLength": 1
+        }
       }
     },
     "DiffFileResult": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["target", "path", "diff", "truncated"],
+      "required": [
+        "target",
+        "path",
+        "diff",
+        "truncated"
+      ],
       "properties": {
-        "target": { "$ref": "#/definitions/TargetIdentity" },
-        "path": { "type": "string" },
-        "diff": { "type": "string" },
-        "truncated": { "type": "boolean" }
+        "target": {
+          "$ref": "#/definitions/TargetIdentity"
+        },
+        "path": {
+          "type": "string"
+        },
+        "diff": {
+          "type": "string"
+        },
+        "truncated": {
+          "type": "boolean"
+        }
       }
     },
     "ReviewStartResult": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["target", "operationId", "state"],
+      "required": [
+        "target",
+        "operationId",
+        "state"
+      ],
       "properties": {
-        "target": { "$ref": "#/definitions/TargetIdentity" },
-        "operationId": { "type": "string", "minLength": 1 },
-        "state": { "$ref": "#/definitions/OperationState" }
+        "target": {
+          "$ref": "#/definitions/TargetIdentity"
+        },
+        "operationId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "state": {
+          "$ref": "#/definitions/OperationState"
+        }
       }
     },
     "OperationStatusResult": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["operationId", "state", "sequence"],
+      "required": [
+        "operationId",
+        "state",
+        "sequence"
+      ],
       "properties": {
-        "operationId": { "type": "string" },
-        "state": { "$ref": "#/definitions/OperationState" },
-        "sequence": { "type": "integer", "minimum": 0 },
-        "error": { "$ref": "#/definitions/ProtocolError" }
+        "operationId": {
+          "type": "string"
+        },
+        "state": {
+          "$ref": "#/definitions/OperationState"
+        },
+        "sequence": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "error": {
+          "$ref": "#/definitions/ProtocolError"
+        }
       }
     },
-    "EmptyResult": { "type": "object", "additionalProperties": false },
+    "EmptyResult": {
+      "type": "object",
+      "additionalProperties": false
+    },
     "RepoSummary": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["provider", "workspace", "repo"],
+      "required": [
+        "provider",
+        "workspace",
+        "repo"
+      ],
       "properties": {
-        "provider": { "enum": ["github", "bitbucket"] },
-        "workspace": { "type": "string" },
-        "repo": { "type": "string" },
-        "localPath": { "type": ["string", "null"] }
+        "provider": {
+          "enum": [
+            "github",
+            "bitbucket"
+          ]
+        },
+        "workspace": {
+          "type": "string"
+        },
+        "repo": {
+          "type": "string"
+        },
+        "localPath": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
       }
     },
     "RepositoriesResult": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["repos"],
+      "required": [
+        "repos"
+      ],
       "properties": {
-        "repos": { "type": "array", "items": { "$ref": "#/definitions/RepoSummary" } }
+        "repos": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/RepoSummary"
+          }
+        }
+      }
+    },
+    "TargetParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "target"
+      ],
+      "properties": {
+        "target": {
+          "$ref": "#/definitions/TargetIdentity"
+        }
+      }
+    },
+    "ChangedFile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "status",
+        "additions",
+        "deletions"
+      ],
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "status": {
+          "enum": [
+            "added",
+            "modified",
+            "deleted",
+            "renamed",
+            "untracked"
+          ]
+        },
+        "additions": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "deletions": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "oldPath": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "ReviewFilesResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "target",
+        "files"
+      ],
+      "properties": {
+        "target": {
+          "$ref": "#/definitions/TargetIdentity"
+        },
+        "files": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ChangedFile"
+          }
+        }
+      }
+    },
+    "FindingAnchorSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "startLine",
+        "side"
+      ],
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "startLine": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "endLine": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "side": {
+          "enum": [
+            "new",
+            "old"
+          ]
+        }
+      }
+    },
+    "FindingSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "title",
+        "severity",
+        "summary"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "title": {
+          "type": "string"
+        },
+        "severity": {
+          "enum": [
+            "info",
+            "low",
+            "medium",
+            "high",
+            "critical"
+          ]
+        },
+        "summary": {
+          "type": "string"
+        },
+        "anchor": {
+          "oneOf": [
+            {
+              "$ref": "#/definitions/FindingAnchorSummary"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "ReviewFindingsResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "target",
+        "findings"
+      ],
+      "properties": {
+        "target": {
+          "$ref": "#/definitions/TargetIdentity"
+        },
+        "findings": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/FindingSummary"
+          }
+        }
+      }
+    },
+    "ReviewTarget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "provider",
+        "workspace",
+        "repo",
+        "prId",
+        "title",
+        "status",
+        "runId"
+      ],
+      "properties": {
+        "provider": {
+          "enum": [
+            "github",
+            "bitbucket"
+          ]
+        },
+        "workspace": {
+          "type": "string",
+          "minLength": 1
+        },
+        "repo": {
+          "type": "string",
+          "minLength": 1
+        },
+        "prId": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "title": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        },
+        "runId": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "ReviewTargetsResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "targets"
+      ],
+      "properties": {
+        "targets": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ReviewTarget"
+          }
+        }
       }
     }
   },
@@ -191,17 +604,32 @@
       "title": "Hello",
       "type": "object",
       "additionalProperties": false,
-      "required": ["type", "protocolVersion", "client"],
+      "required": [
+        "type",
+        "protocolVersion",
+        "client"
+      ],
       "properties": {
-        "type": { "const": "hello" },
-        "protocolVersion": { "$ref": "#/definitions/ProtocolVersion" },
+        "type": {
+          "const": "hello"
+        },
+        "protocolVersion": {
+          "$ref": "#/definitions/ProtocolVersion"
+        },
         "client": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["name", "version"],
+          "required": [
+            "name",
+            "version"
+          ],
           "properties": {
-            "name": { "type": "string" },
-            "version": { "type": "string" }
+            "name": {
+              "type": "string"
+            },
+            "version": {
+              "type": "string"
+            }
           }
         }
       }
@@ -210,12 +638,29 @@
       "title": "Ready",
       "type": "object",
       "additionalProperties": false,
-      "required": ["type", "protocolVersion", "serverVersion", "capabilities"],
+      "required": [
+        "type",
+        "protocolVersion",
+        "serverVersion",
+        "capabilities"
+      ],
       "properties": {
-        "type": { "const": "ready" },
-        "protocolVersion": { "$ref": "#/definitions/ProtocolVersion" },
-        "serverVersion": { "type": "string" },
-        "capabilities": { "type": "array", "items": { "type": "string" }, "uniqueItems": true }
+        "type": {
+          "const": "ready"
+        },
+        "protocolVersion": {
+          "$ref": "#/definitions/ProtocolVersion"
+        },
+        "serverVersion": {
+          "type": "string"
+        },
+        "capabilities": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true
+        }
       }
     },
     {
@@ -224,32 +669,67 @@
         {
           "type": "object",
           "additionalProperties": false,
-          "required": ["type", "id", "method", "params"],
+          "required": [
+            "type",
+            "id",
+            "method",
+            "params"
+          ],
           "properties": {
-            "type": { "const": "request" },
-            "id": { "$ref": "#/definitions/RequestId" },
-            "method": { "const": "diff.file" },
-            "params": { "$ref": "#/definitions/DiffFileParams" }
+            "type": {
+              "const": "request"
+            },
+            "id": {
+              "$ref": "#/definitions/RequestId"
+            },
+            "method": {
+              "const": "diff.file"
+            },
+            "params": {
+              "$ref": "#/definitions/DiffFileParams"
+            }
           }
         },
         {
           "type": "object",
           "additionalProperties": false,
-          "required": ["type", "id", "method", "params"],
+          "required": [
+            "type",
+            "id",
+            "method",
+            "params"
+          ],
           "properties": {
-            "type": { "const": "request" },
-            "id": { "$ref": "#/definitions/RequestId" },
-            "method": { "const": "review.start" },
-            "params": { "$ref": "#/definitions/ReviewStartParams" }
+            "type": {
+              "const": "request"
+            },
+            "id": {
+              "$ref": "#/definitions/RequestId"
+            },
+            "method": {
+              "const": "review.start"
+            },
+            "params": {
+              "$ref": "#/definitions/ReviewStartParams"
+            }
           }
         },
         {
           "type": "object",
           "additionalProperties": false,
-          "required": ["type", "id", "method", "params"],
+          "required": [
+            "type",
+            "id",
+            "method",
+            "params"
+          ],
           "properties": {
-            "type": { "const": "request" },
-            "id": { "$ref": "#/definitions/RequestId" },
+            "type": {
+              "const": "request"
+            },
+            "id": {
+              "$ref": "#/definitions/RequestId"
+            },
             "method": {
               "enum": [
                 "repository.status",
@@ -258,7 +738,81 @@
                 "shutdown"
               ]
             },
-            "params": { "$ref": "#/definitions/OperationControlParams" }
+            "params": {
+              "$ref": "#/definitions/OperationControlParams"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "type": {
+              "const": "request"
+            },
+            "id": {
+              "$ref": "#/definitions/RequestId"
+            },
+            "method": {
+              "const": "review.files"
+            },
+            "params": {
+              "$ref": "#/definitions/TargetParams"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "type": {
+              "const": "request"
+            },
+            "id": {
+              "$ref": "#/definitions/RequestId"
+            },
+            "method": {
+              "const": "review.findings"
+            },
+            "params": {
+              "$ref": "#/definitions/TargetParams"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "type": {
+              "const": "request"
+            },
+            "id": {
+              "$ref": "#/definitions/RequestId"
+            },
+            "method": {
+              "const": "review.targets"
+            },
+            "params": {
+              "$ref": "#/definitions/EmptyResult"
+            }
           }
         }
       ]
@@ -267,18 +821,48 @@
       "title": "ResponseOk",
       "type": "object",
       "additionalProperties": false,
-      "required": ["type", "id", "ok", "result"],
+      "required": [
+        "type",
+        "id",
+        "ok",
+        "result"
+      ],
       "properties": {
-        "type": { "const": "response" },
-        "id": { "$ref": "#/definitions/RequestId" },
-        "ok": { "const": true },
+        "type": {
+          "const": "response"
+        },
+        "id": {
+          "$ref": "#/definitions/RequestId"
+        },
+        "ok": {
+          "const": true
+        },
         "result": {
           "oneOf": [
-            { "$ref": "#/definitions/DiffFileResult" },
-            { "$ref": "#/definitions/ReviewStartResult" },
-            { "$ref": "#/definitions/OperationStatusResult" },
-            { "$ref": "#/definitions/RepositoriesResult" },
-            { "$ref": "#/definitions/EmptyResult" }
+            {
+              "$ref": "#/definitions/DiffFileResult"
+            },
+            {
+              "$ref": "#/definitions/ReviewStartResult"
+            },
+            {
+              "$ref": "#/definitions/OperationStatusResult"
+            },
+            {
+              "$ref": "#/definitions/RepositoriesResult"
+            },
+            {
+              "$ref": "#/definitions/EmptyResult"
+            },
+            {
+              "$ref": "#/definitions/ReviewFilesResult"
+            },
+            {
+              "$ref": "#/definitions/ReviewFindingsResult"
+            },
+            {
+              "$ref": "#/definitions/ReviewTargetsResult"
+            }
           ]
         }
       }
@@ -287,25 +871,56 @@
       "title": "ResponseError",
       "type": "object",
       "additionalProperties": false,
-      "required": ["type", "id", "ok", "error"],
+      "required": [
+        "type",
+        "id",
+        "ok",
+        "error"
+      ],
       "properties": {
-        "type": { "const": "response" },
-        "id": { "$ref": "#/definitions/RequestId" },
-        "ok": { "const": false },
-        "error": { "$ref": "#/definitions/ProtocolError" }
+        "type": {
+          "const": "response"
+        },
+        "id": {
+          "$ref": "#/definitions/RequestId"
+        },
+        "ok": {
+          "const": false
+        },
+        "error": {
+          "$ref": "#/definitions/ProtocolError"
+        }
       }
     },
     {
       "title": "Event",
       "type": "object",
       "additionalProperties": false,
-      "required": ["type", "operationId", "sequence", "target", "event"],
+      "required": [
+        "type",
+        "operationId",
+        "sequence",
+        "target",
+        "event"
+      ],
       "properties": {
-        "type": { "const": "event" },
-        "operationId": { "type": "string", "minLength": 1 },
-        "sequence": { "type": "integer", "minimum": 0 },
-        "target": { "$ref": "#/definitions/TargetIdentity" },
-        "event": { "$ref": "#/definitions/OperationEvent" }
+        "type": {
+          "const": "event"
+        },
+        "operationId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sequence": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "target": {
+          "$ref": "#/definitions/TargetIdentity"
+        },
+        "event": {
+          "$ref": "#/definitions/OperationEvent"
+        }
       }
     }
   ]

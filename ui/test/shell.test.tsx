@@ -41,7 +41,7 @@ for (const [width, height] of [
       expect(frame).toContain("Norn / OpenTUI workspace");
       expect(frame).toContain("acme/payments");
       if (width >= 80) {
-        expect(frame).toContain("REPOSITORIES");
+        expect(frame).toContain("TARGETS");
       }
       app.renderer.mockInput.pressKey("j");
       await app.renderer.renderOnce();
@@ -71,7 +71,7 @@ test("Enter starts a review, logs stream, q quits and unmount clears", async () 
 
     app.ui.unmount();
     await app.renderer.renderOnce();
-    expect(app.renderer.captureCharFrame()).not.toContain("REPOSITORIES");
+    expect(app.renderer.captureCharFrame()).not.toContain("TARGETS");
   } finally {
     app.cleanup();
     app.renderer.renderer.destroy();

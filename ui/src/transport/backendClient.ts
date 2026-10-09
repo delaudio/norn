@@ -18,6 +18,41 @@ export interface DiffFileResult {
   truncated: boolean;
 }
 
+export type ChangedFileStatus = "added" | "modified" | "deleted" | "renamed" | "untracked";
+
+export interface ChangedFile {
+  path: string;
+  status: ChangedFileStatus;
+  additions: number;
+  deletions: number;
+  oldPath: string | null;
+}
+
+export interface FindingAnchor {
+  path: string;
+  startLine: number;
+  endLine: number | null;
+  side: "new" | "old";
+}
+
+export interface FindingSummary {
+  id: string;
+  title: string;
+  severity: "info" | "low" | "medium" | "high" | "critical";
+  summary: string;
+  anchor: FindingAnchor | null;
+}
+
+export interface ReviewTarget {
+  provider: "github" | "bitbucket";
+  workspace: string;
+  repo: string;
+  prId: number;
+  runId: string;
+  title: string;
+  status: string;
+}
+
 export interface OperationStatus {
   operationId: string;
   state: string;
@@ -40,14 +75,30 @@ export class BackendClient {
   async diffFile(
     target: TargetIdentity,
     path: string,
-    contextLines?: number,
+    options: { oldPath?: string | null; contextLines?: number } = {},
   ): Promise<DiffFileResult> {
     const result = await this.transport.request("diff.file", {
       target,
       path,
-      ...(contextLines === undefined ? {} : { contextLines }),
+      ...(options.oldPath ? { oldPath: options.oldPath } : {}),
+      ...(options.contextLines === undefined ? {} : { contextLines: options.contextLines }),
     });
     return result as unknown as DiffFileResult;
+  }
+
+  async reviewFiles(target: TargetIdentity): Promise<ChangedFile[]> {
+    const result = await this.transport.request("review.files", { target });
+    return (result.files as ChangedFile[]) ?? [];
+  }
+
+  async reviewTargets(): Promise<ReviewTarget[]> {
+    const result = await this.transport.request("review.targets", {});
+    return (result.targets as ReviewTarget[]) ?? [];
+  }
+
+  async reviewFindings(target: TargetIdentity): Promise<FindingSummary[]> {
+    const result = await this.transport.request("review.findings", { target });
+    return (result.findings as FindingSummary[]) ?? [];
   }
 
   async startReview(

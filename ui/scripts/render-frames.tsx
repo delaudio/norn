@@ -30,6 +30,51 @@ const repositories = [
   { provider: "bitbucket" as const, workspace: "acme", repo: "billing", localPath: null },
 ];
 
+const files = [
+  { path: "src/app.ts", status: "modified", additions: 12, deletions: 3, oldPath: null },
+  { path: "src/new.ts", status: "added", additions: 40, deletions: 0, oldPath: null },
+  { path: "README.md", status: "deleted", additions: 0, deletions: 8, oldPath: null },
+];
+const findings = [
+  {
+    id: "f1",
+    title: "Missing null check",
+    severity: "high",
+    summary: "s",
+    anchor: { path: "src/app.ts", startLine: 4, endLine: null, side: "new" },
+  },
+];
+const staleFindings = [
+  ...findings,
+  {
+    id: "f3",
+    title: "Anchor elsewhere",
+    severity: "medium",
+    summary: "s",
+    anchor: { path: "gone/file.ts", startLine: 10, endLine: null, side: "new" },
+  },
+];
+const targets = [
+  {
+    provider: "github" as const,
+    workspace: "acme",
+    repo: "payments",
+    prId: 128,
+    runId: "run-128",
+    title: "Add idempotency keys",
+    status: "succeeded",
+  },
+  {
+    provider: "bitbucket" as const,
+    workspace: "acme",
+    repo: "billing",
+    prId: 64,
+    runId: "run-64",
+    title: "Retry hardening",
+    status: "failed",
+  },
+];
+
 class NeverReadyTransport implements BackendTransport {
   start(): Promise<ReadyInfo> {
     return new Promise<ReadyInfo>(() => {});
@@ -82,7 +127,9 @@ async function emptyScene() {
 }
 
 async function readyScene() {
-  const { client, store, ready } = readyStore(new FakeBackendTransport({ repositories }));
+  const { client, store, ready } = readyStore(
+    new FakeBackendTransport({ repositories, files, findings }),
+  );
   await ready;
   return { store, client };
 }
@@ -101,16 +148,41 @@ async function errorScene() {
 }
 
 async function closedScene() {
-  const { client, store, ready } = readyStore(new FakeBackendTransport({ repositories }));
+  const { client, store, ready } = readyStore(
+    new FakeBackendTransport({ repositories, files, findings }),
+  );
   await ready;
   store.markClosed();
   return { store, client };
 }
 
 async function reviewScene() {
-  const { client, store, ready } = readyStore(new FakeBackendTransport({ repositories }));
+  const { client, store, ready } = readyStore(
+    new FakeBackendTransport({ repositories, files, findings }),
+  );
   await ready;
   await store.startReview(client);
+  await Bun.sleep(5);
+  return { store, client };
+}
+
+async function staleAnchorScene() {
+  const { client, store, ready } = readyStore(
+    new FakeBackendTransport({ repositories, files, findings: staleFindings }),
+  );
+  await ready;
+  await Bun.sleep(5);
+  store.cycleFocus();
+  store.cycleFocus();
+  store.move(1);
+  return { store, client };
+}
+
+async function targetScene() {
+  const { client, store, ready } = readyStore(
+    new FakeBackendTransport({ repositories, targets, files, findings }),
+  );
+  await ready;
   await Bun.sleep(5);
   return { store, client };
 }
@@ -124,6 +196,8 @@ const scenes: Scene[] = [
   { id: "shell-error-80x24", cols: 80, rows: 24, build: errorScene },
   { id: "shell-closed-80x24", cols: 80, rows: 24, build: closedScene },
   { id: "shell-review-80x24", cols: 80, rows: 24, build: reviewScene },
+  { id: "shell-stale-anchor-80x24", cols: 80, rows: 24, build: staleAnchorScene },
+  { id: "shell-review-targets-120x30", cols: 120, rows: 30, build: targetScene },
 ];
 
 function color(value: RGBA): string {

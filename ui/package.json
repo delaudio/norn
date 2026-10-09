@@ -9,7 +9,8 @@
     "frames:generate": "bun run scripts/render-frames.tsx",
     "frames:check": "bun run scripts/check-frames.ts",
     "storybook": "bun run frames:check && storybook dev -p 6007 --no-open",
-    "build-storybook": "bun run frames:check && storybook build -o storybook-static"
+    "build-storybook": "bun run frames:check && storybook build -o storybook-static",
+    "bench": "bun run scripts/bench.ts"
   },
   "dependencies": {
     "@opentui/core": "0.5.17",

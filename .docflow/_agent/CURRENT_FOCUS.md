@@ -8,25 +8,23 @@ If status files and git disagree, git is authoritative; correct this file.
 
 ## Active state
 
-- **Branch:** `issue-300-opentui-frames` (to be created).
-- **Active item:** epic #294 step 06/15, issue #300 - native OpenTUI frame
-  previews and Storybook visual regression.
-- **Change:** `ui/scripts/render-frames.tsx` captures native OpenTUI frames
-  (spans, colors, attributes) into `ui/storybook/generated/frames.json`;
-  `ui/scripts/check-frames.ts` is the golden-frame visual lane (regenerate to a
-  temp file, compare to the committed baseline, fail with
-  `storybook/visual-artifacts/{expected,current,diff}`). `ui/storybook/`
-  (`frame.ts`, `TerminalPreview.tsx`, `preview.css`, `stories/Shell.stories.tsx`)
-  and `ui/.storybook/` render the frames in Storybook. Storybook deps were added
-  to the `ui` package; the CI `ui` job now runs `frames:check`; task-runner
-  recipes `ui-frames-check` added.
-- **Plan items:** `.docflow/plan/todo/0021-opentui-frames.md` (this item);
-  `plan/done/2026-10-09-opentui-{rust-architecture,engine-extraction,protocol,backend}.md`.
+- **Branch:** `issue-301-opentui-vertical-slice` (to be created).
+- **Active item:** epic #294 step 07/15, issue #301 - deliver and measure the
+  real file -> diff -> finding vertical slice.
+- **Change:** protocol gains `review.files` and `review.findings` (schema,
+  generated TypeScript, Rust `protocol.rs`/`backend.rs`). The OpenTUI shell lists
+  changed files, lazily loads the selected diff with stale-response fencing, and
+  navigates findings with anchor resolution plus a missing-anchor notice.
+  `ui/scripts/bench.ts` measures the OpenTUI slice; method and numbers live in
+  `docs/opentui-migration/vertical-slice.md`.
+- **Pending gate:** the Ratatui-vs-OpenTUI comparison and contract thresholds are
+  not produced yet, so #301 stays open (PR uses `Refs`, not `Fixes`).
+- **Plan items:** `.docflow/plan/todo/0022-opentui-vertical-slice.md` (this item)
+  and `plan/todo/00{20,21}-opentui-{shell,frames}.md` (shipped in #300).
 
 ## Next item
 
-- After #300 merges, proceed to #301 (real file -> diff -> finding vertical
-  slice, measured).
+- Finish the #301 PR; then #302/#303/#305.
 
 ## Epic queue
 

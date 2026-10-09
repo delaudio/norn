@@ -43,6 +43,13 @@
             "prId": {
               "type": "integer",
               "minimum": 1
+            },
+            "runId": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "minLength": 1
             }
           }
         },
@@ -193,7 +200,10 @@
         "review.start",
         "operation.status",
         "operation.cancel",
-        "shutdown"
+        "shutdown",
+        "review.files",
+        "review.findings",
+        "review.targets"
       ]
     },
     "DiffFileParams": {
@@ -210,6 +220,12 @@
         "path": {
           "type": "string",
           "minLength": 1
+        },
+        "oldPath": {
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "contextLines": {
           "type": "integer",
@@ -362,6 +378,225 @@
           }
         }
       }
+    },
+    "TargetParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "target"
+      ],
+      "properties": {
+        "target": {
+          "$ref": "#/definitions/TargetIdentity"
+        }
+      }
+    },
+    "ChangedFile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "status",
+        "additions",
+        "deletions"
+      ],
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "status": {
+          "enum": [
+            "added",
+            "modified",
+            "deleted",
+            "renamed",
+            "untracked"
+          ]
+        },
+        "additions": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "deletions": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "oldPath": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "ReviewFilesResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "target",
+        "files"
+      ],
+      "properties": {
+        "target": {
+          "$ref": "#/definitions/TargetIdentity"
+        },
+        "files": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ChangedFile"
+          }
+        }
+      }
+    },
+    "FindingAnchorSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "startLine",
+        "side"
+      ],
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "startLine": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "endLine": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "side": {
+          "enum": [
+            "new",
+            "old"
+          ]
+        }
+      }
+    },
+    "FindingSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "title",
+        "severity",
+        "summary"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "title": {
+          "type": "string"
+        },
+        "severity": {
+          "enum": [
+            "info",
+            "low",
+            "medium",
+            "high",
+            "critical"
+          ]
+        },
+        "summary": {
+          "type": "string"
+        },
+        "anchor": {
+          "oneOf": [
+            {
+              "$ref": "#/definitions/FindingAnchorSummary"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "ReviewFindingsResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "target",
+        "findings"
+      ],
+      "properties": {
+        "target": {
+          "$ref": "#/definitions/TargetIdentity"
+        },
+        "findings": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/FindingSummary"
+          }
+        }
+      }
+    },
+    "ReviewTarget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "provider",
+        "workspace",
+        "repo",
+        "prId",
+        "title",
+        "status",
+        "runId"
+      ],
+      "properties": {
+        "provider": {
+          "enum": [
+            "github",
+            "bitbucket"
+          ]
+        },
+        "workspace": {
+          "type": "string",
+          "minLength": 1
+        },
+        "repo": {
+          "type": "string",
+          "minLength": 1
+        },
+        "prId": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "title": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        },
+        "runId": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "ReviewTargetsResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "targets"
+      ],
+      "properties": {
+        "targets": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ReviewTarget"
+          }
+        }
+      }
     }
   },
   "oneOf": [
@@ -507,6 +742,78 @@
               "$ref": "#/definitions/OperationControlParams"
             }
           }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "type": {
+              "const": "request"
+            },
+            "id": {
+              "$ref": "#/definitions/RequestId"
+            },
+            "method": {
+              "const": "review.files"
+            },
+            "params": {
+              "$ref": "#/definitions/TargetParams"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "type": {
+              "const": "request"
+            },
+            "id": {
+              "$ref": "#/definitions/RequestId"
+            },
+            "method": {
+              "const": "review.findings"
+            },
+            "params": {
+              "$ref": "#/definitions/TargetParams"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "type": {
+              "const": "request"
+            },
+            "id": {
+              "$ref": "#/definitions/RequestId"
+            },
+            "method": {
+              "const": "review.targets"
+            },
+            "params": {
+              "$ref": "#/definitions/EmptyResult"
+            }
+          }
         }
       ]
     },
@@ -546,6 +853,15 @@
             },
             {
               "$ref": "#/definitions/EmptyResult"
+            },
+            {
+              "$ref": "#/definitions/ReviewFilesResult"
+            },
+            {
+              "$ref": "#/definitions/ReviewFindingsResult"
+            },
+            {
+              "$ref": "#/definitions/ReviewTargetsResult"
             }
           ]
         }

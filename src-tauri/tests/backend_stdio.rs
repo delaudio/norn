@@ -292,6 +292,170 @@ fn diff_file_reports_staged_addition_without_head() {
 }
 
 #[test]
+fn review_files_lists_changed_files() {
+    let repo = temp_repo();
+    std::fs::write(repo.path().join("a.txt"), "one\n").expect("write");
+    git(repo.path(), &["add", "-A"]);
+    git(repo.path(), &["commit", "-qm", "init"]);
+    std::fs::write(repo.path().join("a.txt"), "two\n").expect("modify");
+    std::fs::write(repo.path().join("new.txt"), "fresh\n").expect("untracked");
+
+    let mut backend = Backend::spawn(repo.path());
+    backend.handshake();
+    backend.send(json!({
+        "type": "request",
+        "id": "req-files",
+        "method": "review.files",
+        "params": { "target": { "kind": "local", "localSnapshotSha256": LOCAL_SHA } }
+    }));
+    let response = backend.wait_for(
+        |v| v["type"] == "response" && v["id"] == "req-files",
+        Duration::from_secs(5),
+    );
+    assert_eq!(response["ok"], true, "response: {response}");
+    let files = response["result"]["files"].as_array().expect("files array");
+    let paths: Vec<&str> = files.iter().filter_map(|f| f["path"].as_str()).collect();
+    assert!(paths.contains(&"a.txt"), "paths: {paths:?}");
+    assert!(paths.contains(&"new.txt"), "paths: {paths:?}");
+    let untracked = files
+        .iter()
+        .find(|f| f["path"] == "new.txt")
+        .expect("untracked entry");
+    assert_eq!(untracked["additions"], 1);
+}
+
+#[test]
+fn review_files_reports_renames_without_bogus_entries() {
+    let repo = temp_repo();
+    std::fs::write(repo.path().join("old.txt"), "one\n").expect("write");
+    git(repo.path(), &["add", "-A"]);
+    git(repo.path(), &["commit", "-qm", "init"]);
+    git(repo.path(), &["mv", "old.txt", "renamed.txt"]);
+    std::fs::write(repo.path().join("renamed.txt"), "one\ntwo\n").expect("edit");
+
+    let mut backend = Backend::spawn(repo.path());
+    backend.handshake();
+    backend.send(json!({
+        "type": "request",
+        "id": "req-rename",
+        "method": "review.files",
+        "params": { "target": { "kind": "local", "localSnapshotSha256": LOCAL_SHA } }
+    }));
+    let response = backend.wait_for(
+        |v| v["type"] == "response" && v["id"] == "req-rename",
+        Duration::from_secs(5),
+    );
+    assert_eq!(response["ok"], true, "response: {response}");
+    let files = response["result"]["files"].as_array().expect("files array");
+    let paths: Vec<&str> = files.iter().filter_map(|f| f["path"].as_str()).collect();
+    assert_eq!(paths, vec!["renamed.txt"], "paths: {paths:?}");
+    let entry = &files[0];
+    assert_eq!(entry["status"], "renamed");
+    assert_eq!(entry["oldPath"], "old.txt");
+    assert!(entry["additions"].as_u64().unwrap_or(0) >= 1);
+}
+
+#[test]
+fn review_files_lists_staged_files_before_the_first_commit() {
+    let repo = temp_repo();
+    std::fs::write(repo.path().join("first.txt"), "hello\n").expect("write");
+    git(repo.path(), &["add", "-A"]);
+
+    let mut backend = Backend::spawn(repo.path());
+    backend.handshake();
+    backend.send(json!({
+        "type": "request",
+        "id": "req-unborn",
+        "method": "review.files",
+        "params": { "target": { "kind": "local", "localSnapshotSha256": LOCAL_SHA } }
+    }));
+    let response = backend.wait_for(
+        |v| v["type"] == "response" && v["id"] == "req-unborn",
+        Duration::from_secs(5),
+    );
+    assert_eq!(response["ok"], true, "response: {response}");
+    let files = response["result"]["files"].as_array().expect("files array");
+    let paths: Vec<&str> = files.iter().filter_map(|f| f["path"].as_str()).collect();
+    assert_eq!(paths, vec!["first.txt"], "paths: {paths:?}");
+    assert_eq!(files[0]["status"], "added");
+}
+
+#[test]
+fn review_files_preserves_filenames_with_tabs() {
+    let repo = temp_repo();
+    let name = "weird\tname.txt";
+    std::fs::write(repo.path().join(name), "one\n").expect("write");
+    git(repo.path(), &["add", "-A"]);
+    git(repo.path(), &["commit", "-qm", "init"]);
+    std::fs::write(repo.path().join(name), "one\ntwo\n").expect("edit");
+
+    let mut backend = Backend::spawn(repo.path());
+    backend.handshake();
+    backend.send(json!({
+        "type": "request",
+        "id": "req-tab",
+        "method": "review.files",
+        "params": { "target": { "kind": "local", "localSnapshotSha256": LOCAL_SHA } }
+    }));
+    let response = backend.wait_for(
+        |v| v["type"] == "response" && v["id"] == "req-tab",
+        Duration::from_secs(5),
+    );
+    assert_eq!(response["ok"], true, "response: {response}");
+    let files = response["result"]["files"].as_array().expect("files array");
+    let paths: Vec<&str> = files.iter().filter_map(|f| f["path"].as_str()).collect();
+    assert_eq!(paths, vec![name], "paths: {paths:?}");
+    assert!(files[0]["additions"].as_u64().unwrap_or(0) >= 1);
+}
+
+#[test]
+fn review_targets_returns_a_target_list() {
+    let repo = temp_repo();
+    let mut backend = Backend::spawn(repo.path());
+    backend.handshake();
+    backend.send(json!({
+        "type": "request",
+        "id": "req-targets",
+        "method": "review.targets",
+        "params": {}
+    }));
+    let response = backend.wait_for(
+        |v| v["type"] == "response" && v["id"] == "req-targets",
+        Duration::from_secs(5),
+    );
+    assert_eq!(response["ok"], true, "response: {response}");
+    assert!(response["result"]["targets"].is_array());
+}
+
+#[test]
+fn diff_file_before_first_commit_includes_staged_content() {
+    let repo = temp_repo();
+    std::fs::write(repo.path().join("first.txt"), "one\n").expect("write");
+    git(repo.path(), &["add", "-A"]);
+    std::fs::write(repo.path().join("first.txt"), "one\ntwo\n").expect("edit");
+
+    let mut backend = Backend::spawn(repo.path());
+    backend.handshake();
+    backend.send(json!({
+        "type": "request",
+        "id": "req-unborn-diff",
+        "method": "diff.file",
+        "params": {
+            "target": { "kind": "local", "localSnapshotSha256": LOCAL_SHA },
+            "path": "first.txt"
+        }
+    }));
+    let response = backend.wait_for(
+        |v| v["type"] == "response" && v["id"] == "req-unborn-diff",
+        Duration::from_secs(5),
+    );
+    assert_eq!(response["ok"], true, "response: {response}");
+    let diff = response["result"]["diff"].as_str().expect("diff string");
+    assert!(diff.contains("+one"), "diff: {diff}");
+    assert!(diff.contains("+two"), "diff: {diff}");
+}
+
+#[test]
 fn malformed_frames_do_not_stop_the_backend() {
     let repo = temp_repo();
     let mut backend = Backend::spawn(repo.path());
