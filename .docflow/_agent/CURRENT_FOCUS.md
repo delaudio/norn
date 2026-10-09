@@ -8,25 +8,29 @@ If status files and git disagree, git is authoritative; correct this file.
 
 ## Active state
 
-- **Branch:** `issue-297-opentui-protocol` (to be created).
-- **Active item:** epic #294 step 03/15, issue #297 - define and generate the
-  versioned typed stdio protocol.
-- **Change:** single contract source `protocol/norn-protocol.schema.json`
-  (JSON Schema draft-07) with shared fixtures in `protocol/fixtures/`. Generated
-  TypeScript types + schema copy in `src/protocol/generated/`
-  (`pnpm run protocol:generate`) and a runtime ajv validator in
-  `src/protocol/validate.ts`. Rust types and newline-delimited framing in
-  `src-tauri/src/protocol.rs` (handshake, envelopes, error taxonomy,
-  first-slice methods, operation events, `SequenceGuard`). `pnpm run
-  protocol:check` fails CI on drift and is wired into the CI `verify` lane and
-  the release gate.
-- **Plan items:** `.docflow/plan/todo/0018-opentui-protocol.md` (this item);
+- **Branch:** `issue-298-opentui-backend` (to be created).
+- **Active item:** epic #294 step 04/15, issue #298 - persistent Rust stdio
+  backend and operation lifecycle.
+- **Change:** `src-tauri/src/backend.rs` + the `norn-backend` binary: versioned
+  handshake, typed dispatch (`repository.status`, `diff.file`,
+  `review.start`, `operation.status`, `operation.cancel`, `shutdown`), a single
+  serialized writer with a bounded queue, operations on their own threads,
+  cancellation honoured after the last file, untracked-file diffs, provider
+  target resolution, and graceful shutdown on `shutdown`/EOF. Real subprocess
+  integration tests in `src-tauri/tests/backend_stdio.rs`.
+- **Plan items:** `.docflow/plan/todo/0019-opentui-backend.md` (this item);
   `plan/done/2026-10-09-opentui-rust-architecture.md` (#295).
+
+## Limitation
+
+- `review.start` drives the operation lifecycle over the collected target
+  snapshot; the AI/review engine is connected in #301/#303. It does not fabricate
+  findings and fails when the target has no reviewable local repository.
 
 ## Next item
 
-- After #297 merges, proceed to #298 (persistent Rust stdio backend and
-  operation lifecycle), blocked by #296 and #297 (both done).
+- After #298 merges, proceed to #299 (OpenTUI React shell and typed backend
+  client), blocked by #297 and #298 (both done).
 
 ## Epic queue
 
