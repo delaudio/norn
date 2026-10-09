@@ -39,3 +39,7 @@ stories, and a live OpenTUI runtime in the browser.
 
 - `../../adr/0020-opentui-rust-stdio-workspace.md`
 - `../../../docs/opentui-migration/migration-contract.md`
+
+---
+
+Shipped in `a47ab88` (PR #315, issue #300).

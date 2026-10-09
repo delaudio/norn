@@ -41,3 +41,7 @@ OpenTUI, or performing provider calls from TypeScript.
 
 - `../../adr/0020-opentui-rust-stdio-workspace.md`
 - `../../../docs/opentui-migration/migration-contract.md`
+
+---
+
+Shipped in `25c7caf` (PR #314, issue #299).

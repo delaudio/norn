@@ -187,6 +187,16 @@ async function targetScene() {
   return { store, client };
 }
 
+async function splitScene() {
+  const { client, store, ready } = readyStore(
+    new FakeBackendTransport({ repositories, files, findings }),
+  );
+  await ready;
+  await Bun.sleep(5);
+  store.toggleDiffMode();
+  return { store, client };
+}
+
 const scenes: Scene[] = [
   { id: "shell-ready-80x24", cols: 80, rows: 24, build: readyScene },
   { id: "shell-ready-50x15", cols: 50, rows: 15, build: readyScene },
@@ -198,6 +208,7 @@ const scenes: Scene[] = [
   { id: "shell-review-80x24", cols: 80, rows: 24, build: reviewScene },
   { id: "shell-stale-anchor-80x24", cols: 80, rows: 24, build: staleAnchorScene },
   { id: "shell-review-targets-120x30", cols: 120, rows: 30, build: targetScene },
+  { id: "shell-split-120x30", cols: 120, rows: 30, build: splitScene },
 ];
 
 function color(value: RGBA): string {

@@ -79,3 +79,20 @@ comparison is not.
 - The OpenTUI benchmark command is committed and repeatable.
 - Ratatui-vs-OpenTUI numbers exist on the same host and the contract thresholds
   are checked. Until then this item stays open.
+
+## Large-diff rendering (step 08)
+
+`ui/scripts/bench.ts` also renders a generated large diff (1,000 and 10,000
+lines) in unified and split modes with viewport culling enabled on the diff
+scrollbox, and reports the mount cost and the split-mode repaint cost.
+
+Reference run (Apple silicon, Bun 1.3.8, 120x30 terminal):
+
+| lines | mount ms | split repaint ms | process RSS MB |
+| ----- | -------- | ---------------- | -------------- |
+| 1000  | 26.86    | 73.27            | 207            |
+| 10000 | 301.76   | 737.94           | 461            |
+
+Viewport culling stops rendering off-screen rows but React still mounts one
+element per diff line, so mount cost still grows with line count. Full windowed
+virtualization remains a follow-up within the scalable-diff work item.

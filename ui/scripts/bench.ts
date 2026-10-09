@@ -99,11 +99,53 @@ for (const count of [10, 100, 1000]) {
   results.push(await measure(count));
 }
 
+function largeDiff(lineCount: number): string {
+  const body = Array.from({ length: lineCount }, (_, index) =>
+    index % 2 === 0 ? `+line ${index}` : `-line ${index}`,
+  ).join("\n");
+  return `@@ -1,${lineCount} +1,${lineCount} @@\n${body}\n`;
+}
+
+async function measureLargeDiff(lineCount: number) {
+  const client = new BackendClient(
+    new FakeBackendTransport({
+      repositories,
+      files: files(1),
+      findings: [],
+      diffText: largeDiff(lineCount),
+    }),
+  );
+  const store = new ShellStore();
+  await store.connect(client);
+  const renderer = await createTestRenderer({ width: 120, height: 30 });
+  const mountStart = performance.now();
+  const ui = mountApp(renderer.renderer, store, client, () => {});
+  await renderer.renderOnce();
+  const mountMs = round(performance.now() - mountStart);
+
+  // Repaint a large diff in split mode to exercise the row mapping + culling.
+  const repaintStart = performance.now();
+  store.toggleDiffMode();
+  await renderer.renderOnce();
+  const splitRepaintMs = round(performance.now() - repaintStart);
+
+  const processRssMb = Math.round(process.memoryUsage().rss / (1024 * 1024));
+  ui.unmount();
+  renderer.renderer.destroy();
+  return { lines: lineCount, mountMs, splitRepaintMs, processRssMb };
+}
+
+const largeDiffResults = [];
+for (const lineCount of [1000, 10000]) {
+  largeDiffResults.push(await measureLargeDiff(lineCount));
+}
+
 console.log(
   JSON.stringify(
     {
       runtime: { bun: Bun.version, platform: process.platform, arch: process.arch },
       results,
+      largeDiffResults,
     },
     null,
     2,
