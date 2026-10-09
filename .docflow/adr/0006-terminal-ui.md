@@ -1,11 +1,11 @@
 ---
 adr: 0006
 title: Support a terminal UI as a second local review interface
-status: Implemented
+status: Superseded
 date: 2026-07-23
 owner: default-agent
 supersedes:
-superseded-by:
+superseded-by: 0020
 depends-on: [0002, 0003, 0004]
 tags: [tui, cli, rust, review-ui]
 ---
@@ -109,6 +109,7 @@ the desktop app, and preserves Lachesi's staged review workflow.
 | 2026-07-23 | r1 | default-agent | Accepted the terminal UI as a second local review interface. |
 | 2026-07-24 | r2 | default-agent | Made TUI AI review skip duplicate local analyzers. |
 | 2026-07-30 | r3 | default-agent | Aligned native and split diff workflows with the shipped implementation and marked the terminal UI capability implemented after PR #146. |
+| 2026-10-09 | r4 | default-agent | Superseded by ADR 0020, which replaces the Ratatui terminal UI with an OpenTUI React workspace over a Rust stdio backend. |
 
 ## Approvals
 
