@@ -10,7 +10,7 @@ metadata.
 | 0003 | Credentials in the OS keychain, config in a settings file | Implemented | 2026-06-18 | default-agent | credentials, security, settings |
 | 0004 | Diff rendering with react-diff-view | Implemented | 2026-06-18 | default-agent | frontend, diff, review-ui |
 | 0005 | Publish an agentic code review policy pack prototype | Implemented | 2026-07-10 | default-agent | policy, examples, monetization |
-| 0006 | Support a terminal UI as a second local review interface | Implemented | 2026-07-23 | default-agent | tui, cli, rust, review-ui |
+| 0006 | Support a terminal UI as a second local review interface | Superseded | 2026-07-23 | default-agent | tui, cli, rust, review-ui |
 | 0007 | Run reviews through a headless local CLI | Implemented | 2026-07-24 | default-agent | cli, headless, review, automation, codex |
 | 0008 | Run shared reviews as an opt-in tenant-isolated service | Accepted | 2026-07-27 | default-agent | service, trust, multi-tenant, open-core, review |
 | 0009 | Render bounded image diffs in supported terminals | Implemented | 2026-07-28 | default-agent | tui, diff, images, terminal |
@@ -24,3 +24,4 @@ metadata.
 | 0017 | Review local changes before publication | Accepted | 2026-09-03 | codex | local, review, git, tui, desktop, diff |
 | 0018 | Run AI reviews through an OpenCode provider | Implemented | 2026-09-28 | default-agent | ai, provider, opencode, deepseek, cli, review |
 | 0019 | Produce evidence-backed repository health audits from a stable snapshot | Accepted | 2026-10-04 | default-agent | audit, repository, inventory, evidence, security, cli, tui |
+| 0020 | Run the interactive workspace on OpenTUI React over a Rust stdio backend | Accepted | 2026-10-09 | default-agent | opentui, tui, react, typescript, rust, stdio, ipc, migration, desktop |
