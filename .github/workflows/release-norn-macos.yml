@@ -77,6 +77,7 @@ jobs:
           cargo test --locked --manifest-path src-tauri/Cargo.toml --test cli_entrypoint --no-default-features
           cargo test --locked --manifest-path src-tauri/Cargo.toml --bin norn --all-features
           cargo test --locked --manifest-path src-tauri/Cargo.toml --all-targets --no-default-features --features custom-protocol
+          pnpm run test:rust:core
           pnpm run test:tauri
 
       - name: Run release metadata and architecture gates
@@ -132,7 +133,7 @@ jobs:
           mkdir -p "$artifacts_dir"
 
           pnpm run browser-diff:build
-          cargo build --locked --manifest-path src-tauri/Cargo.toml --release --target "$TARGET" --no-default-features --features custom-protocol --bin norn --bin norn-tui
+          cargo build --locked --manifest-path src-tauri/Cargo.toml --release --target "$TARGET" --no-default-features --features custom-protocol,tui --bin norn --bin norn-tui
 
           tarball="norn-${version}-macos-${ARCHITECTURE}.tar.gz"
           archive_root="$RUNNER_TEMP/norn-command-${ARCHITECTURE}"

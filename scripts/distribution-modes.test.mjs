@@ -7,10 +7,13 @@ const packageManifest = JSON.parse(readFileSync("package.json", "utf8"));
 const releaseWorkflow = readFileSync(".github/workflows/release-norn-macos.yml", "utf8");
 const windowsRunner = readFileSync("justfile", "utf8");
 const serviceDockerfile = readFileSync("Dockerfile.service", "utf8");
+const coreDependencyGuard = readFileSync("scripts/verify-core-no-gui-deps.mjs", "utf8");
 
 test("desktop routing is the safe default for package builds", () => {
   assert.match(cargoManifest, /^default = \["desktop-bundle"\]$/m);
-  assert.match(cargoManifest, /^desktop-bundle = \[\]$/m);
+  assert.match(cargoManifest, /^desktop-bundle = \["desktop", "tui"\]$/m);
+  assert.match(cargoManifest, /^desktop = \[/m);
+  assert.match(cargoManifest, /^tui = \[/m);
   assert.match(
     windowsRunner,
     /tauri build --bundles nsis --features custom-protocol,desktop-bundle/,
@@ -25,14 +28,16 @@ test("command distributions explicitly disable desktop routing", () => {
   for (const scriptName of ["install:build", "cli:build", "tui:build", "evaluate"]) {
     assert.match(packageManifest.scripts[scriptName], /--no-default-features/);
   }
-  assert.match(
-    packageManifest.scripts.evaluate,
-    /--no-default-features --features custom-protocol --bin norn -- evaluate/,
-  );
+  assert.match(packageManifest.scripts.evaluate, /--no-default-features --bin norn -- evaluate/);
+  assert.match(packageManifest.scripts["test:rust:core"], /--no-default-features/);
+  assert.match(packageManifest.scripts["test:rust:core"], /verify-core-no-gui-deps\.mjs/);
+  assert.match(coreDependencyGuard, /tauri/);
+  assert.match(coreDependencyGuard, /ratatui/);
+  assert.match(coreDependencyGuard, /process\.exit\(1\)/);
   assert.match(serviceDockerfile, /cargo build .*--no-default-features.*--bin norn/);
   assert.match(
     releaseWorkflow,
-    /cargo build .*--target "\$TARGET" --no-default-features --features custom-protocol --bin norn --bin norn-tui/,
+    /cargo build .*--target "\$TARGET" --no-default-features --features custom-protocol,tui --bin norn --bin norn-tui/,
   );
   assert.match(
     releaseWorkflow,

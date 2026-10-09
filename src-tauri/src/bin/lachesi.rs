@@ -3,5 +3,8 @@ fn main() {
     if let Some(exit_code) = norn_lib::cli::run_from_env_if_cli() {
         std::process::exit(exit_code);
     }
-    norn_lib::run()
+    #[cfg(feature = "desktop")]
+    norn_lib::run();
+    #[cfg(not(feature = "desktop"))]
+    std::process::exit(2);
 }

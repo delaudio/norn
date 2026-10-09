@@ -156,6 +156,7 @@ struct CollectedLocalDiff {
     warnings: Vec<String>,
 }
 
+#[cfg(feature = "desktop")]
 #[tauri::command]
 pub fn get_local_review_snapshot(
     provider: Option<ReviewProvider>,

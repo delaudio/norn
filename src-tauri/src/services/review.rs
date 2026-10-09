@@ -5785,6 +5785,7 @@ fn run_inline_review_pipeline(
     Ok(())
 }
 
+#[cfg(feature = "desktop")]
 #[tauri::command]
 pub fn get_ai_review_run_state(
     store: tauri::State<'_, AiReviewRunStore>,
@@ -5795,6 +5796,7 @@ pub fn get_ai_review_run_state(
     clone_inline_review_state(store.inner(), &pr_key(&workspace, &repo, id))
 }
 
+#[cfg(feature = "desktop")]
 #[tauri::command]
 pub fn load_ai_review_store(
     workspace: String,
@@ -6177,6 +6179,7 @@ pub fn run_headless_review_native(
         })
 }
 
+#[cfg(feature = "desktop")]
 #[tauri::command]
 pub fn create_ai_review_thread(
     workspace: String,
@@ -6220,6 +6223,7 @@ pub fn create_ai_review_thread(
     Ok(store)
 }
 
+#[cfg(feature = "desktop")]
 #[tauri::command]
 pub fn set_active_ai_review_thread(
     workspace: String,
@@ -6235,6 +6239,7 @@ pub fn set_active_ai_review_thread(
     Ok(store)
 }
 
+#[cfg(feature = "desktop")]
 #[tauri::command]
 pub fn delete_ai_review_thread(
     workspace: String,
@@ -6261,6 +6266,7 @@ pub fn delete_ai_review_thread(
     Ok(Some(store))
 }
 
+#[cfg(feature = "desktop")]
 #[tauri::command]
 pub fn record_ai_review_finding_publication(
     workspace: String,
@@ -6280,6 +6286,7 @@ pub fn record_ai_review_finding_publication(
     Ok(Some(store))
 }
 
+#[cfg(feature = "desktop")]
 #[tauri::command]
 #[allow(
     clippy::too_many_arguments,
@@ -6350,6 +6357,7 @@ fn review_profile_for_thread(review_store: &AiReviewStoreData, thread_id: &str) 
         .and_then(|run| run.review_profile.clone())
 }
 
+#[cfg(feature = "desktop")]
 #[tauri::command]
 #[allow(
     clippy::too_many_arguments,
@@ -6466,6 +6474,7 @@ pub async fn reply_inline_review(
     Ok(initial)
 }
 
+#[cfg(feature = "desktop")]
 #[tauri::command]
 pub fn cancel_inline_review(
     store: tauri::State<'_, AiReviewRunStore>,
@@ -6507,6 +6516,7 @@ pub fn cancel_inline_review(
 }
 
 /// Run `claude --print` headlessly, capture stdout, persist to disk, return the review.
+#[cfg(feature = "desktop")]
 #[tauri::command]
 pub async fn run_inline_review(
     workspace: String,
@@ -6557,6 +6567,7 @@ pub async fn run_inline_review(
     .map_err(|e| e.to_string())?
 }
 
+#[cfg(feature = "desktop")]
 #[tauri::command]
 pub async fn draft_ai_review_comments(
     workspace: String,
@@ -6584,6 +6595,7 @@ pub async fn draft_ai_review_comments(
 }
 
 /// Load a previously saved review from disk; returns null if none exists.
+#[cfg(feature = "desktop")]
 #[tauri::command]
 pub fn load_saved_review(workspace: String, repo: String, id: u32) -> Option<SavedReview> {
     let store = load_review_store(&workspace, &repo, id).ok()??;
@@ -6600,6 +6612,7 @@ pub fn load_saved_review(workspace: String, repo: String, id: u32) -> Option<Sav
 }
 
 /// Delete a saved review.
+#[cfg(feature = "desktop")]
 #[tauri::command]
 pub fn delete_saved_review(workspace: String, repo: String, id: u32) {
     let _ = review_storage::delete_review(&workspace, &repo, id);
@@ -6607,11 +6620,13 @@ pub fn delete_saved_review(workspace: String, repo: String, id: u32) {
 
 /// Remove every review whose key is NOT in `keep_keys`.
 /// `keep_keys` contains strings of the form `{workspace}_{repo}_{id}`.
+#[cfg(feature = "desktop")]
 #[tauri::command]
 pub fn cleanup_stale_reviews(keep_keys: Vec<String>) {
     let _ = review_storage::cleanup_stale_reviews(&keep_keys);
 }
 
+#[cfg(feature = "desktop")]
 #[tauri::command]
 pub fn create_ai_review_job(
     workspace: String,
@@ -6633,6 +6648,7 @@ pub fn create_ai_review_job(
     )
 }
 
+#[cfg(feature = "desktop")]
 #[tauri::command]
 pub fn update_ai_review_job_status(
     job_id: String,
@@ -6648,11 +6664,13 @@ pub fn update_ai_review_job_status(
     )
 }
 
+#[cfg(feature = "desktop")]
 #[tauri::command]
 pub fn list_ai_review_jobs(limit: Option<u32>) -> Result<Vec<review_storage::ReviewJob>, String> {
     review_storage::list_recent_review_jobs(limit.unwrap_or(20).clamp(1, 100))
 }
 
+#[cfg(feature = "desktop")]
 #[tauri::command]
 pub fn get_ai_review_fix_state(
     store: tauri::State<'_, AiReviewFixStore>,
@@ -6667,6 +6685,7 @@ pub fn get_ai_review_fix_state(
     )
 }
 
+#[cfg(feature = "desktop")]
 #[tauri::command]
 #[allow(
     clippy::too_many_arguments,
@@ -6718,6 +6737,7 @@ pub async fn start_ai_review_fix(
     Ok(initial)
 }
 
+#[cfg(feature = "desktop")]
 #[tauri::command]
 pub async fn start_ai_review_commit(
     store: tauri::State<'_, AiReviewFixStore>,
@@ -6762,6 +6782,7 @@ pub async fn start_ai_review_commit(
     Ok(initial)
 }
 
+#[cfg(feature = "desktop")]
 #[tauri::command]
 pub async fn start_ai_review_push(
     store: tauri::State<'_, AiReviewFixStore>,
@@ -6793,6 +6814,7 @@ pub async fn start_ai_review_push(
     Ok(initial)
 }
 
+#[cfg(feature = "desktop")]
 #[tauri::command]
 #[allow(
     clippy::too_many_arguments,
@@ -6854,6 +6876,7 @@ pub async fn start_ai_conflict_resolution(
     Ok(initial)
 }
 
+#[cfg(feature = "desktop")]
 #[tauri::command]
 pub async fn sync_pr_branch(
     workspace: String,
@@ -6869,6 +6892,7 @@ pub async fn sync_pr_branch(
     .map_err(|e| e.to_string())?
 }
 
+#[cfg(feature = "desktop")]
 #[tauri::command]
 pub fn reset_ai_review_fix_state(
     store: tauri::State<'_, AiReviewFixStore>,

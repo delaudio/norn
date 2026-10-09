@@ -43,3 +43,6 @@ provider architecture, or treating unshipped backlog as migration requirements.
 
 - `../../adr/0020-opentui-rust-stdio-workspace.md`
 - `../../../docs/opentui-migration/migration-contract.md`
+
+Shipped through [PR #310](https://github.com/delaudio/norn/pull/310)
+(squash-merged to `main`); issue #295 closed.

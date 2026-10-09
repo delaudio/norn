@@ -249,6 +249,7 @@ fn review_terminal_options() -> Vec<ReviewTerminalOption> {
     ]
 }
 
+#[cfg(feature = "desktop")]
 #[tauri::command]
 pub fn list_review_terminals() -> Result<Vec<ReviewTerminalOption>, String> {
     Ok(review_terminal_options())
@@ -258,6 +259,7 @@ pub fn list_review_terminals() -> Result<Vec<ReviewTerminalOption>, String> {
 /// terminal. The shell starts `cd`-ed into the local clone of the repo if one
 /// can be found. Returns the repo path used, or None if no local clone was
 /// found (runs in $HOME then).
+#[cfg(feature = "desktop")]
 #[tauri::command]
 pub async fn launch_claude_review(
     workspace: String,

@@ -14,6 +14,7 @@ test("general CI runs the repository gates for every pull request", () => {
     "cargo fmt",
     "cargo clippy",
     "cargo test",
+    "pnpm run test:rust:core",
     "pnpm run test:rust:cli",
     "pnpm run test:tauri",
     "archgate check",
