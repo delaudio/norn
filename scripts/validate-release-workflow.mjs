@@ -93,9 +93,13 @@ const checks = [
   ],
   [
     workflow.includes(
-      'cargo build --locked --manifest-path src-tauri/Cargo.toml --release --target "$TARGET" --no-default-features --features custom-protocol --bin norn --bin norn-tui',
+      'cargo build --locked --manifest-path src-tauri/Cargo.toml --release --target "$TARGET" --no-default-features --features custom-protocol,tui --bin norn --bin norn-tui',
     ),
     "release archives explicitly disable desktop routing and use the production protocol",
+  ],
+  [
+    workflow.includes("pnpm run test:rust:core"),
+    "the release gate proves the engine builds without Tauri or Ratatui",
   ],
   [
     workflow.includes("src-tauri/target/$TARGET/release"),

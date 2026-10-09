@@ -450,6 +450,7 @@ fn count_commits(
 }
 
 /// Run blocking work on a worker thread so the webview never stalls.
+#[cfg(feature = "desktop")]
 async fn run<T, F>(f: F) -> Result<T, String>
 where
     T: Send + 'static,
@@ -1579,6 +1580,7 @@ pub fn load_config_native() -> Result<AppConfig, String> {
     Ok(cfg)
 }
 
+#[cfg(feature = "desktop")]
 #[tauri::command]
 pub fn load_config() -> Result<AppConfig, String> {
     load_config_native()
@@ -1618,6 +1620,7 @@ pub fn validate_repo_review_config_native(
     Ok(result)
 }
 
+#[cfg(feature = "desktop")]
 #[tauri::command]
 pub fn validate_repo_review_config(
     repo_path: String,
@@ -1626,6 +1629,7 @@ pub fn validate_repo_review_config(
     validate_repo_review_config_native(Path::new(&repo_path), review_profile.as_deref())
 }
 
+#[cfg(feature = "desktop")]
 #[tauri::command]
 #[allow(
     clippy::too_many_arguments,
@@ -1677,11 +1681,13 @@ pub fn save_config(
     })
 }
 
+#[cfg(feature = "desktop")]
 #[tauri::command]
 pub fn save_credentials(username: String, token: String) -> Result<(), String> {
     credentials::store(&Credentials { username, token })
 }
 
+#[cfg(feature = "desktop")]
 #[tauri::command]
 pub fn save_github_token(token: String) -> Result<(), String> {
     if token.trim().is_empty() {
@@ -1691,16 +1697,19 @@ pub fn save_github_token(token: String) -> Result<(), String> {
     }
 }
 
+#[cfg(feature = "desktop")]
 #[tauri::command]
 pub fn has_credentials() -> Result<bool, String> {
     Ok(credentials::has())
 }
 
+#[cfg(feature = "desktop")]
 #[tauri::command]
 pub fn clear_credentials() -> Result<(), String> {
     credentials::clear()
 }
 
+#[cfg(feature = "desktop")]
 #[tauri::command]
 pub fn save_jira_token(token: String) -> Result<(), String> {
     if token.trim().is_empty() {
@@ -1710,6 +1719,7 @@ pub fn save_jira_token(token: String) -> Result<(), String> {
     }
 }
 
+#[cfg(feature = "desktop")]
 #[tauri::command]
 pub fn save_notion_token(token: String) -> Result<(), String> {
     if token.trim().is_empty() {
@@ -1719,6 +1729,7 @@ pub fn save_notion_token(token: String) -> Result<(), String> {
     }
 }
 
+#[cfg(feature = "desktop")]
 #[tauri::command]
 pub async fn test_connection(
     provider: Option<ReviewProvider>,
@@ -1747,6 +1758,7 @@ pub async fn test_connection(
     .await
 }
 
+#[cfg(feature = "desktop")]
 #[tauri::command]
 pub async fn get_current_user(provider: Option<ReviewProvider>) -> Result<WorkspaceUser, String> {
     run(
@@ -1795,6 +1807,7 @@ pub fn list_pull_requests_native(
     }
 }
 
+#[cfg(feature = "desktop")]
 #[tauri::command]
 pub async fn list_pull_requests(
     provider: Option<ReviewProvider>,
@@ -1805,6 +1818,7 @@ pub async fn list_pull_requests(
     run(move || list_pull_requests_native(provider, &workspace, &repo, &opts)).await
 }
 
+#[cfg(feature = "desktop")]
 #[tauri::command]
 pub async fn list_closed_pr_metrics(
     repos: Vec<RepoRef>,
@@ -1818,6 +1832,7 @@ pub async fn list_closed_pr_metrics(
     .await
 }
 
+#[cfg(feature = "desktop")]
 #[tauri::command]
 pub async fn sync_closed_pr_metrics(
     repos: Vec<RepoRef>,
@@ -1940,6 +1955,7 @@ pub async fn sync_closed_pr_metrics(
     .await
 }
 
+#[cfg(feature = "desktop")]
 #[tauri::command]
 pub async fn get_pull_request(
     provider: Option<ReviewProvider>,
@@ -1968,6 +1984,7 @@ pub fn get_pull_request_native(
     }
 }
 
+#[cfg(feature = "desktop")]
 #[tauri::command]
 pub async fn approve_pull_request(
     provider: Option<ReviewProvider>,
@@ -2009,6 +2026,7 @@ pub async fn approve_pull_request(
     .await
 }
 
+#[cfg(feature = "desktop")]
 #[tauri::command]
 pub async fn get_branch_status(
     provider: Option<ReviewProvider>,
@@ -2069,6 +2087,7 @@ pub fn get_diffstat_native(
     }
 }
 
+#[cfg(feature = "desktop")]
 #[tauri::command]
 pub async fn get_diffstat(
     provider: Option<ReviewProvider>,
@@ -2079,6 +2098,7 @@ pub async fn get_diffstat(
     run(move || get_diffstat_native(provider, &workspace, &repo, id)).await
 }
 
+#[cfg(feature = "desktop")]
 #[tauri::command]
 pub async fn get_pr_diff(
     provider: Option<ReviewProvider>,
@@ -2164,6 +2184,7 @@ pub fn get_stable_pull_request_review_snapshot_native(
     })
 }
 
+#[cfg(feature = "desktop")]
 #[tauri::command]
 pub async fn get_pr_file_preview(
     provider: Option<ReviewProvider>,
@@ -2682,6 +2703,7 @@ pub fn reconcile_review_findings_native(
     .reconcile(request)
 }
 
+#[cfg(feature = "desktop")]
 #[tauri::command]
 pub async fn reconcile_review_findings(
     request: FindingReconciliationRequest,
@@ -2719,6 +2741,7 @@ pub fn publish_review_finding_native(
     .publish(request)
 }
 
+#[cfg(feature = "desktop")]
 #[tauri::command]
 pub async fn publish_review_finding(
     request: FindingPublicationRequest,
@@ -3033,6 +3056,7 @@ fn publication_rate_limit_error(error: &str) -> bool {
         || lower.contains("abuse")
 }
 
+#[cfg(feature = "desktop")]
 #[tauri::command]
 pub async fn list_comments(
     provider: Option<ReviewProvider>,
@@ -3074,6 +3098,7 @@ pub fn list_comments_native(
     }
 }
 
+#[cfg(feature = "desktop")]
 #[tauri::command]
 pub async fn create_inline_comment(
     provider: Option<ReviewProvider>,
@@ -3157,6 +3182,7 @@ pub async fn create_inline_comment(
     .await
 }
 
+#[cfg(feature = "desktop")]
 #[tauri::command]
 pub async fn create_general_comment(
     provider: Option<ReviewProvider>,
@@ -3225,6 +3251,7 @@ pub fn create_general_comment_native(
     }
 }
 
+#[cfg(feature = "desktop")]
 #[tauri::command]
 pub async fn delete_comment(
     provider: Option<ReviewProvider>,

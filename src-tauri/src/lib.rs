@@ -1,7 +1,13 @@
+// During the OpenTUI migration the Tauri desktop adapter is gated behind the
+// `desktop` feature. Without it, desktop-only helpers, imports, and DTO fields
+// are intentionally unused in the Tauri-free engine build.
+#![cfg_attr(not(feature = "desktop"), allow(dead_code, unused_imports))]
+
 pub mod administrative_audit;
 mod agent_skills;
 pub mod bitbucket_oauth_onboarding;
 pub mod cli;
+#[cfg(feature = "desktop")]
 mod commands;
 mod config;
 mod credentials;
@@ -34,6 +40,7 @@ pub mod team_authorization;
 pub mod team_credentials;
 pub mod team_oidc;
 mod terminal_auth;
+#[cfg(feature = "tui")]
 pub mod tui;
 pub mod webhook_ingress;
 
@@ -49,15 +56,19 @@ pub use review_storage::{
 };
 pub use services::bitbucket::{publish_review_finding_native, reconcile_review_findings_native};
 
+#[cfg(feature = "desktop")]
 use commands::{bitbucket, context, repositories, review};
+#[cfg(feature = "desktop")]
 use tauri::{
     menu::{Menu, MenuItem, PredefinedMenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     Emitter, Manager,
 };
 
+#[cfg(feature = "desktop")]
 const TRAY_ID: &str = "norn-main";
 
+#[cfg(feature = "desktop")]
 fn setup_menu_bar(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     let status = MenuItem::with_id(app, "status", "● Starting Norn...", false, None::<&str>)?;
     let separator_top = PredefinedMenuItem::separator(app)?;
@@ -123,6 +134,7 @@ fn setup_menu_bar(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+#[cfg(feature = "desktop")]
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     if let Err(error) = runtime_identity::migrate_webview_storage() {
@@ -209,7 +221,7 @@ pub fn run() {
         .expect("error while running tauri application");
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "desktop"))]
 mod tauri_ipc_smoke {
     use std::{
         fs,

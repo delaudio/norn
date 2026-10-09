@@ -173,16 +173,23 @@ Navigation is state-driven through the `AppSelection` union type, not React
 Router. Browser dev and Storybook use the mock IPC layer in
 `src/mock-tauri/`.
 
-`src-tauri/Cargo.toml` must keep the `custom-protocol` cargo feature
-(`custom-protocol = ["tauri/custom-protocol"]`) declared. Without it, every
-Tauri build — `cargo build`, `cargo build --release`, and even `tauri build`
-if the feature is missing entirely — loads `build.devUrl` from
-`tauri.conf.json` instead of the embedded `frontendDist`. That means the
-compiled binary silently tries to reach the Vite dev server on every launch;
-if it isn't running, the window shows a blank white screen with no console
-error and no crash. `pnpm run cli:build` passes `--no-default-features
---features custom-protocol` explicitly for this reason — don't drop either flag
-when touching the script.
+`src-tauri/Cargo.toml` gates the Tauri desktop adapter behind the optional
+`desktop` feature and the Ratatui terminal UI behind the optional `tui` feature.
+The default `desktop-bundle` feature enables both. A `--no-default-features`
+build is the Tauri- and Ratatui-free engine/headless build; `pnpm run
+test:rust:core` proves it compiles and that `tauri`, `ratatui`, `crossterm`, and
+`ratatui-image` are absent from its active dependency tree.
+
+Keep the `custom-protocol` feature declared as
+`custom-protocol = ["desktop", "tauri/custom-protocol"]`. Without it, every
+Tauri build — `cargo build`, `cargo build --release`, and even `tauri build` if
+the feature is missing entirely — loads `build.devUrl` from `tauri.conf.json`
+instead of the embedded `frontendDist`. That means the compiled binary silently
+tries to reach the Vite dev server on every launch; if it isn't running, the
+window shows a blank white screen with no console error and no crash.
+`pnpm run cli:build` passes `--no-default-features --features
+custom-protocol,tui` to build the CLI, the interactive terminal UI, and the
+desktop launcher together — don't drop the flags when touching the script.
 
 The headless service image is intentionally exempt from `custom-protocol`: it
 does not copy or serve frontend assets. Its Docker build must still pass

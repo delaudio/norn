@@ -2145,6 +2145,7 @@ pub fn review_effectiveness_metrics(
         .map_err(|error| error.to_string())
 }
 
+#[cfg(feature = "desktop")]
 #[tauri::command]
 pub fn get_review_effectiveness_metrics(
     filter: ReviewEffectivenessFilter,

@@ -39,6 +39,7 @@ fn main() {
     // particular, a Windows GUI-subsystem binary has no reliable console for
     // CLI output; command behavior belongs to the separately built CLI.
     if distribution_mode(cfg!(feature = "desktop-bundle")) == DistributionMode::Desktop {
+        #[cfg(feature = "desktop")]
         norn_lib::run();
         return;
     }
@@ -52,9 +53,15 @@ fn main() {
             std::io::stdout().is_terminal(),
         ) {
             ZeroArgumentLaunch::Tui => {
+                #[cfg(feature = "tui")]
                 if let Err(error) = norn_lib::tui::run_from_env() {
                     eprintln!("norn-tui: {error}");
                     std::process::exit(1);
+                }
+                #[cfg(not(feature = "tui"))]
+                {
+                    eprintln!("norn: this build does not include the terminal UI; showing help.");
+                    let _ = norn_lib::cli::print_usage();
                 }
             }
             ZeroArgumentLaunch::Help => std::process::exit(norn_lib::cli::print_usage()),
