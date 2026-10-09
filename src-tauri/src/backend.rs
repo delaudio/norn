@@ -442,7 +442,7 @@ fn review_targets_response() -> serde_json::Value {
                 "prId": job.pr_id,
                 "runId": job.id,
                 "title": job.pr_title,
-                "status": serde_json::to_value(&job.status).unwrap_or_else(|_| json!("unknown")),
+                "status": serde_json::to_value(job.status).unwrap_or_else(|_| json!("unknown")),
             }));
         }
     }
@@ -1193,9 +1193,9 @@ fn findings_response(target: &TargetIdentity) -> Result<serde_json::Value, Proto
 }
 
 fn finding_json(finding: crate::services::review::ReviewFinding) -> serde_json::Value {
-    let severity = serde_json::to_value(&finding.severity).unwrap_or_else(|_| json!("info"));
+    let severity = serde_json::to_value(finding.severity).unwrap_or_else(|_| json!("info"));
     let anchor = finding.anchor.as_ref().map(|anchor| {
-        let side = serde_json::to_value(&anchor.side).unwrap_or_else(|_| json!("new"));
+        let side = serde_json::to_value(anchor.side).unwrap_or_else(|_| json!("new"));
         json!({
             "path": anchor.path,
             "startLine": anchor.start_line,
