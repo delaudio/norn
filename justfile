@@ -74,6 +74,10 @@ ui-typecheck:
 ui-test:
     pnpm run ui:test
 
+# Native terminal frame visual regression (Bun).
+ui-frames-check:
+    pnpm run ui:frames:check
+
 # Offline review-quality corpus gate.
 evaluate:
     pnpm run evaluate
