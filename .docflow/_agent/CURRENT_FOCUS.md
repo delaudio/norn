@@ -8,29 +8,31 @@ If status files and git disagree, git is authoritative; correct this file.
 
 ## Active state
 
-- **Branch:** `issue-298-opentui-backend` (to be created).
-- **Active item:** epic #294 step 04/15, issue #298 - persistent Rust stdio
-  backend and operation lifecycle.
-- **Change:** `src-tauri/src/backend.rs` + the `norn-backend` binary: versioned
-  handshake, typed dispatch (`repository.status`, `diff.file`,
-  `review.start`, `operation.status`, `operation.cancel`, `shutdown`), a single
-  serialized writer with a bounded queue, operations on their own threads,
-  cancellation honoured after the last file, untracked-file diffs, provider
-  target resolution, and graceful shutdown on `shutdown`/EOF. Real subprocess
-  integration tests in `src-tauri/tests/backend_stdio.rs`.
-- **Plan items:** `.docflow/plan/todo/0019-opentui-backend.md` (this item);
-  `plan/done/2026-10-09-opentui-rust-architecture.md` (#295).
+- **Branch:** `issue-299-opentui-shell` (to be created).
+- **Active item:** epic #294 step 05/15, issue #299 - OpenTUI React shell and
+  typed backend client.
+- **Change:** new `ui/` Bun package (`@norn/ui`) with OpenTUI 0.5.17 + React
+  19.3.0: a typed `BackendClient` over a `BackendTransport` interface with a
+  production `ProcessBackendTransport` (spawns `norn-backend` by resolved path,
+  NDJSON over stdin, request correlation, bounded pending, timeouts, EOF and
+  version-mismatch handling) and a deterministic `FakeBackendTransport`; a
+  `ShellStore` that fences async results by target generation and operation id;
+  an OpenTUI shell with panels, focus navigation, help, status/error/loading/
+  empty views and responsive layout; and `src/main.ts` with terminal restore on
+  quit/Ctrl+C/init failure. `ui/` has its own typecheck and `bun test` suites; a
+  CI `ui` job and `ui-typecheck`/`ui-test` task-runner recipes were added.
+- **Plan items:** `.docflow/plan/todo/0020-opentui-shell.md` (this item);
+  `plan/done/2026-10-09-opentui-{rust-architecture,engine-extraction,protocol,backend}.md`.
 
-## Limitation
+## Known limitation
 
-- `review.start` drives the operation lifecycle over the collected target
-  snapshot; the AI/review engine is connected in #301/#303. It does not fabricate
-  findings and fails when the target has no reviewable local repository.
+- PTY smoke for terminal restoration is deferred to #307; renderer/input tests
+  cover focus, navigation, resize and cleanup.
 
 ## Next item
 
-- After #298 merges, proceed to #299 (OpenTUI React shell and typed backend
-  client), blocked by #297 and #298 (both done).
+- After #299 merges, proceed to #300 (native OpenTUI frame previews and visual
+  regression testing in Storybook).
 
 ## Epic queue
 

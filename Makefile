@@ -4,11 +4,11 @@
 # package.json / cargo / tauri commands so package.json stays authoritative.
 
 .DEFAULT_GOAL := help
-.PHONY: help dev tauri-dev install-local cli-build cli-install tui tui-build tui-install build typecheck lint test test-tauri evaluate check bundle-windows
+.PHONY: help dev tauri-dev install-local cli-build cli-install tui tui-build tui-install build typecheck lint test test-tauri ui-typecheck ui-test evaluate check bundle-windows
 
 # List available recipes (runs by default).
 help:
-	@echo "Norn recipes: dev tauri-dev install-local cli-build cli-install tui tui-build tui-install build typecheck lint test test-tauri evaluate check bundle-windows"
+	@echo "Norn recipes: dev tauri-dev install-local cli-build cli-install tui tui-build tui-install build typecheck lint test test-tauri ui-typecheck ui-test evaluate check bundle-windows"
 
 # Start the Vite dev server (browser mock IPC).
 dev:
@@ -62,6 +62,14 @@ test:
 # Rust IPC smoke / parity test lane (ARCH-005).
 test-tauri:
 	pnpm run test:tauri
+
+# OpenTUI client typecheck (Bun).
+ui-typecheck:
+	pnpm run ui:typecheck
+
+# OpenTUI client tests (Bun).
+ui-test:
+	pnpm run ui:test
 
 # Offline review-quality corpus gate.
 evaluate:

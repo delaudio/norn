@@ -35,3 +35,5 @@ legacy Tauri command into the protocol.
 
 - `../../adr/0020-opentui-rust-stdio-workspace.md`
 - `../../../docs/opentui-migration/migration-contract.md`
+
+Shipped through [PR #312](https://github.com/delaudio/norn/pull/312) (b69fb1f).

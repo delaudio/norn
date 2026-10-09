@@ -40,3 +40,5 @@ review execution logic.
 
 - `../../adr/0020-opentui-rust-stdio-workspace.md`
 - `../../../docs/opentui-migration/migration-contract.md`
+
+Shipped through [PR #313](https://github.com/delaudio/norn/pull/313) (99cd618).

@@ -66,6 +66,14 @@ test:
 test-tauri:
     pnpm run test:tauri
 
+# OpenTUI client typecheck (Bun).
+ui-typecheck:
+    pnpm run ui:typecheck
+
+# OpenTUI client tests (Bun).
+ui-test:
+    pnpm run ui:test
+
 # Offline review-quality corpus gate.
 evaluate:
     pnpm run evaluate
