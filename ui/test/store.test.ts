@@ -341,3 +341,12 @@ test("rapid target moves coalesce snapshot requests", async () => {
   await new Promise((resolve) => setTimeout(resolve, 80));
   expect(fileCalls).toBeLessThanOrEqual(2);
 });
+
+test("toggleDiffMode switches between unified and split", () => {
+  const store = new ShellStore();
+  expect(store.getSnapshot().diffMode).toBe("unified");
+  store.toggleDiffMode();
+  expect(store.getSnapshot().diffMode).toBe("split");
+  store.toggleDiffMode();
+  expect(store.getSnapshot().diffMode).toBe("unified");
+});

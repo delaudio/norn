@@ -48,6 +48,8 @@ function useShellInput(
       }
     } else if (key.name === "return") {
       void store.startReview(client);
+    } else if (key.name === "s") {
+      store.toggleDiffMode();
     } else if (key.name === "x") {
       void store.cancel(client);
     }
@@ -55,44 +57,142 @@ function useShellInput(
   usePaste(() => {});
 }
 
+export type DiffLineKind = "hunk" | "context" | "add" | "del" | "meta";
+
 interface DiffLine {
   text: string;
   fg: string;
   highlighted: boolean;
+  kind: DiffLineKind;
+  oldNumber: number | null;
+  newNumber: number | null;
 }
 
 /// Render a unified diff while tracking both old- and new-side line numbers so a
-/// finding anchored to either side highlights the correct row.
+/// finding anchored to either side highlights the correct row and so the split
+/// view can place each line in the right column.
 export function diffLines(text: string, highlight: number | null, side: "old" | "new"): DiffLine[] {
   const lines: DiffLine[] = [];
   let oldLine = 0;
   let newLine = 0;
+  let inHunk = false;
   for (const raw of text.split("\n")) {
     let fg: string = theme.text;
     let highlighted = false;
+    let kind: DiffLineKind = "context";
+    let oldNumber: number | null = null;
+    let newNumber: number | null = null;
     const hunk = raw.match(/^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
     if (hunk) {
       fg = theme.muted;
+      kind = "hunk";
+      inHunk = true;
       oldLine = Number.parseInt(hunk[1] ?? "0", 10);
       newLine = Number.parseInt(hunk[2] ?? "0", 10);
+    } else if (!inHunk) {
+      // File headers and other pre-hunk metadata are not source lines.
+      fg = theme.muted;
+      kind = "meta";
+    } else if (raw.startsWith("\\")) {
+      fg = theme.muted;
+      kind = "meta";
     } else if (raw.startsWith("+")) {
       fg = theme.secondary;
+      kind = "add";
+      newNumber = newLine;
       highlighted = highlight !== null && side === "new" && newLine === highlight;
       newLine += 1;
     } else if (raw.startsWith("-")) {
       fg = theme.error;
+      kind = "del";
+      oldNumber = oldLine;
       highlighted = highlight !== null && side === "old" && oldLine === highlight;
       oldLine += 1;
     } else if (raw.startsWith(" ")) {
+      kind = "context";
+      oldNumber = oldLine;
+      newNumber = newLine;
       highlighted =
         highlight !== null &&
         ((side === "new" && newLine === highlight) || (side === "old" && oldLine === highlight));
       oldLine += 1;
       newLine += 1;
     }
-    lines.push({ text: raw, fg, highlighted });
+    lines.push({ text: raw, fg, highlighted, kind, oldNumber, newNumber });
   }
   return lines;
+}
+
+type SplitRow =
+  | { kind: "hunk"; text: string }
+  | { kind: "note"; text: string; side: "old" | "new" | null }
+  | { kind: "pair"; left: DiffLine | null; right: DiffLine | null };
+
+/// Pair removed and added runs side by side so the split view keeps old/new line
+/// mapping and finding anchors intact. Newline annotations are attached after
+/// their run instead of breaking replacement pairing.
+export function splitRows(lines: DiffLine[]): SplitRow[] {
+  const rows: SplitRow[] = [];
+  let index = 0;
+  while (index < lines.length) {
+    const line = lines[index];
+    if (!line) {
+      break;
+    }
+    if (line.kind === "hunk") {
+      rows.push({ kind: "hunk", text: line.text });
+      index += 1;
+      continue;
+    }
+    if (line.kind === "del" || line.kind === "add") {
+      const removed: DiffLine[] = [];
+      const added: DiffLine[] = [];
+      const notes: Array<{ text: string; side: "old" | "new" | null }> = [];
+      let lastSide: "old" | "new" | null = null;
+      while (index < lines.length) {
+        const current = lines[index];
+        if (!current) {
+          break;
+        }
+        if (current.kind === "del") {
+          removed.push(current);
+          lastSide = "old";
+        } else if (current.kind === "add") {
+          added.push(current);
+          lastSide = "new";
+        } else if (current.kind === "meta") {
+          notes.push({ text: current.text, side: lastSide });
+        } else {
+          break;
+        }
+        index += 1;
+      }
+      const height = Math.max(removed.length, added.length);
+      for (let offset = 0; offset < height; offset += 1) {
+        rows.push({ kind: "pair", left: removed[offset] ?? null, right: added[offset] ?? null });
+      }
+      for (const note of notes) {
+        rows.push({ kind: "note", text: note.text, side: note.side });
+      }
+      continue;
+    }
+    if (line.kind === "meta") {
+      rows.push({ kind: "note", text: line.text, side: null });
+      index += 1;
+      continue;
+    }
+    rows.push({ kind: "pair", left: line, right: line });
+    index += 1;
+  }
+  return rows;
+}
+
+function lineLabel(line: DiffLine | null, side: "old" | "new"): string {
+  if (!line) {
+    return "";
+  }
+  const number = side === "old" ? line.oldNumber : line.newNumber;
+  return `${String(number ?? "").padStart(4, " ")} ${line.text}`;
 }
 
 function DiffPanel({
@@ -130,14 +230,80 @@ function DiffPanel({
       <text fg={theme.primary} attributes={TextAttributes.BOLD} height={1} wrapMode="none" truncate>
         {state.diff.path}
         {state.diff.truncated ? " (truncated)" : ""}
+        {`  ·  ${state.diffMode}`}
       </text>
-      <scrollbox ref={scroll} id="detail-scroll" flexGrow={1} minHeight={0} marginTop={1} scrollX>
-        {lines.map((line, index) => (
-          // biome-ignore lint/suspicious/noArrayIndexKey: diff lines are immutable and position-keyed
-          <text key={index} fg={line.highlighted ? theme.primary : line.fg} wrapMode="none">
-            {line.text}
-          </text>
-        ))}
+      <scrollbox
+        ref={scroll}
+        id="detail-scroll"
+        flexGrow={1}
+        minHeight={0}
+        marginTop={1}
+        scrollX
+        viewportCulling
+      >
+        {state.diffMode === "split"
+          ? splitRows(lines).map((row, index) => {
+              if (row.kind === "hunk") {
+                return (
+                  // biome-ignore lint/suspicious/noArrayIndexKey: diff rows are immutable and position-keyed
+                  <text key={index} fg={theme.muted} wrapMode="none">
+                    {row.text}
+                  </text>
+                );
+              }
+              if (row.kind === "note") {
+                if (row.side === null) {
+                  return (
+                    // biome-ignore lint/suspicious/noArrayIndexKey: diff rows are immutable and position-keyed
+                    <text key={index} fg={theme.muted} wrapMode="none">
+                      {row.text}
+                    </text>
+                  );
+                }
+                return (
+                  // biome-ignore lint/suspicious/noArrayIndexKey: diff rows are immutable and position-keyed
+                  <box key={index} flexDirection="row" height={1}>
+                    <box width="50%" minWidth={0}>
+                      <text fg={theme.muted} wrapMode="none" truncate>
+                        {row.side === "old" ? row.text : ""}
+                      </text>
+                    </box>
+                    <box width="50%" minWidth={0}>
+                      <text fg={theme.muted} wrapMode="none" truncate>
+                        {row.side === "new" ? row.text : ""}
+                      </text>
+                    </box>
+                  </box>
+                );
+              }
+              return (
+                // biome-ignore lint/suspicious/noArrayIndexKey: diff rows are immutable and position-keyed
+                <box key={index} flexDirection="row">
+                  <box width="50%" minWidth={0}>
+                    <text
+                      fg={row.left?.highlighted ? theme.primary : (row.left?.fg ?? theme.text)}
+                      wrapMode="word"
+                    >
+                      {lineLabel(row.left, "old")}
+                    </text>
+                  </box>
+                  <box width="50%" minWidth={0}>
+                    <text
+                      fg={row.right?.highlighted ? theme.primary : (row.right?.fg ?? theme.text)}
+                      wrapMode="word"
+                    >
+                      {lineLabel(row.right, "new")}
+                    </text>
+                  </box>
+                </box>
+              );
+            })
+          : lines.map((line, index) => (
+              // biome-ignore lint/suspicious/noArrayIndexKey: diff lines are immutable and position-keyed
+              <text key={index} fg={line.highlighted ? theme.primary : line.fg} wrapMode="none">
+                {line.text}
+              </text>
+            ))}
       </scrollbox>
     </>
   );
@@ -398,8 +564,8 @@ export function Shell({ store, client, quit }: ShellProps) {
       <box height={1} flexShrink={0} paddingX={1} backgroundColor={theme.panel}>
         <text fg={theme.muted}>
           {wide
-            ? "j/k move  ←/→ scroll  Tab pane  Enter review  x cancel  q quit"
-            : "j/k  ←/→  Tab  q"}
+            ? "j/k move  ←/→ scroll  s split  Tab pane  Enter review  x cancel  q quit"
+            : "j/k  ←/→  s  Tab  q"}
         </text>
       </box>
     </box>

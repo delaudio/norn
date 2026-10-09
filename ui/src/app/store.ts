@@ -67,6 +67,7 @@ export interface ShellSnapshot {
   highlightLine: number | null;
   highlightSide: "old" | "new";
   scrollRequest: number;
+  diffMode: "unified" | "split";
   focus: ShellFocus;
   operation: OperationView | null;
   generation: number;
@@ -91,6 +92,7 @@ const INITIAL: ShellSnapshot = {
   highlightLine: null,
   highlightSide: "new",
   scrollRequest: 0,
+  diffMode: "unified",
   focus: "repositories",
   operation: null,
   generation: 0,
@@ -552,6 +554,10 @@ export class ShellStore {
       return true;
     }
     return false;
+  }
+
+  toggleDiffMode(): void {
+    this.update({ diffMode: this.state.diffMode === "unified" ? "split" : "unified" });
   }
 
   cycleFocus(): void {

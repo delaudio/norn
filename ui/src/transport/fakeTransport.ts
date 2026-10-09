@@ -10,6 +10,8 @@ export interface FakeTransportOptions {
   targets?: Array<Record<string, unknown>>;
   files?: Array<Record<string, unknown>>;
   findings?: Array<Record<string, unknown>>;
+  /** Overrides the synthetic diff returned by `diff.file`. */
+  diffText?: string;
   /** Artificial latency in milliseconds for every request. */
   delayMs?: number;
 }
@@ -60,7 +62,7 @@ export class FakeBackendTransport implements BackendTransport {
         return {
           target: params.target,
           path: params.path,
-          diff: "@@ -1 +1 @@\n-old\n+new\n",
+          diff: this.options.diffText ?? "@@ -1 +1 @@\n-old\n+new\n",
           truncated: false,
         };
       case "review.start": {
