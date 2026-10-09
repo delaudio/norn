@@ -28,6 +28,24 @@ export type Request =
       id: RequestId;
       method: "repository.status" | "operation.status" | "operation.cancel" | "shutdown";
       params: OperationControlParams;
+    }
+  | {
+      type: "request";
+      id: RequestId;
+      method: "review.files";
+      params: TargetParams;
+    }
+  | {
+      type: "request";
+      id: RequestId;
+      method: "review.findings";
+      params: TargetParams;
+    }
+  | {
+      type: "request";
+      id: RequestId;
+      method: "review.targets";
+      params: EmptyResult;
     };
 export type RequestId = string;
 /**
@@ -80,6 +98,7 @@ export interface Ready {
 export interface DiffFileParams {
   target: TargetIdentity;
   path: string;
+  oldPath?: string | null;
   contextLines?: number;
 }
 export interface ProviderTarget {
@@ -88,6 +107,7 @@ export interface ProviderTarget {
   workspace: string;
   repo: string;
   prId?: number;
+  runId?: string | null;
 }
 export interface LocalTarget {
   kind: "local";
@@ -100,11 +120,23 @@ export interface ReviewStartParams {
 export interface OperationControlParams {
   operationId?: string;
 }
+export interface TargetParams {
+  target: TargetIdentity;
+}
+export interface EmptyResult {}
 export interface ResponseOk {
   type: "response";
   id: RequestId;
   ok: true;
-  result: DiffFileResult | ReviewStartResult | OperationStatusResult | RepositoriesResult | EmptyResult;
+  result:
+    | DiffFileResult
+    | ReviewStartResult
+    | OperationStatusResult
+    | RepositoriesResult
+    | EmptyResult
+    | ReviewFilesResult
+    | ReviewFindingsResult
+    | ReviewTargetsResult;
 }
 export interface DiffFileResult {
   target: TargetIdentity;
@@ -137,7 +169,46 @@ export interface RepoSummary {
   repo: string;
   localPath?: string | null;
 }
-export interface EmptyResult {}
+export interface ReviewFilesResult {
+  target: TargetIdentity;
+  files: ChangedFile[];
+}
+export interface ChangedFile {
+  path: string;
+  status: "added" | "modified" | "deleted" | "renamed" | "untracked";
+  additions: number;
+  deletions: number;
+  oldPath?: string | null;
+}
+export interface ReviewFindingsResult {
+  target: TargetIdentity;
+  findings: FindingSummary[];
+}
+export interface FindingSummary {
+  id: string;
+  title: string;
+  severity: "info" | "low" | "medium" | "high" | "critical";
+  summary: string;
+  anchor?: FindingAnchorSummary | null;
+}
+export interface FindingAnchorSummary {
+  path: string;
+  startLine: number;
+  endLine?: number | null;
+  side: "new" | "old";
+}
+export interface ReviewTargetsResult {
+  targets: ReviewTarget[];
+}
+export interface ReviewTarget {
+  provider: "github" | "bitbucket";
+  workspace: string;
+  repo: string;
+  prId: number;
+  title: string;
+  status: string;
+  runId: string;
+}
 export interface ResponseError {
   type: "response";
   id: RequestId;

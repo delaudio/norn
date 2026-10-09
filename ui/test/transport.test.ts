@@ -59,3 +59,38 @@ test("process transport handshakes against a fixture subprocess", async () => {
   await client.shutdown();
   client.close();
 });
+
+test("fake transport lists review files and findings", async () => {
+  const client = new BackendClient(
+    new FakeBackendTransport({
+      files: [{ path: "src/a.ts", status: "modified", additions: 2, deletions: 1, oldPath: null }],
+      findings: [],
+    }),
+  );
+  await client.start();
+  const files = await client.reviewFiles(target);
+  expect(files[0]?.path).toBe("src/a.ts");
+  const findings = await client.reviewFindings(target);
+  expect(findings).toHaveLength(0);
+});
+
+test("fake transport lists stored review targets", async () => {
+  const client = new BackendClient(
+    new FakeBackendTransport({
+      targets: [
+        {
+          provider: "github",
+          workspace: "acme",
+          repo: "payments",
+          prId: 1,
+          runId: "run-1",
+          title: "T",
+          status: "succeeded",
+        },
+      ],
+    }),
+  );
+  await client.start();
+  const targets = await client.reviewTargets();
+  expect(targets[0]?.prId).toBe(1);
+});

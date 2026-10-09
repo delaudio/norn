@@ -82,6 +82,8 @@ pub enum TargetIdentity {
         repo: String,
         #[serde(rename = "prId", default, skip_serializing_if = "Option::is_none")]
         pr_id: Option<u32>,
+        #[serde(rename = "runId", default, skip_serializing_if = "Option::is_none")]
+        run_id: Option<String>,
     },
     Local {
         #[serde(rename = "localSnapshotSha256")]
@@ -102,6 +104,8 @@ pub enum ProviderKind {
 pub struct DiffFileParams {
     pub target: TargetIdentity,
     pub path: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub old_path: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub context_lines: Option<u32>,
 }
@@ -124,6 +128,19 @@ pub struct OperationControlParams {
     pub operation_id: Option<String>,
 }
 
+/// Parameters for methods that take no arguments; rejects unknown fields so the
+/// schema and the Rust types agree on what a valid request looks like.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct EmptyParams {}
+
+/// Parameters carrying only a review target.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct TargetParams {
+    pub target: TargetIdentity,
+}
+
 /// A first-slice request. The `method` discriminates the typed parameters, so
 /// an unknown method or a malformed target is rejected at the boundary.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -137,6 +154,16 @@ pub enum Request {
     },
     #[serde(rename = "diff.file")]
     DiffFile { id: String, params: DiffFileParams },
+    #[serde(rename = "review.files")]
+    ReviewFiles { id: String, params: TargetParams },
+    #[serde(rename = "review.findings")]
+    ReviewFindings { id: String, params: TargetParams },
+    #[serde(rename = "review.targets")]
+    ReviewTargets {
+        id: String,
+        #[serde(default)]
+        params: EmptyParams,
+    },
     #[serde(rename = "review.start")]
     ReviewStart {
         id: String,
@@ -167,6 +194,9 @@ impl Request {
         match self {
             Self::RepositoryStatus { id, .. }
             | Self::DiffFile { id, .. }
+            | Self::ReviewFiles { id, .. }
+            | Self::ReviewFindings { id, .. }
+            | Self::ReviewTargets { id, .. }
             | Self::ReviewStart { id, .. }
             | Self::OperationStatus { id, .. }
             | Self::OperationCancel { id, .. }
@@ -178,6 +208,9 @@ impl Request {
         match self {
             Self::RepositoryStatus { .. } => "repository.status",
             Self::DiffFile { .. } => "diff.file",
+            Self::ReviewFiles { .. } => "review.files",
+            Self::ReviewFindings { .. } => "review.findings",
+            Self::ReviewTargets { .. } => "review.targets",
             Self::ReviewStart { .. } => "review.start",
             Self::OperationStatus { .. } => "operation.status",
             Self::OperationCancel { .. } => "operation.cancel",
@@ -202,7 +235,11 @@ impl Request {
                 }
             }
             Self::ReviewStart { params, .. } => params.target.validate()?,
+            Self::ReviewFiles { params, .. } | Self::ReviewFindings { params, .. } => {
+                params.target.validate()?
+            }
             Self::RepositoryStatus { .. }
+            | Self::ReviewTargets { .. }
             | Self::OperationStatus { .. }
             | Self::OperationCancel { .. }
             | Self::Shutdown { .. } => {}
@@ -215,12 +252,18 @@ impl TargetIdentity {
     fn validate(&self) -> Result<(), ProtocolError> {
         match self {
             Self::Provider {
-                workspace, repo, ..
+                workspace,
+                repo,
+                run_id,
+                ..
             } => {
                 if workspace.is_empty() || repo.is_empty() {
                     return Err(invalid_request(
                         "provider target workspace and repo must not be empty",
                     ));
+                }
+                if run_id.as_deref() == Some("") {
+                    return Err(invalid_request("provider target `runId` must not be empty"));
                 }
                 Ok(())
             }

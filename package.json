@@ -48,7 +48,8 @@
     "docs:build": "pnpm --filter @norn/docs build",
     "docs:preview": "pnpm --filter @norn/docs preview",
     "docs:deploy": "npx wrangler deploy --config wrangler.docs.jsonc",
-    "build-storybook": "storybook build"
+    "build-storybook": "storybook build",
+    "ui:bench": "bun run --cwd ui bench"
   },
   "dependencies": {
     "@fontsource-variable/geist": "^5.2.9",

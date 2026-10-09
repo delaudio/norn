@@ -26,6 +26,8 @@ export const Connecting: Story = { args: { frameId: "shell-connecting-80x24" } }
 export const ErrorState: Story = { args: { frameId: "shell-error-80x24" } };
 export const Closed: Story = { args: { frameId: "shell-closed-80x24" } };
 export const Review: Story = { args: { frameId: "shell-review-80x24" } };
+export const ReviewTargets: Story = { args: { frameId: "shell-review-targets-120x30" } };
+export const StaleAnchor: Story = { args: { frameId: "shell-stale-anchor-80x24" } };
 
 export const Gallery: Story = {
   args: { frameId: first },
