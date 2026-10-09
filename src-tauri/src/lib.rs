@@ -22,6 +22,7 @@ mod local_review;
 pub mod operational_telemetry;
 pub mod organization_policy;
 pub mod policy_doctor;
+pub mod protocol;
 pub mod readiness;
 pub mod repo_config;
 pub mod repository_audit;

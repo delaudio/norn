@@ -1,0 +1,15 @@
+{
+  "type": "event",
+  "operationId": "op-1",
+  "sequence": 1,
+  "target": {
+    "kind": "local",
+    "localSnapshotSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  },
+  "event": {
+    "kind": "progress",
+    "message": "scanned mañana\nok ✓",
+    "completed": 1,
+    "total": 3
+  }
+}

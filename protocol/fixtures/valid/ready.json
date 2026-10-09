@@ -1,0 +1,9 @@
+{
+  "type": "ready",
+  "protocolVersion": 1,
+  "serverVersion": "0.3.4",
+  "capabilities": [
+    "diff",
+    "review"
+  ]
+}

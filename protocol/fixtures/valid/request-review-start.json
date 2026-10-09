@@ -1,0 +1,12 @@
+{
+  "type": "request",
+  "id": "req-2",
+  "method": "review.start",
+  "params": {
+    "target": {
+      "kind": "local",
+      "localSnapshotSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "profile": null
+  }
+}

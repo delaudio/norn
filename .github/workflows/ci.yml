@@ -54,6 +54,7 @@ jobs:
         run: |
           pnpm run lint
           pnpm run typecheck
+          pnpm run protocol:check
           pnpm run test
           pnpm run build
 

@@ -1,0 +1,292 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://norn.dev/protocol/norn-protocol.schema.json",
+  "title": "Norn stdio protocol",
+  "description": "Newline-delimited UTF-8 JSON protocol between the OpenTUI client and the Rust backend. Standard output carries these messages only; standard error carries diagnostics. Protocol version 1.",
+  "x-maxFrameBytes": 1048576,
+  "definitions": {
+    "ProtocolVersion": {
+      "description": "The only supported protocol version for this contract.",
+      "const": 1
+    },
+    "TargetIdentity": {
+      "description": "Identity of the review target a request or event applies to.",
+      "oneOf": [
+        {
+          "type": "object",
+          "title": "ProviderTarget",
+          "additionalProperties": false,
+          "required": ["kind", "provider", "workspace", "repo"],
+          "properties": {
+            "kind": { "const": "provider" },
+            "provider": { "enum": ["github", "bitbucket"] },
+            "workspace": { "type": "string", "minLength": 1 },
+            "repo": { "type": "string", "minLength": 1 },
+            "prId": { "type": "integer", "minimum": 1 }
+          }
+        },
+        {
+          "type": "object",
+          "title": "LocalTarget",
+          "additionalProperties": false,
+          "required": ["kind", "localSnapshotSha256"],
+          "properties": {
+            "kind": { "const": "local" },
+            "localSnapshotSha256": { "type": "string", "minLength": 64, "maxLength": 64 }
+          }
+        }
+      ]
+    },
+    "ErrorCode": {
+      "enum": [
+        "invalidRequest",
+        "unsupportedVersion",
+        "unknownMethod",
+        "invalidParams",
+        "cancelled",
+        "notFound",
+        "targetStale",
+        "conflict",
+        "internal"
+      ]
+    },
+    "ProtocolError": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "message"],
+      "properties": {
+        "code": { "$ref": "#/definitions/ErrorCode" },
+        "message": { "type": "string" },
+        "retryable": { "type": "boolean", "default": false }
+      }
+    },
+    "OperationState": { "enum": ["accepted", "running", "succeeded", "failed", "cancelled"] },
+    "OperationEvent": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "message"],
+          "properties": {
+            "kind": { "const": "progress" },
+            "message": { "type": "string" },
+            "completed": { "type": "integer", "minimum": 0 },
+            "total": { "type": "integer", "minimum": 0 }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "level", "message"],
+          "properties": {
+            "kind": { "const": "log" },
+            "level": { "enum": ["debug", "info", "warn", "error"] },
+            "message": { "type": "string" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "state"],
+          "properties": {
+            "kind": { "const": "state" },
+            "state": { "$ref": "#/definitions/OperationState" },
+            "error": { "$ref": "#/definitions/ProtocolError" }
+          }
+        }
+      ]
+    },
+    "RequestId": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "Method": {
+      "enum": [
+        "repository.status",
+        "diff.file",
+        "review.start",
+        "operation.status",
+        "operation.cancel",
+        "shutdown"
+      ]
+    },
+    "DiffFileParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["target", "path"],
+      "properties": {
+        "target": { "$ref": "#/definitions/TargetIdentity" },
+        "path": { "type": "string", "minLength": 1 },
+        "contextLines": { "type": "integer", "minimum": 0, "maximum": 100 }
+      }
+    },
+    "ReviewStartParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["target"],
+      "properties": {
+        "target": { "$ref": "#/definitions/TargetIdentity" },
+        "profile": { "type": ["string", "null"] }
+      }
+    },
+    "OperationControlParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "operationId": { "type": "string", "minLength": 1 }
+      }
+    },
+    "DiffFileResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["target", "path", "diff", "truncated"],
+      "properties": {
+        "target": { "$ref": "#/definitions/TargetIdentity" },
+        "path": { "type": "string" },
+        "diff": { "type": "string" },
+        "truncated": { "type": "boolean" }
+      }
+    },
+    "ReviewStartResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["target", "operationId", "state"],
+      "properties": {
+        "target": { "$ref": "#/definitions/TargetIdentity" },
+        "operationId": { "type": "string", "minLength": 1 },
+        "state": { "$ref": "#/definitions/OperationState" }
+      }
+    },
+    "OperationStatusResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["operationId", "state", "sequence"],
+      "properties": {
+        "operationId": { "type": "string" },
+        "state": { "$ref": "#/definitions/OperationState" },
+        "sequence": { "type": "integer", "minimum": 0 },
+        "error": { "$ref": "#/definitions/ProtocolError" }
+      }
+    },
+    "EmptyResult": { "type": "object", "additionalProperties": false }
+  },
+  "oneOf": [
+    {
+      "title": "Hello",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "protocolVersion", "client"],
+      "properties": {
+        "type": { "const": "hello" },
+        "protocolVersion": { "$ref": "#/definitions/ProtocolVersion" },
+        "client": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["name", "version"],
+          "properties": {
+            "name": { "type": "string" },
+            "version": { "type": "string" }
+          }
+        }
+      }
+    },
+    {
+      "title": "Ready",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "protocolVersion", "serverVersion", "capabilities"],
+      "properties": {
+        "type": { "const": "ready" },
+        "protocolVersion": { "$ref": "#/definitions/ProtocolVersion" },
+        "serverVersion": { "type": "string" },
+        "capabilities": { "type": "array", "items": { "type": "string" }, "uniqueItems": true }
+      }
+    },
+    {
+      "title": "Request",
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "id", "method", "params"],
+          "properties": {
+            "type": { "const": "request" },
+            "id": { "$ref": "#/definitions/RequestId" },
+            "method": { "const": "diff.file" },
+            "params": { "$ref": "#/definitions/DiffFileParams" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "id", "method", "params"],
+          "properties": {
+            "type": { "const": "request" },
+            "id": { "$ref": "#/definitions/RequestId" },
+            "method": { "const": "review.start" },
+            "params": { "$ref": "#/definitions/ReviewStartParams" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "id", "method", "params"],
+          "properties": {
+            "type": { "const": "request" },
+            "id": { "$ref": "#/definitions/RequestId" },
+            "method": {
+              "enum": [
+                "repository.status",
+                "operation.status",
+                "operation.cancel",
+                "shutdown"
+              ]
+            },
+            "params": { "$ref": "#/definitions/OperationControlParams" }
+          }
+        }
+      ]
+    },
+    {
+      "title": "ResponseOk",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "id", "ok", "result"],
+      "properties": {
+        "type": { "const": "response" },
+        "id": { "$ref": "#/definitions/RequestId" },
+        "ok": { "const": true },
+        "result": {
+          "oneOf": [
+            { "$ref": "#/definitions/DiffFileResult" },
+            { "$ref": "#/definitions/ReviewStartResult" },
+            { "$ref": "#/definitions/OperationStatusResult" },
+            { "$ref": "#/definitions/EmptyResult" }
+          ]
+        }
+      }
+    },
+    {
+      "title": "ResponseError",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "id", "ok", "error"],
+      "properties": {
+        "type": { "const": "response" },
+        "id": { "$ref": "#/definitions/RequestId" },
+        "ok": { "const": false },
+        "error": { "$ref": "#/definitions/ProtocolError" }
+      }
+    },
+    {
+      "title": "Event",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "operationId", "sequence", "target", "event"],
+      "properties": {
+        "type": { "const": "event" },
+        "operationId": { "type": "string", "minLength": 1 },
+        "sequence": { "type": "integer", "minimum": 0 },
+        "target": { "$ref": "#/definitions/TargetIdentity" },
+        "event": { "$ref": "#/definitions/OperationEvent" }
+      }
+    }
+  ]
+}

@@ -8,25 +8,25 @@ If status files and git disagree, git is authoritative; correct this file.
 
 ## Active state
 
-- **Branch:** `issue-296-engine-extraction` (to be created).
-- **Active item:** epic #294 step 02/15, issue #296 - extract a UI-independent
-  Rust engine and isolate Tauri adapters.
-- **Change:** `src-tauri/Cargo.toml` now gates the Tauri adapter behind the
-  optional `desktop` feature and the Ratatui terminal UI behind the optional
-  `tui` feature; `desktop-bundle` enables both. `build.rs`, `lib.rs`, `main.rs`,
-  the Tauri-only binaries, and all `#[tauri::command]` wrappers are gated, so a
-  `--no-default-features` build compiles the engine and headless commands with
-  no Tauri, Ratatui, crossterm, or ratatui-image in the active dependency tree.
-  `pnpm run test:rust:core` proves it; the CI `verify` lane and the release gate
-  run it. Build scripts and the macOS release archive now pass
-  `--features custom-protocol,tui` so every shipped distribution still builds.
-- **Plan items:** `.docflow/plan/todo/0017-opentui-engine-extraction.md` (this
-  item); `.docflow/plan/done/2026-10-09-opentui-rust-architecture.md` (#295).
+- **Branch:** `issue-297-opentui-protocol` (to be created).
+- **Active item:** epic #294 step 03/15, issue #297 - define and generate the
+  versioned typed stdio protocol.
+- **Change:** single contract source `protocol/norn-protocol.schema.json`
+  (JSON Schema draft-07) with shared fixtures in `protocol/fixtures/`. Generated
+  TypeScript types + schema copy in `src/protocol/generated/`
+  (`pnpm run protocol:generate`) and a runtime ajv validator in
+  `src/protocol/validate.ts`. Rust types and newline-delimited framing in
+  `src-tauri/src/protocol.rs` (handshake, envelopes, error taxonomy,
+  first-slice methods, operation events, `SequenceGuard`). `pnpm run
+  protocol:check` fails CI on drift and is wired into the CI `verify` lane and
+  the release gate.
+- **Plan items:** `.docflow/plan/todo/0018-opentui-protocol.md` (this item);
+  `plan/done/2026-10-09-opentui-rust-architecture.md` (#295).
 
 ## Next item
 
-- After #296 merges, proceed to #297 (define and generate the versioned typed
-  stdio protocol), which is blocked by #295 and independent of #298.
+- After #297 merges, proceed to #298 (persistent Rust stdio backend and
+  operation lifecycle), blocked by #296 and #297 (both done).
 
 ## Epic queue
 

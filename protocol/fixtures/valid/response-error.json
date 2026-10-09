@@ -1,0 +1,10 @@
+{
+  "type": "response",
+  "id": "req-3",
+  "ok": false,
+  "error": {
+    "code": "cancelled",
+    "message": "cancelled by user",
+    "retryable": false
+  }
+}

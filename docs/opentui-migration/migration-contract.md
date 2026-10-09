@@ -49,13 +49,24 @@ Rules:
   meaning until cutover. No interactive UI is delivered through a bare
   command-distribution binary.
 
-## 3. Protocol (shape only)
+## 3. Protocol
 
-Owned by child issue #297. At minimum a versioned, generated TypeScript/Rust
-contract with: request/response envelopes keyed by a correlation id; correlated
-operation events (progress, streamed logs, terminal states); cancellation;
-snapshot/resync; and bounded resource use. Generated request and response
-schemas must be validated at the boundary; unknown versions fail closed.
+Owned by child issue #297. Single contract source:
+`protocol/norn-protocol.schema.json` (JSON Schema draft-07). Generated TypeScript
+types and the copied schema live in `src/protocol/generated/` (regenerate with
+`pnpm run protocol:generate`); the runtime validator is
+`src/protocol/validate.ts` (ajv). Rust types and framing live in
+`src-tauri/src/protocol.rs`. Shared fixtures in `protocol/fixtures/` are
+validated by both sides, and `pnpm run protocol:check` fails CI on contract
+drift.
+
+Framing is newline-delimited UTF-8 JSON with a 1 MiB frame bound; standard
+output carries protocol messages only and standard error carries diagnostics.
+The contract defines a versioned handshake, request/response envelopes keyed by
+a correlation id, correlated operation events with a monotonic per-operation
+sequence, cancellation, status/snapshot, and shutdown. Unknown versions,
+methods, fields, or enums fail closed, and mutation requests are never replayed
+automatically after a disconnect.
 
 ## 4. Supported platforms and pinned versions
 

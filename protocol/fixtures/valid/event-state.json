@@ -1,0 +1,13 @@
+{
+  "type": "event",
+  "operationId": "op-1",
+  "sequence": 2,
+  "target": {
+    "kind": "local",
+    "localSnapshotSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  },
+  "event": {
+    "kind": "state",
+    "state": "succeeded"
+  }
+}
