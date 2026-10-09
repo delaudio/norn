@@ -37,3 +37,5 @@ deleting the old interfaces (those are later steps).
 
 - `../../adr/0020-opentui-rust-stdio-workspace.md`
 - `../../../docs/opentui-migration/migration-contract.md`
+
+Shipped through [PR #311](https://github.com/delaudio/norn/pull/311) (757709e).
