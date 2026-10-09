@@ -1,0 +1,8 @@
+{
+  "type": "hello",
+  "protocolVersion": 2,
+  "client": {
+    "name": "norn-ui",
+    "version": "0.1.0"
+  }
+}

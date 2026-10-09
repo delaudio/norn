@@ -1,0 +1,13 @@
+{
+  "type": "request",
+  "id": "req-9",
+  "method": "diff.file",
+  "params": {
+    "target": {
+      "kind": "provider",
+      "workspace": "acme",
+      "repo": "payments"
+    },
+    "path": "src/lib.rs"
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "type": "response",
+  "id": "req-9",
+  "ok": false,
+  "error": {
+    "code": "boom",
+    "message": "nope"
+  }
+}

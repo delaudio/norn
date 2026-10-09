@@ -1,0 +1,8 @@
+{
+  "type": "request",
+  "id": "req-3",
+  "method": "operation.cancel",
+  "params": {
+    "operationId": "op-1"
+  }
+}
