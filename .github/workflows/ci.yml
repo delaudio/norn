@@ -92,4 +92,5 @@ jobs:
         working-directory: ui
         run: |
           bun run typecheck
+          bun run frames:check
           bun test

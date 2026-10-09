@@ -1,0 +1,21 @@
+/* Browser preview for captured native terminal frames. */
+body {
+  margin: 0;
+  background: #0a0a0a;
+}
+.terminal-frame {
+  background: #0a0a0a;
+  font: 15px/20px "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+  font-variant-ligatures: none;
+  font-synthesis: none;
+  overflow: hidden;
+}
+.terminal-line {
+  height: 20px;
+  white-space: pre;
+}
+.terminal-line > span {
+  display: inline-block;
+  height: 20px;
+  vertical-align: top;
+}

@@ -8,31 +8,25 @@ If status files and git disagree, git is authoritative; correct this file.
 
 ## Active state
 
-- **Branch:** `issue-299-opentui-shell` (to be created).
-- **Active item:** epic #294 step 05/15, issue #299 - OpenTUI React shell and
-  typed backend client.
-- **Change:** new `ui/` Bun package (`@norn/ui`) with OpenTUI 0.5.17 + React
-  19.3.0: a typed `BackendClient` over a `BackendTransport` interface with a
-  production `ProcessBackendTransport` (spawns `norn-backend` by resolved path,
-  NDJSON over stdin, request correlation, bounded pending, timeouts, EOF and
-  version-mismatch handling) and a deterministic `FakeBackendTransport`; a
-  `ShellStore` that fences async results by target generation and operation id;
-  an OpenTUI shell with panels, focus navigation, help, status/error/loading/
-  empty views and responsive layout; and `src/main.ts` with terminal restore on
-  quit/Ctrl+C/init failure. `ui/` has its own typecheck and `bun test` suites; a
-  CI `ui` job and `ui-typecheck`/`ui-test` task-runner recipes were added.
-- **Plan items:** `.docflow/plan/todo/0020-opentui-shell.md` (this item);
+- **Branch:** `issue-300-opentui-frames` (to be created).
+- **Active item:** epic #294 step 06/15, issue #300 - native OpenTUI frame
+  previews and Storybook visual regression.
+- **Change:** `ui/scripts/render-frames.tsx` captures native OpenTUI frames
+  (spans, colors, attributes) into `ui/storybook/generated/frames.json`;
+  `ui/scripts/check-frames.ts` is the golden-frame visual lane (regenerate to a
+  temp file, compare to the committed baseline, fail with
+  `storybook/visual-artifacts/{expected,current,diff}`). `ui/storybook/`
+  (`frame.ts`, `TerminalPreview.tsx`, `preview.css`, `stories/Shell.stories.tsx`)
+  and `ui/.storybook/` render the frames in Storybook. Storybook deps were added
+  to the `ui` package; the CI `ui` job now runs `frames:check`; task-runner
+  recipes `ui-frames-check` added.
+- **Plan items:** `.docflow/plan/todo/0021-opentui-frames.md` (this item);
   `plan/done/2026-10-09-opentui-{rust-architecture,engine-extraction,protocol,backend}.md`.
-
-## Known limitation
-
-- PTY smoke for terminal restoration is deferred to #307; renderer/input tests
-  cover focus, navigation, resize and cleanup.
 
 ## Next item
 
-- After #299 merges, proceed to #300 (native OpenTUI frame previews and visual
-  regression testing in Storybook).
+- After #300 merges, proceed to #301 (real file -> diff -> finding vertical
+  slice, measured).
 
 ## Epic queue
 

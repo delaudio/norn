@@ -16,6 +16,8 @@
       "!src-tauri/target",
       "!storybook-static",
       "!src/protocol/generated/**",
+      "!ui/storybook/generated/**",
+      "!ui/storybook/visual-artifacts/**",
       "!protocol",
       "!src-tauri/gen",
       "!**/*.css",
