@@ -7,11 +7,13 @@ const browserSource = readFileSync("src/browser-diff/BrowserDiffApp.tsx", "utf8"
 const browserHtml = readFileSync("browser-diff.html", "utf8");
 const browserViteConfig = readFileSync("vite.browser-diff.config.ts", "utf8");
 
-test("browser viewer reuses the maintained desktop diff implementation", () => {
-  assert.match(browserSource, /import \{ DiffViewer \} from "@\/components\/diff\/DiffViewer"/);
+test("browser viewer renders provider diffs with the Pierre diff renderer", () => {
+  assert.match(browserSource, /import \{ PatchDiff \} from "@pierre\/diffs\/react"/);
+  assert.match(browserSource, /<PatchDiff/);
+  assert.match(browserSource, /patch=\{remoteState\.diff \?\? ""\}/);
+  assert.match(browserSource, /diffStyle: viewMode/);
   assert.match(browserSource, /parseUnifiedDiff\(remoteState\.diff \?\? ""\)/);
   assert.match(browserSource, /mergeImageDiffstat\(/);
-  assert.match(browserSource, /<DiffViewer/);
 
   assert.doesNotMatch(serverSource, /const HTML_PAGE/);
   assert.doesNotMatch(serverSource, /function parseUnifiedDiff/);
