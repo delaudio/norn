@@ -32,3 +32,6 @@ storybook-static
 
 # Local agent memory and per-machine Claude settings.
 .claude/
+
+# Frame-check failure artifacts
+ui/storybook/visual-artifacts/
