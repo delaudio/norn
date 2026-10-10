@@ -370,3 +370,20 @@ test("openBrowser surfaces the authenticated session URL", async () => {
   await store.openBrowser(client);
   expect(store.getSnapshot().notice).toContain("/session/");
 });
+
+test("image files load a bounded preview", async () => {
+  const store = new ShellStore();
+  const client = new BackendClient(
+    new FakeBackendTransport({
+      repositories,
+      files: [
+        { path: "images/logo.png", status: "modified", additions: 0, deletions: 0, oldPath: null },
+      ],
+      findings: [],
+    }),
+  );
+  await store.connect(client);
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  expect(store.getSnapshot().preview?.path).toBe("images/logo.png");
+  expect(store.getSnapshot().preview?.mimeType).toBe("image/png");
+});

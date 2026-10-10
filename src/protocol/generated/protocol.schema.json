@@ -204,7 +204,8 @@
         "review.files",
         "review.findings",
         "review.targets",
-        "browser.open"
+        "browser.open",
+        "file.preview"
       ]
     },
     "DiffFileParams": {
@@ -611,6 +612,48 @@
           "minLength": 1
         }
       }
+    },
+    "FilePreviewParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "target",
+        "path"
+      ],
+      "properties": {
+        "target": {
+          "$ref": "#/definitions/TargetIdentity"
+        },
+        "path": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "FilePreviewResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "mimeType",
+        "size",
+        "dataBase64"
+      ],
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "mimeType": {
+          "type": "string"
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "dataBase64": {
+          "type": "string"
+        }
+      }
     }
   },
   "oneOf": [
@@ -852,6 +895,30 @@
               "$ref": "#/definitions/TargetParams"
             }
           }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "type": {
+              "const": "request"
+            },
+            "id": {
+              "$ref": "#/definitions/RequestId"
+            },
+            "method": {
+              "const": "file.preview"
+            },
+            "params": {
+              "$ref": "#/definitions/FilePreviewParams"
+            }
+          }
         }
       ]
     },
@@ -903,6 +970,9 @@
             },
             {
               "$ref": "#/definitions/BrowserOpenResult"
+            },
+            {
+              "$ref": "#/definitions/FilePreviewResult"
             }
           ]
         }

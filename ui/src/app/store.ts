@@ -28,6 +28,20 @@ export interface OperationView {
   logs: OperationLog[];
 }
 
+export interface FilePreviewView {
+  path: string;
+  mimeType: string;
+  size: number;
+  dataBase64: string;
+}
+
+const IMAGE_EXTENSIONS = [".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".svg"];
+
+export function isImagePath(path: string): boolean {
+  const normalized = path.toLowerCase();
+  return IMAGE_EXTENSIONS.some((extension) => normalized.endsWith(extension));
+}
+
 export interface DiffView {
   path: string;
   text: string;
@@ -70,6 +84,8 @@ export interface ShellSnapshot {
   diffMode: "unified" | "split";
   diffExpanded: boolean;
   diffLineCount: number;
+  preview: FilePreviewView | null;
+  previewError: string | null;
   focus: ShellFocus;
   operation: OperationView | null;
   generation: number;
@@ -97,6 +113,8 @@ const INITIAL: ShellSnapshot = {
   diffMode: "unified",
   diffExpanded: false,
   diffLineCount: 0,
+  preview: null,
+  previewError: null,
   focus: "repositories",
   operation: null,
   generation: 0,
@@ -245,6 +263,7 @@ export class ShellStore {
   private starting = false;
   private pendingEvents: BackendOperationEvent[] = [];
   private diffRequest = 0;
+  private previewRequest = 0;
   private diffInFlight = false;
   private diffPending = false;
   private snapshotInFlight = false;
@@ -358,6 +377,7 @@ export class ShellStore {
     } else {
       await this.loadDiff(client);
     }
+    void this.loadPreview(client);
   }
 
   async selectRepository(selected: number): Promise<void> {
@@ -380,6 +400,8 @@ export class ShellStore {
       highlightLine: null,
       highlightSide: "new",
       scrollRequest: 0,
+      preview: null,
+      previewError: null,
       operation: null,
       notice: null,
       error: null,
@@ -425,7 +447,13 @@ export class ShellStore {
     const target = this.activeTarget();
     const file = this.state.files[this.state.selectedFile];
     if (!target || !file) {
-      this.update({ diff: null, diffLoading: false, diffError: null });
+      this.update({
+        diff: null,
+        diffLoading: false,
+        diffError: null,
+        preview: null,
+        previewError: null,
+      });
       return;
     }
     const request = ++this.diffRequest;
@@ -496,6 +524,7 @@ export class ShellStore {
       this.update({ selectedFile, highlightLine: null, highlightSide: "new", notice: null });
       if (this.client) {
         void this.loadDiff(this.client);
+        void this.loadPreview(this.client);
       }
       return true;
     }
@@ -557,6 +586,7 @@ export class ShellStore {
     });
     if (this.client) {
       void this.loadDiff(this.client);
+      void this.loadPreview(this.client);
       return true;
     }
     return false;
@@ -665,6 +695,37 @@ export class ShellStore {
         this.setError(message(error));
       }
     }
+  }
+
+  /// Load the bounded new-side image preview for the selected file, or clear it.
+  private async loadPreview(client: BackendClient): Promise<void> {
+    const request = ++this.previewRequest;
+    const target = this.activeTarget();
+    const file = this.state.files[this.state.selectedFile];
+    if (!target || !file || !isImagePath(file.path)) {
+      this.update({ preview: null, previewError: null });
+      return;
+    }
+    const generation = this.state.generation;
+    this.update({ preview: null, previewError: null });
+    const current = () =>
+      request === this.previewRequest &&
+      generation === this.state.generation &&
+      this.state.files[this.state.selectedFile]?.path === file.path;
+    try {
+      const result = await client.filePreview(target, file.path);
+      if (current()) {
+        this.update({ preview: result, previewError: null });
+      }
+    } catch (error) {
+      if (current()) {
+        this.update({ preview: null, previewError: message(error) });
+      }
+    }
+  }
+
+  setPreviewError(error: string): void {
+    this.update({ preview: null, previewError: error });
   }
 
   /// Start (or refresh) the authenticated browser diff session and surface its

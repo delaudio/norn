@@ -52,6 +52,12 @@ export type Request =
       id: RequestId;
       method: "browser.open";
       params: TargetParams;
+    }
+  | {
+      type: "request";
+      id: RequestId;
+      method: "file.preview";
+      params: FilePreviewParams;
     };
 export type RequestId = string;
 /**
@@ -130,6 +136,10 @@ export interface TargetParams {
   target: TargetIdentity;
 }
 export interface EmptyResult {}
+export interface FilePreviewParams {
+  target: TargetIdentity;
+  path: string;
+}
 export interface ResponseOk {
   type: "response";
   id: RequestId;
@@ -143,7 +153,8 @@ export interface ResponseOk {
     | ReviewFilesResult
     | ReviewFindingsResult
     | ReviewTargetsResult
-    | BrowserOpenResult;
+    | BrowserOpenResult
+    | FilePreviewResult;
 }
 export interface DiffFileResult {
   target: TargetIdentity;
@@ -218,6 +229,12 @@ export interface ReviewTarget {
 }
 export interface BrowserOpenResult {
   url: string;
+}
+export interface FilePreviewResult {
+  path: string;
+  mimeType: string;
+  size: number;
+  dataBase64: string;
 }
 export interface ResponseError {
   type: "response";

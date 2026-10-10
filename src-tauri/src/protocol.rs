@@ -98,6 +98,14 @@ pub enum ProviderKind {
     Bitbucket,
 }
 
+/// Parameters for `file.preview`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct FilePreviewParams {
+    pub target: TargetIdentity,
+    pub path: String,
+}
+
 /// Parameters for `diff.file`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -154,6 +162,11 @@ pub enum Request {
     },
     #[serde(rename = "diff.file")]
     DiffFile { id: String, params: DiffFileParams },
+    #[serde(rename = "file.preview")]
+    FilePreview {
+        id: String,
+        params: FilePreviewParams,
+    },
     #[serde(rename = "review.files")]
     ReviewFiles { id: String, params: TargetParams },
     #[serde(rename = "review.findings")]
@@ -196,6 +209,7 @@ impl Request {
         match self {
             Self::RepositoryStatus { id, .. }
             | Self::DiffFile { id, .. }
+            | Self::FilePreview { id, .. }
             | Self::ReviewFiles { id, .. }
             | Self::ReviewFindings { id, .. }
             | Self::ReviewTargets { id, .. }
@@ -211,6 +225,7 @@ impl Request {
         match self {
             Self::RepositoryStatus { .. } => "repository.status",
             Self::DiffFile { .. } => "diff.file",
+            Self::FilePreview { .. } => "file.preview",
             Self::ReviewFiles { .. } => "review.files",
             Self::ReviewFindings { .. } => "review.findings",
             Self::ReviewTargets { .. } => "review.targets",
@@ -236,6 +251,12 @@ impl Request {
                 }
                 if params.context_lines.is_some_and(|lines| lines > 100) {
                     return Err(invalid_request("`diff.file` contextLines must be <= 100"));
+                }
+            }
+            Self::FilePreview { params, .. } => {
+                params.target.validate()?;
+                if params.path.is_empty() {
+                    return Err(invalid_request("`file.preview` path must not be empty"));
                 }
             }
             Self::ReviewStart { params, .. } => params.target.validate()?,

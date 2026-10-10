@@ -12,7 +12,7 @@
 //! is connected in later steps (#301, #303).
 
 use std::collections::{HashMap, HashSet};
-use std::io::{BufRead, Write};
+use std::io::{BufRead, Read, Write};
 use std::path::{Component, Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
@@ -21,6 +21,7 @@ use std::sync::{Arc, Mutex, OnceLock, RwLock};
 use std::thread;
 use std::time::{Duration, Instant};
 
+use base64::{engine::general_purpose::STANDARD, Engine as _};
 use serde_json::json;
 
 use crate::browser_diff::{open_browser_url, WebDiffServer, WebDiffState, WebDiffTargetKind};
@@ -37,10 +38,12 @@ const EXIT_USAGE: i32 = 2;
 const DEFAULT_OPERATION_DELAY_MS: u64 = 5;
 const MAX_DIFF_BYTES: usize = 256 * 1024;
 const MAX_SYNTHETIC_FILE_BYTES: u64 = 512 * 1024;
+const MAX_PREVIEW_BYTES: u64 = 2 * 1024 * 1024;
 const GIT_TIMEOUT: Duration = Duration::from_secs(10);
 const MAX_CONCURRENT_DIFFS: usize = 4;
 const MAX_CONCURRENT_FILES: usize = 4;
 const MAX_CONCURRENT_BROWSER_OPENS: usize = 1;
+const MAX_CONCURRENT_PREVIEWS: usize = 4;
 const MAX_ACTIVE_OPERATIONS: usize = 8;
 
 /// Every operation the backend tracks while it is running.
@@ -63,6 +66,7 @@ struct Backend {
     active_files: Arc<AtomicUsize>,
     active_operations: Arc<AtomicUsize>,
     active_browser: Arc<AtomicUsize>,
+    active_previews: Arc<AtomicUsize>,
     browser: Arc<Mutex<Option<WebDiffServer>>>,
 }
 
@@ -126,6 +130,7 @@ pub fn run() -> Result<(), i32> {
         active_diffs: Arc::new(AtomicUsize::new(0)),
         active_files: Arc::new(AtomicUsize::new(0)),
         active_browser: Arc::new(AtomicUsize::new(0)),
+        active_previews: Arc::new(AtomicUsize::new(0)),
         browser: Arc::new(Mutex::new(None)),
         active_operations: Arc::new(AtomicUsize::new(0)),
     };
@@ -385,6 +390,31 @@ fn dispatch(request: Request, backend: &Backend) -> bool {
             backend.respond(&id, review_targets_response());
             false
         }
+        Request::FilePreview { params, .. } => {
+            if backend
+                .active_previews
+                .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |current| {
+                    (current < MAX_CONCURRENT_PREVIEWS).then_some(current + 1)
+                })
+                .is_err()
+            {
+                backend.fail(
+                    &id,
+                    ProtocolError::new(
+                        ProtocolErrorCode::Internal,
+                        "too many concurrent preview requests",
+                    ),
+                );
+                return false;
+            }
+            let control = backend.control.clone();
+            let counter = ActiveCounter(backend.active_previews.clone());
+            thread::spawn(move || {
+                file_preview_response(&control, &id, params);
+                counter.decrement();
+            });
+            false
+        }
         Request::BrowserOpen { params, .. } => {
             if backend
                 .active_browser
@@ -490,6 +520,138 @@ fn provider_matches(kind: ProviderKind) -> config::ReviewProvider {
 
 /// Start (or update) the authenticated browser diff session for a target and
 /// return its URL. The OS browser is opened unless `NORN_BROWSER_OPEN=0`.
+/// Return the bounded new-side image bytes for the selected file, or an error
+/// so the shell can show an explicit fallback instead of an empty panel.
+fn file_preview_response(
+    control: &Sender<ServerMessage>,
+    id: &str,
+    params: protocol::FilePreviewParams,
+) {
+    let respond = |value: serde_json::Value| {
+        let _ = control.send(ServerMessage::Response(Response {
+            id: id.to_string(),
+            ok: true,
+            result: Some(value),
+            error: None,
+        }));
+    };
+    let fail = |error: ProtocolError| {
+        let _ = control.send(ServerMessage::Response(Response {
+            id: id.to_string(),
+            ok: false,
+            result: None,
+            error: Some(error),
+        }));
+    };
+    let Some(mime) = image_mime_for_path(&params.path) else {
+        fail(ProtocolError::new(
+            ProtocolErrorCode::NotFound,
+            "unsupported image preview type",
+        ));
+        return;
+    };
+    let Some(repo_path) = resolve_repo_path(&params.target) else {
+        fail(ProtocolError::new(
+            ProtocolErrorCode::NotFound,
+            "no local repository for this target",
+        ));
+        return;
+    };
+    let bytes = match preview_bytes(&params.target, &repo_path, &params.path) {
+        Ok(bytes) => bytes,
+        Err(error) => {
+            fail(error);
+            return;
+        }
+    };
+    respond(json!({
+        "path": params.path,
+        "mimeType": mime,
+        "size": bytes.len(),
+        "dataBase64": STANDARD.encode(&bytes),
+    }));
+}
+
+/// The bounded new-side bytes for `path`, resolved from the target revision
+/// (reviewed head for stored PR targets; the checkout otherwise).
+fn preview_bytes(
+    target: &TargetIdentity,
+    repo_path: &Path,
+    path: &str,
+) -> Result<Vec<u8>, ProtocolError> {
+    if let TargetIdentity::Provider { pr_id: Some(_), .. } = target {
+        let Some((_base, head)) = reviewed_range(target)? else {
+            return Err(ProtocolError::new(
+                ProtocolErrorCode::TargetStale,
+                "no stored reviewed range for this pull request",
+            ));
+        };
+        if !revisions_available(repo_path, &head, &head) {
+            return Err(ProtocolError::new(
+                ProtocolErrorCode::TargetStale,
+                "reviewed revisions are not available in the local checkout",
+            ));
+        }
+        let spec = format!("{head}:{path}");
+        let bytes = git_bytes(repo_path, &["show", spec.as_str()], MAX_PREVIEW_BYTES + 1)
+            .ok_or_else(|| {
+                ProtocolError::new(
+                    ProtocolErrorCode::NotFound,
+                    format!("no preview for `{path}`"),
+                )
+            })?;
+        if bytes.len() as u64 > MAX_PREVIEW_BYTES {
+            return Err(ProtocolError::new(
+                ProtocolErrorCode::TargetStale,
+                "image preview is unavailable or too large",
+            ));
+        }
+        return Ok(bytes);
+    }
+
+    let absolute = safe_canonical_path(repo_path, path).ok_or_else(|| {
+        ProtocolError::new(
+            ProtocolErrorCode::NotFound,
+            format!("no preview for `{path}`"),
+        )
+    })?;
+    let file = std::fs::File::open(&absolute).map_err(|_| {
+        ProtocolError::new(
+            ProtocolErrorCode::NotFound,
+            format!("no preview for `{path}`"),
+        )
+    })?;
+    let mut buffer = Vec::new();
+    let mut reader = Read::take(file, MAX_PREVIEW_BYTES + 1);
+    reader.read_to_end(&mut buffer).map_err(|_| {
+        ProtocolError::new(
+            ProtocolErrorCode::Internal,
+            format!("failed to read the preview for `{path}`"),
+        )
+    })?;
+    if buffer.len() as u64 > MAX_PREVIEW_BYTES {
+        return Err(ProtocolError::new(
+            ProtocolErrorCode::TargetStale,
+            "image preview is unavailable or too large",
+        ));
+    }
+    Ok(buffer)
+}
+
+fn image_mime_for_path(path: &str) -> Option<&'static str> {
+    let normalized = path.to_ascii_lowercase();
+    let extension = normalized.rsplit('.').next()?;
+    match extension {
+        "png" => Some("image/png"),
+        "jpg" | "jpeg" => Some("image/jpeg"),
+        "gif" => Some("image/gif"),
+        "webp" => Some("image/webp"),
+        "bmp" => Some("image/bmp"),
+        "svg" => Some("image/svg+xml"),
+        _ => None,
+    }
+}
+
 fn browser_open_response(
     control: &Sender<ServerMessage>,
     browser: &Arc<Mutex<Option<WebDiffServer>>>,
@@ -1524,14 +1686,20 @@ fn git_names(repo_path: &Path, args: &[&str]) -> Vec<String> {
 }
 
 fn git(repo_path: &Path, args: &[&str]) -> Option<String> {
+    git_bytes(repo_path, args, (MAX_DIFF_BYTES + 4096) as u64)
+        .map(|buffer| String::from_utf8_lossy(&buffer).to_string())
+}
+
+/// Run Git and return raw bytes (binary-safe), bounded by `limit`. Used for
+/// image previews where the output is not UTF-8.
+fn git_bytes(repo_path: &Path, args: &[&str], limit: u64) -> Option<Vec<u8>> {
     let mut child = spawn_git(repo_path, args)?;
     let pid = child.id();
     let stdout = child.stdout.take()?;
-    let limit = (MAX_DIFF_BYTES + 4096) as u64;
     let reader = thread::spawn(move || {
         let mut buffer = Vec::new();
-        let mut stdout = std::io::Read::take(stdout, limit);
-        let _ = std::io::Read::read_to_end(&mut stdout, &mut buffer);
+        let mut stdout = Read::take(stdout, limit);
+        let _ = Read::read_to_end(&mut stdout, &mut buffer);
         buffer
     });
     let deadline = Instant::now() + GIT_TIMEOUT;
@@ -1551,9 +1719,7 @@ fn git(repo_path: &Path, args: &[&str]) -> Option<String> {
     };
     let buffer = reader.join().unwrap_or_default();
     forget_git_child(pid);
-    status
-        .filter(|status| status.success())
-        .map(|_| String::from_utf8_lossy(&buffer).to_string())
+    status.filter(|status| status.success()).map(|_| buffer)
 }
 
 fn spawn_git(repo_path: &Path, args: &[&str]) -> Option<Child> {

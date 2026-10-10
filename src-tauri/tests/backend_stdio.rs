@@ -492,6 +492,58 @@ fn browser_open_returns_an_authenticated_session_url() {
 }
 
 #[test]
+fn file_preview_returns_bounded_image_bytes() {
+    let repo = temp_repo();
+    std::fs::write(repo.path().join("pic.png"), [0x89u8, 0x50, 0x4e, 0x47]).expect("write");
+
+    let mut backend = Backend::spawn(repo.path());
+    backend.handshake();
+    backend.send(json!({
+        "type": "request",
+        "id": "req-preview",
+        "method": "file.preview",
+        "params": {
+            "target": { "kind": "local", "localSnapshotSha256": LOCAL_SHA },
+            "path": "pic.png"
+        }
+    }));
+    let response = backend.wait_for(
+        |v| v["type"] == "response" && v["id"] == "req-preview",
+        Duration::from_secs(5),
+    );
+    assert_eq!(response["ok"], true, "response: {response}");
+    assert_eq!(response["result"]["mimeType"], "image/png");
+    assert_eq!(response["result"]["size"], 4);
+    assert!(!response["result"]["dataBase64"]
+        .as_str()
+        .unwrap_or("")
+        .is_empty());
+}
+
+#[test]
+fn file_preview_rejects_unsupported_types() {
+    let repo = temp_repo();
+    std::fs::write(repo.path().join("notes.txt"), "hello\n").expect("write");
+
+    let mut backend = Backend::spawn(repo.path());
+    backend.handshake();
+    backend.send(json!({
+        "type": "request",
+        "id": "req-preview-bad",
+        "method": "file.preview",
+        "params": {
+            "target": { "kind": "local", "localSnapshotSha256": LOCAL_SHA },
+            "path": "notes.txt"
+        }
+    }));
+    let response = backend.wait_for(
+        |v| v["type"] == "response" && v["id"] == "req-preview-bad",
+        Duration::from_secs(5),
+    );
+    assert_eq!(response["ok"], false, "response: {response}");
+}
+
+#[test]
 fn malformed_frames_do_not_stop_the_backend() {
     let repo = temp_repo();
     let mut backend = Backend::spawn(repo.path());
