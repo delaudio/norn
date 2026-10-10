@@ -8,6 +8,7 @@ import type {
   ChangedFile,
   FindingSummary,
   RepositorySummary,
+  ReviewRunSummary,
   ReviewTarget,
 } from "../transport/backendClient";
 import type { TargetIdentity } from "../transport/protocol";
@@ -85,6 +86,7 @@ export interface ShellSnapshot {
   selectedFile: number;
   findings: FindingSummary[];
   selectedFinding: number;
+  history: ReviewRunSummary[];
   diff: DiffView | null;
   diffLoading: boolean;
   diffError: string | null;
@@ -114,6 +116,7 @@ const INITIAL: ShellSnapshot = {
   selectedFile: 0,
   findings: [],
   selectedFinding: 0,
+  history: [],
   diff: null,
   diffLoading: false,
   diffError: null,
@@ -374,6 +377,16 @@ export class ShellStore {
         this.update({ error: message(findings.error) });
       }
     }
+    try {
+      const history = await client.reviewHistory(target);
+      if (generation === this.state.generation) {
+        this.update({ history });
+      }
+    } catch {
+      if (generation === this.state.generation) {
+        this.update({ history: [] });
+      }
+    }
     if (generation !== this.state.generation) {
       return;
     }
@@ -404,6 +417,7 @@ export class ShellStore {
       findings: [],
       selectedFile: 0,
       selectedFinding: 0,
+      history: [],
       diff: null,
       diffLoading: false,
       diffError: null,

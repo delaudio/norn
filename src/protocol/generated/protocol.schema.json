@@ -205,7 +205,8 @@
         "review.findings",
         "review.targets",
         "browser.open",
-        "file.preview"
+        "file.preview",
+        "review.history"
       ]
     },
     "DiffFileParams": {
@@ -654,6 +655,51 @@
           "type": "string"
         }
       }
+    },
+    "ReviewRunSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "runId",
+        "createdAt",
+        "status",
+        "turnKind",
+        "findingsCount"
+      ],
+      "properties": {
+        "runId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "createdAt": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        },
+        "turnKind": {
+          "type": "string"
+        },
+        "findingsCount": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "ReviewHistoryResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "runs"
+      ],
+      "properties": {
+        "runs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ReviewRunSummary"
+          }
+        }
+      }
     }
   },
   "oneOf": [
@@ -919,6 +965,30 @@
               "$ref": "#/definitions/FilePreviewParams"
             }
           }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "type": {
+              "const": "request"
+            },
+            "id": {
+              "$ref": "#/definitions/RequestId"
+            },
+            "method": {
+              "const": "review.history"
+            },
+            "params": {
+              "$ref": "#/definitions/TargetParams"
+            }
+          }
         }
       ]
     },
@@ -973,6 +1043,9 @@
             },
             {
               "$ref": "#/definitions/FilePreviewResult"
+            },
+            {
+              "$ref": "#/definitions/ReviewHistoryResult"
             }
           ]
         }

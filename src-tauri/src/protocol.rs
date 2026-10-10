@@ -171,6 +171,8 @@ pub enum Request {
     ReviewFiles { id: String, params: TargetParams },
     #[serde(rename = "review.findings")]
     ReviewFindings { id: String, params: TargetParams },
+    #[serde(rename = "review.history")]
+    ReviewHistory { id: String, params: TargetParams },
     #[serde(rename = "review.targets")]
     ReviewTargets {
         id: String,
@@ -213,6 +215,7 @@ impl Request {
             | Self::ReviewFiles { id, .. }
             | Self::ReviewFindings { id, .. }
             | Self::ReviewTargets { id, .. }
+            | Self::ReviewHistory { id, .. }
             | Self::BrowserOpen { id, .. }
             | Self::ReviewStart { id, .. }
             | Self::OperationStatus { id, .. }
@@ -229,6 +232,7 @@ impl Request {
             Self::ReviewFiles { .. } => "review.files",
             Self::ReviewFindings { .. } => "review.findings",
             Self::ReviewTargets { .. } => "review.targets",
+            Self::ReviewHistory { .. } => "review.history",
             Self::BrowserOpen { .. } => "browser.open",
             Self::ReviewStart { .. } => "review.start",
             Self::OperationStatus { .. } => "operation.status",
@@ -262,6 +266,7 @@ impl Request {
             Self::ReviewStart { params, .. } => params.target.validate()?,
             Self::ReviewFiles { params, .. }
             | Self::ReviewFindings { params, .. }
+            | Self::ReviewHistory { params, .. }
             | Self::BrowserOpen { params, .. } => params.target.validate()?,
             Self::RepositoryStatus { .. }
             | Self::ReviewTargets { .. }

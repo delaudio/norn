@@ -402,3 +402,27 @@ test("a running operation survives a target switch", async () => {
   expect(store.getSnapshot().operation).not.toBeNull();
   expect(store.getSnapshot().operation?.targetLabel).toContain("payments");
 });
+
+test("loads the stored review history for a target", async () => {
+  const store = new ShellStore();
+  const client = new BackendClient(
+    new FakeBackendTransport({
+      repositories,
+      files,
+      findings,
+      history: [
+        {
+          runId: "run-1",
+          createdAt: "2026-01-01T00:00:00Z",
+          status: "succeeded",
+          turnKind: "initial",
+          findingsCount: 2,
+        },
+      ],
+    }),
+  );
+  await store.connect(client);
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  expect(store.getSnapshot().history).toHaveLength(1);
+  expect(store.getSnapshot().history[0]?.findingsCount).toBe(2);
+});
