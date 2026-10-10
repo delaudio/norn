@@ -1,6 +1,13 @@
 import { type ScrollBoxRenderable, TextAttributes } from "@opentui/core";
 import { useKeyboard, usePaste, useTerminalDimensions } from "@opentui/react";
-import { type RefObject, useEffect, useRef, useSyncExternalStore } from "react";
+import {
+  type ReactNode,
+  type RefObject,
+  useEffect,
+  useMemo,
+  useRef,
+  useSyncExternalStore,
+} from "react";
 import type { BackendClient } from "../../transport/backendClient";
 import type { ShellSnapshot, ShellStore } from "../store";
 import { theme } from "../theme";
@@ -50,6 +57,8 @@ function useShellInput(
       void store.startReview(client);
     } else if (key.name === "s") {
       store.toggleDiffMode();
+    } else if (key.name === "e") {
+      store.toggleDiffExpanded();
     } else if (key.name === "x") {
       void store.cancel(client);
     }
@@ -195,12 +204,105 @@ function lineLabel(line: DiffLine | null, side: "old" | "new"): string {
   return `${String(number ?? "").padStart(4, " ")} ${line.text}`;
 }
 
+function splitRowElement(row: SplitRow, key: number): ReactNode {
+  if (row.kind === "hunk") {
+    return (
+      <text key={key} fg={theme.muted} wrapMode="none">
+        {row.text}
+      </text>
+    );
+  }
+  if (row.kind === "note") {
+    if (row.side === null) {
+      return (
+        <text key={key} fg={theme.muted} wrapMode="none">
+          {row.text}
+        </text>
+      );
+    }
+    return (
+      <box key={key} flexDirection="row" height={1}>
+        <box width="50%" minWidth={0}>
+          <text fg={theme.muted} wrapMode="none" truncate>
+            {row.side === "old" ? row.text : ""}
+          </text>
+        </box>
+        <box width="50%" minWidth={0}>
+          <text fg={theme.muted} wrapMode="none" truncate>
+            {row.side === "new" ? row.text : ""}
+          </text>
+        </box>
+      </box>
+    );
+  }
+  const highlighted = row.left?.highlighted === true || row.right?.highlighted === true;
+  return (
+    <box key={key} id={highlighted ? "diff-highlight" : undefined} flexDirection="row">
+      <box width="50%" minWidth={0}>
+        <text
+          fg={row.left?.highlighted ? theme.primary : (row.left?.fg ?? theme.text)}
+          wrapMode="word"
+        >
+          {lineLabel(row.left, "old")}
+        </text>
+      </box>
+      <box width="50%" minWidth={0}>
+        <text
+          fg={row.right?.highlighted ? theme.primary : (row.right?.fg ?? theme.text)}
+          wrapMode="word"
+        >
+          {lineLabel(row.right, "new")}
+        </text>
+      </box>
+    </box>
+  );
+}
+
+/// Diff rows rendered at once before collapsing; bounds React mounts on very
+/// large diffs while keeping the highlighted region visible.
+const MAX_RENDERED_DIFF_ROWS = 2000;
+
+function splitHighlightIndex(rows: SplitRow[]): number {
+  return rows.findIndex(
+    (row) =>
+      row.kind === "pair" && (row.left?.highlighted === true || row.right?.highlighted === true),
+  );
+}
+
+/// The row window to render, centred on the anchor when a large diff is
+/// collapsed. Split out so it can be unit tested.
+export function diffWindow(
+  total: number,
+  anchorIndex: number,
+  expanded: boolean,
+  max: number = MAX_RENDERED_DIFF_ROWS,
+): { start: number; end: number; collapsed: boolean } {
+  if (expanded || total <= max) {
+    return { start: 0, end: total, collapsed: false };
+  }
+  const anchor = anchorIndex >= 0 ? anchorIndex : 0;
+  const start = Math.max(0, Math.min(anchor - Math.floor(max / 2), total - max));
+  return { start, end: start + max, collapsed: true };
+}
+
 function DiffPanel({
   state,
   scroll,
+  lines,
+  splitAll,
+  windowStart,
+  windowEnd,
+  collapsed,
+  total,
 }: {
   state: ShellSnapshot;
   scroll: RefObject<ScrollBoxRenderable | null>;
+  lines: DiffLine[];
+  splitAll: SplitRow[];
+  windowStart: number;
+  windowEnd: number;
+  collapsed: boolean;
+  total: number;
 }) {
   if (state.status === "connecting") {
     return <text fg={theme.muted}>Connecting to the Norn backend…</text>;
@@ -224,13 +326,16 @@ function DiffPanel({
       </text>
     );
   }
-  const lines = diffLines(state.diff.text, state.highlightLine, state.highlightSide);
+  const split = state.diffMode === "split";
+  const hiddenAbove = windowStart;
+  const hiddenBelow = total - windowEnd;
   return (
     <>
       <text fg={theme.primary} attributes={TextAttributes.BOLD} height={1} wrapMode="none" truncate>
         {state.diff.path}
         {state.diff.truncated ? " (truncated)" : ""}
         {`  ·  ${state.diffMode}`}
+        {collapsed ? "  ·  collapsed" : ""}
       </text>
       <scrollbox
         ref={scroll}
@@ -241,69 +346,28 @@ function DiffPanel({
         scrollX
         viewportCulling
       >
-        {state.diffMode === "split"
-          ? splitRows(lines).map((row, index) => {
-              if (row.kind === "hunk") {
-                return (
-                  // biome-ignore lint/suspicious/noArrayIndexKey: diff rows are immutable and position-keyed
-                  <text key={index} fg={theme.muted} wrapMode="none">
-                    {row.text}
-                  </text>
-                );
-              }
-              if (row.kind === "note") {
-                if (row.side === null) {
-                  return (
-                    // biome-ignore lint/suspicious/noArrayIndexKey: diff rows are immutable and position-keyed
-                    <text key={index} fg={theme.muted} wrapMode="none">
-                      {row.text}
-                    </text>
-                  );
-                }
-                return (
-                  // biome-ignore lint/suspicious/noArrayIndexKey: diff rows are immutable and position-keyed
-                  <box key={index} flexDirection="row" height={1}>
-                    <box width="50%" minWidth={0}>
-                      <text fg={theme.muted} wrapMode="none" truncate>
-                        {row.side === "old" ? row.text : ""}
-                      </text>
-                    </box>
-                    <box width="50%" minWidth={0}>
-                      <text fg={theme.muted} wrapMode="none" truncate>
-                        {row.side === "new" ? row.text : ""}
-                      </text>
-                    </box>
-                  </box>
-                );
-              }
-              return (
-                // biome-ignore lint/suspicious/noArrayIndexKey: diff rows are immutable and position-keyed
-                <box key={index} flexDirection="row">
-                  <box width="50%" minWidth={0}>
-                    <text
-                      fg={row.left?.highlighted ? theme.primary : (row.left?.fg ?? theme.text)}
-                      wrapMode="word"
-                    >
-                      {lineLabel(row.left, "old")}
-                    </text>
-                  </box>
-                  <box width="50%" minWidth={0}>
-                    <text
-                      fg={row.right?.highlighted ? theme.primary : (row.right?.fg ?? theme.text)}
-                      wrapMode="word"
-                    >
-                      {lineLabel(row.right, "new")}
-                    </text>
-                  </box>
-                </box>
-              );
-            })
-          : lines.map((line, index) => (
-              // biome-ignore lint/suspicious/noArrayIndexKey: diff lines are immutable and position-keyed
-              <text key={index} fg={line.highlighted ? theme.primary : line.fg} wrapMode="none">
+        {hiddenAbove > 0 ? (
+          <text fg={theme.muted} wrapMode="none">{`… ${hiddenAbove} lines above (collapsed)`}</text>
+        ) : null}
+        {split
+          ? splitAll.slice(windowStart, windowEnd).map((row, index) => splitRowElement(row, index))
+          : lines.slice(windowStart, windowEnd).map((line, index) => (
+              <text
+                // biome-ignore lint/suspicious/noArrayIndexKey: diff lines are immutable and position-keyed
+                key={index}
+                id={line.highlighted ? "diff-highlight" : undefined}
+                fg={line.highlighted ? theme.primary : line.fg}
+                wrapMode="none"
+              >
                 {line.text}
               </text>
             ))}
+        {hiddenBelow > 0 ? (
+          <text
+            fg={theme.muted}
+            wrapMode="none"
+          >{`… ${hiddenBelow} lines below — press e to expand`}</text>
+        ) : null}
       </scrollbox>
     </>
   );
@@ -384,17 +448,59 @@ export function Shell({ store, client, quit }: ShellProps) {
   useShellInput(store, client, quit, scroll);
   const wide = width >= 100;
 
+  const diffLinesData = useMemo(
+    () => (state.diff ? diffLines(state.diff.text, state.highlightLine, state.highlightSide) : []),
+    [state.diff, state.highlightLine, state.highlightSide],
+  );
+  const splitAll = useMemo(
+    () => (state.diffMode === "split" ? splitRows(diffLinesData) : []),
+    [state.diffMode, diffLinesData],
+  );
+  const diffTotal = state.diffMode === "split" ? splitAll.length : diffLinesData.length;
+  const diffAnchor =
+    state.diffMode === "split"
+      ? splitHighlightIndex(splitAll)
+      : diffLinesData.findIndex((line) => line.highlighted);
+  const diffWindowInfo = diffWindow(diffTotal, diffAnchor, state.diffExpanded);
+  const diffCollapsed = state.diff ? diffWindowInfo.collapsed : false;
+
+  // Keep the highlighted region visible. `scrollChildIntoView` uses the real
+  // layout offset, so wrapped split rows scroll correctly; a numeric fallback
+  // covers a not-yet-laid-out child and the non-wrapping unified view.
   useEffect(() => {
-    if (state.scrollRequest === 0 || !state.diff) {
+    const view = scroll.current;
+    if (!view || !state.diff) {
       return;
     }
-    const index = diffLines(state.diff.text, state.highlightLine, state.highlightSide).findIndex(
-      (line) => line.highlighted,
-    );
-    if (index >= 0 && scroll.current) {
-      scroll.current.scrollTop = index;
+    if (diffAnchor < 0) {
+      // No anchor: preserve the reviewer's scroll position (for example when
+      // expanding an unanchored diff).
+      return;
     }
-  }, [state.scrollRequest, state.diff, state.highlightLine, state.highlightSide]);
+    // A new scroll request re-centres even when the anchor is unchanged.
+    if (state.scrollRequest < 0) {
+      return;
+    }
+    const aboveMarker = diffWindowInfo.start > 0 ? 1 : 0;
+    const target = diffAnchor - diffWindowInfo.start + aboveMarker;
+    const centered = () => Math.max(0, target - Math.floor(view.height / 2));
+    if (state.diffMode === "split" || state.diffExpanded) {
+      try {
+        view.scrollChildIntoView("diff-highlight");
+      } catch {
+        view.scrollTop = centered();
+      }
+    } else {
+      view.scrollTop = centered();
+    }
+  }, [
+    state.scrollRequest,
+    state.diff,
+    diffAnchor,
+    diffWindowInfo.start,
+    state.diffMode,
+    state.diffExpanded,
+  ]);
 
   const repo = state.repositories[state.selected];
   const selectedFinding = state.findings[state.selectedFinding];
@@ -558,14 +664,24 @@ export function Shell({ store, client, quit }: ShellProps) {
           >
             {detailTitle}
           </text>
-          <DiffPanel state={state} scroll={scroll} />
+          <DiffPanel
+            state={state}
+            scroll={scroll}
+            lines={diffLinesData}
+            splitAll={splitAll}
+            windowStart={diffWindowInfo.start}
+            windowEnd={diffWindowInfo.end}
+            collapsed={diffCollapsed}
+            total={diffTotal}
+          />
         </box>
       </box>
       <box height={1} flexShrink={0} paddingX={1} backgroundColor={theme.panel}>
         <text fg={theme.muted}>
+          {diffCollapsed ? "large diff · e expand  " : ""}
           {wide
-            ? "j/k move  ←/→ scroll  s split  Tab pane  Enter review  x cancel  q quit"
-            : "j/k  ←/→  s  Tab  q"}
+            ? "j/k move  ←/→ scroll  s split  e expand  Tab pane  Enter review  x cancel  q quit"
+            : "j/k  ←/→  s  e  Tab  q"}
         </text>
       </box>
     </box>
