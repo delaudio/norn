@@ -106,3 +106,19 @@ test("large diffs render collapsed with an expand hint", async () => {
     renderer.renderer.destroy();
   }
 });
+
+test("streams review events into a bounded operation panel", async () => {
+  const app = await mount(100, 30);
+  try {
+    app.renderer.mockInput.pressEnter();
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    await app.renderer.renderOnce();
+    const frame = app.renderer.captureCharFrame();
+    expect(frame).toContain("review succeeded");
+    expect(frame).toContain("collected file");
+  } finally {
+    app.cleanup();
+    app.ui.unmount();
+    app.renderer.renderer.destroy();
+  }
+});

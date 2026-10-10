@@ -620,12 +620,16 @@ export function Shell({ store, client, quit }: ShellProps) {
         </text>
       ) : null}
       {state.operation ? (
-        <text fg={theme.secondary} height={1} wrapMode="none" truncate>
-          review {state.operation.state} · {state.operation.targetLabel}
-          {state.operation.logs.length > 0
-            ? ` · ${state.operation.logs[state.operation.logs.length - 1]?.text ?? ""}`
-            : ""}
-        </text>
+        <box flexDirection="column" flexShrink={0} paddingX={1} backgroundColor={theme.panel}>
+          <text fg={theme.secondary} height={1} wrapMode="none" truncate>
+            {`review ${state.operation.state} · ${state.operation.targetLabel}`}
+          </text>
+          {state.operation.logs.slice(-5).map((log) => (
+            <text key={log.id} fg={theme.muted} height={1} wrapMode="none" truncate>
+              {log.text}
+            </text>
+          ))}
+        </box>
       ) : null}
       {selectedFinding ? (
         <text fg={theme.text} height={1} wrapMode="none" truncate>
