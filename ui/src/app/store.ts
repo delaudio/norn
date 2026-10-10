@@ -68,6 +68,8 @@ export interface ShellSnapshot {
   highlightSide: "old" | "new";
   scrollRequest: number;
   diffMode: "unified" | "split";
+  diffExpanded: boolean;
+  diffLineCount: number;
   focus: ShellFocus;
   operation: OperationView | null;
   generation: number;
@@ -93,6 +95,8 @@ const INITIAL: ShellSnapshot = {
   highlightSide: "new",
   scrollRequest: 0,
   diffMode: "unified",
+  diffExpanded: false,
+  diffLineCount: 0,
   focus: "repositories",
   operation: null,
   generation: 0,
@@ -435,6 +439,8 @@ export class ShellStore {
           diff: { path: file.path, text: result.diff, truncated: result.truncated },
           diffLoading: false,
           diffError: null,
+          diffExpanded: false,
+          diffLineCount: result.diff.split("\n").length,
         });
         const highlight = this.state.highlightLine;
         if (highlight != null) {
@@ -558,6 +564,10 @@ export class ShellStore {
 
   toggleDiffMode(): void {
     this.update({ diffMode: this.state.diffMode === "unified" ? "split" : "unified" });
+  }
+
+  toggleDiffExpanded(): void {
+    this.update({ diffExpanded: !this.state.diffExpanded });
   }
 
   cycleFocus(): void {

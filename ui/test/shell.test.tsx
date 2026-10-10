@@ -77,3 +77,32 @@ test("Enter starts a review, logs stream, q quits and unmount clears", async () 
     app.renderer.renderer.destroy();
   }
 });
+
+test("large diffs render collapsed with an expand hint", async () => {
+  const renderer = await createTestRenderer({ width: 120, height: 30 });
+  const body = Array.from({ length: 2500 }, (_, i) => (i % 2 === 0 ? `+l${i}` : `-l${i}`)).join(
+    "\n",
+  );
+  const diffText = `@@ -1,2500 +1,2500 @@\n${body}\n`;
+  const client = new BackendClient(
+    new FakeBackendTransport({
+      repositories,
+      files: [{ path: "src/a.ts", status: "modified", additions: 1, deletions: 1, oldPath: null }],
+      findings: [],
+      diffText,
+    }),
+  );
+  const store = new ShellStore();
+  await store.connect(client);
+  const ui = mountApp(renderer.renderer, store, client, () => {});
+  await renderer.renderOnce();
+  try {
+    const frame = renderer.captureCharFrame();
+    expect(frame).toContain("collapsed");
+    expect(frame).toContain("e expand");
+    expect(store.getSnapshot().diffLineCount).toBeGreaterThan(2000);
+  } finally {
+    ui.unmount();
+    renderer.renderer.destroy();
+  }
+});

@@ -197,6 +197,22 @@ async function splitScene() {
   return { store, client };
 }
 
+function longDiff(lineCount: number): string {
+  const body = Array.from({ length: lineCount }, (_, index) =>
+    index % 2 === 0 ? `+line ${index}` : `-line ${index}`,
+  ).join("\n");
+  return `@@ -1,${lineCount} +1,${lineCount} @@\n${body}\n`;
+}
+
+async function largeDiffScene() {
+  const { client, store, ready } = readyStore(
+    new FakeBackendTransport({ repositories, files, findings, diffText: longDiff(2500) }),
+  );
+  await ready;
+  await Bun.sleep(5);
+  return { store, client };
+}
+
 const scenes: Scene[] = [
   { id: "shell-ready-80x24", cols: 80, rows: 24, build: readyScene },
   { id: "shell-ready-50x15", cols: 50, rows: 15, build: readyScene },
@@ -209,6 +225,7 @@ const scenes: Scene[] = [
   { id: "shell-stale-anchor-80x24", cols: 80, rows: 24, build: staleAnchorScene },
   { id: "shell-review-targets-120x30", cols: 120, rows: 30, build: targetScene },
   { id: "shell-split-120x30", cols: 120, rows: 30, build: splitScene },
+  { id: "shell-large-diff-120x30", cols: 120, rows: 30, build: largeDiffScene },
 ];
 
 function color(value: RGBA): string {

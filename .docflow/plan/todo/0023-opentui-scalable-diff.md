@@ -9,8 +9,10 @@
 Reach terminal diff parity for large reviews without freezing navigation. This
 change delivers the text-diff increment: unified and split diff modes with a
 mode toggle, viewport culling on the diff scrollbox so off-screen rows are not
-rendered, old/new line mapping preserved in both modes, and a large-diff
-performance fixture that records mount and split-repaint cost.
+rendered, large-diff collapse (diffs over 2,000 rows render a bounded window
+centred on the highlighted region with an `e` expand toggle), old/new line
+mapping preserved in both modes, and a large-diff performance fixture that
+records mount and split-repaint cost.
 
 GitHub issue: #302 (epic #294 step 08/15).
 
@@ -26,6 +28,8 @@ change references #302 without closing it.
   comments keep correct anchors in both.
 - A mode toggle is exposed through the shell and documented.
 - The diff scrollbox uses viewport culling; off-screen rows are not rendered.
+- Diffs over 2,000 rows collapse to a bounded window centred on the highlight,
+  with an `e` expand toggle and an expand hint.
 - Large-diff benchmarks (1,000 and 10,000 lines) are recorded with commands.
 - `pnpm run typecheck`, `pnpm run test`, `archgate check`, the `ui` job, Rust
   tests and `frames:check` pass.

@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { diffLines, splitRows } from "../src/app/components/Shell";
+import { diffLines, diffWindow, splitRows } from "../src/app/components/Shell";
 import { anchorPresent } from "../src/app/store";
 
 const DIFF = "@@ -1 +1 @@\n-old\n+new\n";
@@ -63,4 +63,19 @@ test("split view treats file headers as metadata, not source lines", () => {
     left: { text: "-a", oldNumber: 1 },
     right: { text: "+b", newNumber: 1 },
   });
+});
+
+test("difWindow collapses large diffs around the anchor and expands on demand", () => {
+  // no anchor: window starts at 0
+  expect(diffWindow(5000, -1, false, 2000)).toEqual({ start: 0, end: 2000, collapsed: true });
+  // anchor near the end keeps the end in view
+  const nearEnd = diffWindow(5000, 4900, false, 2000);
+  expect(nearEnd).toEqual({ start: 3000, end: 5000, collapsed: true });
+  // anchor in the middle centres the window
+  const middle = diffWindow(5000, 2500, false, 2000);
+  expect(middle.start).toBe(1500);
+  expect(middle.end).toBe(3500);
+  // small diffs and expanded diffs render everything
+  expect(diffWindow(100, 10, false, 2000)).toEqual({ start: 0, end: 100, collapsed: false });
+  expect(diffWindow(5000, 2500, true, 2000)).toEqual({ start: 0, end: 5000, collapsed: false });
 });

@@ -350,3 +350,14 @@ test("toggleDiffMode switches between unified and split", () => {
   store.toggleDiffMode();
   expect(store.getSnapshot().diffMode).toBe("unified");
 });
+
+test("toggleDiffExpanded toggles and resets when a diff loads", async () => {
+  const store = new ShellStore();
+  expect(store.getSnapshot().diffExpanded).toBe(false);
+  store.toggleDiffExpanded();
+  expect(store.getSnapshot().diffExpanded).toBe(true);
+  const client = new BackendClient(new FakeBackendTransport({ repositories, files, findings }));
+  await store.connect(client);
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  expect(store.getSnapshot().diffExpanded).toBe(false);
+});
