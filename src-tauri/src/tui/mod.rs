@@ -1,4 +1,3 @@
-mod diff_server;
 mod image_diff;
 mod loading;
 mod render;
@@ -14,7 +13,7 @@ use std::{
     time::Duration,
 };
 
-use diff_server::{open_browser_url, WebDiffServer, WebDiffState, WebDiffTargetKind};
+use crate::browser_diff::{open_browser_url, WebDiffServer, WebDiffState, WebDiffTargetKind};
 
 use crossterm::event::{self, Event, KeyCode, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::{
