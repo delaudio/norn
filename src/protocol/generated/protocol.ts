@@ -46,6 +46,12 @@ export type Request =
       id: RequestId;
       method: "review.targets";
       params: EmptyResult;
+    }
+  | {
+      type: "request";
+      id: RequestId;
+      method: "browser.open";
+      params: TargetParams;
     };
 export type RequestId = string;
 /**
@@ -136,7 +142,8 @@ export interface ResponseOk {
     | EmptyResult
     | ReviewFilesResult
     | ReviewFindingsResult
-    | ReviewTargetsResult;
+    | ReviewTargetsResult
+    | BrowserOpenResult;
 }
 export interface DiffFileResult {
   target: TargetIdentity;
@@ -208,6 +215,9 @@ export interface ReviewTarget {
   title: string;
   status: string;
   runId: string;
+}
+export interface BrowserOpenResult {
+  url: string;
 }
 export interface ResponseError {
   type: "response";

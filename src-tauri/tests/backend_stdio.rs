@@ -22,6 +22,7 @@ impl Backend {
         let mut child = Command::new(env!("CARGO_BIN_EXE_norn-backend"))
             .current_dir(cwd)
             .env("NORN_BACKEND_OPERATION_DELAY_MS", "200")
+            .env("NORN_BROWSER_OPEN", "0")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -453,6 +454,41 @@ fn diff_file_before_first_commit_includes_staged_content() {
     let diff = response["result"]["diff"].as_str().expect("diff string");
     assert!(diff.contains("+one"), "diff: {diff}");
     assert!(diff.contains("+two"), "diff: {diff}");
+}
+
+#[test]
+fn browser_open_returns_an_authenticated_session_url() {
+    let repo = temp_repo();
+    std::fs::write(repo.path().join("a.txt"), "one\n").expect("write");
+    git(repo.path(), &["add", "-A"]);
+    git(repo.path(), &["commit", "-qm", "init"]);
+    std::fs::write(repo.path().join("a.txt"), "two\n").expect("edit");
+
+    let mut backend = Backend::spawn(repo.path());
+    backend.handshake();
+    backend.send(json!({
+        "type": "request",
+        "id": "req-browser",
+        "method": "browser.open",
+        "params": { "target": { "kind": "local", "localSnapshotSha256": LOCAL_SHA } }
+    }));
+    let response = backend.wait_for(
+        |v| v["type"] == "response" && v["id"] == "req-browser",
+        Duration::from_secs(5),
+    );
+    assert_eq!(response["ok"], true, "response: {response}");
+    let url = response["result"]["url"].as_str().expect("url string");
+    assert!(url.starts_with("http://127.0.0.1:"), "url: {url}");
+    let token = url
+        .split("/session/")
+        .nth(1)
+        .and_then(|rest| rest.split('/').next())
+        .expect("session token");
+    assert_eq!(token.len(), 64, "token: {token}");
+    assert!(
+        token.bytes().all(|b| b.is_ascii_hexdigit()),
+        "token: {token}"
+    );
 }
 
 #[test]

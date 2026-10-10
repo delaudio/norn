@@ -54,6 +54,8 @@ export class FakeBackendTransport implements BackendTransport {
         return { repos: this.options.repositories ?? [] };
       case "review.targets":
         return { targets: this.options.targets ?? [] };
+      case "browser.open":
+        return { url: `http://127.0.0.1:0/session/${"0".repeat(64)}/` };
       case "review.files":
         return { target: params.target, files: this.options.files ?? [] };
       case "review.findings":
