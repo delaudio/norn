@@ -15,7 +15,7 @@ numbers and must not appear in product strings.
 | --- | --- | --- | --- | --- |
 | Rust engine, headless CLI, service, stdio backend | `src-tauri/` | crate `norn`; binaries `norn`, `norn-tui` (compat), `norn-app` (compat), `norn-backend` | Rust (pinned) | Directory name stays `src-tauri/` during the transition; renamed once at cutover (#309). |
 | OpenTUI workspace | `ui/` | package `@norn/ui` | Bun + OpenTUI + React + TypeScript | New interactive surface; owns presentation and transient interaction state. |
-| Retained browser diff assets | `src/browser-diff/`, `browser-diff.html`, `vite.browser-diff.config.ts` | served HTML/JS | existing pnpm/Vite | Served by the Rust `diff_server`; preserved unchanged. |
+| Retained browser diff assets | `src/browser-diff/`, `browser-diff.html`, `vite.browser-diff.config.ts` | served HTML/JS | existing pnpm/Vite | Served by the Rust `browser_diff` server; preserved unchanged. |
 | Docs and web | `apps/docs/`, `apps/web/`, Storybook | existing | existing pnpm | Stay on the current toolchain until cutover. |
 
 Rules:
@@ -154,7 +154,7 @@ removal with maintainer decision; `shared` = Rust/native service reused as-is.
 | Diff: unified/split/conversation, per-file nav, large-diff collapse | both | `render.rs`, `DiffViewer`, `FileDiff`, `FileTree` | `viewedFilesStorage` | #301/#302 | port |
 | Syntax highlighting | both | `delta` subprocess (TUI), `refractor` (desktop) | none | #302 | port |
 | Image diffs (terminal protocols; single preview) | both | `tui/image_diff.rs`, `FileDiff.ImagePreviewPanel` | none | #302 | port |
-| Authenticated browser diff viewer | TUI + shared assets | `tui/diff_server.rs`, `browser-diff/*` | session token | #302 | preserve |
+| Authenticated browser diff viewer | TUI + shared assets | `browser_diff.rs`, `browser-diff/*` | session token | #302 | preserve |
 | Drafts/composer staged comments + explicit publish | both | `tui/mod.rs`, `useDraftComments`, `reviewService` | localStorage (desktop), session (TUI) | #304 | port |
 | Structured finding publication + reconciliation | desktop | `reviewFindingPublication.ts`, `reviewService.ts`, Rust `publish_review_finding` | Rust review store | #304 | port |
 | AI review start + streaming logs | both | `tui/mod.rs`, `AiReviewPanel`, `useAiReview` | Rust run store | #303 | port |

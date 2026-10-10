@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
-const serverSource = readFileSync("src-tauri/src/tui/diff_server.rs", "utf8");
+const serverSource = readFileSync("src-tauri/src/browser_diff.rs", "utf8");
 const browserSource = readFileSync("src/browser-diff/BrowserDiffApp.tsx", "utf8");
 const browserHtml = readFileSync("browser-diff.html", "utf8");
 const browserViteConfig = readFileSync("vite.browser-diff.config.ts", "utf8");

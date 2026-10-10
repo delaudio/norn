@@ -7,6 +7,7 @@ pub mod administrative_audit;
 mod agent_skills;
 pub mod backend;
 pub mod bitbucket_oauth_onboarding;
+pub mod browser_diff;
 pub mod cli;
 #[cfg(feature = "desktop")]
 mod commands;
