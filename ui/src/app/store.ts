@@ -26,6 +26,16 @@ export interface OperationView {
   state: string;
   sequence: number;
   logs: OperationLog[];
+  targetLabel: string;
+}
+
+function targetLabel(target: TargetIdentity): string {
+  if (target.kind === "local") {
+    return "local";
+  }
+  const provider = target as { workspace?: string; repo?: string; prId?: number };
+  const base = `${provider.workspace ?? ""}/${provider.repo ?? ""}`;
+  return provider.prId === undefined ? base : `${base} #${provider.prId}`;
 }
 
 export interface FilePreviewView {
@@ -402,7 +412,6 @@ export class ShellStore {
       scrollRequest: 0,
       preview: null,
       previewError: null,
-      operation: null,
       notice: null,
       error: null,
     });
@@ -634,6 +643,7 @@ export class ShellStore {
           state: result.state,
           sequence: result.sequence ?? 0,
           logs: [{ id: this.nextLogId++, text: `started ${result.operationId}` }],
+          targetLabel: targetLabel(target),
         },
       });
       this.drainPendingEvents(result.operationId);
@@ -668,6 +678,7 @@ export class ShellStore {
         state: eventState(event.event) ?? operation.state,
         sequence: event.sequence,
         logs,
+        targetLabel: operation.targetLabel,
       },
     });
   }

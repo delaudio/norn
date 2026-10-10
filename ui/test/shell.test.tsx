@@ -64,7 +64,7 @@ test("Enter starts a review, logs stream, q quits and unmount clears", async () 
     await new Promise((resolve) => setTimeout(resolve, 10));
     await app.renderer.renderOnce();
     expect(app.store.getSnapshot().operation?.state).toBe("succeeded");
-    expect(app.renderer.captureCharFrame()).toContain("review fake-op-");
+    expect(app.renderer.captureCharFrame()).toContain("review succeeded");
 
     app.renderer.mockInput.pressKey("q");
     expect(app.quits()).toBe(1);

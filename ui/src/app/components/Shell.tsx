@@ -621,7 +621,7 @@ export function Shell({ store, client, quit }: ShellProps) {
       ) : null}
       {state.operation ? (
         <text fg={theme.secondary} height={1} wrapMode="none" truncate>
-          review {state.operation.id} · {state.operation.state}
+          review {state.operation.state} · {state.operation.targetLabel}
           {state.operation.logs.length > 0
             ? ` · ${state.operation.logs[state.operation.logs.length - 1]?.text ?? ""}`
             : ""}

@@ -387,3 +387,18 @@ test("image files load a bounded preview", async () => {
   expect(store.getSnapshot().preview?.path).toBe("images/logo.png");
   expect(store.getSnapshot().preview?.mimeType).toBe("image/png");
 });
+
+test("a running operation survives a target switch", async () => {
+  const store = new ShellStore();
+  const client = new BackendClient(
+    new FakeBackendTransport({ repositories, files, findings, delayMs: 5 }),
+  );
+  await store.connect(client);
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  await store.startReview(client);
+  expect(store.getSnapshot().operation?.targetLabel).toContain("payments");
+  store.move(1); // switch to the second repository
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  expect(store.getSnapshot().operation).not.toBeNull();
+  expect(store.getSnapshot().operation?.targetLabel).toContain("payments");
+});
