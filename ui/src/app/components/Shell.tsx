@@ -59,6 +59,8 @@ function useShellInput(
       store.toggleDiffMode();
     } else if (key.name === "e") {
       store.toggleDiffExpanded();
+    } else if (key.name === "b") {
+      void store.openBrowser(client);
     } else if (key.name === "x") {
       void store.cancel(client);
     }

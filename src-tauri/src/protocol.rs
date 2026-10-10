@@ -164,6 +164,8 @@ pub enum Request {
         #[serde(default)]
         params: EmptyParams,
     },
+    #[serde(rename = "browser.open")]
+    BrowserOpen { id: String, params: TargetParams },
     #[serde(rename = "review.start")]
     ReviewStart {
         id: String,
@@ -197,6 +199,7 @@ impl Request {
             | Self::ReviewFiles { id, .. }
             | Self::ReviewFindings { id, .. }
             | Self::ReviewTargets { id, .. }
+            | Self::BrowserOpen { id, .. }
             | Self::ReviewStart { id, .. }
             | Self::OperationStatus { id, .. }
             | Self::OperationCancel { id, .. }
@@ -211,6 +214,7 @@ impl Request {
             Self::ReviewFiles { .. } => "review.files",
             Self::ReviewFindings { .. } => "review.findings",
             Self::ReviewTargets { .. } => "review.targets",
+            Self::BrowserOpen { .. } => "browser.open",
             Self::ReviewStart { .. } => "review.start",
             Self::OperationStatus { .. } => "operation.status",
             Self::OperationCancel { .. } => "operation.cancel",
@@ -235,9 +239,9 @@ impl Request {
                 }
             }
             Self::ReviewStart { params, .. } => params.target.validate()?,
-            Self::ReviewFiles { params, .. } | Self::ReviewFindings { params, .. } => {
-                params.target.validate()?
-            }
+            Self::ReviewFiles { params, .. }
+            | Self::ReviewFindings { params, .. }
+            | Self::BrowserOpen { params, .. } => params.target.validate()?,
             Self::RepositoryStatus { .. }
             | Self::ReviewTargets { .. }
             | Self::OperationStatus { .. }

@@ -37,7 +37,10 @@ const MAX_REQUEST_HEAD_BYTES: usize = 16 * 1024;
 const MAX_ACTIVE_CONNECTIONS: usize = 16;
 const MAX_BROWSER_ASSET_BYTES: u64 = 16 * 1024 * 1024;
 const MAX_BROWSER_ASSET_TOTAL_BYTES: u64 = 32 * 1024 * 1024;
-const MAX_BROWSER_ASSET_FILES: usize = 128;
+// The Pierre/Shiki diff renderer emits one lazily-loaded chunk per language, so
+// the packaged asset count is higher than a hand-written bundle; the byte caps
+// below remain the size bound.
+const MAX_BROWSER_ASSET_FILES: usize = 512;
 const SESSION_TOKEN_BYTES: usize = 32;
 const SECURITY_HEADERS: &str = "Content-Security-Policy: default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'\r\nReferrer-Policy: no-referrer\r\nX-Content-Type-Options: nosniff\r\nX-Frame-Options: DENY\r\n";
 

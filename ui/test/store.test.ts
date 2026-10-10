@@ -361,3 +361,12 @@ test("toggleDiffExpanded toggles and resets when a diff loads", async () => {
   await new Promise((resolve) => setTimeout(resolve, 5));
   expect(store.getSnapshot().diffExpanded).toBe(false);
 });
+
+test("openBrowser surfaces the authenticated session URL", async () => {
+  const store = new ShellStore();
+  const client = new BackendClient(new FakeBackendTransport({ repositories }));
+  await store.connect(client);
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  await store.openBrowser(client);
+  expect(store.getSnapshot().notice).toContain("/session/");
+});

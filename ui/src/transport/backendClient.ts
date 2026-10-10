@@ -96,6 +96,11 @@ export class BackendClient {
     return (result.targets as ReviewTarget[]) ?? [];
   }
 
+  async browserOpen(target: TargetIdentity): Promise<{ url: string }> {
+    const result = await this.transport.request("browser.open", { target });
+    return result as unknown as { url: string };
+  }
+
   async reviewFindings(target: TargetIdentity): Promise<FindingSummary[]> {
     const result = await this.transport.request("review.findings", { target });
     return (result.findings as FindingSummary[]) ?? [];

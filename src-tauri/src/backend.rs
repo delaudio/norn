@@ -17,12 +17,13 @@ use std::path::{Component, Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::mpsc::{channel, sync_channel, Receiver, RecvTimeoutError, Sender, SyncSender};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock, RwLock};
 use std::thread;
 use std::time::{Duration, Instant};
 
 use serde_json::json;
 
+use crate::browser_diff::{open_browser_url, WebDiffServer, WebDiffState, WebDiffTargetKind};
 use crate::config;
 use crate::protocol::{
     self, ClientMessage, OperationEvent, OperationEventFrame, OperationState, ProtocolError,
@@ -39,6 +40,7 @@ const MAX_SYNTHETIC_FILE_BYTES: u64 = 512 * 1024;
 const GIT_TIMEOUT: Duration = Duration::from_secs(10);
 const MAX_CONCURRENT_DIFFS: usize = 4;
 const MAX_CONCURRENT_FILES: usize = 4;
+const MAX_CONCURRENT_BROWSER_OPENS: usize = 1;
 const MAX_ACTIVE_OPERATIONS: usize = 8;
 
 /// Every operation the backend tracks while it is running.
@@ -60,6 +62,8 @@ struct Backend {
     active_diffs: Arc<AtomicUsize>,
     active_files: Arc<AtomicUsize>,
     active_operations: Arc<AtomicUsize>,
+    active_browser: Arc<AtomicUsize>,
+    browser: Arc<Mutex<Option<WebDiffServer>>>,
 }
 
 impl Backend {
@@ -121,6 +125,8 @@ pub fn run() -> Result<(), i32> {
         shutdown: shutdown.clone(),
         active_diffs: Arc::new(AtomicUsize::new(0)),
         active_files: Arc::new(AtomicUsize::new(0)),
+        active_browser: Arc::new(AtomicUsize::new(0)),
+        browser: Arc::new(Mutex::new(None)),
         active_operations: Arc::new(AtomicUsize::new(0)),
     };
 
@@ -379,6 +385,32 @@ fn dispatch(request: Request, backend: &Backend) -> bool {
             backend.respond(&id, review_targets_response());
             false
         }
+        Request::BrowserOpen { params, .. } => {
+            if backend
+                .active_browser
+                .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |current| {
+                    (current < MAX_CONCURRENT_BROWSER_OPENS).then_some(current + 1)
+                })
+                .is_err()
+            {
+                backend.fail(
+                    &id,
+                    ProtocolError::new(
+                        ProtocolErrorCode::Internal,
+                        "a browser open request is already in progress",
+                    ),
+                );
+                return false;
+            }
+            let control = backend.control.clone();
+            let browser = Arc::clone(&backend.browser);
+            let counter = ActiveCounter(backend.active_browser.clone());
+            thread::spawn(move || {
+                browser_open_response(&control, &browser, &id, params.target);
+                counter.decrement();
+            });
+            false
+        }
         Request::Shutdown { .. } => {
             backend.respond(&id, json!({}));
             backend.shutdown.store(true, Ordering::SeqCst);
@@ -454,6 +486,255 @@ fn provider_matches(kind: ProviderKind) -> config::ReviewProvider {
         ProviderKind::Github => config::ReviewProvider::Github,
         ProviderKind::Bitbucket => config::ReviewProvider::Bitbucket,
     }
+}
+
+/// Start (or update) the authenticated browser diff session for a target and
+/// return its URL. The OS browser is opened unless `NORN_BROWSER_OPEN=0`.
+fn browser_open_response(
+    control: &Sender<ServerMessage>,
+    browser: &Arc<Mutex<Option<WebDiffServer>>>,
+    id: &str,
+    target: TargetIdentity,
+) {
+    let respond = |value: serde_json::Value| {
+        let _ = control.send(ServerMessage::Response(Response {
+            id: id.to_string(),
+            ok: true,
+            result: Some(value),
+            error: None,
+        }));
+    };
+    let fail = |error: ProtocolError| {
+        let _ = control.send(ServerMessage::Response(Response {
+            id: id.to_string(),
+            ok: false,
+            result: None,
+            error: Some(error),
+        }));
+    };
+    let state = match browser_diff_state(&target) {
+        Ok(state) => state,
+        Err(error) => {
+            fail(error);
+            return;
+        }
+    };
+    let mut guard = match browser.lock() {
+        Ok(guard) => guard,
+        Err(_) => {
+            fail(ProtocolError::new(
+                ProtocolErrorCode::Internal,
+                "browser server lock poisoned",
+            ));
+            return;
+        }
+    };
+    let url = match guard.as_mut() {
+        Some(server) => {
+            server.update_pr(state);
+            server.url()
+        }
+        None => {
+            let shared = Arc::new(RwLock::new(state));
+            match WebDiffServer::start(shared) {
+                Ok(server) => {
+                    let url = server.url();
+                    *guard = Some(server);
+                    url
+                }
+                Err(error) => {
+                    fail(ProtocolError::new(ProtocolErrorCode::Internal, error));
+                    return;
+                }
+            }
+        }
+    };
+    drop(guard);
+    if std::env::var("NORN_BROWSER_OPEN")
+        .map(|value| value != "0")
+        .unwrap_or(true)
+    {
+        let _ = open_browser_url(&url);
+    }
+    respond(json!({ "url": url }));
+}
+
+/// Build the browser-viewer state for a target from the local checkout, reusing
+/// the same reviewed revisions and diff computation as the review slice. No
+/// provider credentials are included.
+fn browser_diff_state(target: &TargetIdentity) -> Result<WebDiffState, ProtocolError> {
+    let repo_path = resolve_repo_path(target).ok_or_else(|| {
+        ProtocolError::new(
+            ProtocolErrorCode::NotFound,
+            "no local repository for this target",
+        )
+    })?;
+    if !is_git_repo(&repo_path) {
+        return Err(ProtocolError::new(
+            ProtocolErrorCode::TargetStale,
+            format!("`{}` is not a git repository", repo_path.display()),
+        ));
+    }
+    let mut state = WebDiffState::default();
+
+    if let TargetIdentity::Provider {
+        provider,
+        workspace,
+        repo,
+        pr_id: Some(pr_id),
+        run_id,
+    } = target
+    {
+        let Some((base, head)) = reviewed_range(target)? else {
+            return Err(ProtocolError::new(
+                ProtocolErrorCode::TargetStale,
+                "no stored reviewed range for this pull request",
+            ));
+        };
+        if !revisions_available(&repo_path, &base, &head) {
+            return Err(ProtocolError::new(
+                ProtocolErrorCode::TargetStale,
+                "reviewed revisions are not available in the local checkout",
+            ));
+        }
+        let diff = git(
+            &repo_path,
+            &[
+                "diff",
+                "--no-ext-diff",
+                "--no-textconv",
+                "-M",
+                "--src-prefix=a/",
+                "--dst-prefix=b/",
+                base.as_str(),
+                head.as_str(),
+            ],
+        )
+        .ok_or_else(|| {
+            ProtocolError::new(
+                ProtocolErrorCode::Internal,
+                "failed to generate the reviewed diff",
+            )
+        })?;
+        let files = changed_file_entries(&repo_path, Some((base.as_str(), head.as_str())))?;
+        let run = crate::services::review::load_ai_review_store_native(workspace, repo, *pr_id)
+            .map_err(|error| {
+                ProtocolError::new(
+                    ProtocolErrorCode::Internal,
+                    format!("review store: {error}"),
+                )
+            })
+            .ok()
+            .and_then(|store| select_review_run(store, run_id.as_deref()));
+        state.provider = Some(provider_matches(*provider));
+        state.target_kind = WebDiffTargetKind::PullRequest;
+        state.workspace = workspace.clone();
+        state.repo = repo.clone();
+        state.pr_id = *pr_id;
+        state.pr_title = format!("Pull request #{pr_id}");
+        if let Some(run) = run {
+            state.source_branch = run.source_branch;
+            state.target_branch = run.destination_branch;
+        }
+        state.base_sha = Some(base);
+        state.diff = Some(diff);
+        state.diffstat = Some(diffstat_from_files(&files));
+        return Ok(state);
+    }
+
+    // Working-tree target (local, or a configured repository without a PR).
+    let files = changed_file_entries(&repo_path, None)?;
+    let diff = working_tree_patch(&repo_path, &files)?;
+    state.target_kind = WebDiffTargetKind::Local;
+    state.pr_title = "Local changes".to_string();
+    state.source_branch = git(&repo_path, &["rev-parse", "--abbrev-ref", "HEAD"])
+        .map(|value| value.trim().to_string())
+        .unwrap_or_default();
+    state.target_branch = "HEAD".to_string();
+    state.base_sha = git(&repo_path, &["rev-parse", "HEAD"]).map(|value| value.trim().to_string());
+    state.diff = Some(diff);
+    state.diffstat = Some(diffstat_from_files(&files));
+    match target {
+        TargetIdentity::Provider {
+            workspace, repo, ..
+        } => {
+            state.provider = None;
+            state.workspace = workspace.clone();
+            state.repo = repo.clone();
+        }
+        TargetIdentity::Local {
+            local_snapshot_sha256,
+        } => {
+            state.local_snapshot_sha256 = Some(local_snapshot_sha256.clone());
+        }
+    }
+    Ok(state)
+}
+
+/// Concatenate per-file working-tree patches, including untracked files and
+/// repositories before their first commit, mirroring the terminal diff view.
+fn working_tree_patch(
+    repo_path: &Path,
+    files: &[serde_json::Value],
+) -> Result<String, ProtocolError> {
+    let mut patch = String::new();
+    for file in files {
+        let Some(path) = file["path"].as_str() else {
+            continue;
+        };
+        let old_path = file["oldPath"].as_str();
+        match file_diff(repo_path, path, None, old_path) {
+            Some(diff) => {
+                patch.push_str(&diff);
+                if !diff.ends_with('\n') {
+                    patch.push('\n');
+                }
+            }
+            None => {
+                // Binary or zero-line changes legitimately have no textual patch.
+                let additions = file["additions"].as_u64().unwrap_or(0);
+                let deletions = file["deletions"].as_u64().unwrap_or(0);
+                if additions == 0 && deletions == 0 {
+                    continue;
+                }
+                return Err(ProtocolError::new(
+                    ProtocolErrorCode::Internal,
+                    format!("failed to generate the working-tree diff for `{path}`"),
+                ));
+            }
+        }
+    }
+    Ok(patch)
+}
+
+fn diffstat_from_files(
+    files: &[serde_json::Value],
+) -> Vec<crate::services::bitbucket::DiffstatEntry> {
+    files
+        .iter()
+        .map(|file| {
+            let path = file["path"].as_str().unwrap_or_default().to_string();
+            let old = file["oldPath"].as_str().map(str::to_string);
+            let status = match file["status"].as_str().unwrap_or("modified") {
+                "added" | "untracked" => "added",
+                "deleted" => "removed",
+                "renamed" => "renamed",
+                _ => "modified",
+            };
+            let (old_path, new_path) = match status {
+                "removed" => (old.or_else(|| Some(path.clone())), None),
+                "renamed" => (old, Some(path.clone())),
+                _ => (None, Some(path.clone())),
+            };
+            crate::services::bitbucket::DiffstatEntry {
+                status: status.to_string(),
+                lines_added: file["additions"].as_u64().unwrap_or(0) as u32,
+                lines_removed: file["deletions"].as_u64().unwrap_or(0) as u32,
+                old_path,
+                new_path,
+            }
+        })
+        .collect()
 }
 
 /// Resolve the local checkout for the requested target. Provider targets require
@@ -1852,6 +2133,28 @@ mod tests {
             diff.contains("\n \n"),
             "blank context line must keep its leading space: {diff}"
         );
+    }
+
+    #[test]
+    fn working_tree_patch_includes_staged_and_untracked_files() {
+        let dir = init_repo();
+        let git = |args: &[&str]| {
+            let output = Command::new("git")
+                .arg("-C")
+                .arg(dir.path())
+                .args(args)
+                .output()
+                .expect("run git");
+            assert!(output.status.success(), "git {args:?} failed");
+        };
+        std::fs::write(dir.path().join("staged.txt"), "one\n").expect("write");
+        git(&["add", "-A"]);
+        std::fs::write(dir.path().join("untracked.txt"), "two\n").expect("write");
+
+        let files = changed_file_entries(dir.path(), None).expect("files");
+        let patch = working_tree_patch(dir.path(), &files).expect("patch");
+        assert!(patch.contains("staged.txt"), "patch: {patch}");
+        assert!(patch.contains("untracked.txt"), "patch: {patch}");
     }
 
     #[test]

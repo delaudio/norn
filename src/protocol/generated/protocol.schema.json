@@ -203,7 +203,8 @@
         "shutdown",
         "review.files",
         "review.findings",
-        "review.targets"
+        "review.targets",
+        "browser.open"
       ]
     },
     "DiffFileParams": {
@@ -597,6 +598,19 @@
           }
         }
       }
+    },
+    "BrowserOpenResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "url"
+      ],
+      "properties": {
+        "url": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
     }
   },
   "oneOf": [
@@ -814,6 +828,30 @@
               "$ref": "#/definitions/EmptyResult"
             }
           }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "type": {
+              "const": "request"
+            },
+            "id": {
+              "$ref": "#/definitions/RequestId"
+            },
+            "method": {
+              "const": "browser.open"
+            },
+            "params": {
+              "$ref": "#/definitions/TargetParams"
+            }
+          }
         }
       ]
     },
@@ -862,6 +900,9 @@
             },
             {
               "$ref": "#/definitions/ReviewTargetsResult"
+            },
+            {
+              "$ref": "#/definitions/BrowserOpenResult"
             }
           ]
         }

@@ -667,6 +667,26 @@ export class ShellStore {
     }
   }
 
+  /// Start (or refresh) the authenticated browser diff session and surface its
+  /// URL in the notice line.
+  async openBrowser(client: BackendClient): Promise<void> {
+    const target = this.activeTarget();
+    if (!target) {
+      return;
+    }
+    const generation = this.state.generation;
+    try {
+      const result = await client.browserOpen(target);
+      if (generation === this.state.generation) {
+        this.update({ notice: `Browser diff: ${result.url}` });
+      }
+    } catch (error) {
+      if (generation === this.state.generation) {
+        this.update({ error: message(error) });
+      }
+    }
+  }
+
   clearError(): void {
     if (this.state.error !== null) {
       this.update({ error: null });
