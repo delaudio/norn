@@ -8030,8 +8030,8 @@
       {
         "spans": [
           {
-            "text": "review accepted · acme/payments · started fake-op-1",
-            "width": 51,
+            "text": "review fake-op-1 · accepted · started fake-op-1",
+            "width": 47,
             "fg": "rgba(158,206,106,1)",
             "bg": "rgba(10,10,10,1)",
             "attributes": 0,
@@ -8040,8 +8040,8 @@
             "underline": false
           },
           {
-            "text": "                             ",
-            "width": 29,
+            "text": "                                 ",
+            "width": 33,
             "fg": "rgba(255,255,255,1)",
             "bg": "rgba(10,10,10,1)",
             "attributes": 0,
