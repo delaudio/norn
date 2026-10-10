@@ -8030,20 +8030,64 @@
       {
         "spans": [
           {
-            "text": "review accepted · acme/payments · started fake-op-1",
-            "width": 51,
-            "fg": "rgba(158,206,106,1)",
-            "bg": "rgba(10,10,10,1)",
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(20,20,20,1)",
             "attributes": 0,
             "bold": false,
             "italic": false,
             "underline": false
           },
           {
-            "text": "                             ",
-            "width": 29,
+            "text": "review accepted · acme/payments",
+            "width": 31,
+            "fg": "rgba(158,206,106,1)",
+            "bg": "rgba(20,20,20,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "                                                ",
+            "width": 48,
             "fg": "rgba(255,255,255,1)",
-            "bg": "rgba(10,10,10,1)",
+            "bg": "rgba(20,20,20,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(20,20,20,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "started fake-op-1",
+            "width": 17,
+            "fg": "rgba(128,128,128,1)",
+            "bg": "rgba(20,20,20,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "                                                              ",
+            "width": 62,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(20,20,20,1)",
             "attributes": 0,
             "bold": false,
             "italic": false,
@@ -8808,63 +8852,9 @@
             "underline": false
           },
           {
-            "text": "█",
+            "text": "▀",
             "width": 1,
             "fg": "rgba(154,158,163,1)",
-            "bg": "rgba(37,37,39,1)",
-            "attributes": 0,
-            "bold": false,
-            "italic": false,
-            "underline": false
-          },
-          {
-            "text": "  ",
-            "width": 2,
-            "fg": "rgba(255,255,255,1)",
-            "bg": "rgba(10,10,10,1)",
-            "attributes": 0,
-            "bold": false,
-            "italic": false,
-            "underline": false
-          }
-        ]
-      },
-      {
-        "spans": [
-          {
-            "text": "                                 ",
-            "width": 33,
-            "fg": "rgba(255,255,255,1)",
-            "bg": "rgba(20,20,20,1)",
-            "attributes": 0,
-            "bold": false,
-            "italic": false,
-            "underline": false
-          },
-          {
-            "text": "│",
-            "width": 1,
-            "fg": "rgba(60,60,60,1)",
-            "bg": "rgba(20,20,20,1)",
-            "attributes": 0,
-            "bold": false,
-            "italic": false,
-            "underline": false
-          },
-          {
-            "text": "                                           ",
-            "width": 43,
-            "fg": "rgba(255,255,255,1)",
-            "bg": "rgba(10,10,10,1)",
-            "attributes": 0,
-            "bold": false,
-            "italic": false,
-            "underline": false
-          },
-          {
-            "text": " ",
-            "width": 1,
-            "fg": "rgba(255,255,255,1)",
             "bg": "rgba(37,37,39,1)",
             "attributes": 0,
             "bold": false,
