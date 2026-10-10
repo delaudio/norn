@@ -58,6 +58,12 @@ export type Request =
       id: RequestId;
       method: "file.preview";
       params: FilePreviewParams;
+    }
+  | {
+      type: "request";
+      id: RequestId;
+      method: "review.history";
+      params: TargetParams;
     };
 export type RequestId = string;
 /**
@@ -154,7 +160,8 @@ export interface ResponseOk {
     | ReviewFindingsResult
     | ReviewTargetsResult
     | BrowserOpenResult
-    | FilePreviewResult;
+    | FilePreviewResult
+    | ReviewHistoryResult;
 }
 export interface DiffFileResult {
   target: TargetIdentity;
@@ -235,6 +242,16 @@ export interface FilePreviewResult {
   mimeType: string;
   size: number;
   dataBase64: string;
+}
+export interface ReviewHistoryResult {
+  runs: ReviewRunSummary[];
+}
+export interface ReviewRunSummary {
+  runId: string;
+  createdAt: string;
+  status: string;
+  turnKind: string;
+  findingsCount: number;
 }
 export interface ResponseError {
   type: "response";

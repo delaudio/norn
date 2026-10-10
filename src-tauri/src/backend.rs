@@ -390,6 +390,13 @@ fn dispatch(request: Request, backend: &Backend) -> bool {
             backend.respond(&id, review_targets_response());
             false
         }
+        Request::ReviewHistory { params, .. } => {
+            match review_history_response(&params.target) {
+                Ok(value) => backend.respond(&id, value),
+                Err(error) => backend.fail(&id, error),
+            };
+            false
+        }
         Request::FilePreview { params, .. } => {
             if backend
                 .active_previews
@@ -516,6 +523,43 @@ fn provider_matches(kind: ProviderKind) -> config::ReviewProvider {
         ProviderKind::Github => config::ReviewProvider::Github,
         ProviderKind::Bitbucket => config::ReviewProvider::Bitbucket,
     }
+}
+
+/// Recent stored review runs for a target, most recent first (bounded).
+fn review_history_response(target: &TargetIdentity) -> Result<serde_json::Value, ProtocolError> {
+    let runs = match target {
+        TargetIdentity::Provider {
+            workspace,
+            repo,
+            pr_id: Some(pr_id),
+            ..
+        } => {
+            let store =
+                crate::services::review::load_ai_review_store_native(workspace, repo, *pr_id)
+                    .map_err(|error| {
+                        ProtocolError::new(
+                            ProtocolErrorCode::Internal,
+                            format!("review store: {error}"),
+                        )
+                    })?;
+            let mut runs = store.map(|store| store.review_runs).unwrap_or_default();
+            runs.reverse();
+            runs.into_iter()
+                .take(20)
+                .map(|run| {
+                    json!({
+                        "runId": run.id,
+                        "createdAt": run.created_at,
+                        "status": serde_json::to_value(run.status).unwrap_or_else(|_| json!("unknown")),
+                        "turnKind": serde_json::to_value(run.turn_kind).unwrap_or_else(|_| json!("initial")),
+                        "findingsCount": run.findings.len(),
+                    })
+                })
+                .collect::<Vec<_>>()
+        }
+        _ => Vec::new(),
+    };
+    Ok(json!({ "runs": runs }))
 }
 
 /// Start (or update) the authenticated browser diff session for a target and

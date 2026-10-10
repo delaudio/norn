@@ -679,7 +679,9 @@ export function Shell({ store, client, quit }: ShellProps) {
               />
               <ListPanel
                 id="findings-list"
-                title="FINDINGS"
+                title={
+                  state.history.length > 0 ? `FINDINGS · ${state.history.length} runs` : "FINDINGS"
+                }
                 focused={state.focus === "findings"}
                 options={findingOptions(state)}
                 selectedIndex={state.selectedFinding}

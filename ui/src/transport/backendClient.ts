@@ -43,6 +43,14 @@ export interface FindingSummary {
   anchor: FindingAnchor | null;
 }
 
+export interface ReviewRunSummary {
+  runId: string;
+  createdAt: string;
+  status: string;
+  turnKind: string;
+  findingsCount: number;
+}
+
 export interface ReviewTarget {
   provider: "github" | "bitbucket";
   workspace: string;
@@ -94,6 +102,11 @@ export class BackendClient {
   async reviewTargets(): Promise<ReviewTarget[]> {
     const result = await this.transport.request("review.targets", {});
     return (result.targets as ReviewTarget[]) ?? [];
+  }
+
+  async reviewHistory(target: TargetIdentity): Promise<ReviewRunSummary[]> {
+    const result = await this.transport.request("review.history", { target });
+    return (result.runs as ReviewRunSummary[]) ?? [];
   }
 
   async browserOpen(target: TargetIdentity): Promise<{ url: string }> {
