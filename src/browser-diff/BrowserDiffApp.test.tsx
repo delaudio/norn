@@ -3,6 +3,16 @@ import { StrictMode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { BrowserDiffApp, type BrowserDiffState, browserDiffApiUrl } from "./BrowserDiffApp";
 
+// The Pierre renderer relies on browser layout/async highlighting that jsdom
+// does not provide; assert the app wires the patch and mode into it instead.
+vi.mock("@pierre/diffs/react", () => ({
+  PatchDiff: ({ patch, options }: { patch: string; options?: { diffStyle?: string } }) => (
+    <pre data-testid="pierre-patch" data-diff-style={options?.diffStyle}>
+      {patch}
+    </pre>
+  ),
+}));
+
 const rawDiff = `diff --git a/src/example.ts b/src/example.ts
 index 1111111..2222222 100644
 --- a/src/example.ts
@@ -61,7 +71,7 @@ describe("BrowserDiffApp", () => {
     );
   });
 
-  it("renders provider state through the shared diff viewer", async () => {
+  it("renders provider state through the Pierre diff renderer", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn().mockResolvedValue(stateResponse("Use the shared diff renderer", 1)),
@@ -70,10 +80,10 @@ describe("BrowserDiffApp", () => {
     render(<BrowserDiffApp />);
 
     expect(await screen.findByText("Use the shared diff renderer")).toBeInTheDocument();
-    expect(screen.getAllByText("src/example.ts").length).toBeGreaterThan(0);
-    await waitFor(() =>
-      expect(screen.getByRole("main")).toHaveTextContent('export const value = "after";'),
-    );
+    const patch = await screen.findByTestId("pierre-patch");
+    expect(patch).toHaveTextContent("src/example.ts");
+    expect(patch).toHaveTextContent('export const value = "after";');
+    expect(patch).toHaveAttribute("data-diff-style", "split");
   });
 
   it("labels local review targets without presenting a pull request id", async () => {

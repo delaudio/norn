@@ -15,7 +15,7 @@ numbers and must not appear in product strings.
 | --- | --- | --- | --- | --- |
 | Rust engine, headless CLI, service, stdio backend | `src-tauri/` | crate `norn`; binaries `norn`, `norn-tui` (compat), `norn-app` (compat), `norn-backend` | Rust (pinned) | Directory name stays `src-tauri/` during the transition; renamed once at cutover (#309). |
 | OpenTUI workspace | `ui/` | package `@norn/ui` | Bun + OpenTUI + React + TypeScript | New interactive surface; owns presentation and transient interaction state. |
-| Retained browser diff assets | `src/browser-diff/`, `browser-diff.html`, `vite.browser-diff.config.ts` | served HTML/JS | existing pnpm/Vite | Served by the Rust `browser_diff` server; preserved unchanged. |
+| Retained browser diff assets | `src/browser-diff/`, `browser-diff.html`, `vite.browser-diff.config.ts` | served HTML/JS | existing pnpm/Vite | Served by the Rust `browser_diff` server; the client renders diffs with `@pierre/diffs`. |
 | Docs and web | `apps/docs/`, `apps/web/`, Storybook | existing | existing pnpm | Stay on the current toolchain until cutover. |
 
 Rules:

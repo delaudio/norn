@@ -1,7 +1,8 @@
 import { Moon, Sun } from "@phosphor-icons/react";
+import { PatchDiff } from "@pierre/diffs/react";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { DiffViewer } from "@/components/diff/DiffViewer";
 import { parseUnifiedDiff } from "@/lib/diff";
+import type { ImageDiffMetadata, ReviewFileData } from "@/lib/imageDiff";
 import {
   countReviewFileChanges,
   imageDiffKey,
@@ -85,6 +86,39 @@ function shortRepository(state: BrowserDiffState): string {
   return state.workspace ? `${state.workspace}/${state.repo}` : state.repo;
 }
 
+function BrowserImagePanel({ file }: { file: ReviewFileData & { imageDiff: ImageDiffMetadata } }) {
+  const image = file.imageDiff;
+  const path = image.preview.preview?.path ?? image.path;
+  const label =
+    image.oldPath && image.newPath && image.oldPath !== image.newPath
+      ? `${image.oldPath} → ${image.newPath}`
+      : path;
+  return (
+    <div className="border-b border-border bg-background px-4 py-4">
+      <div className="mb-1 break-all text-xs font-medium text-foreground">{label}</div>
+      <div className="mb-3 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+        <span className="rounded-md border border-border px-1.5 py-0.5">{image.mimeType}</span>
+        <span>{image.previewSide === "old" ? "base image" : "new image"}</span>
+      </div>
+      {image.preview.status === "ready" ? (
+        <div className="overflow-auto rounded-md border border-border bg-muted/20 p-3">
+          <img
+            src={image.preview.preview.dataUrl}
+            alt={path}
+            className="mx-auto max-h-[70vh] max-w-full object-contain"
+            loading="lazy"
+            decoding="async"
+          />
+        </div>
+      ) : (
+        <div className="rounded-md border border-dashed border-border bg-muted/30 px-4 py-8 text-center text-sm text-muted-foreground">
+          Image preview is not loaded yet.
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function BrowserDiffApp() {
   const [remoteState, setRemoteState] = useState<BrowserDiffState | null>(null);
   const [viewMode, setViewMode] = useState<Exclude<DiffViewMode, "conversation">>("split");
@@ -161,6 +195,14 @@ export function BrowserDiffApp() {
     [files],
   );
 
+  const imageFiles = useMemo(
+    () =>
+      files.filter(
+        (file): file is ReviewFileData & { imageDiff: ImageDiffMetadata } => file.imageDiff != null,
+      ),
+    [files],
+  );
+
   const populationWarning = remoteState?.populationFailed
     ? "Some diff data could not be loaded. Return to Norn and open the browser diff again to retry."
     : null;
@@ -207,6 +249,22 @@ export function BrowserDiffApp() {
           </div>
         </div>
         <div className="flex items-center gap-3">
+          <div className="flex overflow-hidden rounded-md border border-border">
+            {(["split", "unified"] as const).map((mode) => (
+              <button
+                key={mode}
+                type="button"
+                className={`px-2 py-1 text-xs capitalize ${
+                  viewMode === mode
+                    ? "bg-muted text-foreground"
+                    : "bg-background text-muted-foreground hover:text-foreground"
+                }`}
+                onClick={() => setViewMode(mode)}
+              >
+                {mode}
+              </button>
+            ))}
+          </div>
           <button
             type="button"
             className="inline-flex size-8 items-center justify-center rounded-md border border-border bg-background text-muted-foreground hover:bg-muted hover:text-foreground"
@@ -229,20 +287,39 @@ export function BrowserDiffApp() {
         </div>
       )}
 
-      <DiffViewer
-        files={files}
-        viewMode={viewMode}
-        onViewModeChange={(mode) => {
-          if (mode !== "conversation") setViewMode(mode);
-        }}
-        loading={!remoteState && !stateError}
-        error={stateError}
-        emptyMessage={
-          remoteState?.targetKind === "local"
-            ? "No unpublished local changes."
-            : "No changes in this pull request."
-        }
-      />
+      <section className="min-h-0">
+        {stateError ? (
+          <div className="px-5 py-8 text-sm text-muted-foreground">{stateError}</div>
+        ) : !remoteState ? (
+          <div className="px-5 py-8 text-sm text-muted-foreground">Loading review target…</div>
+        ) : (
+          <>
+            {(remoteState.diff ?? "").trim().length > 0 ? (
+              <PatchDiff
+                patch={remoteState.diff ?? ""}
+                options={{
+                  theme: theme === "dark" ? "github-dark" : "github-light",
+                  diffStyle: viewMode,
+                }}
+                disableWorkerPool
+              />
+            ) : null}
+            {imageFiles.map((file) => (
+              <BrowserImagePanel
+                key={`${file.imageDiff!.oldPath}->${file.imageDiff!.newPath}`}
+                file={file}
+              />
+            ))}
+            {(remoteState.diff ?? "").trim().length === 0 && imageFiles.length === 0 ? (
+              <div className="px-5 py-8 text-sm text-muted-foreground">
+                {remoteState.targetKind === "local"
+                  ? "No unpublished local changes."
+                  : "No changes in this pull request."}
+              </div>
+            ) : null}
+          </>
+        )}
+      </section>
     </main>
   );
 }
