@@ -101,6 +101,19 @@ export class BackendClient {
     return result as unknown as { url: string };
   }
 
+  async filePreview(
+    target: TargetIdentity,
+    path: string,
+  ): Promise<{ path: string; mimeType: string; size: number; dataBase64: string }> {
+    const result = await this.transport.request("file.preview", { target, path });
+    return result as unknown as {
+      path: string;
+      mimeType: string;
+      size: number;
+      dataBase64: string;
+    };
+  }
+
   async reviewFindings(target: TargetIdentity): Promise<FindingSummary[]> {
     const result = await this.transport.request("review.findings", { target });
     return (result.findings as FindingSummary[]) ?? [];

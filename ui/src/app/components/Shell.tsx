@@ -9,7 +9,7 @@ import {
   useSyncExternalStore,
 } from "react";
 import type { BackendClient } from "../../transport/backendClient";
-import type { ShellSnapshot, ShellStore } from "../store";
+import { type FilePreviewView, isImagePath, type ShellSnapshot, type ShellStore } from "../store";
 import { theme } from "../theme";
 
 interface ShellProps {
@@ -287,6 +287,32 @@ export function diffWindow(
   return { start, end: start + max, collapsed: true };
 }
 
+function decodeBase64(value: string): Uint8Array {
+  const binary = atob(value);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+  return bytes;
+}
+
+function DiffImage({
+  preview,
+  onError,
+}: {
+  preview: FilePreviewView;
+  onError: (message: string) => void;
+}) {
+  const bytes = useMemo(() => decodeBase64(preview.dataBase64), [preview.dataBase64]);
+  return (
+    <image
+      source={bytes}
+      fit="fit"
+      onError={() => onError("this terminal does not support inline images")}
+    />
+  );
+}
+
 function DiffPanel({
   state,
   scroll,
@@ -296,10 +322,12 @@ function DiffPanel({
   windowEnd,
   collapsed,
   total,
+  onPreviewError,
 }: {
   state: ShellSnapshot;
   scroll: RefObject<ScrollBoxRenderable | null>;
   lines: DiffLine[];
+  onPreviewError: (message: string) => void;
   splitAll: SplitRow[];
   windowStart: number;
   windowEnd: number;
@@ -320,6 +348,33 @@ function DiffPanel({
   }
   if (state.diffLoading) {
     return <text fg={theme.muted}>Loading diff…</text>;
+  }
+  const previewFile = state.files[state.selectedFile];
+  if (previewFile && isImagePath(previewFile.path)) {
+    const preview = state.preview?.path === previewFile.path ? state.preview : null;
+    return (
+      <>
+        <text
+          fg={theme.primary}
+          attributes={TextAttributes.BOLD}
+          height={1}
+          wrapMode="none"
+          truncate
+        >
+          {previewFile.path}
+          {"  ·  image"}
+        </text>
+        <box flexGrow={1} minHeight={0} marginTop={1} alignItems="center" justifyContent="center">
+          {preview ? (
+            <DiffImage preview={preview} onError={onPreviewError} />
+          ) : state.previewError ? (
+            <text fg={theme.warning}>{`Image preview unavailable: ${state.previewError}`}</text>
+          ) : (
+            <text fg={theme.muted}>Loading image preview…</text>
+          )}
+        </box>
+      </>
+    );
   }
   if (!state.diff) {
     return (
@@ -675,6 +730,7 @@ export function Shell({ store, client, quit }: ShellProps) {
             windowEnd={diffWindowInfo.end}
             collapsed={diffCollapsed}
             total={diffTotal}
+            onPreviewError={(message) => store.setPreviewError(message)}
           />
         </box>
       </box>
