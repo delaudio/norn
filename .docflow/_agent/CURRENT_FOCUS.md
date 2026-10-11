@@ -8,9 +8,9 @@ If status files and git disagree, git is authoritative; correct this file.
 
 ## Active state
 
-- **Branch:** `issue-305-canonical-workspace-state`.
+- **Branch:** `issue-302-diff-navigation-streaming` (isolated preparation after PR #344).
 - **Active item:** complete epic #294 through verified PRs and squash merges.
-- **Current change:** plan 0042, canonical records/prompt/viewed consumption prepared for PR; plan 0041 / PR #343 merged at `ccd133d`, both CI gates green. PR #342 merged at `2a2ed72` with both CI gates green. PR #341 merged with both CI gates green. PR #340 merged at `72440ea` with both CI gates green. PR #339 merged at `76ba213` with both CI gates green. PR #338 merged at `3168dcd` with all checks green.
+- **Current change:** plan 0043, native diff navigation and streaming evidence; plan 0042 is PR #344, CI pending; plan 0041 / PR #343 merged at `ccd133d`, both CI gates green. PR #342 merged at `2a2ed72` with both CI gates green. PR #341 merged with both CI gates green. PR #340 merged at `72440ea` with both CI gates green. PR #339 merged at `76ba213` with both CI gates green. PR #338 merged at `3168dcd` with all checks green.
 - **Review instruction:** the maintainer explicitly requested no Norn reviews
   for this migration session; use code inspection and deterministic checks.
 - **Merged baseline:** main at `ccd133d`, including PRs #316–#343.
