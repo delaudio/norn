@@ -41,3 +41,15 @@ app to have been opened before upgrade. Coordinate draft schema with #304.
 - Claimed by: default-agent, 2026-10-11, `issue-305-desktop-data-recovery`.
 - Blockers: None for this partial delivery; PR #339 merged at `76ba213`. Platform archive validation and consumption remain final parity gates.
 - Stopped:
+
+## Delivery
+
+Effective on merge to main of PR #340. Local evidence: root lint/typecheck,
+123 frontend tests/tooling, Archgate 17/17, production desktop/browser build;
+67 terminal tests/36 native frames; 616 core tests (2 ignored), no-GUI guard;
+36 backend/CLI subprocess tests; strict all-feature/all-target Clippy and protocol
+drift check. React Doctor reports no issues in both projects. Bridge archive
+pinned to `34a3c2a2b56b698ef8cf9978f0b1e0a7ba4402db`. This bounded export/import
+delivery leaves canonical-record consumption and installed-platform recovery
+verification in the parent issue's final parity gate. #305 and ADR 0020 remain
+incomplete; source files and legacy profiles are preserved.
