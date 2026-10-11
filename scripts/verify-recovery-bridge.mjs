@@ -5,7 +5,6 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import vm from "node:vm";
-import ts from "typescript";
 
 export const recoveryRevision = "72440eaef4177b809664bf6b563647d7659f3e52";
 const root = fileURLToPath(new URL("../", import.meta.url));
@@ -17,7 +16,8 @@ function archived(path) {
     maxBuffer: 2 * 1024 * 1024,
   });
 }
-export function verifyRecoveryBridge() {
+export async function verifyRecoveryBridge() {
+  const { default: ts } = await import("typescript");
   for (const name of ["docs/user-data-recovery.md", "docs/opentui-migration/user-data-recovery.md"])
     assert.ok(
       readFileSync(new URL(`../${name}`, import.meta.url), "utf8").includes(recoveryRevision),
@@ -75,4 +75,4 @@ export function verifyRecoveryBridge() {
   };
 }
 if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1]))
-  console.log(JSON.stringify(verifyRecoveryBridge(), null, 2));
+  console.log(JSON.stringify(await verifyRecoveryBridge(), null, 2));

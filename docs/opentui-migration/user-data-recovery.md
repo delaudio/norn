@@ -167,3 +167,14 @@ directory-copy tests. It never launches a webview or accesses the runner's nativ
 credential store. These are build/copy gates, not a native user-profile recovery
 claim. The same archived production frontend and embedded desktop compile
 passed locally on macOS 26.2; no recovery desktop was launched.
+
+The first Windows archive run compiled the desktop successfully, but its
+GUI-linked unit-test executable failed before running any test with
+`0xc0000139 / STATUS_ENTRYPOINT_NOT_FOUND`. The isolated profile-copy lane now
+uses the archive's engine-only `--no-default-features` unit build; the separate
+full desktop compile/custom-protocol gate is retained. This narrows the copy
+regression to its required filesystem dependencies and does not claim the
+Windows desktop runtime/loading problem is diagnosed or repaired. Actual
+native recovery remains a distinct final gate. Contract-only tooling imports
+the revision constant without eagerly requiring TypeScript; transpilation is
+loaded only when the installed-dependency source verifier executes.
