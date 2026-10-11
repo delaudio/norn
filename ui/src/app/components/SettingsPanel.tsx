@@ -24,6 +24,11 @@ export function SettingsPanel({
   useKeyboard((key) => {
     key.preventDefault();
     key.stopPropagation();
+    if (state.themePreview) {
+      if (key.ctrl && key.name === "y") void settings.stageImportedTheme(client);
+      else if (key.name === "escape") settings.dismissImportedTheme();
+      return;
+    }
     if (state.clearConfirmation) {
       if (key.name === "y") void settings.clearCredential(client);
       else if (key.name === "escape" || key.name === "n") settings.dismissClear();
@@ -46,6 +51,7 @@ export function SettingsPanel({
         })
         .catch((error) => shell.setError(error instanceof Error ? error.message : String(error)));
     } else if (key.ctrl && key.name === "d") shell.toggleData();
+    else if (key.ctrl && key.name === "t") void settings.previewImportedTheme(client);
     else if (key.ctrl && key.name === "r") void settings.refreshReadiness(client);
     else if (key.ctrl && key.name === "k") void settings.saveCredential(client);
     else if (key.name === "escape" || key.name === "q") shell.toggleSettings();
@@ -63,14 +69,14 @@ export function SettingsPanel({
   });
   return (
     <box flexDirection="column" flexGrow={1} paddingX={1} backgroundColor={theme.background}>
-      <text fg={theme.primary} height={1} truncate>
+      <text fg={theme.primary} height={1} flexShrink={0} truncate>
         Settings · Enter edit/cycle · Esc discard and close
       </text>
-      <text fg={theme.muted} height={1} truncate>
+      <text fg={theme.muted} height={1} flexShrink={0} truncate>
         Ctrl+D user data · Ctrl+S preferences · Ctrl+K credential · a add repo · d remove repo · x
         clear keychain
       </text>
-      <text fg={theme.muted} height={1} truncate>
+      <text fg={theme.muted} height={1} flexShrink={0} truncate>
         Secrets stay in the OS store. Existing environment credentials are preserved.
       </text>
       {state.loading ? <text fg={theme.muted}>Loading preferences…</text> : null}
@@ -80,9 +86,32 @@ export function SettingsPanel({
       {state.saving ? (
         <text fg={theme.warning}>Saving… wait for confirmation before retrying.</text>
       ) : null}
-      {state.error ? <text fg={theme.error}>{state.error}</text> : null}
-      {state.notice ? <text fg={theme.warning}>{state.notice}</text> : null}
-      <text fg={theme.secondary} height={1} truncate>
+      {state.error ? (
+        <text fg={theme.error} height={3} flexShrink={0}>
+          {state.error}
+        </text>
+      ) : null}
+      {state.notice ? (
+        <text fg={theme.warning} height={2} flexShrink={0}>
+          {state.notice}
+        </text>
+      ) : null}
+      <text fg={theme.muted} height={1} flexShrink={0} truncate>
+        Ctrl+T preview imported theme · Ctrl+Y stage · Ctrl+S save
+      </text>
+      {state.themeLoading ? (
+        <text fg={theme.warning} height={1} flexShrink={0}>
+          Reading imported theme…
+        </text>
+      ) : null}
+      {state.themePreview ? (
+        <text
+          fg={theme.warning}
+          height={2}
+          flexShrink={0}
+        >{`Theme draft: ${state.themePreview.draftTheme} → imported ${state.themePreview.value}. Ctrl+Y stage · Esc dismiss`}</text>
+      ) : null}
+      <text fg={theme.secondary} height={1} flexShrink={0} truncate>
         {state.credentials
           .map(
             (status) =>
@@ -90,7 +119,7 @@ export function SettingsPanel({
           )
           .join(" · ")}
       </text>
-      <text fg={theme.muted} height={1} truncate>
+      <text fg={theme.muted} height={1} flexShrink={0} truncate>
         {state.readinessLoading
           ? "Checking tool paths…"
           : state.readiness
@@ -98,7 +127,7 @@ export function SettingsPanel({
             : "Ctrl+R checks tool paths. Presence does not verify authentication."}
       </text>
       {state.readiness ? (
-        <text fg={theme.warning} height={1} truncate>
+        <text fg={theme.warning} height={1} flexShrink={0} truncate>
           {state.readiness.credentialStore === "unsupported"
             ? "Native credential store unavailable on this build; existing environment credentials work. No plaintext fallback."
             : `Selected agent: ${state.readiness.selectedAgent} · tool presence does not verify login or provider connection.`}
@@ -124,7 +153,7 @@ export function SettingsPanel({
           </box>
         ))}
       </scrollbox>
-      <text fg={theme.muted} height={1} truncate>
+      <text fg={theme.muted} height={1} flexShrink={0} truncate>
         {state.editing
           ? "Typing changes this draft · Ctrl+U clear · Enter keep · Esc undo field"
           : "Cancel discards unsaved fields. Saving preferences never writes credentials."}

@@ -48,7 +48,7 @@ live beside `workspace-data-v1.json` in Norn's local data directory.
 
 You do not have to have opened the old desktop before upgrading. If its profile
 or a profile backup remains, use the archived export bridge from source revision
-[`34a3c2a2b56b698ef8cf9978f0b1e0a7ba4402db`](https://github.com/delaudio/norn/tree/34a3c2a2b56b698ef8cf9978f0b1e0a7ba4402db)
+[`72440eaef4177b809664bf6b563647d7659f3e52`](https://github.com/delaudio/norn/tree/72440eaef4177b809664bf6b563647d7659f3e52)
 in a separate checkout. This revision preserves the original desktop application
 ID and export action. Obtain it from the repository's history/archived source;
 use its lockfile and desktop build prerequisites. Do not install it over the new
@@ -89,3 +89,13 @@ The importer never invents missing content. If both the original profile and all
 backups were deleted, report the missing source rather than treating a new empty
 profile as a successful migration. Current import tests use synthetic exports;
 platform-specific recovery builds are checked before final desktop retirement.
+
+## Using an imported theme
+
+Import preserves the archived theme record without silently replacing your
+current preferences. In terminal Settings, Ctrl+T previews the imported theme;
+Ctrl+Y stages it in the settings draft. Ctrl+S explicitly saves preferences.
+Other edited fields are retained. Escape dismisses the preview or discards the
+settings draft when closing Settings. If the imported record or configuration
+changed, preview/reload before retrying; no automatic overwrite is attempted.
+Opening User data from Settings and returning retains unsaved settings edits.
