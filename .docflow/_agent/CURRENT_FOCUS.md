@@ -4,25 +4,21 @@ Git is authoritative. Durable history lives in WORKLOG and plan/done.
 
 ## Active state
 
-- **Goal:** finish all remaining epic #294 migration work through verified PRs
-  and squash merges; no Norn code reviews (explicit maintainer instruction).
-- **Branch:** `issue-306-canonical-scope-picker`.
-- **Current change:** plan 0053 / #355 locally verified at `e4264db`; prepared
-  completion becomes effective only on merge. PR/checks/integration outstanding.
-- **Merged baseline:** `4a303f1042e1747c7479d645392640da0921aed9` (PR #354);
-  #304 closed. #302/#303/#305 already closed on GitHub.
-- **Verified:** root gate, protocol, UI 143 tests/93 frames, Rust 666 core/51
-  stdio/five CLI/five onboarding, strict all-feature Clippy, no-GUI guard.
-  Empty TCP connections in inherited HTTP fixtures diagnosed/fixed; assertions
-  and production deadlines unchanged. Native recovery is still unobserved.
-- **User data:** preserve unrelated untracked `.norn.yaml`; do not read/stage it.
+- **Goal:** complete all remaining epic #294 work through verified PRs and squash
+  merges; no Norn reviews, as explicitly instructed by the maintainer.
+- **Branch:** `issue-357-provider-pr-reads`; plan 0054 claimed before code.
+- **Merged baseline:** PR #356 at `2a7f0fe605d3012c2e2b9a0c03e1d15b60f7c574`,
+  exact-head UI/verify CI green; #355 closed. #302/#303/#304/#305 closed.
+- **Current work:** first bounded #357 delivery: native provider PR list/detail/
+  current-user reads and strict bounded protocol. Terminal browsing, pinned
+  pre-review diffs and explicit PR approval follow; #357/#306 remain open.
+- **User data:** unrelated untracked `.norn.yaml` must not be read or staged.
 
-## Next item
+## Next items
 
-- Integrate #355 after exact-head CI passes; complete #306 retained parity
-  (provider PR navigation/detail, local base/layer, explorer/branch operations,
-  history/analytics, context/polling and native recovery), then #307 hardening,
-  #308 matched packaging, #309 removal/cutover, and epic closure.
-- ADR 0020 remains Accepted until all cutover criteria are achieved. No live
-  provider publication, release publication, real credentials/private profiles
-  or user-data removal is authorized by automated verification.
+- Finish #357, then #358–#364 in order, reconcile #306, harden #307, package #308,
+  remove legacy surfaces #309 and close epic only after verified full delivery.
+- Native-profile recovery/platform runtime is unobserved; no mock/compile waiver.
+  ADR 0020 remains Accepted until full cutover. Verification uses owned resources,
+  synthetic provider fixtures and fake agents, never private profiles, actual
+  credentials, live provider mutations or release publication.
