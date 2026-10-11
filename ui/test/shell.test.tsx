@@ -78,6 +78,44 @@ test("Enter starts a review, logs stream, q quits and unmount clears", async () 
   }
 });
 
+test("reply composer accepts bracketed paste without executing pasted shortcuts", async () => {
+  const renderer = await createTestRenderer({ width: 100, height: 30 });
+  const client = new BackendClient(
+    new FakeBackendTransport({
+      repositories,
+      targets: [
+        {
+          provider: "github",
+          workspace: "acme",
+          repo: "payments",
+          prId: 7,
+          title: "Review",
+          latestRunId: "run-1",
+          status: "completed",
+        },
+      ],
+    }),
+  );
+  const store = new ShellStore();
+  await store.connect(client);
+  let quits = 0;
+  const ui = mountApp(renderer.renderer, store, client, () => {
+    quits += 1;
+  });
+  try {
+    store.move(2);
+    store.beginReply();
+    await renderer.mockInput.pasteBracketedText("qjk\nPlease explain 👩‍💻");
+    expect(store.getSnapshot().composerText).toBe("qjk\nPlease explain 👩‍💻");
+    expect(quits).toBe(0);
+    store.backspaceReply();
+    expect(store.getSnapshot().composerText).toBe("qjk\nPlease explain ");
+  } finally {
+    ui.unmount();
+    renderer.renderer.destroy();
+  }
+});
+
 test("large diffs render collapsed with an expand hint", async () => {
   const renderer = await createTestRenderer({ width: 120, height: 30 });
   const body = Array.from({ length: 2500 }, (_, i) => (i % 2 === 0 ? `+l${i}` : `-l${i}`)).join(

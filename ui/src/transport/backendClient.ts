@@ -132,6 +132,11 @@ export class BackendClient {
     return (result.findings as FindingSummary[]) ?? [];
   }
 
+  async reviewReply(target: TargetIdentity, message: string): Promise<OperationStatus> {
+    const result = await this.transport.request("review.reply", { target, message });
+    return result as unknown as OperationStatus;
+  }
+
   async startReview(
     target: TargetIdentity,
     profile: string | null = null,

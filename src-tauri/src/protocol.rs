@@ -98,6 +98,14 @@ pub enum ProviderKind {
     Bitbucket,
 }
 
+/// Parameters for `review.reply`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ReviewReplyParams {
+    pub target: TargetIdentity,
+    pub message: String,
+}
+
 /// Parameters for `file.preview`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -186,6 +194,11 @@ pub enum Request {
         id: String,
         params: ReviewStartParams,
     },
+    #[serde(rename = "review.reply")]
+    ReviewReply {
+        id: String,
+        params: ReviewReplyParams,
+    },
     #[serde(rename = "operation.status")]
     OperationStatus {
         id: String,
@@ -218,6 +231,7 @@ impl Request {
             | Self::ReviewHistory { id, .. }
             | Self::BrowserOpen { id, .. }
             | Self::ReviewStart { id, .. }
+            | Self::ReviewReply { id, .. }
             | Self::OperationStatus { id, .. }
             | Self::OperationCancel { id, .. }
             | Self::Shutdown { id, .. } => id,
@@ -235,6 +249,7 @@ impl Request {
             Self::ReviewHistory { .. } => "review.history",
             Self::BrowserOpen { .. } => "browser.open",
             Self::ReviewStart { .. } => "review.start",
+            Self::ReviewReply { .. } => "review.reply",
             Self::OperationStatus { .. } => "operation.status",
             Self::OperationCancel { .. } => "operation.cancel",
             Self::Shutdown { .. } => "shutdown",
@@ -264,6 +279,12 @@ impl Request {
                 }
             }
             Self::ReviewStart { params, .. } => params.target.validate()?,
+            Self::ReviewReply { params, .. } => {
+                params.target.validate()?;
+                if params.message.trim().is_empty() {
+                    return Err(invalid_request("`review.reply` message must not be empty"));
+                }
+            }
             Self::ReviewFiles { params, .. }
             | Self::ReviewFindings { params, .. }
             | Self::ReviewHistory { params, .. }

@@ -68,6 +68,8 @@ pub struct AiReviewThread {
     pub created_at: String,
     pub updated_at: String,
     pub claude_session_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ai_provider: Option<AiProvider>,
     pub messages: Vec<AiReviewMessage>,
 }
 
@@ -744,6 +746,7 @@ fn legacy_review_to_store(review: LegacySavedReview) -> AiReviewStoreData {
             created_at: review.generated_at.clone(),
             updated_at: review.generated_at.clone(),
             claude_session_id: None,
+            ai_provider: None,
             messages: vec![AiReviewMessage {
                 id: message_id,
                 role: AiReviewMessageRole::Assistant,
@@ -5985,6 +5988,7 @@ fn start_inline_review_for_target(
         created_at: created_at.clone(),
         updated_at: created_at.clone(),
         claude_session_id: None,
+        ai_provider: None,
         messages: Vec::new(),
     };
     if let Some(message) = display_message
@@ -6000,6 +6004,9 @@ fn start_inline_review_for_target(
         );
     }
     review_store.threads.push(thread);
+    if let Some(last) = review_store.threads.last_mut() {
+        last.ai_provider = Some(ai_provider);
+    }
     if let Err(error) =
         save_review_store_for_target(&workspace, &repo, &target, &review_store, &store)
     {
@@ -6103,6 +6110,7 @@ pub fn run_headless_review_native(
         created_at: created_at.clone(),
         updated_at: created_at,
         claude_session_id: None,
+        ai_provider: Some(ai_provider),
         messages: Vec::new(),
     });
     save_review_store(&workspace, &repo, pr_id, &review_store)
@@ -6209,6 +6217,7 @@ pub fn create_ai_review_thread(
         created_at: now.clone(),
         updated_at: now.clone(),
         claude_session_id: None,
+        ai_provider: None,
         messages: Vec::new(),
     };
     if let Some(message) = initial_message

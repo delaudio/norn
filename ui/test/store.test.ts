@@ -426,3 +426,39 @@ test("loads the stored review history for a target", async () => {
   expect(store.getSnapshot().history).toHaveLength(1);
   expect(store.getSnapshot().history[0]?.findingsCount).toBe(2);
 });
+
+test("composing a reply submits it as an operation", async () => {
+  const store = new ShellStore();
+  const client = new BackendClient(
+    new FakeBackendTransport({
+      repositories,
+      targets: [
+        {
+          provider: "github",
+          workspace: "acme",
+          repo: "payments",
+          prId: 42,
+          runId: "run-42",
+          title: "Review",
+          status: "succeeded",
+        },
+      ],
+      files,
+      findings,
+    }),
+  );
+  await store.connect(client);
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  store.move(1);
+  store.move(1); // select the stored review target
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  store.beginReply();
+  expect(store.getSnapshot().composing).toBe(true);
+  store.appendReplyText("Please add tests");
+  store.backspaceReply();
+  store.appendReplyText("s");
+  expect(store.getSnapshot().composerText).toBe("Please add tests");
+  await store.submitReply(client);
+  expect(store.getSnapshot().composing).toBe(false);
+  expect(store.getSnapshot().operation?.state).toBe("accepted");
+});
