@@ -6365,16 +6365,12 @@ fn review_profile_for_thread(review_store: &AiReviewStoreData, thread_id: &str) 
         .and_then(|run| run.review_profile.clone())
 }
 
-#[cfg(feature = "desktop")]
-#[tauri::command]
-#[allow(
-    clippy::too_many_arguments,
-    reason = "the command parameters are the stable Tauri IPC review-reply contract"
-)]
-pub async fn reply_inline_review(
-    store: tauri::State<'_, AiReviewRunStore>,
-    workspace: String,
-    repo: String,
+/// Start a follow-up (reply) inline review run for an existing thread.
+#[allow(clippy::too_many_arguments)]
+pub fn reply_inline_review_native(
+    store: &AiReviewRunStore,
+    workspace: &str,
+    repo: &str,
     id: u32,
     title: String,
     source_branch: String,
@@ -6384,7 +6380,7 @@ pub async fn reply_inline_review(
     thread_id: String,
     user_message: String,
     base_payload: String,
-    ai_provider: Option<AiProvider>,
+    ai_provider: AiProvider,
     claude_model: Option<String>,
     claude_effort: Option<String>,
     codex_model: Option<String>,
@@ -6392,11 +6388,12 @@ pub async fn reply_inline_review(
     opencode_model: Option<String>,
     opencode_effort: Option<String>,
 ) -> Result<AiReviewRunState, String> {
-    let ai_provider = ai_provider.unwrap_or_default();
     let trimmed_message = user_message.trim();
     if trimmed_message.is_empty() {
         return Err("A reply message is required.".to_string());
     }
+    let workspace = workspace.to_string();
+    let repo = repo.to_string();
     let key = pr_key(&workspace, &repo, id);
     let mut review_store = load_review_store(&workspace, &repo, id)?
         .ok_or_else(|| "No saved AI review exists for this pull request yet.".to_string())?;
@@ -6409,7 +6406,7 @@ pub async fn reply_inline_review(
     };
     let fallback_payload = build_reply_fallback_payload(&base_payload, thread, trimmed_message);
     let (initial, run_id) = begin_inline_review_run(
-        store.inner(),
+        store,
         &key,
         title,
         thread_id.clone(),
@@ -6427,7 +6424,7 @@ pub async fn reply_inline_review(
     );
     review_store.active_thread_id = Some(thread_id.clone());
     if let Err(error) = save_review_store(&workspace, &repo, id, &review_store) {
-        set_inline_review_failed(store.inner(), &key, run_id, error.clone());
+        set_inline_review_failed(store, &key, run_id, error.clone());
         return Err(error);
     }
 
@@ -6439,8 +6436,8 @@ pub async fn reply_inline_review(
     let resume_for_pipeline = resume_session_id.clone();
     let fallback_for_pipeline = resume_session_id.map(|_| fallback_payload);
 
-    let store_clone = store.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || {
+    let store_clone = store.clone();
+    std::thread::spawn(move || {
         if let Err(error) = run_inline_review_pipeline(
             store_clone.clone(),
             key.clone(),
@@ -6480,6 +6477,52 @@ pub async fn reply_inline_review(
         }
     });
     Ok(initial)
+}
+#[cfg(feature = "desktop")]
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+pub async fn reply_inline_review(
+    store: tauri::State<'_, AiReviewRunStore>,
+    workspace: String,
+    repo: String,
+    id: u32,
+    title: String,
+    source_branch: String,
+    destination_branch: String,
+    reviewed_base_sha: Option<String>,
+    reviewed_head_sha: Option<String>,
+    thread_id: String,
+    user_message: String,
+    base_payload: String,
+    ai_provider: Option<AiProvider>,
+    claude_model: Option<String>,
+    claude_effort: Option<String>,
+    codex_model: Option<String>,
+    codex_effort: Option<String>,
+    opencode_model: Option<String>,
+    opencode_effort: Option<String>,
+) -> Result<AiReviewRunState, String> {
+    reply_inline_review_native(
+        store.inner(),
+        &workspace,
+        &repo,
+        id,
+        title,
+        source_branch,
+        destination_branch,
+        reviewed_base_sha,
+        reviewed_head_sha,
+        thread_id,
+        user_message,
+        base_payload,
+        ai_provider.unwrap_or_default(),
+        claude_model,
+        claude_effort,
+        codex_model,
+        codex_effort,
+        opencode_model,
+        opencode_effort,
+    )
 }
 
 #[cfg(feature = "desktop")]
