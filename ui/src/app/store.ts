@@ -1,4 +1,8 @@
-import type { DraftTarget, WorkspaceSettings } from "../../../src/protocol/generated/protocol";
+import type {
+  DraftTarget,
+  WorkspaceScope,
+  WorkspaceSettings,
+} from "../../../src/protocol/generated/protocol";
 import type { WorkspaceReadiness } from "../transport/backendClient";
 import { SyntaxHighlighter } from "./syntaxHighlighter";
 import type { DiffSyntax, SyntaxReader } from "./syntaxTypes";
@@ -275,6 +279,7 @@ export function pickerTargetIdentity(entry: PickerEntry): TargetIdentity {
 export function buildPicker(
   repositories: RepositorySummary[],
   targets: ReviewTarget[],
+  scopes: WorkspaceScope[] = [],
 ): PickerEntry[] {
   const workingTree: PickerEntry[] = repositories.map((repo) => ({
     kind: "working-tree",
@@ -296,7 +301,27 @@ export function buildPicker(
     title: target.title,
     status: target.status,
   }));
-  return [...workingTree, ...reviews];
+  const existing = new Set(
+    reviews.map((entry) =>
+      JSON.stringify([entry.provider, entry.workspace, entry.repo, entry.prId]),
+    ),
+  );
+  const saved: PickerEntry[] = scopes
+    .filter(
+      (scope) =>
+        !existing.has(JSON.stringify([scope.provider, scope.workspace, scope.repo, scope.prId])),
+    )
+    .map((scope) => ({
+      kind: "review",
+      provider: scope.provider,
+      workspace: scope.workspace,
+      repo: scope.repo,
+      prId: scope.prId,
+      runId: null,
+      title: scope.localOnly ? "Saved local data" : `Saved PR #${scope.prId}`,
+      status: `${scope.draftCount} drafts · ${scope.referenceCount} references · ${scope.viewedCount} viewed`,
+    }));
+  return [...workingTree, ...reviews, ...saved];
 }
 
 function message(error: unknown): string {
@@ -664,14 +689,15 @@ export class ShellStore {
   async applySettings(client: BackendClient, settings: WorkspaceSettings): Promise<void> {
     const generation = this.state.generation;
     const target = this.activeTarget();
-    const [repositories, targets, readiness] = await Promise.all([
+    const [repositories, targets, readiness, scopes] = await Promise.all([
       client.repositories(),
       client.reviewTargets(),
       this.state.readiness ? client.readiness() : Promise.resolve(null),
+      client.workspaceScopes(() => generation === this.state.generation),
     ]);
     if (generation !== this.state.generation || this.state.status === "closed") return;
     setTheme(settings.theme);
-    const picker = buildPicker(repositories, targets);
+    const picker = buildPicker(repositories, targets, scopes);
     const selected = picker.findIndex((entry) => sameTarget(pickerTargetIdentity(entry), target));
     this.update({ repositories, picker, diffMode: settings.defaultDiffView, readiness });
     await this.selectPicker(Math.max(0, selected));
@@ -694,16 +720,19 @@ export class ShellStore {
           this.update({ notice: "Readiness could not be checked. Press m to inspect settings." });
         }
       }
-      const [repositories, targets] = await Promise.all([
+      const [repositories, targets, scopes] = await Promise.all([
         client.repositories(),
         client.reviewTargets(),
+        ready.capabilities.includes("workspace-scopes")
+          ? client.workspaceScopes()
+          : Promise.resolve([]),
       ]);
       this.update({
         status: "ready",
         serverVersion: ready.serverVersion,
         repositories,
         selected: 0,
-        picker: buildPicker(repositories, targets),
+        picker: buildPicker(repositories, targets, scopes),
         selectedPicker: 0,
         generation: this.state.generation + 1,
         files: [],
@@ -1150,6 +1179,13 @@ export class ShellStore {
     if (!target || this.requestInFlight()) {
       return;
     }
+    if (target.kind === "provider" && (target.prId ?? 0) >= 0x80000000) {
+      this.update({
+        notice:
+          "Saved local data cannot start a provider review. Select a working-tree or branch target.",
+      });
+      return;
+    }
     const active = this.state.operation;
     if (active && (active.state === "accepted" || active.state === "running")) {
       return;
@@ -1313,9 +1349,12 @@ export class ShellStore {
     }
     if (state !== "succeeded") return;
     try {
-      const targets = await client.reviewTargets();
+      const [targets, scopes] = await Promise.all([
+        client.reviewTargets(),
+        client.workspaceScopes(() => generation === this.state.generation),
+      ]);
       if (generation !== this.state.generation || !sameTarget(this.activeTarget(), target)) return;
-      const picker = buildPicker(this.state.repositories, targets);
+      const picker = buildPicker(this.state.repositories, targets, scopes);
       const next =
         target.kind === "provider" && target.prId
           ? picker.findIndex(
@@ -1438,6 +1477,10 @@ export class ShellStore {
     const entry = this.state.picker[this.state.selectedPicker];
     if (entry?.kind !== "review") {
       this.update({ notice: "Replies are available for pull-request reviews." });
+      return;
+    }
+    if (!entry.runId) {
+      this.update({ notice: "Select a saved review before replying to an agent." });
       return;
     }
     if (

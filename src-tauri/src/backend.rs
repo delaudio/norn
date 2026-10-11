@@ -182,6 +182,7 @@ pub fn run() -> Result<(), i32> {
         capabilities: vec![
             "workspace-data".to_string(),
             "workspace-records".to_string(),
+            "workspace-scopes".to_string(),
             "draft-staging".to_string(),
             "draft-publication".to_string(),
             "remote-comments".to_string(),
@@ -406,6 +407,7 @@ fn dispatch(request: Request, backend: &Backend) -> bool {
             false
         }
         Request::WorkspaceRead { .. }
+        | Request::WorkspaceScopes { .. }
         | Request::WorkspaceMutate { .. }
         | Request::DraftPrepare { .. }
         | Request::DraftStage { .. } => {
@@ -429,6 +431,13 @@ fn dispatch(request: Request, backend: &Backend) -> bool {
             let active = backend.active_workspace.clone();
             thread::spawn(move || {
                 let result = match request {
+                    Request::WorkspaceScopes { params, .. } => {
+                        crate::services::workspace_data::scope_read(params)
+                            .map(|value| json!(value))
+                            .map_err(|message| {
+                                ProtocolError::new(ProtocolErrorCode::Conflict, message)
+                            })
+                    }
                     Request::WorkspaceRead { params, .. } => {
                         crate::services::workspace_data::record_read(params)
                             .map(|value| json!(value))
@@ -587,6 +596,11 @@ fn dispatch(request: Request, backend: &Backend) -> bool {
             false
         }
         Request::ReviewStart { params, .. } => {
+            if matches!(&params.target, TargetIdentity::Provider { pr_id: Some(id), .. } if crate::local_review::is_local_review_id(u64::from(*id)))
+            {
+                backend.fail(&id, ProtocolError::new(ProtocolErrorCode::InvalidParams, "Saved local data is read-only here; select a working-tree or branch target to start a local review."));
+                return false;
+            }
             if backend
                 .active_operations
                 .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |current| {
@@ -867,39 +881,111 @@ fn repositories() -> Vec<serde_json::Value> {
         .collect()
 }
 
-/// Real, offline review targets: recent review jobs whose workspace/repo match a
-/// configured repository, so the shell can select a stored PR review (with its
-/// `prId`) and reach its persisted findings.
+/// Resolve actual saved runs from jobs without guessing their provider or treating
+/// a job ID as a run ID. Imported scopes are exposed separately by workspace.scopes.
 fn review_targets_response() -> serde_json::Value {
-    let configured = config::load().repos;
     let mut targets = Vec::new();
+    let mut seen = std::collections::HashSet::new();
     if let Ok(jobs) = crate::review_storage::list_recent_review_jobs(50) {
         for job in jobs {
             if job.pr_id == 0 {
                 continue;
             }
-            let Some(repo) = configured
-                .iter()
-                .find(|entry| entry.workspace == job.workspace && entry.repo == job.repo)
-            else {
+            let Some(thread_id) = job.thread_id.as_deref() else {
                 continue;
             };
-            let provider = match repo.provider {
-                config::ReviewProvider::Github => "github",
-                config::ReviewProvider::Bitbucket => "bitbucket",
+            let Ok(Some(store)) = crate::services::review::load_ai_review_store_native(
+                &job.workspace,
+                &job.repo,
+                job.pr_id,
+            ) else {
+                continue;
             };
+            let Some(run) = store.review_runs.iter().rev().find(|run| {
+                run.thread_id.as_deref() == Some(thread_id)
+                    && run.workspace == job.workspace
+                    && run.repo == job.repo
+                    && run.pr_id == job.pr_id
+                    && !run.id.is_empty()
+                    && run.id.len() <= 256
+            }) else {
+                continue;
+            };
+            let provider = match run.provider {
+                crate::services::review::ReviewProvider::Github => "github",
+                crate::services::review::ReviewProvider::Bitbucket => "bitbucket",
+            };
+            if !seen.insert((
+                provider.to_string(),
+                run.workspace.clone(),
+                run.repo.clone(),
+                run.pr_id,
+                run.id.clone(),
+            )) {
+                continue;
+            }
             targets.push(json!({
-                "provider": provider,
-                "workspace": job.workspace,
-                "repo": job.repo,
-                "prId": job.pr_id,
-                "runId": job.id,
-                "title": job.pr_title,
-                "status": serde_json::to_value(job.status).unwrap_or_else(|_| json!("unknown")),
+                "provider": provider, "workspace": run.workspace, "repo": run.repo,
+                "prId": run.pr_id, "runId": run.id,
+                "title": job.pr_title.chars().take(256).collect::<String>(),
+                "status": run.status,
             }));
         }
     }
     json!({ "targets": targets })
+}
+
+/// Filter shared legacy storage by the complete saved run identity before
+/// exposing findings or conversations. This does not rewrite legacy storage.
+fn scoped_review_store(
+    target: &TargetIdentity,
+    mut store: crate::services::review::AiReviewStoreData,
+) -> Result<crate::services::review::AiReviewStoreData, ProtocolError> {
+    let TargetIdentity::Provider {
+        provider,
+        workspace,
+        repo,
+        pr_id: Some(pr_id),
+        run_id,
+    } = target
+    else {
+        return Ok(crate::services::review::AiReviewStoreData::default());
+    };
+    let expected = match provider {
+        ProviderKind::Github => crate::services::review::ReviewProvider::Github,
+        ProviderKind::Bitbucket => crate::services::review::ReviewProvider::Bitbucket,
+    };
+    store.review_runs.retain(|run| {
+        run.provider == expected
+            && run.workspace == *workspace
+            && run.repo == *repo
+            && run.pr_id == *pr_id
+    });
+    if run_id
+        .as_deref()
+        .is_some_and(|id| !store.review_runs.iter().any(|run| run.id == id))
+    {
+        return Err(ProtocolError::new(
+            ProtocolErrorCode::TargetStale,
+            "Selected saved review does not match this target.",
+        ));
+    }
+    let threads: std::collections::HashSet<_> = store
+        .review_runs
+        .iter()
+        .filter_map(|run| run.thread_id.as_deref())
+        .collect();
+    store
+        .threads
+        .retain(|thread| threads.contains(thread.id.as_str()));
+    if store
+        .active_thread_id
+        .as_deref()
+        .is_some_and(|id| !threads.contains(id))
+    {
+        store.active_thread_id = None;
+    }
+    Ok(store)
 }
 
 fn review_output_response(target: &TargetIdentity) -> Result<serde_json::Value, ProtocolError> {
@@ -974,6 +1060,7 @@ fn review_threads_response(target: &TargetIdentity) -> Result<serde_json::Value,
     let store = crate::services::review::load_ai_review_store_native(workspace, repo, *pr_id)
         .map_err(|error| ProtocolError::new(ProtocolErrorCode::Internal, error))?
         .unwrap_or_default();
+    let store = scoped_review_store(target, store)?;
     let selected_thread = match target {
         TargetIdentity::Provider {
             run_id: Some(run_id),
@@ -1057,7 +1144,7 @@ fn review_history_response(target: &TargetIdentity) -> Result<serde_json::Value,
                             format!("review store: {error}"),
                         )
                     })?;
-            let mut runs = store.map(|store| store.review_runs).unwrap_or_default();
+            let mut runs = scoped_review_store(target, store.unwrap_or_default())?.review_runs;
             runs.reverse();
             runs.into_iter()
                 .take(20)
@@ -2285,7 +2372,8 @@ fn findings_response(target: &TargetIdentity) -> Result<serde_json::Value, Proto
                             format!("review store: {error}"),
                         )
                     })?;
-            select_review_run(store, run_id.as_deref())
+            let store = scoped_review_store(target, store.unwrap_or_default())?;
+            select_review_run(Some(store), run_id.as_deref())
                 .map(|run| run.findings.into_iter().map(finding_json).collect())
                 .unwrap_or_default()
         }

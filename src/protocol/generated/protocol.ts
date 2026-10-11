@@ -280,6 +280,12 @@ export type Request =
       id: RequestId;
       method: "comments.list";
       params: CommentsListParams;
+    }
+  | {
+      type: "request";
+      id: RequestId;
+      method: "workspace.scopes";
+      params: ScopeReadParams;
     };
 export type RequestId = string;
 /**
@@ -338,6 +344,11 @@ export type RecordMutation =
       kind: "removeDraft";
       localId: string;
     };
+export type ScopeReadParams = {
+  offset?: number;
+  limit?: number;
+  inventoryVersion?: string | null;
+};
 export type OperationState = "accepted" | "running" | "succeeded" | "failed" | "cancelled";
 export type ErrorCode =
   | "invalidRequest"
@@ -747,7 +758,8 @@ export interface ResponseOk {
     | PublicationItemResult
     | PublicationCancelResult
     | PublicationStatusResult
-    | CommentsListResult;
+    | CommentsListResult
+    | ScopePage;
 }
 export interface DiffFileResult {
   target: TargetIdentity;
@@ -1232,6 +1244,26 @@ export interface RemoteComment {
   from: number | null;
   commitId: string | null;
   rangeStart: number | null;
+}
+export interface ScopePage {
+  inventoryVersion: string;
+  offset: number;
+  nextOffset: number | null;
+  totalScopes: number;
+  /**
+   * @maxItems 100
+   */
+  scopes: WorkspaceScope[];
+}
+export interface WorkspaceScope {
+  provider: "github" | "bitbucket";
+  workspace: string;
+  repo: string;
+  prId: number;
+  draftCount: number;
+  referenceCount: number;
+  viewedCount: number;
+  localOnly: boolean;
 }
 export interface ResponseError {
   type: "response";

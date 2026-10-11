@@ -1051,3 +1051,8 @@ pub(crate) use records::{
     remove_acknowledged_draft, with_locked_drafts,
 };
 pub use records::{RecordMutateParams, RecordMutation, RecordReadParams};
+
+#[path = "workspace_scopes.rs"]
+mod scopes;
+pub(crate) use scopes::scope_read;
+pub use scopes::ScopeReadParams;

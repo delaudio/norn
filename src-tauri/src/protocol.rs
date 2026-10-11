@@ -336,6 +336,11 @@ pub enum Request {
         #[serde(default)]
         params: EmptyParams,
     },
+    #[serde(rename = "workspace.scopes")]
+    WorkspaceScopes {
+        id: String,
+        params: crate::services::workspace_data::ScopeReadParams,
+    },
     #[serde(rename = "browser.open")]
     BrowserOpen { id: String, params: TargetParams },
     #[serde(rename = "review.start")]
@@ -421,6 +426,7 @@ impl Request {
             | Self::ReviewFiles { id, .. }
             | Self::ReviewFindings { id, .. }
             | Self::ReviewTargets { id, .. }
+            | Self::WorkspaceScopes { id, .. }
             | Self::ReviewHistory { id, .. }
             | Self::ReviewThreads { id, .. }
             | Self::ReviewOutput { id, .. }
@@ -471,6 +477,7 @@ impl Request {
             Self::ReviewFiles { .. } => "review.files",
             Self::ReviewFindings { .. } => "review.findings",
             Self::ReviewTargets { .. } => "review.targets",
+            Self::WorkspaceScopes { .. } => "workspace.scopes",
             Self::ReviewHistory { .. } => "review.history",
             Self::ReviewThreads { .. } => "review.threads",
             Self::ReviewOutput { .. } => "review.output",
@@ -559,6 +566,9 @@ impl Request {
                 {
                     return Err(invalid_request("Invalid user-data page parameters."));
                 }
+            }
+            Self::WorkspaceScopes { params, .. } => {
+                params.validate().map_err(invalid_request)?;
             }
             Self::WorkspaceMutate { params, .. } => {
                 if params.key.is_empty()

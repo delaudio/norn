@@ -2524,3 +2524,111 @@ fn publication_control_and_invalid_approvals_never_access_provider_credentials()
         false
     );
 }
+
+#[test]
+fn canonical_scope_inventory_is_offline_paged_and_reachable_after_restart() {
+    let repo = temp_repo();
+    let data = tempfile::tempdir().unwrap();
+    let path = data.path().join("workspace-data-v1.json");
+    let original = json!({"schemaVersion":1,"records":[
+        {"key":"viewed.github:imported/repo/7","payload":{"kind":"viewed","value":["owned-private-path.rs"]}},
+        {"key":"viewed.bitbucket:imported/repo/7","payload":{"kind":"viewed","value":["owned-bitbucket.rs"]}}
+    ]});
+    std::fs::write(&path, original.to_string()).unwrap();
+    let mut backend = Backend::spawn_env(
+        repo.path(),
+        &[("NORN_DATA_DIR", data.path().to_str().unwrap())],
+    );
+    backend.handshake();
+    backend.send(
+        json!({"type":"request","id":"scopes","method":"workspace.scopes","params":{"limit":1}}),
+    );
+    let first = backend.wait_for(|value| value["id"] == "scopes", Duration::from_secs(5));
+    assert_eq!(first["ok"], true, "{first}");
+    assert_eq!(first["result"]["totalScopes"], 2);
+    assert_eq!(first["result"]["scopes"][0]["provider"], "bitbucket");
+    assert!(!first.to_string().contains("owned-private-path"));
+    let version = first["result"]["inventoryVersion"].clone();
+    std::fs::write(&path, json!({"schemaVersion":1,"records":[{"key":"viewed.github:imported/repo/7","payload":{"kind":"viewed","value":["after-edit.rs"]}}]}).to_string()).unwrap();
+    backend.send(json!({"type":"request","id":"second","method":"workspace.scopes","params":{"offset":1,"limit":1,"inventoryVersion":version}}));
+    let second = backend.wait_for(|value| value["id"] == "second", Duration::from_secs(5));
+    assert_eq!(second["ok"], true, "{second}");
+    assert_eq!(second["result"]["totalScopes"], 2);
+    assert_eq!(second["result"]["scopes"][0]["provider"], "github");
+    backend.send(json!({"type":"request","id":"local-refuse","method":"review.start","params":{"target":{"kind":"provider","provider":"github","workspace":"imported","repo":"repo","prId":2147483649u32}}}));
+    let refused = backend.wait_for(
+        |value| value["id"] == "local-refuse",
+        Duration::from_secs(5),
+    );
+    assert_eq!(refused["ok"], false, "{refused}");
+    assert_eq!(refused["error"]["code"], "invalidParams");
+    drop(backend);
+    let mut backend = Backend::spawn_env(
+        repo.path(),
+        &[("NORN_DATA_DIR", data.path().to_str().unwrap())],
+    );
+    backend.handshake();
+    backend.send(json!({"type":"request","id":"expired","method":"workspace.scopes","params":{"offset":1,"inventoryVersion":version}}));
+    let expired = backend.wait_for(|value| value["id"] == "expired", Duration::from_secs(5));
+    assert_eq!(expired["ok"], false, "{expired}");
+    backend.send(json!({"type":"request","id":"refresh","method":"workspace.scopes","params":{}}));
+    let refreshed = backend.wait_for(|value| value["id"] == "refresh", Duration::from_secs(5));
+    assert_eq!(refreshed["result"]["totalScopes"], 1);
+    backend.send(json!({"type":"request","id":"content","method":"workspace.read","params":{"key":"viewed.github:imported/repo/7"}}));
+    let content = backend.wait_for(|value| value["id"] == "content", Duration::from_secs(5));
+    assert_eq!(content["result"]["payload"]["value"][0], "after-edit.rs");
+}
+
+#[test]
+#[cfg(unix)]
+fn saved_targets_resolve_run_and_provider_without_configuration_guessing() {
+    let mut fixture = FixFixture::new("#!/bin/sh\nexit 99\n");
+    fixture
+        .backend
+        .send(json!({"type":"request","id":"targets-real","method":"review.targets","params":{}}));
+    let targets = fixture.backend.wait_for(
+        |value| value["id"] == "targets-real",
+        Duration::from_secs(5),
+    );
+    assert_eq!(targets["result"]["targets"][0]["runId"], "run-fix");
+    assert_eq!(targets["result"]["targets"][0]["provider"], "github");
+    let connection = rusqlite::Connection::open(fixture._data.path().join("norn.sqlite3")).unwrap();
+    let stored: String = connection
+        .query_row(
+            "SELECT store_json FROM ai_review_stores WHERE review_key='fixture_demo_9'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let mut stored: Value = serde_json::from_str(&stored).unwrap();
+    stored["reviewRuns"][0]["provider"] = json!("bitbucket");
+    connection
+        .execute(
+            "UPDATE ai_review_stores SET store_json=?1 WHERE review_key='fixture_demo_9'",
+            [stored.to_string()],
+        )
+        .unwrap();
+    fixture.backend.send(
+        json!({"type":"request","id":"targets-provider","method":"review.targets","params":{}}),
+    );
+    let targets = fixture.backend.wait_for(
+        |value| value["id"] == "targets-provider",
+        Duration::from_secs(5),
+    );
+    assert_eq!(targets["result"]["targets"][0]["provider"], "bitbucket");
+    assert_eq!(targets["result"]["targets"][0]["runId"], "run-fix");
+    for (index, method) in ["review.history", "review.findings", "review.threads"]
+        .into_iter()
+        .enumerate()
+    {
+        let id = format!("wrong-provider-{index}");
+        fixture.backend.send(
+            json!({"type":"request","id":id,"method":method,"params":{"target":fixture.target}}),
+        );
+        let response = fixture
+            .backend
+            .wait_for(|value| value["id"] == id, Duration::from_secs(5));
+        assert_eq!(response["ok"], false, "{response}");
+        assert_eq!(response["error"]["code"], "targetStale");
+    }
+}

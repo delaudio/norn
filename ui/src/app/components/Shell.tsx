@@ -683,7 +683,7 @@ function DiffPanel({
   if (state.status === "closed") {
     return <text fg={theme.warning}>Backend connection closed. Press q to quit.</text>;
   }
-  if (state.repositories.length === 0) {
+  if (state.picker.length === 0) {
     return (
       <box flexDirection="column">
         <text fg={theme.primary}>Welcome to Norn</text>
@@ -841,7 +841,10 @@ function pickerOptions(state: ShellSnapshot): ListOption[] {
       entry.kind === "review"
         ? `${entry.workspace}/${entry.repo} #${entry.prId} · ${entry.status}`
         : `${entry.workspace}/${entry.repo}`,
-    description: entry.kind === "review" ? `${entry.title} · ${entry.runId}` : entry.title,
+    description:
+      entry.kind === "review"
+        ? `${entry.provider} · ${entry.title} · ${entry.runId ?? "No saved review"}`
+        : entry.title,
   }));
 }
 
