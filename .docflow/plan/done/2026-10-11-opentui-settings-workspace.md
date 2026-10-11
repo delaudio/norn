@@ -43,3 +43,11 @@ under #305; no legacy data is deleted or old interface retired in this item.
 - Claimed by: default-agent, 2026-10-11, `issue-305-settings-workspace`.
 - Blockers: None; PR #338 merged at `3168dcd`.
 - Stopped:
+
+## Delivery
+
+Effective on merge to main of PR #339. Verified locally: root lint/typecheck,
+121 frontend tests plus tooling, Archgate; 62 terminal tests/32 native frames;
+609 core tests (2 ignored), no-GUI dependency guard; 35 backend subprocess tests;
+strict all-feature/all-target Clippy and protocol drift check. React Doctor reports
+no issues. #305 and the owning migration decision remain incomplete.
