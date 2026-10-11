@@ -56,5 +56,31 @@ at-most-once approval are subsequent required #357 deliveries; do not close
 ## Status
 
 - Claimed by: default-agent, 2026-10-12, `issue-357-native-pr-browser`.
-- Blockers: implementation, local gates and exact-head PR integration.
+- Blockers: exact-head CI and squash merge; local gates passed.
 - Stopped:
+
+## Prepared completion receipt
+
+- Feature commit: `df7ab05` (`feat(ui): browse native provider pull requests`).
+- Local root typecheck/123 tests plus tooling/lint/Archgate 12/12, generated
+  protocol, UI typecheck/160 tests/970 assertions/105 frames, React Doctor
+  (Intl allocation fixed; native-renderer false positives and two maintainability
+  warnings assessed in the evidence), Rust 672 core plus two existing ignored/
+  52 stdio/six isolated CLI/five onboarding/three binary tests, strict all-feature/
+  all-target Clippy/fmt and no-GUI dependency guard passed.
+- Native wide/narrow input and 12 new Storybook frames inspected. Previous 93
+  frames: 39 final help lines changed, no other line/dimension differences.
+- Docflow audit after main synchronization: ADR 1–20 numbering/INDEX metadata/
+  sections/status/links and 0055 collision checks pass. Existing Accepted ADR
+  0011/0013 todo-coverage advisories are unchanged; reconcile retained migration
+  decisions in #306, without claiming unrelated work shipped.
+- Evidence: `docs/opentui-migration/native-pr-browser.md`. #357/#306 remain open
+  for pre-review pinned diffs and explicit PR approval/native browser opening.
+  ADR 0020 remains Accepted until full cutover.
+
+## Shipped
+
+This prepared receipt becomes effective only when its pull request is squash
+merged to `main` after exact-head UI/verify CI succeeds. The feature commit above
+is the reviewable implementation base; the squash merge is the shipping event.
+Before that event this item is prepared, not shipped, regardless of its done path.

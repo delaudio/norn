@@ -293,3 +293,14 @@ Plan 0053 completion prepared after implementation `e4264db`, effective only on 
 - 2026-10-11: Plan 0054 completion prepared against verified `8f1a120`; all final local gates pass, exact-head CI and squash merge still required. No new plan collision on synchronized main; owner links/contiguous ADRs verified and ADR 0020 remains Accepted. Historical ADR 0011 coverage unchanged. #357/#306 not closed by the read bridge.
 
 - 2026-10-12 (Rome): PR #365 merged at `2f2cd50d3314b09528f323f40778c0eb45cc4879` after exact `8e2e36d` UI/verify success (verify 12m46s); first #357 read bridge shipped. Claimed plan 0055 native PR browser on synchronized main. #357/#306 remain open for all required deliveries; no Norn reviews.
+
+- 2026-10-12: prepared plan 0055 at feature `df7ab05`: F2 native PR browser,
+  grouped provider/state/actual-author/query filters, independent explicit pages,
+  bounded two-read scheduler with generation fences, metadata/reviewer detail,
+  and workspace selection preserving actual saved runs. Twelve owned store/native
+  input tests and twelve new native-cell stories; all local gates passed, UI
+  160 tests/970 assertions/105 frames. Rapid batched Tab/arrow input stale closure
+  fixed; reused Intl segmenter after React Doctor. Assessed native DOM-property
+  false positives without suppression. Prepared done receipt is not effective
+  until exact-head CI and squash merge. #357/#306 remain open; no Norn review,
+  live provider action, private credential/profile access or release publication.

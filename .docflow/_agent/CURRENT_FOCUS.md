@@ -6,13 +6,14 @@ Git is authoritative. Durable history lives in WORKLOG and plan/done.
 
 - **Goal:** complete all remaining epic #294 work through verified PRs/squash
   merges; no Norn reviews, per explicit maintainer instruction.
-- **Branch:** `issue-357-native-pr-browser`; plan 0055 claimed before code.
+- **Branch:** `issue-357-native-pr-browser`; plan 0055 implemented at `df7ab05`; prepared receipt
+  in plan/done, effective only on verified PR merge.
 - **Merged baseline:** PR #365 at `2f2cd50d3314b09528f323f40778c0eb45cc4879`,
   exact `8e2e36d` UI/verify green. #355 closed; #357/#306 remain open.
-- **Current work:** second #357 delivery: native repository/author/state filters,
-  per-repository paging, metadata/reviewers/revisions and explicit selection that
-  preserves saved runs. Pinned pre-review diffs and explicit approval follow.
-- **Verified bridge:** root/protocol/UI 148 tests/93 frames, Rust 672 core/52
+- **Current work:** integrate second #357 delivery after exact-head UI/verify CI.
+  Native filters/pages/detail/full-scope selection implemented and locally
+  verified; pre-review pinned diffs and explicit approval follow.
+- **Verified bridge:** root/protocol/UI 160 tests/105 frames, Rust 672 core/52
   stdio/six CLI/five onboarding, strict all-feature Clippy/no-GUI. CLI status now
   runs under an owned child mock keyring; inherited publication fixture
   intermittency remains tracked in #307, never called fixed by a rerun.
