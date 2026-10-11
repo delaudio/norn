@@ -1,0 +1,173 @@
+{
+  "renderer": "opentui",
+  "width": 120,
+  "height": 30,
+  "runtime": "1.3.8",
+  "platform": "darwin",
+  "arch": "arm64",
+  "inputSha256": "e659bededa7563f29ad14d290ae0166ead0d5ef4bfd5bd02c2868f4f0ca537ac",
+  "results": [
+    {
+      "case": "files-10",
+      "files": 10,
+      "selectedPath": "src/generated/file-9.ts",
+      "selectedPatchBytes": 551,
+      "totalReviewBytes": 5510,
+      "fakeConnectAndSelectMs": 2.3027919999999966,
+      "measurements": [
+        {
+          "mode": "unified",
+          "firstFrameMs": 22.845208999999997,
+          "scrollP95Ms": 0.7115829999999903,
+          "samples": 100,
+          "maximumMountedRows": 25,
+          "contentRows": 25
+        },
+        {
+          "mode": "split",
+          "firstFrameMs": 6.298542000000026,
+          "scrollP95Ms": 0.41004200000000424,
+          "samples": 100,
+          "maximumMountedRows": 15,
+          "contentRows": 22
+        }
+      ],
+      "processRssMiB": 152.15625
+    },
+    {
+      "case": "files-100",
+      "files": 100,
+      "selectedPath": "src/generated/file-99.ts",
+      "selectedPatchBytes": 555,
+      "totalReviewBytes": 55460,
+      "fakeConnectAndSelectMs": 2.1437080000000037,
+      "measurements": [
+        {
+          "mode": "unified",
+          "firstFrameMs": 3.361124999999987,
+          "scrollP95Ms": 0.3722500000000082,
+          "samples": 100,
+          "maximumMountedRows": 25,
+          "contentRows": 25
+        },
+        {
+          "mode": "split",
+          "firstFrameMs": 4.107333000000011,
+          "scrollP95Ms": 0.2356670000000065,
+          "samples": 100,
+          "maximumMountedRows": 15,
+          "contentRows": 22
+        }
+      ],
+      "processRssMiB": 166.09375
+    },
+    {
+      "case": "files-1000",
+      "files": 1000,
+      "selectedPath": "src/generated/file-999.ts",
+      "selectedPatchBytes": 559,
+      "totalReviewBytes": 558560,
+      "fakeConnectAndSelectMs": 2.656666999999999,
+      "measurements": [
+        {
+          "mode": "unified",
+          "firstFrameMs": 2.678750000000008,
+          "scrollP95Ms": 0.19795799999999986,
+          "samples": 100,
+          "maximumMountedRows": 25,
+          "contentRows": 25
+        },
+        {
+          "mode": "split",
+          "firstFrameMs": 2.9638330000000224,
+          "scrollP95Ms": 0.1560000000000059,
+          "samples": 100,
+          "maximumMountedRows": 15,
+          "contentRows": 22
+        }
+      ],
+      "processRssMiB": 172.65625
+    },
+    {
+      "case": "lines-1000",
+      "files": 1,
+      "selectedPath": "src/generated/large.ts",
+      "selectedPatchBytes": 22029,
+      "totalReviewBytes": 22029,
+      "fakeConnectAndSelectMs": 0.09050000000002001,
+      "measurements": [
+        {
+          "mode": "unified",
+          "firstFrameMs": 3.3573749999999905,
+          "scrollP95Ms": 1.1432499999999663,
+          "samples": 100,
+          "maximumMountedRows": 39,
+          "contentRows": 1005
+        },
+        {
+          "mode": "split",
+          "firstFrameMs": 4.225916000000041,
+          "scrollP95Ms": 1.512708000000032,
+          "samples": 100,
+          "maximumMountedRows": 28,
+          "contentRows": 1000
+        }
+      ],
+      "processRssMiB": 253.40625
+    },
+    {
+      "case": "lines-10000",
+      "files": 1,
+      "selectedPath": "src/generated/large.ts",
+      "selectedPatchBytes": 229031,
+      "totalReviewBytes": 229031,
+      "fakeConnectAndSelectMs": 0.27025000000003274,
+      "measurements": [
+        {
+          "mode": "unified",
+          "firstFrameMs": 9.944124999999985,
+          "scrollP95Ms": 2.5093749999999773,
+          "samples": 100,
+          "maximumMountedRows": 39,
+          "contentRows": 10005
+        },
+        {
+          "mode": "split",
+          "firstFrameMs": 12.305333999999903,
+          "scrollP95Ms": 3.3162920000000895,
+          "samples": 100,
+          "maximumMountedRows": 28,
+          "contentRows": 10000
+        }
+      ],
+      "processRssMiB": 302.828125
+    },
+    {
+      "case": "real-norn-backend",
+      "files": 1,
+      "selectedPath": "src-tauri/src/backend.rs",
+      "selectedPatchBytes": 52500,
+      "totalReviewBytes": 52500,
+      "fakeConnectAndSelectMs": 0.10704099999998107,
+      "measurements": [
+        {
+          "mode": "unified",
+          "firstFrameMs": 2.825417000000016,
+          "scrollP95Ms": 1.18912499999999,
+          "samples": 100,
+          "maximumMountedRows": 39,
+          "contentRows": 1289
+        },
+        {
+          "mode": "split",
+          "firstFrameMs": 5.674916000000053,
+          "scrollP95Ms": 3.8303750000000036,
+          "samples": 100,
+          "maximumMountedRows": 33,
+          "contentRows": 2990
+        }
+      ],
+      "processRssMiB": 327.140625
+    }
+  ]
+}

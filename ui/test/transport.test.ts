@@ -37,9 +37,12 @@ test("fake transport handshakes, lists repositories and streams review events", 
 test("process transport handshakes against a fixture subprocess", async () => {
   const script = fileURLToPath(new URL("./fixtures/fake-backend.ts", import.meta.url));
   chmodSync(script, 0o755);
-  const client = new BackendClient(new ProcessBackendTransport(script));
+  const client = new BackendClient(
+    new ProcessBackendTransport(script, { ...process.env, NORN_TRANSPORT_FIXTURE_ENV: "isolated" }),
+  );
   const ready = await client.start();
   expect(ready.serverVersion).toBe("fixture-0.1.0");
+  expect(ready.capabilities).toContain("isolated-fixture-env");
 
   const repos = await client.repositories();
   expect(repos[0]?.workspace).toBe("acme");

@@ -13,7 +13,10 @@ commits. Separate engine/IPC/connect latency from direct rendering measurements;
 do not mislabel fake transport connect timing as OS startup or compare unequal
 loads. Keep a repeatable baseline artifact and a documented invocation of the
 archived Ratatui harness before removal. No review engine/provider execution,
-credentials, HOME configuration or live publication. Streaming-load correctness
+credentials, HOME configuration or live publication. Add a read-only real IPC
+measurement using an explicit backend environment and isolated empty config;
+record existing EOF/exit-code limitations rather than claiming lifecycle parity.
+Streaming-load correctness
 and lifecycle remain #303/#307 gates; record them as pending if not measured here.
 
 ## Exit Criteria
@@ -36,5 +39,19 @@ and lifecycle remain #303/#307 gates; record them as pending if not measured her
 ## Status
 
 - Claimed by: default-agent, 2026-10-11, `issue-302-rendering-baseline`.
-- Blockers: PR #342 CI pending; isolated local preparation only.
+- Blockers: None; PR #342 merged at `2a2ed72` with both CI gates green. Real IPC EOF status and writer latency are explicitly tracked for #307.
 - Stopped:
+
+## Delivery
+
+Effective on merge to main of the matched-baseline PR. Six shared workloads,
+two native modes, 100 scroll samples and three separate process runs pass
+the recorded budgets. Shared input hashes and selected patch identity/bytes
+match; native bodies are asserted. Raw artifacts and repeatable scripts are
+committed. Root lint/typecheck/123 tests/tooling, Archgate 17/17, 75 UI tests
+and 44 native frames, strict all-feature/all-target Clippy and the opt-in
+release Ratatui test pass. The subprocess test proves explicit environment
+isolation; read-only real Rust IPC is measured with empty temporary settings.
+Its ACK/EOF exit-code limitation and 25 ms writer wait remain #307 follow-ups,
+not claimed lifecycle completion. Streaming/installed/platform gates remain
+open; #302 and ADR 0020 are not closed by this rendering delivery.

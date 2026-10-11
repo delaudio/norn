@@ -3871,3 +3871,7 @@ mod tests {
         assert_eq!(image.selected_side, ImageSide::New);
     }
 }
+
+#[cfg(test)]
+#[path = "render_bench.rs"]
+mod rendering_benchmark;
