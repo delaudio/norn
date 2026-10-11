@@ -8,9 +8,9 @@ If status files and git disagree, git is authoritative; correct this file.
 
 ## Active state
 
-- **Branch:** `issue-305-canonical-references` (independent preparation after PR #349).
+- **Branch:** `issue-304-persistent-drafts` (independent preparation after PR #350).
 - **Active item:** complete epic #294 through verified PRs and squash merges.
-- **Current change:** plan 0048, canonical references prepared for validation/merge; plan 0047 / PR #349 merged at `da0b87f`, all gates including three-platform archive build/copy green; plan 0046 / PR #348 merged at `e9d3020`, UI/verify green; #302 closed; plan 0045 / PR #347 merged at `58247d3`, UI/verify green; plan 0044 / PR #346 merged at `066174e`, UI/verify green; plan 0043 / PR #345 merged at `565d081`, UI/verify green; plan 0042 / PR #344 merged at `5eb33fd`, UI/verify green; plan 0041 / PR #343 merged at `ccd133d`, both CI gates green. PR #342 merged at `2a2ed72` with both CI gates green. PR #341 merged with both CI gates green. PR #340 merged at `72440ea` with both CI gates green. PR #339 merged at `76ba213` with both CI gates green. PR #338 merged at `3168dcd` with all checks green.
+- **Current change:** plan 0049, persistent local draft editor claimed; plan 0048 / PR #350 awaiting Rust CI; plan 0047 / PR #349 merged at `da0b87f`, all gates including three-platform archive build/copy green; plan 0046 / PR #348 merged at `e9d3020`, UI/verify green; #302 closed; plan 0045 / PR #347 merged at `58247d3`, UI/verify green; plan 0044 / PR #346 merged at `066174e`, UI/verify green; plan 0043 / PR #345 merged at `565d081`, UI/verify green; plan 0042 / PR #344 merged at `5eb33fd`, UI/verify green; plan 0041 / PR #343 merged at `ccd133d`, both CI gates green. PR #342 merged at `2a2ed72` with both CI gates green. PR #341 merged with both CI gates green. PR #340 merged at `72440ea` with both CI gates green. PR #339 merged at `76ba213` with both CI gates green. PR #338 merged at `3168dcd` with all checks green.
 - **Review instruction:** the maintainer explicitly requested no Norn reviews
   for this migration session; use code inspection and deterministic checks.
 - **Merged baseline:** main at `da0b87f`, including PRs #316–#349.
@@ -20,7 +20,7 @@ If status files and git disagree, git is authoritative; correct this file.
 
 ## Next item
 
-- Merge verified canonical reference PR; then implement staged comments/publication (#304), completing draft consumption for #305. Physical Sixel wide/narrow/quit observed; Retina scaling remains hardening work. Preserve `.norn.yaml` as unrelated user data.
+- Merge verified canonical reference PR; implement persistent draft editing, then authoritative finding staging and approved publication/reconciliation (#304), completing draft consumption for #305. Physical Sixel wide/narrow/quit observed; Retina scaling remains hardening work. Preserve `.norn.yaml` as unrelated user data.
 
 ## Epic queue
 
