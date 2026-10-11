@@ -1,0 +1,16 @@
+{
+  "type": "request",
+  "id": "publication-fixture",
+  "method": "publication.prepare",
+  "params": {
+    "scope": {
+      "provider": "github",
+      "workspace": "fixture",
+      "repo": "demo",
+      "prId": 9
+    },
+    "localIds": [
+      "draft-1"
+    ]
+  }
+}

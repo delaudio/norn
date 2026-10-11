@@ -1,0 +1,40 @@
+{
+  "type": "response",
+  "id": "publication-fixture",
+  "ok": true,
+  "result": {
+    "scope": {
+      "provider": "github",
+      "workspace": "fixture",
+      "repo": "demo",
+      "prId": 9
+    },
+    "key": "drafts.github:fixture/demo/9",
+    "recordVersion": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+    "approvalId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "expiresAt": 300001,
+    "items": [
+      {
+        "comment": {
+          "scope": {
+            "provider": "github",
+            "workspace": "fixture",
+            "repo": "demo",
+            "prId": 9
+          },
+          "localId": "draft-1",
+          "headSha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "baseSha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "mode": "general",
+          "path": "",
+          "to": null,
+          "from": null,
+          "parentId": null,
+          "raw": "Original body",
+          "originalDraftHash": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+        },
+        "markdown": "Original body\n\n<!-- norn-draft:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff -->"
+      }
+    ]
+  }
+}

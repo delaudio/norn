@@ -1,16 +1,22 @@
 import type {
   AuthProviderParams,
+  CommentsListResult,
   DraftPreparation,
   DraftPrepareParams,
   DraftStageParams,
   DraftStageResult,
   DraftTarget,
+  PublicationItemResult,
+  PublicationPrepareResult,
+  PublicationScope,
+  PublicationStatusResult,
   RecordMutation,
   RecordMutationResult,
   RecordPage,
   WorkspaceReadiness,
   WorkspaceSettings,
 } from "../../../src/protocol/generated/protocol";
+import { samePublicationScope, validPublicationDTO } from "./publicationValidation";
 
 // Typed facade over a BackendTransport. Domain methods are added as later
 // migration steps land; the first slice exposes repository listing and diffs.
@@ -284,6 +290,127 @@ export class BackendClient {
       throw new Error("Invalid finding draft preview. No staging was requested.");
     return result as unknown as DraftPreparation;
   }
+  private async publicationRequest<T>(
+    method: string,
+    params: Record<string, unknown>,
+    requestType: string,
+    resultType: string,
+    scope?: PublicationScope,
+  ): Promise<T> {
+    if (!validPublicationDTO(requestType, params)) throw new Error("Invalid publication request.");
+    const result = await this.transport.request(method, params);
+    if (
+      !validPublicationDTO(resultType, result) ||
+      (scope && !samePublicationScope(result.scope as PublicationScope, scope))
+    )
+      throw new Error("Invalid publication response; inspect status before sending again.");
+    const comments =
+      resultType === "PublicationPrepareResult"
+        ? (result as unknown as PublicationPrepareResult).items.map((item) => item.comment)
+        : resultType === "PublicationStatusResult"
+          ? (result as unknown as PublicationStatusResult).entries.map((entry) => entry.comment)
+          : resultType === "PublicationItemResult"
+            ? [(result as unknown as PublicationItemResult).entry.comment]
+            : [];
+    if (scope && comments.some((comment) => !samePublicationScope(comment.scope, scope)))
+      throw new Error("Publication entry belongs to another scope.");
+    if (resultType === "PublicationPrepareResult") {
+      const preview = result as unknown as PublicationPrepareResult;
+      const ids = params.localIds as string[];
+      const selectedIds = new Set(ids);
+      if (
+        preview.key !==
+          `drafts.${scope!.provider}:${scope!.workspace}/${scope!.repo}/${scope!.prId}` ||
+        preview.items.length !== ids.length ||
+        new Set(comments.map((comment) => comment.localId)).size !== ids.length ||
+        comments.some((comment) => !selectedIds.has(comment.localId))
+      )
+        throw new Error("Publication preview does not match the selected drafts.");
+      for (const item of preview.items) {
+        const comment = item.comment;
+        const key = new Bun.CryptoHasher("sha256")
+          .update(
+            JSON.stringify([
+              comment.scope.provider,
+              comment.scope.workspace.replace(/[A-Z]/g, (letter) => letter.toLowerCase()),
+              comment.scope.repo.replace(/[A-Z]/g, (letter) => letter.toLowerCase()),
+              comment.scope.prId,
+              comment.localId,
+            ]),
+          )
+          .digest("hex");
+        if (item.markdown !== `${comment.raw}\n\n<!-- norn-draft:${key} -->`)
+          throw new Error("Publication preview does not match its approved body.");
+      }
+    }
+    if (resultType === "PublicationItemResult") {
+      const item = result as unknown as PublicationItemResult;
+      if (
+        item.entry.comment.localId !== params.localId ||
+        (item.draftRemoved && (!item.localSaved || item.entry.state !== "published")) ||
+        ["published", "publishedUnverified", "publishedSnapshotChanged"].includes(
+          item.entry.state,
+        ) !==
+          (item.entry.remoteId !== null)
+      )
+        throw new Error("Publication result is inconsistent. Inspect status before sending again.");
+    }
+    return result as T;
+  }
+  preparePublication(scope: PublicationScope, localIds: string[]) {
+    return this.publicationRequest<PublicationPrepareResult>(
+      "publication.prepare",
+      { scope, localIds },
+      "PublicationPrepareParams",
+      "PublicationPrepareResult",
+      scope,
+    );
+  }
+  applyPublication(scope: PublicationScope, approvalId: string, localId: string) {
+    return this.publicationRequest<PublicationItemResult>(
+      "publication.apply",
+      { scope, approvalId, localId },
+      "PublicationApplyParams",
+      "PublicationItemResult",
+      scope,
+    );
+  }
+  cancelPublication(scope: PublicationScope, approvalId: string) {
+    return this.publicationRequest<{ canceled: boolean }>(
+      "publication.cancel",
+      { scope, approvalId },
+      "PublicationCancelParams",
+      "PublicationCancelResult",
+    );
+  }
+  publicationStatus(scope: PublicationScope, after: string | null = null, limit = 20) {
+    return this.publicationRequest<PublicationStatusResult>(
+      "publication.status",
+      { scope, after, limit },
+      "PublicationStatusParams",
+      "PublicationStatusResult",
+      scope,
+    );
+  }
+  reconcilePublication(scope: PublicationScope, localId: string) {
+    return this.publicationRequest<PublicationItemResult>(
+      "publication.reconcile",
+      { scope, localId },
+      "PublicationReconcileParams",
+      "PublicationItemResult",
+      scope,
+    );
+  }
+  remoteComments(scope: PublicationScope, offset = 0, version: string | null = null) {
+    return this.publicationRequest<CommentsListResult>(
+      "comments.list",
+      { scope, offset, limit: 50, version },
+      "CommentsListParams",
+      "CommentsListResult",
+      scope,
+    );
+  }
+
   async stageFindingDraft(params: DraftStageParams): Promise<DraftStageResult> {
     const result = await this.transport.request(
       "draft.stage",

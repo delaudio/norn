@@ -1,15 +1,21 @@
 import { DataPanel } from "../src/app/components/DataPanel";
 import { DraftPanel } from "../src/app/components/DraftPanel";
 import { DraftStagingPanel } from "../src/app/components/DraftStagingPanel";
+import { PublicationPanel } from "../src/app/components/PublicationPanel";
 import { ReferencePanel } from "../src/app/components/ReferencePanel";
 import { SettingsPanel } from "../src/app/components/SettingsPanel";
 import { WorkspacePanel } from "../src/app/components/WorkspacePanel";
 import { DataStore } from "../src/app/dataStore";
 import { DraftStagingStore } from "../src/app/draftStagingStore";
 import { DraftStore } from "../src/app/draftStore";
+import { PublicationStore } from "../src/app/publicationStore";
 import { ReferenceStore } from "../src/app/referenceStore";
 import { SettingsStore } from "../src/app/settingsStore";
 import { WorkspaceStore } from "../src/app/workspaceStore";
+import {
+  FakePublicationTransport,
+  publicationFixtureScope,
+} from "../src/transport/fakePublicationTransport";
 // Renders every terminal component/scene with the real OpenTUI renderer and
 // serializes bounded frame fixtures (cell spans, colors, attributes) for the
 // Storybook preview and the golden-frame visual lane.
@@ -792,7 +798,78 @@ async function syntaxScene(mode: "unified" | "split" | "plain") {
   if (mode === "split") scene.store.toggleDiffMode();
   return { store: scene.store, client: scene.client };
 }
+async function publicationScene(mode: "drafts" | "preview" | "partial" | "status" | "threads") {
+  const transport = new FakePublicationTransport();
+  const { client, store, ready } = readyStore(transport);
+  await ready;
+  const publication = new PublicationStore();
+  await publication.load(client, publicationFixtureScope);
+  publication.toggle();
+  publication.move(1);
+  publication.toggle();
+  if (["preview", "partial", "status"].includes(mode)) await publication.prepare();
+  if (mode === "partial" || mode === "status") {
+    transport.uncertainAt = 2;
+    await publication.approve();
+  }
+  if (mode === "status") await publication.show("status");
+  if (mode === "threads") await publication.show("threads");
+  return {
+    client,
+    store,
+    view: <PublicationPanel publication={publication} onClose={() => {}} onReply={() => {}} />,
+  };
+}
+
 const scenes: Scene[] = [
+  {
+    id: "shell-publication-drafts-120x40",
+    cols: 120,
+    rows: 40,
+    build: () => publicationScene("drafts"),
+  },
+  {
+    id: "shell-publication-drafts-50x20",
+    cols: 50,
+    rows: 20,
+    build: () => publicationScene("drafts"),
+  },
+  {
+    id: "shell-publication-preview-120x40",
+    cols: 120,
+    rows: 40,
+    build: () => publicationScene("preview"),
+  },
+  {
+    id: "shell-publication-preview-50x20",
+    cols: 50,
+    rows: 20,
+    build: () => publicationScene("preview"),
+  },
+  {
+    id: "shell-publication-partial-120x40",
+    cols: 120,
+    rows: 40,
+    build: () => publicationScene("partial"),
+  },
+  {
+    id: "shell-publication-status-80x30",
+    cols: 80,
+    rows: 30,
+    build: () => publicationScene("status"),
+  },
+  {
+    id: "shell-publication-threads-120x30",
+    cols: 120,
+    rows: 30,
+    build: () => publicationScene("threads"),
+  },
+  {
+    id: "shell-publication-threads-50x20",
+    cols: 50,
+    rows: 20,
+    build: () => publicationScene("threads"),
+  },
   { id: "shell-onboarding-120x30", cols: 120, rows: 30, build: () => onboardingScene(false) },
   { id: "shell-onboarding-50x15", cols: 50, rows: 15, build: () => onboardingScene(false) },
   {

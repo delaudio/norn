@@ -96,6 +96,9 @@ struct Backend {
     active_previews: Arc<AtomicUsize>,
     active_settings: Arc<AtomicUsize>,
     active_workspace: Arc<AtomicUsize>,
+    active_publication: Arc<AtomicUsize>,
+    active_publication_reads: Arc<AtomicUsize>,
+    publication: Arc<crate::services::draft_publication::Manager>,
     browser: Arc<Mutex<Option<WebDiffServer>>>,
     fix_approvals: Arc<Mutex<HashMap<String, FixApproval>>>,
 }
@@ -163,6 +166,11 @@ pub fn run() -> Result<(), i32> {
         active_previews: Arc::new(AtomicUsize::new(0)),
         active_settings: Arc::new(AtomicUsize::new(0)),
         active_workspace: Arc::new(AtomicUsize::new(0)),
+        active_publication: Arc::new(AtomicUsize::new(0)),
+        active_publication_reads: Arc::new(AtomicUsize::new(0)),
+        publication: Arc::new(crate::services::draft_publication::Manager::new(
+            shutdown.clone(),
+        )),
         browser: Arc::new(Mutex::new(None)),
         fix_approvals: Arc::new(Mutex::new(HashMap::new())),
         active_operations: Arc::new(AtomicUsize::new(0)),
@@ -175,6 +183,8 @@ pub fn run() -> Result<(), i32> {
             "workspace-data".to_string(),
             "workspace-records".to_string(),
             "draft-staging".to_string(),
+            "draft-publication".to_string(),
+            "remote-comments".to_string(),
             "workspace-readiness".to_string(),
             "settings".to_string(),
             "auth".to_string(),
@@ -317,6 +327,84 @@ fn dispatch(request: Request, backend: &Backend) -> bool {
     let id = request.id().to_string();
     let method = request.method();
     match request {
+        Request::PublicationCancel { params, .. } => {
+            match backend.publication.cancel(params) {
+                Ok(canceled) => {
+                    backend.respond(&id, json!({ "canceled": canceled }));
+                }
+                Err(message) => {
+                    backend.fail(
+                        &id,
+                        ProtocolError::new(ProtocolErrorCode::Conflict, message),
+                    );
+                }
+            }
+            false
+        }
+        Request::PublicationPrepare { .. }
+        | Request::PublicationApply { .. }
+        | Request::PublicationStatus { .. }
+        | Request::PublicationReconcile { .. }
+        | Request::CommentsList { .. } => {
+            let writes = matches!(
+                request,
+                Request::PublicationApply { .. } | Request::PublicationReconcile { .. }
+            );
+            let active = if writes {
+                backend.active_publication.clone()
+            } else {
+                backend.active_publication_reads.clone()
+            };
+            let bound = if writes { 1 } else { 2 };
+            if active
+                .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| {
+                    (n < bound).then_some(n + 1)
+                })
+                .is_err()
+            {
+                backend.fail(&id, ProtocolError::new(ProtocolErrorCode::Conflict, "Another publication request is in progress; inspect its result before retrying."));
+                return false;
+            }
+            let manager = backend.publication.clone();
+            let control = backend.control.clone();
+            thread::spawn(move || {
+                let result = match request {
+                    Request::PublicationPrepare { params, .. } => {
+                        manager.prepare(params).map(|value| json!(value))
+                    }
+                    Request::PublicationApply { params, .. } => {
+                        manager.apply(params).map(|value| json!(value))
+                    }
+                    Request::PublicationStatus { params, .. } => {
+                        manager.status(params).map(|value| json!(value))
+                    }
+                    Request::PublicationReconcile { params, .. } => {
+                        manager.reconcile(params).map(|value| json!(value))
+                    }
+                    Request::CommentsList { params, .. } => {
+                        manager.comments(params).map(|value| json!(value))
+                    }
+                    _ => unreachable!(),
+                };
+                active.fetch_sub(1, Ordering::SeqCst);
+                let response = match result {
+                    Ok(value) => Response {
+                        id,
+                        ok: true,
+                        result: Some(value),
+                        error: None,
+                    },
+                    Err(message) => Response {
+                        id,
+                        ok: false,
+                        result: None,
+                        error: Some(ProtocolError::new(ProtocolErrorCode::Conflict, message)),
+                    },
+                };
+                let _ = control.send(ServerMessage::Response(response));
+            });
+            false
+        }
         Request::WorkspaceRead { .. }
         | Request::WorkspaceMutate { .. }
         | Request::DraftPrepare { .. }

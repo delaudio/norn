@@ -122,10 +122,19 @@ export class ProcessBackendTransport implements BackendTransport {
     }
     const id = `ui-${this.nextId++}`;
     return new Promise<Record<string, unknown>>((resolve, reject) => {
-      const timer = setTimeout(() => {
-        this.pending.delete(id);
-        reject(new Error(`backend request ${method} timed out`));
-      }, REQUEST_TIMEOUT_MS);
+      const timer = setTimeout(
+        () => {
+          this.pending.delete(id);
+          reject(new Error(`backend request ${method} timed out`));
+        },
+        method === "publication.prepare"
+          ? 120_000
+          : method === "publication.apply" ||
+              method === "publication.reconcile" ||
+              method === "comments.list"
+            ? 90_000
+            : REQUEST_TIMEOUT_MS,
+      );
       this.pending.set(id, { resolve, reject, timer });
       this.write({ type: "request", id, method, params } as unknown as NornStdioProtocol);
     });

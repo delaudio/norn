@@ -1,0 +1,18 @@
+{
+  "type": "response",
+  "id": "publication-fixture",
+  "ok": true,
+  "result": {
+    "scope": {
+      "provider": "github",
+      "workspace": "fixture",
+      "repo": "demo",
+      "prId": 9
+    },
+    "comments": [],
+    "version": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "offset": 0,
+    "totalItems": 0,
+    "nextOffset": null
+  }
+}

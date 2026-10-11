@@ -11,6 +11,7 @@ import {
   useEffect,
   useMemo,
   useRef,
+  useState,
   useSyncExternalStore,
 } from "react";
 import type { BackendClient } from "../../transport/backendClient";
@@ -19,6 +20,7 @@ import { DiffScrollPositions } from "../diffScrollPositions";
 import { DraftStagingStore } from "../draftStagingStore";
 import { DraftStore } from "../draftStore";
 import { imageProtocol } from "../imageProtocol";
+import { PublicationStore } from "../publicationStore";
 import { ReferenceStore } from "../referenceStore";
 import { SettingsStore } from "../settingsStore";
 import {
@@ -36,6 +38,7 @@ import { DataPanel } from "./DataPanel";
 import { DraftPanel } from "./DraftPanel";
 import { DraftStagingPanel } from "./DraftStagingPanel";
 import { FixPanel } from "./FixPanel";
+import { PublicationPanel } from "./PublicationPanel";
 import { ReferencePanel } from "./ReferencePanel";
 import { SettingsPanel } from "./SettingsPanel";
 import { VirtualDiff } from "./VirtualDiff";
@@ -913,6 +916,8 @@ export function Shell({ store, client, quit }: ShellProps) {
   const workspace = useMemo(() => new WorkspaceStore(), []);
   const staging = useMemo(() => new DraftStagingStore(), []);
   const drafts = useMemo(() => new DraftStore(), []);
+  const publication = useMemo(() => new PublicationStore(), []);
+  const [publicationOpen, setPublicationOpen] = useState(false);
   const references = useMemo(() => new ReferenceStore(), []);
   const workspaceEntry = state.picker[state.selectedPicker];
   const referenceProvider = workspaceEntry?.provider;
@@ -959,6 +964,27 @@ export function Shell({ store, client, quit }: ShellProps) {
   }, [
     drafts,
     client,
+    state.draftsOpen,
+    referenceProvider,
+    referenceWorkspace,
+    referenceRepo,
+    referencePrId,
+  ]);
+  useEffect(() => {
+    if (!publicationOpen || !state.draftsOpen) return;
+    if (!referenceProvider || !referenceWorkspace || !referenceRepo || referencePrId == null)
+      return;
+    void publication.load(client, {
+      provider: referenceProvider,
+      workspace: referenceWorkspace,
+      repo: referenceRepo,
+      prId: referencePrId,
+    });
+    return () => publication.dispose();
+  }, [
+    publication,
+    client,
+    publicationOpen,
     state.draftsOpen,
     referenceProvider,
     referenceWorkspace,
@@ -1103,8 +1129,29 @@ export function Shell({ store, client, quit }: ShellProps) {
         onDrafts={() => store.toggleDrafts()}
       />
     );
+  if (state.draftsOpen && publicationOpen && referencePrId != null)
+    return (
+      <PublicationPanel
+        publication={publication}
+        onClose={() => {
+          setPublicationOpen(false);
+          void drafts.load(client, workspaceEntry);
+        }}
+        onReply={(comment) => {
+          setPublicationOpen(false);
+          drafts.reply(comment);
+        }}
+      />
+    );
   if (state.draftsOpen)
-    return <DraftPanel drafts={drafts} client={client} onClose={() => store.toggleDrafts()} />;
+    return (
+      <DraftPanel
+        drafts={drafts}
+        client={client}
+        onClose={() => store.toggleDrafts()}
+        onPublish={() => setPublicationOpen(true)}
+      />
+    );
   if (state.referencesOpen)
     return (
       <ReferencePanel

@@ -6371,6 +6371,227 @@ pub fn delete_ai_review_thread(
     Ok(Some(store))
 }
 
+/// Persist confirmed publication metadata and reviewer feedback together, while
+/// retaining current chat/run JSON fields and later reviewer dispositions.
+pub(crate) fn acknowledge_draft_publication(
+    entry: &crate::draft_publication::JournalEntry,
+) -> Result<(), String> {
+    use crate::draft_publication::PublicationState;
+    if entry.state != PublicationState::Published {
+        return Err("Only a confirmed unchanged publication can update finding metadata.".into());
+    }
+    let Some(reference) = entry.comment.finding_ref.as_ref() else {
+        return Ok(());
+    };
+    let target = crate::review_feedback::ReviewFindingFeedbackTarget {
+        identity: crate::review_feedback::ReviewFindingFeedbackIdentity {
+            tenant_id: "local".into(),
+            provider: match entry.comment.scope.provider {
+                ConfigReviewProvider::Github => PullRequestReviewEventProvider::Github,
+                ConfigReviewProvider::Bitbucket => PullRequestReviewEventProvider::Bitbucket,
+            },
+            workspace: entry.comment.scope.workspace.clone(),
+            repo: entry.comment.scope.repo.clone(),
+            pr_id: u64::from(entry.comment.scope.pr_id),
+        },
+        review_run_id: reference.review_run_id.clone(),
+        finding_fingerprint: reference.finding_fingerprint.clone(),
+    };
+    review_storage::update_local_review_json(
+        &entry.comment.scope.workspace,
+        &entry.comment.scope.repo,
+        entry.comment.scope.pr_id,
+        |original, connection| {
+            let latest = review_storage::get_finding_feedback_state_from(connection, &target)?;
+            publication_update_json(original, entry, &latest)
+        },
+    )
+}
+fn publication_update_json(
+    original: &str,
+    entry: &crate::draft_publication::JournalEntry,
+    latest: &crate::review_feedback::ReviewFindingFeedbackState,
+) -> Result<
+    (
+        String,
+        Option<crate::review_feedback::ReviewFindingFeedbackEvent>,
+    ),
+    String,
+> {
+    use crate::draft_publication::{CommentMode, PublicationState};
+    use crate::review_feedback::{
+        ReviewFindingFeedbackAction, ReviewFindingFeedbackEvent, ReviewFindingFeedbackIdentity,
+    };
+    entry.comment.validate()?;
+    if entry.state != PublicationState::Published {
+        return Err("Publication still requires verification.".into());
+    }
+    let reference = entry
+        .comment
+        .finding_ref
+        .as_ref()
+        .ok_or("Publication has no saved finding association.")?;
+    let remote_id = entry
+        .remote_id
+        .as_ref()
+        .ok_or("Publication has no remote acknowledgment.")?;
+    let confirmed = entry
+        .confirmed_at
+        .ok_or("Publication acknowledgment has no timestamp.")?;
+    let started = entry
+        .started_at
+        .ok_or("Publication approval has no timestamp.")?;
+    let mut value: serde_json::Value =
+        serde_json::from_str(original).map_err(|_| "Saved review metadata is invalid.")?;
+    let runs = value
+        .get_mut("reviewRuns")
+        .and_then(serde_json::Value::as_array_mut)
+        .ok_or("Saved review has no structured runs.")?;
+    let matching = runs
+        .iter()
+        .enumerate()
+        .filter(|(_, run)| {
+            run.get("id").and_then(serde_json::Value::as_str)
+                == Some(reference.review_run_id.as_str())
+        })
+        .map(|(index, _)| index)
+        .collect::<Vec<_>>();
+    let [index] = matching.as_slice() else {
+        return Err("The publication's saved run is missing or ambiguous.".into());
+    };
+    let run: ReviewRun = serde_json::from_value(runs[*index].clone())
+        .map_err(|_| "The publication's saved run is invalid.")?;
+    let provider = match entry.comment.scope.provider {
+        ConfigReviewProvider::Github => ReviewProvider::Github,
+        ConfigReviewProvider::Bitbucket => ReviewProvider::Bitbucket,
+    };
+    if run.provider != provider
+        || run.workspace != entry.comment.scope.workspace
+        || run.repo != entry.comment.scope.repo
+        || run.pr_id != entry.comment.scope.pr_id
+        || !run
+            .reviewed_head_sha
+            .as_deref()
+            .is_some_and(|sha| sha.eq_ignore_ascii_case(&entry.comment.head_sha))
+        || !run
+            .reviewed_base_sha
+            .as_deref()
+            .is_some_and(|sha| sha.eq_ignore_ascii_case(&entry.comment.base_sha))
+    {
+        return Err(
+            "The publication no longer matches its original saved review identity and revisions."
+                .into(),
+        );
+    }
+    let matching = run
+        .findings
+        .iter()
+        .enumerate()
+        .filter(|(_, finding)| finding.id == reference.finding_id)
+        .map(|(index, _)| index)
+        .collect::<Vec<_>>();
+    let [finding_index] = matching.as_slice() else {
+        return Err("The publication's saved finding is missing or ambiguous.".into());
+    };
+    let mut finding = run.findings[*finding_index].clone();
+    if finding.fingerprint != reference.finding_fingerprint {
+        return Err("The publication's saved finding changed identity.".into());
+    }
+    let already_recorded = finding
+        .publication
+        .as_ref()
+        .is_some_and(|publication| publication.remote_comment_ids.contains(remote_id));
+    let event_id = format!("publication:{}", entry.comment.identity_key());
+    let later_disposition = latest.latest_event.as_ref().is_some_and(|event| {
+        event.event_id != event_id
+            && event
+                .occurred_at
+                .parse::<u64>()
+                .is_ok_and(|time| time >= started)
+    });
+    let blocked_disposition = matches!(
+        finding.status,
+        ReviewFindingStatus::Dismissed | ReviewFindingStatus::Fixed | ReviewFindingStatus::Stale
+    );
+    let preserve_disposition = already_recorded || blocked_disposition || later_disposition;
+    let prior_status = finding.status;
+    let published_at = finding
+        .publication
+        .as_ref()
+        .and_then(|publication| publication.published_at.clone())
+        .unwrap_or_else(|| confirmed.to_string());
+    apply_review_finding_publication_event(
+        &mut finding,
+        &ReviewFindingPublicationEvent {
+            kind: ReviewFindingPublicationEventKind::PublishDraft,
+            review_run_id: reference.review_run_id.clone(),
+            finding_fingerprint: reference.finding_fingerprint.clone(),
+            mode: match entry.comment.mode {
+                CommentMode::Inline => ReviewPublicationMode::Inline,
+                CommentMode::File => ReviewPublicationMode::File,
+                CommentMode::General => ReviewPublicationMode::General,
+            },
+            draft_id: Some(entry.comment.local_id.clone()),
+            remote_comment_id: Some(remote_id.clone()),
+            published_at: Some(published_at),
+        },
+    );
+    if preserve_disposition {
+        finding.status = prior_status;
+    }
+    let original_finding = runs[*index]
+        .get_mut("findings")
+        .and_then(serde_json::Value::as_array_mut)
+        .and_then(|findings| findings.get_mut(*finding_index))
+        .and_then(serde_json::Value::as_object_mut)
+        .ok_or("Saved finding metadata is invalid.")?;
+    // Change only publication/status; retain unknown future evidence/chat fields.
+    original_finding.insert(
+        "status".into(),
+        serde_json::to_value(finding.status).map_err(|_| "Cannot encode finding status.")?,
+    );
+    let mut publication = original_finding
+        .get("publication")
+        .and_then(serde_json::Value::as_object)
+        .cloned()
+        .unwrap_or_default();
+    let updated = serde_json::to_value(&finding.publication)
+        .map_err(|_| "Cannot encode publication metadata.")?;
+    if let Some(updated) = updated.as_object() {
+        for (key, value) in updated {
+            publication.insert(key.clone(), value.clone());
+        }
+    }
+    original_finding.insert("publication".into(), serde_json::Value::Object(publication));
+    let feedback = if blocked_disposition || later_disposition {
+        None
+    } else {
+        Some(ReviewFindingFeedbackEvent {
+            event_id,
+            identity: ReviewFindingFeedbackIdentity {
+                tenant_id: "local".into(),
+                provider: match provider {
+                    ReviewProvider::Github => PullRequestReviewEventProvider::Github,
+                    ReviewProvider::Bitbucket => PullRequestReviewEventProvider::Bitbucket,
+                },
+                workspace: entry.comment.scope.workspace.clone(),
+                repo: entry.comment.scope.repo.clone(),
+                pr_id: u64::from(entry.comment.scope.pr_id),
+            },
+            review_run_id: reference.review_run_id.clone(),
+            finding_fingerprint: reference.finding_fingerprint.clone(),
+            action: ReviewFindingFeedbackAction::Accepted,
+            occurred_at: started.to_string(),
+            actor_id: "local:reviewer".into(),
+            reason: None,
+        })
+    };
+    Ok((
+        serde_json::to_string(&value).map_err(|_| "Cannot encode saved review metadata.")?,
+        feedback,
+    ))
+}
+
 #[cfg(feature = "desktop")]
 #[tauri::command]
 pub fn record_ai_review_finding_publication(
@@ -8939,5 +9160,110 @@ Fix: invalidate the query after the mutation succeeds."#;
             active_local_snapshot_sha256s(&store, "workspace", "repo"),
             vec![active_snapshot]
         );
+    }
+}
+
+#[cfg(test)]
+mod approved_publication_metadata_tests {
+    use super::*;
+    use crate::draft_publication::{
+        ApprovedComment, CommentMode, FindingAssociation, JournalEntry, PublicationScope,
+        PublicationState,
+    };
+    use crate::review_feedback::{ReviewFindingDisposition, ReviewFindingFeedbackState};
+    use serde_json::json;
+    fn fixture() -> (serde_json::Value, JournalEntry, ReviewFindingFeedbackState) {
+        let value = json!({"unknownStoreField":{"retained":true},"threads":[{"unrelated":"keep"}],"reviewRuns":[{
+            "id":"run","schemaVersion":"1","provider":"github","workspace":"owner","repo":"repo","prId":7,
+            "sourceBranch":"feature","destinationBranch":"main","reviewedHeadSha":"b".repeat(40),"reviewedBaseSha":"a".repeat(40),
+            "status":"succeeded","turnKind":"initial","createdAt":"1","finishedAt":"2","diffFingerprint":"diff","unknownRunField":42,
+            "findings":[{"id":"finding","fingerprint":"fingerprint","title":"Validate","severity":"high","confidence":"high","category":"bug","status":"new",
+              "summary":"Retain evidence 世界","source":"llm","evidenceIds":[],"unknownFindingField":[1,2],
+              "publication":{"mode":"general","draftIds":["local"],"remoteCommentIds":[],"publishedAt":null,"unknownPublicationField":"keep"}}]
+        }]});
+        let comment = ApprovedComment {
+            scope: PublicationScope {
+                provider: ConfigReviewProvider::Github,
+                workspace: "owner".into(),
+                repo: "repo".into(),
+                pr_id: 7,
+            },
+            local_id: "local".into(),
+            head_sha: "b".repeat(40),
+            base_sha: "a".repeat(40),
+            mode: CommentMode::General,
+            path: String::new(),
+            to: None,
+            from: None,
+            parent_id: None,
+            raw: "exact".into(),
+            finding_ref: Some(FindingAssociation {
+                review_run_id: "run".into(),
+                finding_id: "finding".into(),
+                finding_fingerprint: "fingerprint".into(),
+            }),
+            original_draft_hash: Some("c".repeat(64)),
+        };
+        let entry = JournalEntry {
+            payload_hash: comment.payload_hash().unwrap(),
+            comment,
+            attempt: "attempt".into(),
+            state: PublicationState::Published,
+            remote_id: Some("123".into()),
+            started_at: Some(100),
+            confirmed_at: Some(200),
+        };
+        let state = ReviewFindingFeedbackState {
+            disposition: ReviewFindingDisposition::Open,
+            latest_event: None,
+            events: vec![],
+        };
+        (value, entry, state)
+    }
+    #[test]
+    fn publication_preserves_unknown_evidence_and_is_idempotent() {
+        let (original, entry, state) = fixture();
+        let (first, feedback) =
+            publication_update_json(&original.to_string(), &entry, &state).unwrap();
+        let value: serde_json::Value = serde_json::from_str(&first).unwrap();
+        assert_eq!(value["threads"], original["threads"]);
+        assert_eq!(value["unknownStoreField"], original["unknownStoreField"]);
+        assert_eq!(value["reviewRuns"][0]["unknownRunField"], 42);
+        let finding = &value["reviewRuns"][0]["findings"][0];
+        assert_eq!(finding["unknownFindingField"], json!([1, 2]));
+        assert_eq!(finding["publication"]["unknownPublicationField"], "keep");
+        assert_eq!(finding["status"], "published");
+        assert_eq!(finding["publication"]["remoteCommentIds"], json!(["123"]));
+        let feedback = feedback.unwrap();
+        assert_eq!(feedback.occurred_at, "100");
+        let (second, repeated) = publication_update_json(&first, &entry, &state).unwrap();
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&second).unwrap(),
+            value
+        );
+        assert_eq!(repeated.unwrap().event_id, feedback.event_id);
+    }
+    #[test]
+    fn later_reviewer_dispositions_survive_acknowledgment_and_repair() {
+        let (mut original, entry, state) = fixture();
+        original["reviewRuns"][0]["findings"][0]["status"] = json!("dismissed");
+        let (updated, feedback) =
+            publication_update_json(&original.to_string(), &entry, &state).unwrap();
+        let value: serde_json::Value = serde_json::from_str(&updated).unwrap();
+        assert_eq!(value["reviewRuns"][0]["findings"][0]["status"], "dismissed");
+        assert_eq!(
+            value["reviewRuns"][0]["findings"][0]["publication"]["remoteCommentIds"],
+            json!(["123"])
+        );
+        assert!(feedback.is_none());
+        let mut wrong = entry.clone();
+        wrong.comment.scope.provider = ConfigReviewProvider::Bitbucket;
+        assert!(publication_update_json(&original.to_string(), &wrong, &state).is_err());
+        let mut wrong = entry.clone();
+        wrong.comment.head_sha = "d".repeat(40);
+        assert!(publication_update_json(&original.to_string(), &wrong, &state).is_err());
+        let mut wrong = entry;
+        wrong.state = PublicationState::PublishedUnverified;
+        assert!(publication_update_json(&original.to_string(), &wrong, &state).is_err());
     }
 }

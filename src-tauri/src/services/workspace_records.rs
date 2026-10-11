@@ -262,7 +262,16 @@ fn page_end<T: Serialize>(items: &[T], start: usize, end: usize) -> Result<usize
     Ok(end)
 }
 
+#[cfg(test)]
 fn mutate_at(path: &Path, params: RecordMutateParams) -> Result<RecordMutationResult, String> {
+    mutate_at_guarded(path, params, false, false)
+}
+fn mutate_at_guarded(
+    path: &Path,
+    params: RecordMutateParams,
+    guard_publication: bool,
+    cleanup: bool,
+) -> Result<RecordMutationResult, String> {
     let empty = empty_record(&params.key)?;
     if !hash(&params.expected_version) {
         return Err("Invalid user-data record version.".into());
@@ -279,6 +288,26 @@ fn mutate_at(path: &Path, params: RecordMutateParams) -> Result<RecordMutationRe
     let old = index.map(|index| &document.records[index]);
     if version(old)? != params.expected_version {
         return Err("User-data record changed; refresh before saving your edit.".into());
+    }
+    if guard_publication {
+        let local_id = match &params.mutation {
+            RecordMutation::PutDraft { draft } => Some(draft.local_id.as_str()),
+            RecordMutation::RemoveDraft { local_id } => Some(local_id.as_str()),
+            _ => None,
+        };
+        if let Some(local_id) = local_id {
+            use crate::draft_publication::{
+                PublicationJournal, PublicationState, SqlitePublicationJournal,
+            };
+            let scope = publication_scope(&params.key)?;
+            if let Some(entry) = SqlitePublicationJournal.lookup(&scope.identity_key(local_id))? {
+                if entry.state != PublicationState::Rejected
+                    && !(cleanup && entry.state == PublicationState::Published)
+                {
+                    return Err("This draft has a pending or confirmed publication. Reconcile its result before editing or removing it.".into());
+                }
+            }
+        }
     }
     let mut record = old.cloned().unwrap_or(empty);
     match (&mut record.payload, params.mutation) {
@@ -358,7 +387,7 @@ pub(crate) fn record_read(params: RecordReadParams) -> Result<RecordPage, String
     read_at(&canonical_path()?, params, cache())
 }
 pub(crate) fn record_mutate(params: RecordMutateParams) -> Result<RecordMutationResult, String> {
-    mutate_at(&canonical_path()?, params)
+    mutate_at_guarded(&canonical_path()?, params, true, false)
 }
 pub(crate) fn draft_snapshot(key: &str) -> Result<(String, Vec<DraftComment>), String> {
     let empty = empty_record(key)?;
@@ -373,6 +402,88 @@ pub(crate) fn draft_snapshot(key: &str) -> Result<(String, Vec<DraftComment>), S
         _ => Err("Expected a pull-request draft scope.".into()),
     }
 }
+fn publication_scope(key: &str) -> Result<crate::draft_publication::PublicationScope, String> {
+    let scope = key
+        .strip_prefix("drafts.")
+        .ok_or("Expected a draft scope.")?;
+    let (provider, location) = scope.split_once(':').ok_or("Invalid draft scope.")?;
+    let parts = location.split('/').collect::<Vec<_>>();
+    let [workspace, repo, pr_id] = parts.as_slice() else {
+        return Err("Invalid draft scope.".into());
+    };
+    Ok(crate::draft_publication::PublicationScope {
+        provider: match provider {
+            "github" => ReviewProvider::Github,
+            "bitbucket" => ReviewProvider::Bitbucket,
+            _ => return Err("Invalid draft provider.".into()),
+        },
+        workspace: (*workspace).into(),
+        repo: (*repo).into(),
+        pr_id: pr_id.parse().map_err(|_| "Invalid draft PR.")?,
+    })
+}
+pub(crate) fn with_locked_drafts<T>(
+    key: &str,
+    callback: impl FnOnce(&str, &[DraftComment]) -> Result<T, String>,
+) -> Result<T, String> {
+    let empty = empty_record(key)?;
+    let path = canonical_path()?;
+    let _guard = data_lock()
+        .lock()
+        .map_err(|_| "User data is unavailable.")?;
+    let _file_guard = crate::runtime_identity::acquire_storage_lock(&path)?;
+    let (document, _, _) = read_destination(&path)?;
+    let record = document.records.iter().find(|record| record.key == key);
+    let version = version(record)?;
+    match &record.unwrap_or(&empty).payload {
+        WorkspaceValue::Drafts(items) => callback(&version, items),
+        _ => Err("Expected a draft scope.".into()),
+    }
+}
+pub(crate) fn remove_acknowledged_draft(
+    key: &str,
+    entry: &crate::draft_publication::JournalEntry,
+) -> Result<bool, String> {
+    use crate::draft_publication::{
+        PublicationJournal, PublicationState, SqlitePublicationJournal,
+    };
+    let (version, drafts) = draft_snapshot(key)?;
+    let Some(draft) = drafts
+        .iter()
+        .find(|draft| draft.local_id == entry.comment.local_id)
+    else {
+        return Ok(true);
+    };
+    let actual = format!(
+        "{:x}",
+        Sha256::digest(serde_json::to_vec(draft).map_err(|_| "Cannot encode draft.")?)
+    );
+    if entry.state != PublicationState::Published
+        || entry.comment.original_draft_hash.as_deref() != Some(&actual)
+    {
+        return Ok(false);
+    }
+    let saved = SqlitePublicationJournal
+        .lookup(&entry.comment.identity_key())?
+        .ok_or("Publication acknowledgment is unavailable.")?;
+    if saved != *entry {
+        return Err("Publication acknowledgment changed.".into());
+    }
+    mutate_at_guarded(
+        &canonical_path()?,
+        RecordMutateParams {
+            key: key.into(),
+            expected_version: version,
+            mutation: RecordMutation::RemoveDraft {
+                local_id: draft.local_id.clone(),
+            },
+        },
+        true,
+        true,
+    )
+    .map(|_| true)
+}
+
 pub(crate) fn prompt_for_scope(
     provider: ReviewProvider,
     workspace: &str,

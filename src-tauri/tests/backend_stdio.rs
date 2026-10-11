@@ -2461,3 +2461,66 @@ fn resumed_reply_keeps_prior_conversation_instead_of_resending_new_reference_con
     assert!(payload.contains("Please clarify the prior finding."));
     assert!(!payload.contains("NEW_REFERENCE_CONTEXT_NOT_RESENT"));
 }
+
+#[test]
+fn publication_control_and_invalid_approvals_never_access_provider_credentials() {
+    let repository = temp_repo();
+    let mut backend = Backend::spawn(repository.path());
+    backend.handshake();
+    let scope = json!({"provider":"github","workspace":"synthetic","repo":"review","prId":7});
+    for (id, method, params, success) in [
+        (
+            "publication-status",
+            "publication.status",
+            json!({"scope":scope,"after":null,"limit":20}),
+            true,
+        ),
+        (
+            "publication-empty",
+            "publication.prepare",
+            json!({"scope":scope,"localIds":[]}),
+            false,
+        ),
+        (
+            "publication-fake",
+            "publication.apply",
+            json!({"scope":scope,"approvalId":"a".repeat(64),"localId":"draft"}),
+            false,
+        ),
+        (
+            "publication-cancel",
+            "publication.cancel",
+            json!({"scope":scope,"approvalId":"a".repeat(64)}),
+            true,
+        ),
+        (
+            "publication-missing",
+            "publication.reconcile",
+            json!({"scope":scope,"localId":"missing"}),
+            false,
+        ),
+        (
+            "comments-unbounded",
+            "comments.list",
+            json!({"scope":scope,"offset":0,"limit":101,"version":null}),
+            false,
+        ),
+    ] {
+        backend.send(json!({"type":"request","id":id,"method":method,"params":params}));
+        let response = backend.wait_for(|frame| frame["id"] == id, Duration::from_secs(5));
+        assert_eq!(response["ok"], success, "{id}");
+        if id == "publication-status" {
+            assert_eq!(response["result"]["entries"], json!([]));
+        }
+    }
+    backend.send(
+        json!({"type":"request","id":"still-responsive","method":"operation.status","params":{}}),
+    );
+    assert_eq!(
+        backend.wait_for(
+            |frame| frame["id"] == "still-responsive",
+            Duration::from_secs(5)
+        )["ok"],
+        false
+    );
+}

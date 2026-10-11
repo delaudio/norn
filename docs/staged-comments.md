@@ -57,3 +57,37 @@ metadata for the same pinned review keeps the preview, while selecting another
 target clears it. Closing an in-flight save does not undo a durable write;
 inspect the draft list before retrying after an interruption. CRLF bodies keep
 their original saved text and display as ordinary terminal lines.
+
+## Publish explicitly
+
+From the staged-comment list press `p`. Space selects up to twenty comments;
+Enter prepares a read-only preview of their exact body, path, side, line,
+parent and current base/head revisions. PageUp/PageDown reads the preview.
+Only `y` approves sending. `n` or Escape cancels; pasted text never approves.
+Previews expire after five minutes and each approved item can be used once.
+General, file and single-line inline comments use their explicit modes. An
+unsupported or outdated position remains local until you choose a supported
+mode or stage a finding from a fresh review.
+
+Sending proceeds one comment at a time. Escape/`n` stops remaining sends;
+an in-flight request can still reach the provider. A confirmed unchanged
+comment is removed locally only after its acknowledgment and associated
+finding metadata are saved. A partial failure stops the batch and preserves
+outstanding comments. Confirmed remote IDs remain visible even if local
+cleanup needs repair.
+
+Press `s` for scoped publication history. Select an item and press `r` to
+reconcile it with a read-only provider scan. An uncertain request is never
+sent again automatically: a missing comment does not prove that the original
+request failed. Changed revisions and unverified post-send revisions keep
+the draft. Pending or confirmed journal entries prevent editing/removing the
+same draft identity; inspect the remote result before making a separate manual
+follow-up. Closing the app does not erase this history.
+
+Press `t` to read remote threads, then `r` on a supported root comment to
+open a local reply composer. The actual parent, path and old/new side remain
+attached. Ctrl+S stages the edited reply; it still needs a publication preview
+and approval. GitHub general issue comments do not support threaded replies,
+and unsupported replies never fall back to a new top-level comment. Remote
+comment reads are bounded; if the complete inventory cannot be verified,
+preserve the draft and inspect the provider directly.

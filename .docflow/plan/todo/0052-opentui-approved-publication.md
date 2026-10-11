@@ -53,5 +53,5 @@ publication/feedback updates and recovery after acknowledged remote results.
 ## Status
 
 - Claimed by: default-agent, 2026-10-11, `issue-304-approved-publication`.
-- Blockers: implementation/gates, #353 merge, PR CI/merge.
+- Blockers: implementation/gates and PR CI/merge; #353 merged at `3385fe1`.
 - Stopped:

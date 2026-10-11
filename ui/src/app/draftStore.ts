@@ -1,4 +1,4 @@
-import type { WorkspaceDraft } from "../../../src/protocol/generated/protocol";
+import type { RemoteComment, WorkspaceDraft } from "../../../src/protocol/generated/protocol";
 import type { BackendClient } from "../transport/backendClient";
 import { draftModes, validDraft } from "../transport/workspaceValidation";
 import type { PickerEntry } from "./store";
@@ -129,6 +129,25 @@ export class DraftStore {
       error: null,
       notice: null,
     });
+  }
+  reply(comment: RemoteComment) {
+    if (comment.deleted || comment.parentId || this.state.busy || !this.state.version) return;
+    this.add();
+    if (!this.state.draft) return;
+    this.update({
+      draft: {
+        ...this.state.draft,
+        path: comment.path,
+        to: comment.to,
+        from: comment.from,
+        publicationMode: comment.mode,
+        parentId: comment.id,
+        reviewHeadSha: comment.commitId,
+        source: "manual",
+      },
+      field: draftFields.indexOf("raw"),
+    });
+    this.beginField();
   }
   edit() {
     if (this.state.busy || !this.state.items[this.state.selected]) return;

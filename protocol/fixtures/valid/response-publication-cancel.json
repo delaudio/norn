@@ -1,0 +1,8 @@
+{
+  "type": "response",
+  "id": "publication-fixture",
+  "ok": true,
+  "result": {
+    "canceled": true
+  }
+}
