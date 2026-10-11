@@ -1,4 +1,5 @@
 import type {
+  WorkspaceDraft,
   WorkspaceReference,
   WorkspaceSettings,
   WorkspaceValue,
@@ -136,6 +137,8 @@ export class FakeBackendTransport implements BackendTransport {
           value?: string;
           path?: string;
           reference?: WorkspaceReference;
+          draft?: WorkspaceDraft;
+          localId?: string;
           id?: string;
         };
         let next: WorkspaceValue;
@@ -166,6 +169,22 @@ export class FakeBackendTransport implements BackendTransport {
           next = {
             kind: "references",
             value: payload.value.filter((item) => item.id !== mutation.id),
+          };
+        else if (payload.kind === "drafts" && mutation.kind === "putDraft" && mutation.draft)
+          next = {
+            kind: "drafts",
+            value: payload.value.some((item) => item.localId === mutation.draft!.localId)
+              ? payload.value.map((item) =>
+                  item.localId === mutation.draft!.localId
+                    ? structuredClone(mutation.draft!)
+                    : item,
+                )
+              : [...payload.value, structuredClone(mutation.draft)],
+          };
+        else if (payload.kind === "drafts" && mutation.kind === "removeDraft")
+          next = {
+            kind: "drafts",
+            value: payload.value.filter((item) => item.localId !== mutation.localId),
           };
         else throw new Error("Unsupported fixture mutation.");
         this.records[key] = next;

@@ -111,3 +111,10 @@ export const ReferenceEditor: Story = { args: { frameId: "shell-references-editi
 export const ReferenceConflict: Story = { args: { frameId: "shell-references-conflict-80x30" } };
 export const ReferenceRemoval: Story = { args: { frameId: "shell-references-remove-80x30" } };
 export const NoPullRequestReferences: Story = { args: { frameId: "shell-references-local-50x15" } };
+
+export const SavedDrafts: Story = { args: { frameId: "shell-drafts-saved-120x40" } };
+export const CompactDrafts: Story = { args: { frameId: "shell-drafts-saved-50x20" } };
+export const DraftEditor: Story = { args: { frameId: "shell-drafts-editing-120x40" } };
+export const DraftConflict: Story = { args: { frameId: "shell-drafts-conflict-80x30" } };
+export const DraftRemoval: Story = { args: { frameId: "shell-drafts-remove-80x30" } };
+export const NoPullRequestDrafts: Story = { args: { frameId: "shell-drafts-local-50x15" } };

@@ -1,8 +1,10 @@
 import { DataPanel } from "../src/app/components/DataPanel";
+import { DraftPanel } from "../src/app/components/DraftPanel";
 import { ReferencePanel } from "../src/app/components/ReferencePanel";
 import { SettingsPanel } from "../src/app/components/SettingsPanel";
 import { WorkspacePanel } from "../src/app/components/WorkspacePanel";
 import { DataStore } from "../src/app/dataStore";
+import { DraftStore } from "../src/app/draftStore";
 import { ReferenceStore } from "../src/app/referenceStore";
 import { SettingsStore } from "../src/app/settingsStore";
 import { WorkspaceStore } from "../src/app/workspaceStore";
@@ -602,6 +604,84 @@ async function referencesScene(mode: "saved" | "editing" | "conflict" | "remove"
   };
 }
 
+async function draftsScene(mode: "saved" | "editing" | "conflict" | "remove" | "local") {
+  class Transport extends FakeBackendTransport {
+    async request(method: string, params: Record<string, unknown>) {
+      if (mode === "conflict" && method === "workspace.mutate")
+        throw new Error("User data changed. Edits retained; refresh before saving.");
+      return super.request(method, params);
+    }
+  }
+  const transport = new Transport({
+    workspaceRecords: {
+      "drafts.github:acme/payments/7": {
+        kind: "drafts",
+        value: [
+          {
+            localId: "draft-1",
+            prId: 7,
+            path: "src/payment.ts",
+            to: 12,
+            raw: "Imported finding comment 世界.\nHandle the missing key before processing.",
+            createdAt: 1,
+            source: "aiFinding",
+            publicationMode: "inline",
+            findingRef: {
+              reviewRunId: "run-7",
+              findingId: "finding-1",
+              findingFingerprint: "synthetic-fingerprint",
+            },
+            reviewBaseSha: "a".repeat(40),
+            reviewHeadSha: "b".repeat(40),
+          },
+          {
+            localId: "draft-2",
+            prId: 7,
+            path: "",
+            raw: "General reviewer note. Saved locally.",
+            parentId: "19",
+            createdAt: 2,
+            source: "manual",
+            publicationMode: "general",
+          },
+          {
+            localId: "draft-3",
+            prId: 7,
+            path: "src/legacy.ts",
+            from: 3,
+            raw: "Local-only observation.",
+            createdAt: 3,
+            source: null,
+            publicationMode: "localOnly",
+          },
+        ],
+      },
+    },
+  });
+  const { client, store, ready } = readyStore(transport);
+  await ready;
+  const drafts = new DraftStore(
+    () => 123,
+    () => "synthetic-new-draft",
+  );
+  await drafts.load(client, {
+    provider: "github",
+    workspace: "acme",
+    repo: "payments",
+    prId: mode === "local" ? null : 7,
+  });
+  if (mode === "editing" || mode === "conflict") {
+    drafts.edit();
+    for (let i = 0; i < 5; i++) drafts.move(1);
+    drafts.beginField();
+    drafts.append("\nUnsaved reviewer edit.");
+    drafts.finishField();
+    if (mode === "conflict") await drafts.save(client);
+  }
+  if (mode === "remove") drafts.requestRemoval();
+  return { client, store, view: <DraftPanel drafts={drafts} client={client} onClose={() => {}} /> };
+}
+
 async function searchScene(mode: "editing" | "none" | "split") {
   const transport = new FakeBackendTransport({
     repositories,
@@ -664,6 +744,12 @@ const scenes: Scene[] = [
     rows: 40,
     build: () => referencesScene("saved"),
   },
+  { id: "shell-drafts-saved-120x40", cols: 120, rows: 40, build: () => draftsScene("saved") },
+  { id: "shell-drafts-saved-50x20", cols: 50, rows: 20, build: () => draftsScene("saved") },
+  { id: "shell-drafts-editing-120x40", cols: 120, rows: 40, build: () => draftsScene("editing") },
+  { id: "shell-drafts-conflict-80x30", cols: 80, rows: 30, build: () => draftsScene("conflict") },
+  { id: "shell-drafts-remove-80x30", cols: 80, rows: 30, build: () => draftsScene("remove") },
+  { id: "shell-drafts-local-50x15", cols: 50, rows: 15, build: () => draftsScene("local") },
   { id: "shell-references-saved-50x20", cols: 50, rows: 20, build: () => referencesScene("saved") },
   {
     id: "shell-references-editing-120x40",
