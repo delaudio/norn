@@ -7,10 +7,9 @@
 ## Scope
 
 Introduce a review-engine seam in the stdio backend so `review.start` can run
-the shared headless engine. `NORN_REVIEW_ENGINE=real` runs
-`headless_review::run` (assembling the request from configuration); the default
-remains the deterministic simulated sequence, and `fake` is a fast deterministic
-engine used by tests. Cancellation is honoured before start; a running agent is
+the shared headless engine. `headless_review::run` (assembling the request from configuration) is the
+**default**; `NORN_REVIEW_ENGINE=simulated` keeps the deterministic placeholder
+and `fake` is a fast deterministic engine used by tests. Cancellation is honoured before start; a running agent is
 not killed mid-run.
 
 GitHub issue: #303 (epic #294 step 09/15).
@@ -21,8 +20,8 @@ progress streaming from the running agent, cooperative mid-run cancellation,
 
 ## Exit Criteria
 
-- `review.start` dispatches to the selected engine; real execution uses the
-  shared headless engine with no React-side agent shelling.
+- `review.start` dispatches to the selected engine; the **real** engine is the
+  default and uses the shared headless engine with no React-side agent shelling.
 - A deterministic fake engine streams running → progress → succeeded and is
   covered by a subprocess test.
 - `cargo clippy -D warnings`, `cargo test`, `pnpm run lint/typecheck/test`, the
