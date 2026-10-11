@@ -226,6 +226,12 @@ export type Request =
       id: RequestId;
       method: "review.output";
       params: TargetParams;
+    }
+  | {
+      type: "request";
+      id: RequestId;
+      method: "workspace.readiness";
+      params: EmptyParams;
     };
 export type RequestId = string;
 /**
@@ -493,7 +499,8 @@ export interface ResponseOk {
     | ReviewHistoryResult
     | RecordPage
     | RecordMutationResult
-    | ReviewOutputResult;
+    | ReviewOutputResult
+    | WorkspaceReadiness;
 }
 export interface DiffFileResult {
   target: TargetIdentity;
@@ -610,6 +617,35 @@ export interface ReviewOutputResult {
   target: TargetIdentity;
   runId: string;
   text: string;
+}
+export interface WorkspaceReadiness {
+  configuredRepos: number;
+  selectedAgent: "claude" | "codex" | "opencode";
+  /**
+   * @minItems 4
+   * @maxItems 4
+   */
+  tools: [
+    {
+      name: "git" | "claude" | "codex" | "opencode";
+      available: boolean;
+    },
+    {
+      name: "git" | "claude" | "codex" | "opencode";
+      available: boolean;
+    },
+    {
+      name: "git" | "claude" | "codex" | "opencode";
+      available: boolean;
+    },
+    {
+      name: "git" | "claude" | "codex" | "opencode";
+      available: boolean;
+    }
+  ];
+  configRootAvailable: boolean;
+  dataRootAvailable: boolean;
+  credentialStore: "native" | "unsupported";
 }
 export interface ResponseError {
   type: "response";

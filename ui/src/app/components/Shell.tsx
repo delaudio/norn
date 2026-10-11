@@ -657,9 +657,33 @@ function DiffPanel({
   }
   if (state.repositories.length === 0) {
     return (
-      <text fg={theme.muted}>
-        No repositories configured. Press m for settings or run `norn setup`.
-      </text>
+      <box flexDirection="column">
+        <text fg={theme.primary}>Welcome to Norn</text>
+        <text fg={theme.muted}>
+          No repositories configured. Press m for settings or run `norn setup`.
+        </text>
+        <text fg={theme.text}>
+          Add a provider, owner and repository; credentials are saved separately.
+        </text>
+        <text fg={theme.muted}>
+          Existing credentials stay in Rust. Settings show presence, never stored values.
+        </text>
+        {state.readiness ? (
+          <text fg={theme.warning}>
+            {`Selected agent: ${state.readiness.selectedAgent} · ${state.readiness.tools.find((tool) => tool.name === state.readiness?.selectedAgent)?.available ? "found on PATH" : "missing on PATH"}. Tool presence does not verify login.`}
+          </text>
+        ) : null}
+        {state.readiness?.credentialStore === "unsupported" ? (
+          <text fg={theme.warning}>
+            This build has no native credential store. Use existing environment credentials; no
+            plaintext fallback.
+          </text>
+        ) : null}
+        <text fg={theme.muted}>
+          Ctrl+D in settings previews/imports desktop data with a backup. No review starts until
+          Enter.
+        </text>
+      </box>
     );
   }
   if (state.diffLoading) {

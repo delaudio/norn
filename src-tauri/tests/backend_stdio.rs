@@ -905,6 +905,46 @@ fn review_output_is_exact_bounded_and_pinned_to_provider_and_run() {
 }
 
 #[cfg(unix)]
+#[test]
+fn workspace_readiness_never_executes_found_tools_or_reads_credentials() {
+    use std::os::unix::fs::PermissionsExt;
+    let repo = tempfile::tempdir().unwrap();
+    let tools = tempfile::tempdir().unwrap();
+    let marker = tools.path().join("executed");
+    let executable = tools.path().join("opencode");
+    std::fs::write(
+        &executable,
+        format!("#!/bin/sh\nprintf executed > '{}'\n", marker.display()),
+    )
+    .unwrap();
+    std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700)).unwrap();
+    let mut backend = Backend::spawn_env(repo.path(), &[("PATH", tools.path().to_str().unwrap())]);
+    backend.handshake();
+    backend.send(
+        json!({"type":"request","id":"ready-status","method":"workspace.readiness","params":{}}),
+    );
+    let response = backend.wait_for(
+        |value| value["id"] == "ready-status",
+        Duration::from_secs(10),
+    );
+    assert_eq!(response["ok"], true, "{response}");
+    let result = &response["result"];
+    assert_eq!(result["configuredRepos"], 0);
+    assert!(result["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|tool| tool["name"] == "opencode" && tool["available"] == true));
+    assert!(result.get("credentials").is_none());
+    assert!(result.get("token").is_none());
+    assert!(!marker.exists());
+    assert!(!response.to_string().contains("executed"));
+    backend.send(json!({"type":"request","id":"done","method":"shutdown","params":{}}));
+    backend.wait_for(|value| value["id"] == "done", Duration::from_secs(10));
+    assert!(backend.child.wait().unwrap().success());
+}
+
+#[cfg(unix)]
 impl FixFixture {
     fn new(agent_script: &str) -> Self {
         use std::os::unix::fs::PermissionsExt;

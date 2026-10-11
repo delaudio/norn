@@ -1,0 +1,1 @@
+{"type":"response","id":"readiness","ok":true,"result":{"configuredRepos":0,"selectedAgent":"opencode","tools":[{"name":"git","available":true},{"name":"claude","available":false},{"name":"codex","available":false},{"name":"opencode","available":true}],"configRootAvailable":true,"dataRootAvailable":true,"credentialStore":"unsupported"}}

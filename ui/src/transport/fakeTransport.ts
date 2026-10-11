@@ -23,6 +23,8 @@ export interface FakeTransportOptions {
   credentials?: CredentialStatus[];
   fixPhase?: "readyToCommit" | "readyToPush" | "completed";
   workspaceRecords?: Record<string, WorkspaceValue>;
+  availableTools?: string[];
+  credentialStore?: "native" | "unsupported";
 }
 
 interface FakeOperation {
@@ -94,7 +96,15 @@ export class FakeBackendTransport implements BackendTransport {
     await this.delay();
     return {
       serverVersion: this.options.serverVersion ?? "fake-0.0.0",
-      capabilities: ["repository", "diff", "review", "settings", "auth", "workspace-records"],
+      capabilities: [
+        "repository",
+        "diff",
+        "review",
+        "settings",
+        "auth",
+        "workspace-records",
+        "workspace-readiness",
+      ],
     };
   }
 
@@ -194,6 +204,20 @@ export class FakeBackendTransport implements BackendTransport {
       }
       case "repository.status":
         return { repos: structuredClone(this.settingsValue.repos) };
+      case "workspace.readiness":
+        return {
+          configuredRepos: this.settingsValue.repos.length,
+          selectedAgent: this.settingsValue.aiProvider,
+          tools: ["git", "claude", "codex", "opencode"].map((name) => ({
+            name,
+            available: (
+              this.options.availableTools ?? ["git", "claude", "codex", "opencode"]
+            ).includes(name),
+          })),
+          configRootAvailable: true,
+          dataRootAvailable: true,
+          credentialStore: this.options.credentialStore ?? "native",
+        };
       case "review.targets":
         return { targets: this.options.targets ?? [] };
       case "review.history":

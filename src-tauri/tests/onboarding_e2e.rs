@@ -23,7 +23,63 @@ fn run_norn(repo: &Path, args: &[&str]) -> (i32, String, String) {
     cli_args.push("--repo-path".to_string());
     cli_args.push(repo.as_os_str().to_string_lossy().to_string());
 
+    // The production doctor command intentionally reads OS credential status.
+    // Exercise its real parser/engine in a test child with a mock keyring, rather
+    // than querying the maintainer's keychain through the installed adapter.
+    if args.first() == Some(&"doctor") && !args.contains(&"--help") {
+        let isolated = tempfile::tempdir().unwrap();
+        let tools = isolated.path().join(".local/bin");
+        fs::create_dir_all(&tools).unwrap();
+        for name in ["claude", "codex", "opencode"] {
+            let tool = tools.join(name);
+            fs::write(&tool, "#!/bin/sh\nprintf 'fixture-version\\n'\n").unwrap();
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                fs::set_permissions(&tool, fs::Permissions::from_mode(0o700)).unwrap();
+            }
+        }
+        let result_file = isolated.path().join("doctor-result.json");
+        let status = Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "isolated_doctor_fixture_child", "--nocapture"])
+            .env_clear()
+            .env("HOME", isolated.path())
+            .env("USERPROFILE", isolated.path())
+            .env("XDG_CONFIG_HOME", isolated.path().join("config"))
+            .env("XDG_DATA_HOME", isolated.path().join("data"))
+            .env("NORN_CONFIG_DIR", isolated.path().join("config/norn"))
+            .env("NORN_DATA_DIR", isolated.path().join("data/norn"))
+            .env("NORN_REVIEW_DATA_DIR", isolated.path().join("reviews"))
+            .env(
+                "PATH",
+                std::env::join_paths([tools.as_path(), Path::new("/usr/bin"), Path::new("/bin")])
+                    .unwrap(),
+            )
+            .env(
+                "NORN_TEST_DOCTOR_ARGS",
+                serde_json::to_string(&cli_args).unwrap(),
+            )
+            .env("NORN_TEST_DOCTOR_RESULT", &result_file)
+            .current_dir(isolated.path())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .unwrap();
+        assert!(status.success());
+        return serde_json::from_slice(&fs::read(result_file).unwrap()).unwrap();
+    }
+
+    let isolated = tempfile::tempdir().unwrap();
     let output = Command::new(env!("CARGO_BIN_EXE_norn"))
+        .env_clear()
+        .env("HOME", isolated.path())
+        .env("USERPROFILE", isolated.path())
+        .env("XDG_CONFIG_HOME", isolated.path().join("config"))
+        .env("XDG_DATA_HOME", isolated.path().join("data"))
+        .env("NORN_CONFIG_DIR", isolated.path().join("config/norn"))
+        .env("NORN_DATA_DIR", isolated.path().join("data/norn"))
+        .env("NORN_REVIEW_DATA_DIR", isolated.path().join("reviews"))
+        .env("PATH", "/usr/bin:/bin")
         .args(cli_args)
         .output()
         .expect("run norn");
@@ -32,6 +88,39 @@ fn run_norn(repo: &Path, args: &[&str]) -> (i32, String, String) {
         String::from_utf8_lossy(&output.stdout).to_string(),
         String::from_utf8_lossy(&output.stderr).to_string(),
     )
+}
+
+#[test]
+fn onboarding_doctor_help_uses_actual_cli_routing_without_probes() {
+    let repo = tempfile::tempdir().unwrap();
+    let (code, stdout, stderr) = run_norn(repo.path(), &["doctor", "--help"]);
+    assert_eq!(code, 0);
+    assert!(stderr.is_empty());
+    assert!(stdout.contains("doctor"));
+}
+
+#[test]
+fn isolated_doctor_fixture_child() {
+    let Some(arguments) = std::env::var_os("NORN_TEST_DOCTOR_ARGS") else {
+        return;
+    };
+    keyring::set_default_credential_builder(keyring::mock::default_credential_builder());
+    let args: Vec<String> = serde_json::from_str(arguments.to_str().unwrap()).unwrap();
+    let parsed = norn_lib::readiness::parse_doctor_args(&args).unwrap();
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+    let code = norn_lib::readiness::run_doctor(parsed, &mut stdout, &mut stderr);
+    let result = (
+        code,
+        String::from_utf8(stdout).unwrap(),
+        String::from_utf8(stderr).unwrap(),
+    );
+    fs::write(
+        std::env::var_os("NORN_TEST_DOCTOR_RESULT").unwrap(),
+        serde_json::to_vec(&result).unwrap(),
+    )
+    .unwrap();
+    std::process::exit(0);
 }
 
 fn init_git_repo(repo: &Path) {
@@ -88,6 +177,11 @@ fn onboarding_e2e_smoke_journey_with_mixed_repo_and_remote() {
     let doctor_no_remote: Value =
         serde_json::from_str(&doctor_no_remote).expect("doctor no remote output");
     assert_eq!(doctor_no_remote["status"], "fail");
+    assert!(doctor_no_remote["machine"]["cliTools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|tool| tool["version"] == "fixture-version"));
     let has_remote_missing = doctor_no_remote["issues"]
         .as_array()
         .expect("doctor issues")

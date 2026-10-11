@@ -140,6 +140,17 @@ async function emptyScene() {
   await ready;
   return { store, client };
 }
+async function onboardingScene(unsupported: boolean) {
+  const scene = readyStore(
+    new FakeBackendTransport({
+      repositories: [],
+      availableTools: ["git"],
+      credentialStore: unsupported ? "unsupported" : "native",
+    }),
+  );
+  await scene.ready;
+  return { store: scene.store, client: scene.client };
+}
 
 async function readyScene() {
   const { client, store, ready } = readyStore(
@@ -551,6 +562,14 @@ async function syntaxScene(mode: "unified" | "split" | "plain") {
   return { store: scene.store, client: scene.client };
 }
 const scenes: Scene[] = [
+  { id: "shell-onboarding-120x30", cols: 120, rows: 30, build: () => onboardingScene(false) },
+  { id: "shell-onboarding-50x15", cols: 50, rows: 15, build: () => onboardingScene(false) },
+  {
+    id: "shell-onboarding-unsupported-80x24",
+    cols: 80,
+    rows: 24,
+    build: () => onboardingScene(true),
+  },
   { id: "shell-syntax-unified-120x30", cols: 120, rows: 30, build: () => syntaxScene("unified") },
   { id: "shell-syntax-split-120x30", cols: 120, rows: 30, build: () => syntaxScene("split") },
   { id: "shell-syntax-split-50x15", cols: 50, rows: 15, build: () => syntaxScene("split") },

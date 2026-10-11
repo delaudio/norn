@@ -1,4 +1,5 @@
 import type { WorkspaceSettings } from "../../../src/protocol/generated/protocol";
+import type { WorkspaceReadiness } from "../transport/backendClient";
 import { SyntaxHighlighter } from "./syntaxHighlighter";
 import type { DiffSyntax, SyntaxReader } from "./syntaxTypes";
 import { setTheme } from "./theme";
@@ -130,6 +131,7 @@ export interface PickerEntry {
 }
 
 export interface ShellSnapshot {
+  readiness: WorkspaceReadiness | null;
   syntax: DiffSyntax | null;
   syntaxLoading: boolean;
   searchOpen: boolean;
@@ -183,6 +185,7 @@ export interface ShellSnapshot {
 }
 
 const INITIAL: ShellSnapshot = {
+  readiness: null,
   syntax: null,
   syntaxLoading: false,
   searchOpen: false,
@@ -607,15 +610,18 @@ export class ShellStore {
   }
 
   async applySettings(client: BackendClient, settings: WorkspaceSettings): Promise<void> {
-    setTheme(settings.theme);
+    const generation = this.state.generation;
     const target = this.activeTarget();
-    const [repositories, targets] = await Promise.all([
+    const [repositories, targets, readiness] = await Promise.all([
       client.repositories(),
       client.reviewTargets(),
+      this.state.readiness ? client.readiness() : Promise.resolve(null),
     ]);
+    if (generation !== this.state.generation || this.state.status === "closed") return;
+    setTheme(settings.theme);
     const picker = buildPicker(repositories, targets);
     const selected = picker.findIndex((entry) => sameTarget(pickerTargetIdentity(entry), target));
-    this.update({ repositories, picker, diffMode: settings.defaultDiffView });
+    this.update({ repositories, picker, diffMode: settings.defaultDiffView, readiness });
     await this.selectPicker(Math.max(0, selected));
   }
 
@@ -628,6 +634,13 @@ export class ShellStore {
         const snapshot = await client.settings();
         setTheme(snapshot.settings.theme);
         this.update({ diffMode: snapshot.settings.defaultDiffView });
+      }
+      if (ready.capabilities.includes("workspace-readiness")) {
+        try {
+          this.update({ readiness: await client.readiness() });
+        } catch {
+          this.update({ notice: "Readiness could not be checked. Press m to inspect settings." });
+        }
       }
       const [repositories, targets] = await Promise.all([
         client.repositories(),
