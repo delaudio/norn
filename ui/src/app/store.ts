@@ -28,6 +28,20 @@ export interface OperationView {
   sequence: number;
   logs: OperationLog[];
   targetLabel: string;
+  reply: boolean;
+}
+
+const GraphemeSegmenter = (
+  Intl as unknown as {
+    Segmenter?: new () => { segment(text: string): Iterable<{ segment: string }> };
+  }
+).Segmenter;
+
+function graphemes(text: string): string[] {
+  if (GraphemeSegmenter) {
+    return [...new GraphemeSegmenter().segment(text)].map((entry) => entry.segment);
+  }
+  return Array.from(text);
 }
 
 function targetLabel(target: TargetIdentity): string {
@@ -94,6 +108,8 @@ export interface ShellSnapshot {
   highlightSide: "old" | "new";
   scrollRequest: number;
   diffMode: "unified" | "split";
+  composing: boolean;
+  composerText: string;
   diffExpanded: boolean;
   diffLineCount: number;
   preview: FilePreviewView | null;
@@ -124,6 +140,8 @@ const INITIAL: ShellSnapshot = {
   highlightSide: "new",
   scrollRequest: 0,
   diffMode: "unified",
+  composing: false,
+  composerText: "",
   diffExpanded: false,
   diffLineCount: 0,
   preview: null,
@@ -277,6 +295,7 @@ export class ShellStore {
   private pendingEvents: BackendOperationEvent[] = [];
   private diffRequest = 0;
   private previewRequest = 0;
+  private replying = false;
   private diffInFlight = false;
   private diffPending = false;
   private snapshotInFlight = false;
@@ -658,6 +677,7 @@ export class ShellStore {
           sequence: result.sequence ?? 0,
           logs: [{ id: this.nextLogId++, text: `started ${result.operationId}` }],
           targetLabel: targetLabel(target),
+          reply: false,
         },
       });
       this.drainPendingEvents(result.operationId);
@@ -686,15 +706,25 @@ export class ShellStore {
       ...operation.logs,
       { id: this.nextLogId++, text: describeEvent(event.event) },
     ].slice(-100);
+    const state = eventState(event.event) ?? operation.state;
     this.update({
       operation: {
         id: operation.id,
-        state: eventState(event.event) ?? operation.state,
+        state,
         sequence: event.sequence,
         logs,
         targetLabel: operation.targetLabel,
+        reply: operation.reply,
       },
     });
+    if (operation.reply) {
+      if (state === "succeeded") {
+        this.update({ composerText: "" });
+      } else if (state === "failed" || state === "cancelled") {
+        // Restore the submitted draft so it is not lost on failure.
+        this.update({ composing: true });
+      }
+    }
   }
 
   private drainPendingEvents(operationId: string): void {
@@ -751,6 +781,87 @@ export class ShellStore {
 
   setPreviewError(error: string): void {
     this.update({ preview: null, previewError: error });
+  }
+
+  beginReply(): void {
+    if (this.replying) {
+      return;
+    }
+    const active = this.state.operation;
+    if (active && (active.state === "accepted" || active.state === "running")) {
+      this.update({ notice: "Another review operation is already in progress." });
+      return;
+    }
+    const entry = this.state.picker[this.state.selectedPicker];
+    if (entry?.kind !== "review") {
+      this.update({ notice: "Replies are available for pull-request reviews." });
+      return;
+    }
+    this.update({ composing: true, composerText: "" });
+  }
+
+  cancelReply(): void {
+    this.update({ composing: false, composerText: "" });
+  }
+
+  appendReplyText(text: string): void {
+    const next = graphemes(this.state.composerText + text)
+      .slice(0, 4000)
+      .join("");
+    this.update({ composerText: next });
+  }
+
+  backspaceReply(): void {
+    const characters = graphemes(this.state.composerText);
+    characters.pop();
+    this.update({ composerText: characters.join("") });
+  }
+
+  async submitReply(client: BackendClient): Promise<void> {
+    const replyMessage = this.state.composerText.trim();
+    if (replyMessage.length === 0) {
+      this.update({ notice: "Reply message is empty." });
+      return;
+    }
+    const activeOperation = this.state.operation;
+    if (
+      this.replying ||
+      (activeOperation !== null &&
+        (activeOperation.state === "accepted" || activeOperation.state === "running"))
+    ) {
+      return;
+    }
+    const target = this.activeTarget();
+    if (!target) {
+      return;
+    }
+    const generation = this.state.generation;
+    this.replying = true;
+    // Close the composer while the request is in flight; restore the draft on failure.
+    this.update({ composing: false });
+    try {
+      const result = await client.reviewReply(target, replyMessage);
+      if (generation !== this.state.generation) {
+        return;
+      }
+      this.update({
+        operation: {
+          id: result.operationId,
+          state: result.state,
+          sequence: result.sequence ?? 0,
+          logs: [{ id: this.nextLogId++, text: `reply ${result.operationId}` }],
+          targetLabel: targetLabel(target),
+          reply: true,
+        },
+      });
+      this.drainPendingEvents(result.operationId);
+    } catch (error) {
+      if (generation === this.state.generation) {
+        this.update({ composing: true, error: message(error) });
+      }
+    } finally {
+      this.replying = false;
+    }
   }
 
   /// Start (or refresh) the authenticated browser diff session and surface its

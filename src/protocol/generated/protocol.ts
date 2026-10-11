@@ -64,6 +64,12 @@ export type Request =
       id: RequestId;
       method: "review.history";
       params: TargetParams;
+    }
+  | {
+      type: "request";
+      id: RequestId;
+      method: "review.reply";
+      params: ReviewReplyParams;
     };
 export type RequestId = string;
 /**
@@ -145,6 +151,10 @@ export interface EmptyResult {}
 export interface FilePreviewParams {
   target: TargetIdentity;
   path: string;
+}
+export interface ReviewReplyParams {
+  target: TargetIdentity;
+  message: string;
 }
 export interface ResponseOk {
   type: "response";

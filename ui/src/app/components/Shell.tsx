@@ -32,6 +32,19 @@ function useShellInput(
     if (key.ctrl || key.meta || key.super || key.option) {
       return;
     }
+    if (store.getSnapshot().composing) {
+      key.preventDefault();
+      if (key.name === "escape") {
+        store.cancelReply();
+      } else if (key.name === "return") {
+        void store.submitReply(client);
+      } else if (key.name === "backspace") {
+        store.backspaceReply();
+      } else if (key.sequence.length > 0 && key.sequence >= " ") {
+        store.appendReplyText(key.sequence);
+      }
+      return;
+    }
     key.preventDefault();
     if (key.name === "q") {
       quit();
@@ -59,6 +72,8 @@ function useShellInput(
       store.toggleDiffMode();
     } else if (key.name === "e") {
       store.toggleDiffExpanded();
+    } else if (key.name === "r") {
+      store.beginReply();
     } else if (key.name === "b") {
       void store.openBrowser(client);
     } else if (key.name === "x") {
@@ -740,6 +755,13 @@ export function Shell({ store, client, quit }: ShellProps) {
           />
         </box>
       </box>
+      {state.composing ? (
+        <box height={1} flexShrink={0} paddingX={1} backgroundColor={theme.panel}>
+          <text fg={theme.primary} wrapMode="none" truncate>
+            {`Reply › ${state.composerText}`}
+          </text>
+        </box>
+      ) : null}
       <box height={1} flexShrink={0} paddingX={1} backgroundColor={theme.panel}>
         <text fg={theme.muted}>
           {diffCollapsed ? "large diff · e expand  " : ""}

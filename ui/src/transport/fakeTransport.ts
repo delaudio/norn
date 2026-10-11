@@ -78,6 +78,12 @@ export class FakeBackendTransport implements BackendTransport {
           diff: this.options.diffText ?? "@@ -1 +1 @@\n-old\n+new\n",
           truncated: false,
         };
+      case "review.reply": {
+        const operationId = `fake-reply-${this.nextOperation++}`;
+        const target = params.target as TargetIdentity;
+        this.operations.set(operationId, { target, state: "accepted", sequence: 0 });
+        return { target, operationId, state: "accepted" };
+      }
       case "review.start": {
         const operationId = `fake-op-${this.nextOperation++}`;
         const target = params.target as TargetIdentity;

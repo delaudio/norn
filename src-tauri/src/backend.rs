@@ -33,7 +33,7 @@ use crate::protocol::{
 };
 use crate::services::review::{
     cancel_inline_review_native, cancel_local_inline_review_native, get_ai_review_run_state_native,
-    get_local_ai_review_run_state_native, start_inline_review_native,
+    get_local_ai_review_run_state_native, reply_inline_review_native, start_inline_review_native,
     start_local_inline_review_native, AiReviewRunStatus, AiReviewRunStore,
 };
 use crate::services::review_prompt::{build_review_payload, resolve_review_prompt};
@@ -348,6 +348,30 @@ fn dispatch(request: Request, backend: &Backend) -> bool {
                 backend.next_operation.fetch_add(1, Ordering::SeqCst)
             );
             backend.start_review(&id, &operation_id, params.target);
+            false
+        }
+        Request::ReviewReply { params, .. } => {
+            if backend
+                .active_operations
+                .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |current| {
+                    (current < MAX_ACTIVE_OPERATIONS).then_some(current + 1)
+                })
+                .is_err()
+            {
+                backend.fail(
+                    &id,
+                    ProtocolError::new(
+                        ProtocolErrorCode::Internal,
+                        "too many active review operations",
+                    ),
+                );
+                return false;
+            }
+            let operation_id = format!(
+                "op-{}",
+                backend.next_operation.fetch_add(1, Ordering::SeqCst)
+            );
+            backend.start_reply(&id, &operation_id, params.target, params.message);
             false
         }
         Request::OperationStatus { params, .. } => {
@@ -1885,6 +1909,52 @@ fn prune_terminal_operations(operations: &mut HashMap<String, Operation>) {
 }
 
 impl Backend {
+    fn start_reply(
+        &self,
+        request_id: &str,
+        operation_id: &str,
+        target: TargetIdentity,
+        message: String,
+    ) {
+        let cancel = Arc::new(AtomicBool::new(false));
+        {
+            let mut operations = self.operations.lock().expect("operations lock");
+            prune_terminal_operations(&mut operations);
+            operations.insert(
+                operation_id.to_string(),
+                Operation {
+                    cancel: cancel.clone(),
+                    state: OperationState::Accepted,
+                    sequence: 0,
+                    error: None,
+                },
+            );
+        }
+        self.respond(
+            request_id,
+            json!({
+                "target": target,
+                "operationId": operation_id,
+                "state": "accepted",
+            }),
+        );
+        let writer = self.events.clone();
+        let operations = self.operations.clone();
+        let counter = ActiveCounter(self.active_operations.clone());
+        let operation_id = operation_id.to_string();
+        thread::spawn(move || {
+            run_reply_operation(
+                &writer,
+                &operations,
+                &operation_id,
+                &target,
+                &cancel,
+                message,
+            );
+            counter.decrement();
+        });
+    }
+
     fn start_review(&self, request_id: &str, operation_id: &str, target: TargetIdentity) {
         let cancel = Arc::new(AtomicBool::new(false));
         {
@@ -2232,6 +2302,172 @@ fn monitor_inline_session(
         }
         thread::sleep(Duration::from_millis(100));
     }
+}
+
+fn run_reply_operation(
+    writer: &SyncSender<ServerMessage>,
+    operations: &Operations,
+    operation_id: &str,
+    target: &TargetIdentity,
+    cancel: &AtomicBool,
+    message: String,
+) {
+    set_operation(operations, operation_id, OperationState::Running, 0, None);
+    emit_event(
+        writer,
+        operations,
+        operation_id,
+        target,
+        1,
+        OperationEvent::State {
+            state: OperationState::Running,
+            error: None,
+        },
+        OperationState::Running,
+        None,
+    );
+    if cancel.load(Ordering::SeqCst) {
+        finish_cancelled(writer, operations, operation_id, target, 2);
+        return;
+    }
+    match start_inline_reply_session(target, &message) {
+        Ok(session) => {
+            monitor_inline_session(writer, operations, operation_id, target, cancel, session)
+        }
+        Err(error) => emit_failed(writer, operations, operation_id, target, 2, error),
+    }
+}
+
+fn start_inline_reply_session(
+    target: &TargetIdentity,
+    message: &str,
+) -> Result<InlineSession, ProtocolError> {
+    let store = review_run_store().clone();
+    let TargetIdentity::Provider {
+        workspace,
+        repo,
+        pr_id: Some(pr_id),
+        run_id,
+        ..
+    } = target
+    else {
+        return Err(ProtocolError::new(
+            ProtocolErrorCode::NotFound,
+            "replies are available for pull-request reviews",
+        ));
+    };
+    let repo_path = resolve_repo_path(target).ok_or_else(|| {
+        ProtocolError::new(
+            ProtocolErrorCode::TargetStale,
+            "no reviewable local repository for this target",
+        )
+    })?;
+    let Some((base, head)) = reviewed_range(target)? else {
+        return Err(ProtocolError::new(
+            ProtocolErrorCode::TargetStale,
+            "no stored reviewed range for this pull request",
+        ));
+    };
+    if !revisions_available(&repo_path, &base, &head) {
+        return Err(ProtocolError::new(
+            ProtocolErrorCode::TargetStale,
+            "reviewed revisions are not available in the local checkout",
+        ));
+    }
+    let store_data = crate::services::review::load_ai_review_store_native(workspace, repo, *pr_id)
+        .ok()
+        .flatten();
+    let run = select_review_run(store_data.clone(), run_id.as_deref());
+    let thread_id = run
+        .as_ref()
+        .and_then(|run| run.thread_id.clone())
+        .ok_or_else(|| {
+            ProtocolError::new(
+                ProtocolErrorCode::NotFound,
+                "the selected review has no thread to reply to",
+            )
+        })?;
+    // Resume the provider recorded on the thread (falling back to a Claude
+    // resume session id, then the configured provider).
+    let thread = store_data
+        .as_ref()
+        .and_then(|data| data.threads.iter().find(|thread| thread.id == thread_id));
+    let (source_branch, destination_branch) = run
+        .map(|run| (run.source_branch, run.destination_branch))
+        .unwrap_or_else(|| ("source".to_string(), "destination".to_string()));
+    let prompt = resolve_review_prompt(None);
+    let diff = git(
+        &repo_path,
+        &[
+            "diff",
+            "--no-ext-diff",
+            "--no-textconv",
+            "-M",
+            base.as_str(),
+            head.as_str(),
+        ],
+    )
+    .ok_or_else(|| {
+        ProtocolError::new(
+            ProtocolErrorCode::Internal,
+            "failed to generate the reviewed diff",
+        )
+    })?;
+    let base_payload = build_review_payload(
+        &prompt,
+        &format!("Pull request #{pr_id}"),
+        "pr",
+        "This target contains the provider pull-request diff.",
+        &source_branch,
+        &destination_branch,
+        &diff,
+    );
+    let ai_provider = thread
+        .and_then(|thread| thread.ai_provider)
+        .or_else(|| {
+            thread
+                .and_then(|thread| thread.claude_session_id.as_ref())
+                .map(|_| config::AiProvider::Claude)
+        })
+        .unwrap_or_else(|| config::load().ai_provider);
+    let workspace = workspace.clone();
+    let repo = repo.clone();
+    let pr_id = *pr_id;
+    let started = reply_inline_review_native(
+        &store,
+        &workspace,
+        &repo,
+        pr_id,
+        format!("Pull request #{pr_id}"),
+        source_branch,
+        destination_branch,
+        Some(base),
+        Some(head),
+        thread_id,
+        message.to_string(),
+        base_payload,
+        ai_provider,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+    )
+    .map_err(inline_start_error)?;
+    let thread = started.thread_id.clone();
+    let read_store = store.clone();
+    let read_workspace = workspace.clone();
+    let read_repo = repo.clone();
+    Ok(InlineSession {
+        thread_id: thread,
+        read: Box::new(move || {
+            get_ai_review_run_state_native(&read_store, &read_workspace, &read_repo, pr_id)
+        }),
+        cancel: Box::new(move || {
+            cancel_inline_review_native(&store, &workspace, &repo, pr_id).map(|_| ())
+        }),
+    })
 }
 
 struct InlineSession {

@@ -206,7 +206,8 @@
         "review.targets",
         "browser.open",
         "file.preview",
-        "review.history"
+        "review.history",
+        "review.reply"
       ]
     },
     "DiffFileParams": {
@@ -700,6 +701,23 @@
           }
         }
       }
+    },
+    "ReviewReplyParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "target",
+        "message"
+      ],
+      "properties": {
+        "target": {
+          "$ref": "#/definitions/TargetIdentity"
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
     }
   },
   "oneOf": [
@@ -987,6 +1005,30 @@
             },
             "params": {
               "$ref": "#/definitions/TargetParams"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "type": {
+              "const": "request"
+            },
+            "id": {
+              "$ref": "#/definitions/RequestId"
+            },
+            "method": {
+              "const": "review.reply"
+            },
+            "params": {
+              "$ref": "#/definitions/ReviewReplyParams"
             }
           }
         }
