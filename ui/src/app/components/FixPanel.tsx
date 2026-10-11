@@ -40,36 +40,44 @@ export function FixPanel({
       </text>
       <scrollbox ref={scroll} height="100%" flexGrow={1} minHeight={0}>
         {preview ? (
-          <>
-            <text
-              fg={theme.text}
-            >{`${preview.repoPath} · ${preview.currentBranch} → ${preview.sourceBranch}`}</text>
-            <text
-              fg={theme.muted}
-            >{`${preview.dirtyFileCount ?? preview.dirtyFiles.length} local edit(s) · approval expires in ${preview.expiresInSeconds}s`}</text>
-            {preview.effects.map((effect) => (
-              <text key={effect} fg={theme.text}>
-                {effect}
-              </text>
-            ))}
-          </>
+          <MutationEffects preview={preview} />
         ) : result ? (
-          <>
-            <text fg={theme.text}>
-              {result.commitSha
-                ? `Commit: ${result.commitSha}`
-                : (result.summary ?? "Inspect partial edits in the checkout.")}
-            </text>
-            <text
-              fg={theme.muted}
-            >{`Files: ${result.filesTouched.join(", ") || "none reported"}`}</text>
-            <text fg={theme.muted}>{`Checks: ${result.tests.join("; ") || "none reported"}`}</text>
-            <text
-              fg={theme.text}
-            >{`Suggested commit: ${result.suggestedCommitMessage ?? "none"}`}</text>
-          </>
+          <MutationResult result={result} />
         ) : null}
       </scrollbox>
     </box>
+  );
+}
+
+function MutationEffects({ preview }: { preview: FixPreview }) {
+  return (
+    <>
+      <text
+        fg={theme.text}
+      >{`${preview.repoPath} · ${preview.currentBranch} → ${preview.sourceBranch}`}</text>
+      <text
+        fg={theme.muted}
+      >{`${preview.dirtyFileCount ?? preview.dirtyFiles.length} local edit(s) · approval expires in ${preview.expiresInSeconds}s`}</text>
+      {preview.effects.map((effect) => (
+        <text key={effect} fg={theme.text}>
+          {effect}
+        </text>
+      ))}
+    </>
+  );
+}
+
+function MutationResult({ result }: { result: FixState }) {
+  return (
+    <>
+      <text fg={theme.text}>
+        {result.commitSha
+          ? `Commit: ${result.commitSha}`
+          : (result.summary ?? "Inspect partial edits in the checkout.")}
+      </text>
+      <text fg={theme.muted}>{`Files: ${result.filesTouched.join(", ") || "none reported"}`}</text>
+      <text fg={theme.muted}>{`Checks: ${result.tests.join("; ") || "none reported"}`}</text>
+      <text fg={theme.text}>{`Suggested commit: ${result.suggestedCommitMessage ?? "none"}`}</text>
+    </>
   );
 }
