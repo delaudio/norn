@@ -112,8 +112,9 @@ Do not delete/replace the user's live canonical root to force a fallback.
 
 An already-upgraded user can obtain the archived source revision containing the
 bridge and build it in a separate checkout on macOS, Linux or Windows with the
-same prerequisites as the old desktop. The archive reference will be pinned in
-public recovery instructions before #309 removes the desktop. Install dependencies,
+same prerequisites as the old desktop. The archive reference is pinned to `34a3c2a2b56b698ef8cf9978f0b1e0a7ba4402db` in
+[public recovery instructions](../user-data-recovery.md); installed platform builds
+remain a required verification before #309 removes the desktop. Install dependencies,
 build production frontend assets, and compile with `custom-protocol,desktop-bundle`
 so the original production origin is used (a Vite dev origin has different storage).
 Run the resulting desktop binary directly from that checkout, export, close it,
