@@ -46,8 +46,27 @@ does not close #357/#306 or claim those flows already work.
 - Plan 0053 / PR #356 merged at `2a7f0fe605d3012c2e2b9a0c03e1d15b60f7c574`; #355 closed.
 - Native provider parsing and settings/authentication remain authoritative.
 
-## Status
+## Completion (effective on verified merge to main)
 
-- Claimed by: default-agent, 2026-10-11, `issue-357-provider-pr-reads`.
-- Blockers: implementation, local verification and exact-head PR integration.
-- Stopped:
+Implementation `8f1a120` on PR #356 baseline `2a7f0fe` adds read-only provider
+PR list/detail/current-user IPC, bounded native transport, strict generated
+DTOs and client identity/generation/cursor/URL validation. Owned provider
+fixtures cover both providers, filtered paging, actual approval metadata,
+unsafe/malformed/oversized responses and Bitbucket UUID aliases.
+
+Local verification exits zero: root typecheck/123 tests plus tooling/lint/
+Archgate 12/12, generated protocol, UI typecheck/148 tests/886 assertions/93
+unchanged native frames, Rust 672 core plus two existing ignored/52 stdio/six
+CLI/five onboarding/three binary tests, strict all-feature/all-target Clippy
+and no-GUI dependency guard. The actual CLI credential-status test now runs
+under an owned child mock keyring, with real executable help routing and
+isolated remaining CLI commands. Initial inherited publication-fixture
+intermittency is recorded in #307; a passing rerun is not called its fix.
+
+Evidence: `docs/opentui-migration/provider-pr-reads.md`. Prepared completion is
+not shipped until exact-head CI passes and the PR merges to main. Synchronized
+main has no new plan collision; contiguous ADR catalogue and owner links pass,
+while historical ADR 0011 coverage is unchanged. ADR 0020 remains Accepted.
+#357 terminal browsing, pinned pre-review diffs and explicit PR approval remain
+required. #306–#309 and actual native-profile recovery remain open; no Norn
+review, live provider mutation, private-profile inspection or data removal.
