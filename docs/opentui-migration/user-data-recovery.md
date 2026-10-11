@@ -60,8 +60,9 @@ result reports their count and reasons. An additions-only import creates a verif
 backup of the preceding destination before atomic replacement. Interrupted writes
 leave either the preceding or complete new document; a leftover verified backup
 can be reused on retry. No automatic replacement/merge of conflicting draft lists
-is attempted. A same-process mutex serializes this service; unrelated external
-writers are not covered by an operating-system compare-and-swap.
+is attempted. A process mutex and persistent sidecar file lock serialize canonical import
+and per-record writers across processes. Corrupt bytes are retained and
+conflicting scope records still require explicit reconciliation.
 
 Equivalent headless route:
 
@@ -112,7 +113,7 @@ Do not delete/replace the user's live canonical root to force a fallback.
 
 An already-upgraded user can obtain the archived source revision containing the
 bridge and build it in a separate checkout on macOS, Linux or Windows with the
-same prerequisites as the old desktop. The archive reference is pinned to `34a3c2a2b56b698ef8cf9978f0b1e0a7ba4402db` in
+same prerequisites as the old desktop. The archive reference is pinned to `72440eaef4177b809664bf6b563647d7659f3e52` in
 [public recovery instructions](../user-data-recovery.md); installed platform builds
 remain a required verification before #309 removes the desktop. Install dependencies,
 build production frontend assets, and compile with `custom-protocol,desktop-bundle`
@@ -135,9 +136,34 @@ integration use temporary config/data with no OS credential access. Terminal tes
 and native frames cover preview, rejection/conflict display, explicit confirmation,
 failed import and cancellation/input fencing.
 
-This delivery supplies canonical persistence/import ownership. Draft publication,
-reference UI, viewed-file navigation and prompt consumption must use these records
-in #304/#303/#306 before #305 and final parity are declared complete. Platform
+This delivery supplies canonical persistence/import ownership. Viewed-file navigation and prompt consumption use these canonical records.
+Imported themes can be explicitly previewed/staged in terminal settings, then
+saved through the existing settings version fence. Draft publication and
+reference UI/enrichment remain coordinated with #304/#306 before final parity
+is declared complete. Platform
 recovery builds and the exact archived source reference must be verified/pinned
 before cutover. No cross-platform installed recovery test is claimed by Linux-
 or macOS-hosted synthetic exports alone.
+
+## Archived bridge source verification
+
+`node scripts/verify-recovery-bridge.mjs` checks the pinned merged revision,
+original application ID, embedded production frontend/custom-protocol feature,
+registered Settings export action, and executes that **archived** exporter
+in a bounded isolated JavaScript context. Six synthetic canonical/legacy DOM
+fixtures labeled for macOS WebKit, Linux WebKitGTK and Windows WebView2 prove
+the shared DOM export format, source retention and cache/credential exclusion.
+Those labels do not simulate the native storage encodings or demonstrate
+actual platform profile recovery. The script uses local git history only;
+fetch the pinned revision if working in a shallow checkout.
+
+The exact complete exporter revision is now the merge of its delivery PR,
+not an intermediate implementation commit. The source evidence is reproducible
+without launching a desktop, accessing a user profile or reading a credential.
+
+The `recovery-bridge` workflow compiles this immutable archive with a production
+frontend/custom protocol on Linux, macOS and Windows and runs isolated profile
+directory-copy tests. It never launches a webview or accesses the runner's native
+credential store. These are build/copy gates, not a native user-profile recovery
+claim. The same archived production frontend and embedded desktop compile
+passed locally on macOS 26.2; no recovery desktop was launched.

@@ -1,0 +1,38 @@
+{
+  "revision": "72440eaef4177b809664bf6b563647d7659f3e52",
+  "applicationId": "app.norn.desktop",
+  "mode": "archived-source DOM synthetic verification",
+  "nativeProfileRecoveryObserved": false,
+  "routes": [
+    {
+      "platform": "macOS/WebKit",
+      "source": "canonical",
+      "exportedEntries": 2
+    },
+    {
+      "platform": "macOS/WebKit",
+      "source": "legacy",
+      "exportedEntries": 2
+    },
+    {
+      "platform": "Linux/WebKitGTK",
+      "source": "canonical",
+      "exportedEntries": 2
+    },
+    {
+      "platform": "Linux/WebKitGTK",
+      "source": "legacy",
+      "exportedEntries": 2
+    },
+    {
+      "platform": "Windows/WebView2",
+      "source": "canonical",
+      "exportedEntries": 2
+    },
+    {
+      "platform": "Windows/WebView2",
+      "source": "legacy",
+      "exportedEntries": 2
+    }
+  ]
+}

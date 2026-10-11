@@ -7,8 +7,8 @@
 ## Scope
 
 Add an explicit terminal action to inspect the canonical imported theme and
-preview its effect against the current settings version, then approve applying
-only that preference. Do not silently replace newer settings on startup or
+preview its effect on the settings draft, then approve staging only that
+preference. The existing explicit settings save retains its version fence. Do not silently replace newer settings on startup or
 mutate the archived imported record. Preserve unrelated preferences and fence
 pending results on disposal/navigation. Coordinate with unsaved settings edits.
 Pin the recovery guide to a merged, complete desktop exporter revision and
@@ -18,7 +18,7 @@ exactly which native recovery observations remain for packaging/cutover.
 ## Exit Criteria
 
 1. Imported dark/light theme is read from Rust-owned canonical records; preview
-   shows imported/current values and requires a separate explicit confirmation.
+   shows imported/current values and requires a separate explicit staging confirmation and existing explicit save.
    Missing/wrong/changed data and stale settings versions fail clearly, keeping
    existing preferences and source records intact.
 2. Settings/editor cancellation and pending theme actions do not silently discard

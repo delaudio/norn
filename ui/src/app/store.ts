@@ -498,7 +498,7 @@ export class ShellStore {
   }
 
   toggleData(): void {
-    this.update({ dataOpen: !this.state.dataOpen, settingsOpen: false, fixPreview: null });
+    this.update({ dataOpen: !this.state.dataOpen, fixPreview: null });
   }
   toggleWorkspace(): void {
     this.update({

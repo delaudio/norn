@@ -345,7 +345,7 @@ async function backgroundOperationScene() {
   return { client, store };
 }
 
-async function settingsScene(mode: "normal" | "secret" | "error" | "light") {
+async function settingsScene(mode: "normal" | "secret" | "error" | "light" | "imported-theme") {
   class SettingsTransport extends FakeBackendTransport {
     async request(method: string, params: Record<string, unknown>) {
       if (mode === "error" && method === "settings.get")
@@ -356,6 +356,7 @@ async function settingsScene(mode: "normal" | "secret" | "error" | "light") {
     }
   }
   const transport = new SettingsTransport({
+    workspaceRecords: { theme: { kind: "theme", value: "light" } },
     repositories,
     credentials: [{ provider: "github", available: true, source: "keychain" }],
   });
@@ -363,6 +364,7 @@ async function settingsScene(mode: "normal" | "secret" | "error" | "light") {
   await ready;
   const settings = new SettingsStore();
   await settings.load(client);
+  if (mode === "imported-theme") await settings.previewImportedTheme(client);
   if (mode === "light") {
     const snapshot = await client.settings();
     snapshot.settings.theme = "light";
@@ -615,6 +617,18 @@ const scenes: Scene[] = [
   { id: "shell-settings-secret-50x15", cols: 50, rows: 15, build: () => settingsScene("secret") },
   { id: "shell-settings-error-80x24", cols: 80, rows: 24, build: () => settingsScene("error") },
   { id: "shell-settings-light-120x40", cols: 120, rows: 40, build: () => settingsScene("light") },
+  {
+    id: "shell-settings-imported-theme-120x40",
+    cols: 120,
+    rows: 40,
+    build: () => settingsScene("imported-theme"),
+  },
+  {
+    id: "shell-settings-imported-theme-50x20",
+    cols: 50,
+    rows: 20,
+    build: () => settingsScene("imported-theme"),
+  },
   { id: "shell-background-operation-120x30", cols: 120, rows: 30, build: backgroundOperationScene },
   { id: "shell-background-operation-50x15", cols: 50, rows: 15, build: backgroundOperationScene },
   { id: "shell-sync-preview-120x30", cols: 120, rows: 30, build: () => branchScene("sync") },

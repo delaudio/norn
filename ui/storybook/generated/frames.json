@@ -37978,6 +37978,40 @@
             "underline": false
           },
           {
+            "text": "Ctrl+T preview imported theme · Ctrl+Y stage · Ctrl+S save",
+            "width": 58,
+            "fg": "rgba(128,128,128,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "                                                             ",
+            "width": 61,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
             "text": "github: keychain",
             "width": 16,
             "fg": "rgba(158,206,106,1)",
@@ -38988,20 +39022,6 @@
       {
         "spans": [
           {
-            "text": "                                                                                                                        ",
-            "width": 120,
-            "fg": "rgba(255,255,255,1)",
-            "bg": "rgba(10,10,10,1)",
-            "attributes": 0,
-            "bold": false,
-            "italic": false,
-            "underline": false
-          }
-        ]
-      },
-      {
-        "spans": [
-          {
             "text": " ",
             "width": 1,
             "fg": "rgba(255,255,255,1)",
@@ -39132,6 +39152,40 @@
           {
             "text": "          ",
             "width": 10,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "Ctrl+T preview imported theme · Ctrl+Y stage · ",
+            "width": 47,
+            "fg": "rgba(128,128,128,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "  ",
+            "width": 2,
             "fg": "rgba(255,255,255,1)",
             "bg": "rgba(10,10,10,1)",
             "attributes": 0,
@@ -39634,60 +39688,6 @@
             "underline": false
           },
           {
-            "text": "empty)",
-            "width": 6,
-            "fg": "rgba(238,238,238,1)",
-            "bg": "rgba(10,10,10,1)",
-            "attributes": 0,
-            "bold": false,
-            "italic": false,
-            "underline": false
-          },
-          {
-            "text": "                                         ",
-            "width": 41,
-            "fg": "rgba(255,255,255,1)",
-            "bg": "rgba(10,10,10,1)",
-            "attributes": 0,
-            "bold": false,
-            "italic": false,
-            "underline": false
-          },
-          {
-            "text": " ",
-            "width": 1,
-            "fg": "rgba(255,255,255,1)",
-            "bg": "rgba(37,37,39,1)",
-            "attributes": 0,
-            "bold": false,
-            "italic": false,
-            "underline": false
-          },
-          {
-            "text": " ",
-            "width": 1,
-            "fg": "rgba(255,255,255,1)",
-            "bg": "rgba(10,10,10,1)",
-            "attributes": 0,
-            "bold": false,
-            "italic": false,
-            "underline": false
-          }
-        ]
-      },
-      {
-        "spans": [
-          {
-            "text": " ",
-            "width": 1,
-            "fg": "rgba(255,255,255,1)",
-            "bg": "rgba(10,10,10,1)",
-            "attributes": 0,
-            "bold": false,
-            "italic": false,
-            "underline": false
-          },
-          {
             "text": "Cancel discards unsaved fields. Saving ",
             "width": 39,
             "fg": "rgba(128,128,128,1)",
@@ -39808,6 +39808,40 @@
           {
             "text": "                                          ",
             "width": 42,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "Ctrl+T preview imported theme · Ctrl+Y stage · Ctrl+S save",
+            "width": 58,
+            "fg": "rgba(128,128,128,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "                                                             ",
+            "width": 61,
             "fg": "rgba(255,255,255,1)",
             "bg": "rgba(10,10,10,1)",
             "attributes": 0,
@@ -40840,20 +40874,6 @@
       {
         "spans": [
           {
-            "text": "                                                                                                                        ",
-            "width": 120,
-            "fg": "rgba(255,255,255,1)",
-            "bg": "rgba(10,10,10,1)",
-            "attributes": 0,
-            "bold": false,
-            "italic": false,
-            "underline": false
-          }
-        ]
-      },
-      {
-        "spans": [
-          {
             "text": " ",
             "width": 1,
             "fg": "rgba(255,255,255,1)",
@@ -41006,6 +41026,40 @@
             "underline": false
           },
           {
+            "text": "Ctrl+T preview imported theme · Ctrl+Y stage · ",
+            "width": 47,
+            "fg": "rgba(128,128,128,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "  ",
+            "width": 2,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
             "text": "github: keychain",
             "width": 16,
             "fg": "rgba(158,206,106,1)",
@@ -41078,60 +41132,6 @@
             "width": 48,
             "fg": "rgba(224,175,104,1)",
             "bg": "rgba(10,10,10,1)",
-            "attributes": 0,
-            "bold": false,
-            "italic": false,
-            "underline": false
-          },
-          {
-            "text": " ",
-            "width": 1,
-            "fg": "rgba(255,255,255,1)",
-            "bg": "rgba(10,10,10,1)",
-            "attributes": 0,
-            "bold": false,
-            "italic": false,
-            "underline": false
-          }
-        ]
-      },
-      {
-        "spans": [
-          {
-            "text": " ",
-            "width": 1,
-            "fg": "rgba(255,255,255,1)",
-            "bg": "rgba(10,10,10,1)",
-            "attributes": 0,
-            "bold": false,
-            "italic": false,
-            "underline": false
-          },
-          {
-            "text": "  Repo 2 provider: bitbucket",
-            "width": 28,
-            "fg": "rgba(238,238,238,1)",
-            "bg": "rgba(10,10,10,1)",
-            "attributes": 0,
-            "bold": false,
-            "italic": false,
-            "underline": false
-          },
-          {
-            "text": "                   ",
-            "width": 19,
-            "fg": "rgba(255,255,255,1)",
-            "bg": "rgba(10,10,10,1)",
-            "attributes": 0,
-            "bold": false,
-            "italic": false,
-            "underline": false
-          },
-          {
-            "text": " ",
-            "width": 1,
-            "fg": "rgba(255,255,255,1)",
-            "bg": "rgba(37,37,39,1)",
             "attributes": 0,
             "bold": false,
             "italic": false,
@@ -41706,6 +41706,82 @@
       {
         "spans": [
           {
+            "text": "                                                                                ",
+            "width": 80,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": "                                                                                ",
+            "width": 80,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "Ctrl+T preview imported theme · Ctrl+Y stage · Ctrl+S save",
+            "width": 58,
+            "fg": "rgba(128,128,128,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "                     ",
+            "width": 21,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": "                                                                                ",
+            "width": 80,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
             "text": " ",
             "width": 1,
             "fg": "rgba(255,255,255,1)",
@@ -41728,62 +41804,6 @@
           {
             "text": "             ",
             "width": 13,
-            "fg": "rgba(255,255,255,1)",
-            "bg": "rgba(10,10,10,1)",
-            "attributes": 0,
-            "bold": false,
-            "italic": false,
-            "underline": false
-          }
-        ]
-      },
-      {
-        "spans": [
-          {
-            "text": "                                                                                ",
-            "width": 80,
-            "fg": "rgba(255,255,255,1)",
-            "bg": "rgba(10,10,10,1)",
-            "attributes": 0,
-            "bold": false,
-            "italic": false,
-            "underline": false
-          }
-        ]
-      },
-      {
-        "spans": [
-          {
-            "text": "                                                                                ",
-            "width": 80,
-            "fg": "rgba(255,255,255,1)",
-            "bg": "rgba(10,10,10,1)",
-            "attributes": 0,
-            "bold": false,
-            "italic": false,
-            "underline": false
-          }
-        ]
-      },
-      {
-        "spans": [
-          {
-            "text": "                                                                                ",
-            "width": 80,
-            "fg": "rgba(255,255,255,1)",
-            "bg": "rgba(10,10,10,1)",
-            "attributes": 0,
-            "bold": false,
-            "italic": false,
-            "underline": false
-          }
-        ]
-      },
-      {
-        "spans": [
-          {
-            "text": "                                                                                ",
-            "width": 80,
             "fg": "rgba(255,255,255,1)",
             "bg": "rgba(10,10,10,1)",
             "attributes": 0,
@@ -42122,6 +42142,40 @@
           {
             "text": "                                          ",
             "width": 42,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(250,250,250,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(250,250,250,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "Ctrl+T preview imported theme · Ctrl+Y stage · Ctrl+S save",
+            "width": 58,
+            "fg": "rgba(96,96,96,1)",
+            "bg": "rgba(250,250,250,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "                                                             ",
+            "width": 61,
             "fg": "rgba(255,255,255,1)",
             "bg": "rgba(250,250,250,1)",
             "attributes": 0,
@@ -43154,20 +43208,6 @@
       {
         "spans": [
           {
-            "text": "                                                                                                                        ",
-            "width": 120,
-            "fg": "rgba(255,255,255,1)",
-            "bg": "rgba(250,250,250,1)",
-            "attributes": 0,
-            "bold": false,
-            "italic": false,
-            "underline": false
-          }
-        ]
-      },
-      {
-        "spans": [
-          {
             "text": " ",
             "width": 1,
             "fg": "rgba(255,255,255,1)",
@@ -43192,6 +43232,2088 @@
             "width": 43,
             "fg": "rgba(255,255,255,1)",
             "bg": "rgba(250,250,250,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      }
+    ]
+  },
+  "shell-settings-imported-theme-120x40": {
+    "cols": 120,
+    "rows": 40,
+    "lines": [
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "Settings · Enter edit/cycle · Esc discard and close",
+            "width": 51,
+            "fg": "rgba(122,162,247,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "                                                                    ",
+            "width": 68,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "Ctrl+D user data · Ctrl+S preferences · Ctrl+K credential · a add repo · d remove repo · x clear keychain",
+            "width": 105,
+            "fg": "rgba(128,128,128,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "              ",
+            "width": 14,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "Secrets stay in the OS store. Existing environment credentials are preserved.",
+            "width": 77,
+            "fg": "rgba(128,128,128,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "                                          ",
+            "width": 42,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "Preview only. Ctrl+Y stages this theme; Ctrl+S saves preferences. Esc dismisses.",
+            "width": 80,
+            "fg": "rgba(224,175,104,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "                                       ",
+            "width": 39,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": "                                                                                                                        ",
+            "width": 120,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "Ctrl+T preview imported theme · Ctrl+Y stage · Ctrl+S save",
+            "width": 58,
+            "fg": "rgba(128,128,128,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "                                                             ",
+            "width": 61,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "Theme draft: dark → imported light. Ctrl+Y stage · Esc dismiss",
+            "width": 62,
+            "fg": "rgba(224,175,104,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "                                                         ",
+            "width": 57,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": "                                                                                                                        ",
+            "width": 120,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "github: keychain",
+            "width": 16,
+            "fg": "rgba(158,206,106,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "                                                                                                       ",
+            "width": 103,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "Tools: git found · claude found · codex found · opencode found · Ctrl+R refresh",
+            "width": 79,
+            "fg": "rgba(128,128,128,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "                                        ",
+            "width": 40,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "Selected agent: claude · tool presence does not verify login or provider connection.",
+            "width": 84,
+            "fg": "rgba(224,175,104,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "                                   ",
+            "width": 35,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "› Review provider: github",
+            "width": 25,
+            "fg": "rgba(122,162,247,1)",
+            "bg": "rgba(30,30,30,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "                                                                                             ",
+            "width": 93,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(30,30,30,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "  Agent: claude",
+            "width": 15,
+            "fg": "rgba(238,238,238,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "                                                                                                        ",
+            "width": 104,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "  Claude model (blank = default): (default / empty)",
+            "width": 51,
+            "fg": "rgba(238,238,238,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "                                                                    ",
+            "width": 68,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "  Claude effort (blank = default): (default / empty)",
+            "width": 52,
+            "fg": "rgba(238,238,238,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "                                                                   ",
+            "width": 67,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "  Codex model (blank = default): (default / empty)",
+            "width": 50,
+            "fg": "rgba(238,238,238,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "                                                                     ",
+            "width": 69,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "  Codex effort (blank = default): (default / empty)",
+            "width": 51,
+            "fg": "rgba(238,238,238,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "                                                                    ",
+            "width": 68,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "  OpenCode model (blank = default): (default / empty)",
+            "width": 53,
+            "fg": "rgba(238,238,238,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "                                                                  ",
+            "width": 66,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "  OpenCode effort (blank = default): (default / empty)",
+            "width": 54,
+            "fg": "rgba(238,238,238,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "                                                                 ",
+            "width": 65,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "  Default diff: unified",
+            "width": 23,
+            "fg": "rgba(238,238,238,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "                                                                                                ",
+            "width": 96,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "  Theme: dark",
+            "width": 13,
+            "fg": "rgba(238,238,238,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "                                                                                                          ",
+            "width": 106,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "  Jira URL: (default / empty)",
+            "width": 29,
+            "fg": "rgba(238,238,238,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "                                                                                          ",
+            "width": 90,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "  Automatic PR sync seconds (blank = off): (default / empty)",
+            "width": 60,
+            "fg": "rgba(238,238,238,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "                                                           ",
+            "width": 59,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "  Repo 1 provider: github",
+            "width": 25,
+            "fg": "rgba(238,238,238,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "                                                                                              ",
+            "width": 94,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "  Repo 1 owner / workspace: acme",
+            "width": 32,
+            "fg": "rgba(238,238,238,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "                                                                                       ",
+            "width": 87,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "  Repo 1 name: payments",
+            "width": 23,
+            "fg": "rgba(238,238,238,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "                                                                                                ",
+            "width": 96,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "  Repo 1 local clone path: /home/dev/payments",
+            "width": 45,
+            "fg": "rgba(238,238,238,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "                                                                          ",
+            "width": 74,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "  Repo 2 provider: bitbucket",
+            "width": 28,
+            "fg": "rgba(238,238,238,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "                                                                                           ",
+            "width": 91,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "  Repo 2 owner / workspace: acme",
+            "width": 32,
+            "fg": "rgba(238,238,238,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "                                                                                       ",
+            "width": 87,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "  Repo 2 name: billing",
+            "width": 22,
+            "fg": "rgba(238,238,238,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "                                                                                                 ",
+            "width": 97,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "  Repo 2 local clone path: (default / empty)",
+            "width": 44,
+            "fg": "rgba(238,238,238,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "                                                                           ",
+            "width": 75,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "  Credential provider: github",
+            "width": 29,
+            "fg": "rgba(238,238,238,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "                                                                                          ",
+            "width": 90,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "  Bitbucket username: (default / empty)",
+            "width": 39,
+            "fg": "rgba(238,238,238,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "                                                                                ",
+            "width": 80,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "  New credential (never read back): (default / empty)",
+            "width": 53,
+            "fg": "rgba(238,238,238,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "                                                                  ",
+            "width": 66,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": "                                                                                                                        ",
+            "width": 120,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": "                                                                                                                        ",
+            "width": 120,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": "                                                                                                                        ",
+            "width": 120,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": "                                                                                                                        ",
+            "width": 120,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": "                                                                                                                        ",
+            "width": 120,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "Cancel discards unsaved fields. Saving preferences never writes credentials.",
+            "width": 76,
+            "fg": "rgba(128,128,128,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "                                           ",
+            "width": 43,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      }
+    ]
+  },
+  "shell-settings-imported-theme-50x20": {
+    "cols": 50,
+    "rows": 20,
+    "lines": [
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "Settings · Enter edit/cycle · Esc discard and ",
+            "width": 46,
+            "fg": "rgba(122,162,247,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "   ",
+            "width": 3,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "Ctrl+D user data · Ctrl+S preferences · Ctrl+K ",
+            "width": 47,
+            "fg": "rgba(128,128,128,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "  ",
+            "width": 2,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "Secrets stay in the OS store. Existing ",
+            "width": 39,
+            "fg": "rgba(128,128,128,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "          ",
+            "width": 10,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "Preview only. Ctrl+Y stages this theme; Ctrl+S ",
+            "width": 47,
+            "fg": "rgba(224,175,104,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "  ",
+            "width": 2,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "saves preferences. Esc dismisses.",
+            "width": 33,
+            "fg": "rgba(224,175,104,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "                ",
+            "width": 16,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "Ctrl+T preview imported theme · Ctrl+Y stage · ",
+            "width": 47,
+            "fg": "rgba(128,128,128,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "  ",
+            "width": 2,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "Theme draft: dark → imported light. Ctrl+Y stage",
+            "width": 48,
+            "fg": "rgba(224,175,104,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "· Esc dismiss",
+            "width": 13,
+            "fg": "rgba(224,175,104,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "                                    ",
+            "width": 36,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "github: keychain",
+            "width": 16,
+            "fg": "rgba(158,206,106,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "                                 ",
+            "width": 33,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "Tools: git found · claude found · codex found · ",
+            "width": 48,
+            "fg": "rgba(128,128,128,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "Selected agent: claude · tool presence does not ",
+            "width": 48,
+            "fg": "rgba(224,175,104,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "› Review provider: github",
+            "width": 25,
+            "fg": "rgba(122,162,247,1)",
+            "bg": "rgba(30,30,30,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "                      ",
+            "width": 22,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(30,30,30,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "▀",
+            "width": 1,
+            "fg": "rgba(154,158,163,1)",
+            "bg": "rgba(37,37,39,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "  Agent: claude",
+            "width": 15,
+            "fg": "rgba(238,238,238,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "                                ",
+            "width": 32,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(37,37,39,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "  Claude model (blank = default): (default / ",
+            "width": 45,
+            "fg": "rgba(238,238,238,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "  ",
+            "width": 2,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(37,37,39,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "empty)",
+            "width": 6,
+            "fg": "rgba(238,238,238,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "                                         ",
+            "width": 41,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(37,37,39,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "  Claude effort (blank = default): (default / ",
+            "width": 46,
+            "fg": "rgba(238,238,238,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(37,37,39,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "empty)",
+            "width": 6,
+            "fg": "rgba(238,238,238,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "                                         ",
+            "width": 41,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(37,37,39,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "  Codex model (blank = default): (default / ",
+            "width": 44,
+            "fg": "rgba(238,238,238,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "   ",
+            "width": 3,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(37,37,39,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "empty)",
+            "width": 6,
+            "fg": "rgba(238,238,238,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "                                         ",
+            "width": 41,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(37,37,39,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "Cancel discards unsaved fields. Saving ",
+            "width": 39,
+            "fg": "rgba(128,128,128,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "          ",
+            "width": 10,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
             "attributes": 0,
             "bold": false,
             "italic": false,

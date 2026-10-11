@@ -14,6 +14,12 @@ export interface SettingsField {
   sensitive?: boolean;
 }
 export interface SettingsState {
+  themeLoading: boolean;
+  themePreview: {
+    value: "dark" | "light";
+    recordVersion: string;
+    draftTheme: "dark" | "light";
+  } | null;
   readiness: WorkspaceReadiness | null;
   readinessLoading: boolean;
   loading: boolean;
@@ -56,6 +62,8 @@ export class SettingsStore {
   private original: SettingsSnapshot | null = null;
   private generation = 0;
   private state: SettingsState = {
+    themeLoading: false,
+    themePreview: null,
     readiness: null,
     readinessLoading: false,
     loading: false,
@@ -86,7 +94,13 @@ export class SettingsStore {
   }
   async load(client: BackendClient) {
     const generation = ++this.generation;
-    this.update({ loading: true, error: null, notice: null });
+    this.update({
+      loading: true,
+      themePreview: null,
+      themeLoading: false,
+      error: null,
+      notice: null,
+    });
     try {
       const snapshot = await client.settings();
       if (generation !== this.generation) return;
@@ -113,6 +127,8 @@ export class SettingsStore {
     this.generation++;
     this.original = null;
     this.update({
+      themePreview: null,
+      themeLoading: false,
       readiness: null,
       readinessLoading: false,
       draft: null,
@@ -129,6 +145,65 @@ export class SettingsStore {
       editing: false,
       clearConfirmation: false,
     });
+  }
+  async previewImportedTheme(client: BackendClient): Promise<void> {
+    if (!this.readyToSave() || !this.state.draft) return;
+    const generation = this.generation;
+    this.update({ themeLoading: true, themePreview: null, error: null, notice: null });
+    try {
+      const record = await client.readWorkspace("theme", () => generation === this.generation);
+      if (generation !== this.generation) return;
+      if (
+        !record.available ||
+        record.payload.kind !== "theme" ||
+        !["dark", "light"].includes(record.payload.value)
+      )
+        throw new Error("No imported theme is available. Import a desktop export first.");
+      this.update({
+        themePreview: {
+          value: record.payload.value as "dark" | "light",
+          recordVersion: record.recordVersion,
+          draftTheme: this.state.draft!.theme,
+        },
+        notice: "Preview only. Ctrl+Y stages this theme; Ctrl+S saves preferences. Esc dismisses.",
+      });
+    } catch (error) {
+      if (generation === this.generation) this.update({ error: errorText(error) });
+    } finally {
+      if (generation === this.generation) this.update({ themeLoading: false });
+    }
+  }
+  dismissImportedTheme(): void {
+    if (!this.state.themeLoading) this.update({ themePreview: null, notice: null });
+  }
+  async stageImportedTheme(client: BackendClient): Promise<void> {
+    if (!this.readyToSave() || !this.state.draft || !this.state.themePreview) return;
+    const generation = this.generation;
+    const preview = this.state.themePreview;
+    this.update({ themeLoading: true, error: null });
+    try {
+      const record = await client.readWorkspace("theme", () => generation === this.generation);
+      if (generation !== this.generation) return;
+      if (
+        !record.available ||
+        record.recordVersion !== preview.recordVersion ||
+        record.payload.kind !== "theme" ||
+        record.payload.value !== preview.value ||
+        this.state.draft?.theme !== preview.draftTheme
+      )
+        throw new Error("Imported theme or theme draft changed. Preview again before applying.");
+      this.update({
+        draft: { ...this.state.draft!, theme: preview.value },
+        themePreview: null,
+        notice:
+          "Imported theme staged. Other draft preferences retained. Ctrl+S saves; Esc discards.",
+      });
+    } catch (error) {
+      if (generation === this.generation)
+        this.update({ themePreview: null, error: errorText(error) });
+    } finally {
+      if (generation === this.generation) this.update({ themeLoading: false });
+    }
   }
   async refreshReadiness(client: BackendClient): Promise<void> {
     if (this.state.readinessLoading) return;
@@ -308,6 +383,7 @@ export class SettingsStore {
   private readyToSave(): boolean {
     if (
       this.state.saving ||
+      this.state.themeLoading ||
       this.state.loading ||
       this.state.credentialsLoading ||
       this.state.editing
