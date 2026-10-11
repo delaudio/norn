@@ -1,9 +1,11 @@
 import type {
   DraftTarget,
+  PrRepositoryIdentity,
   WorkspaceScope,
   WorkspaceSettings,
 } from "../../../src/protocol/generated/protocol";
 import type { WorkspaceReadiness } from "../transport/backendClient";
+import { validPublicationDTO } from "../transport/publicationValidation";
 import { SyntaxHighlighter } from "./syntaxHighlighter";
 import type { DiffSyntax, SyntaxReader } from "./syntaxTypes";
 import { setTheme } from "./theme";
@@ -124,6 +126,7 @@ export interface DiffView {
 /// repository, followed by stored PR review targets. Working-tree entries carry
 /// no `prId`; review entries do.
 export interface PickerEntry {
+  origin?: "remote";
   kind: "working-tree" | "review";
   provider: "github" | "bitbucket";
   workspace: string;
@@ -149,6 +152,8 @@ export interface ShellSnapshot {
   referencesOpen: boolean;
   draftsOpen: boolean;
   findingStage: { target: DraftTarget; findingId: string } | null;
+  providerOpen: boolean;
+  providerReads: boolean;
   settingsOpen: boolean;
   dataOpen: boolean;
   status: ShellStatus;
@@ -206,6 +211,8 @@ const INITIAL: ShellSnapshot = {
   referencesOpen: false,
   draftsOpen: false,
   findingStage: null,
+  providerOpen: false,
+  providerReads: false,
   settingsOpen: false,
   dataOpen: false,
   status: "idle",
@@ -406,6 +413,73 @@ export function anchorPresent(text: string, line: number, side: "old" | "new"): 
 }
 
 export class ShellStore {
+  private readonly remoteEntries = new Map<string, PickerEntry>();
+  private pickerScope(entry: PickerEntry): string {
+    return JSON.stringify([entry.provider, entry.workspace, entry.repo, entry.prId]);
+  }
+  private mergeRemote(picker: PickerEntry[]): PickerEntry[] {
+    const existing = new Set(picker.map((entry) => this.pickerScope(entry)));
+    return [
+      ...picker,
+      ...[...this.remoteEntries].filter(([key]) => !existing.has(key)).map(([, entry]) => entry),
+    ];
+  }
+  toggleProvider(): void {
+    if (this.state.providerOpen) {
+      this.update({ providerOpen: false });
+      return;
+    }
+    if (
+      this.state.composing ||
+      this.state.fixPreview ||
+      this.state.fixPreviewLoading ||
+      this.state.searchOpen ||
+      this.state.findingStage ||
+      this.state.settingsOpen ||
+      this.state.dataOpen ||
+      this.state.workspaceOpen ||
+      this.state.referencesOpen ||
+      this.state.draftsOpen
+    ) {
+      this.update({ notice: "Finish or close the current editor or approval before opening PRs." });
+      return;
+    }
+    this.update({ providerOpen: true });
+  }
+  async selectProviderPr(
+    repository: PrRepositoryIdentity,
+    prId: number,
+    title: string,
+    status: string,
+  ): Promise<void> {
+    if (
+      !validPublicationDTO("PrRepositoryIdentity", repository) ||
+      !Number.isSafeInteger(prId) ||
+      prId < 1 ||
+      prId >= 0x80000000
+    )
+      throw new Error("Invalid provider PR identity.");
+    if (this.state.composing || this.state.fixPreview || this.state.fixPreviewLoading)
+      throw new Error("Finish the current editor or approval first.");
+    const remote: PickerEntry = {
+      ...repository,
+      kind: "review",
+      prId,
+      runId: null,
+      title,
+      status,
+      origin: "remote",
+    };
+    const key = this.pickerScope(remote);
+    this.remoteEntries.delete(key);
+    this.remoteEntries.set(key, remote);
+    if (this.remoteEntries.size > 1000)
+      this.remoteEntries.delete(this.remoteEntries.keys().next().value as string);
+    const picker = this.mergeRemote(this.state.picker.filter((entry) => entry.origin !== "remote"));
+    const selectedPicker = picker.findIndex((entry) => this.pickerScope(entry) === key);
+    this.update({ picker, providerOpen: false });
+    await this.selectPicker(selectedPicker);
+  }
   private copyPending = false;
   async copyReviewOutput(client: BackendClient, copy: (text: string) => boolean): Promise<void> {
     if (this.copyPending) return;
@@ -697,7 +771,7 @@ export class ShellStore {
     ]);
     if (generation !== this.state.generation || this.state.status === "closed") return;
     setTheme(settings.theme);
-    const picker = buildPicker(repositories, targets, scopes);
+    const picker = this.mergeRemote(buildPicker(repositories, targets, scopes));
     const selected = picker.findIndex((entry) => sameTarget(pickerTargetIdentity(entry), target));
     this.update({ repositories, picker, diffMode: settings.defaultDiffView, readiness });
     await this.selectPicker(Math.max(0, selected));
@@ -732,7 +806,8 @@ export class ShellStore {
         serverVersion: ready.serverVersion,
         repositories,
         selected: 0,
-        picker: buildPicker(repositories, targets, scopes),
+        picker: this.mergeRemote(buildPicker(repositories, targets, scopes)),
+        providerReads: ready.capabilities.includes("provider-pr-reads"),
         selectedPicker: 0,
         generation: this.state.generation + 1,
         files: [],
@@ -1354,7 +1429,7 @@ export class ShellStore {
         client.workspaceScopes(() => generation === this.state.generation),
       ]);
       if (generation !== this.state.generation || !sameTarget(this.activeTarget(), target)) return;
-      const picker = buildPicker(this.state.repositories, targets, scopes);
+      const picker = this.mergeRemote(buildPicker(this.state.repositories, targets, scopes));
       const next =
         target.kind === "provider" && target.prId
           ? picker.findIndex(

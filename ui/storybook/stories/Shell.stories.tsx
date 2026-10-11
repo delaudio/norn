@@ -158,3 +158,18 @@ export const RemoteCommentThreads: Story = {
 export const CompactRemoteCommentThreads: Story = {
   args: { frameId: "shell-publication-threads-50x20" },
 };
+
+export const ProviderList: Story = { args: { frameId: "shell-provider-list-120x30" } };
+export const ProviderListCompact: Story = { args: { frameId: "shell-provider-list-50x15" } };
+export const ProviderDetail: Story = { args: { frameId: "shell-provider-detail-120x30" } };
+export const ProviderDetailCompact: Story = { args: { frameId: "shell-provider-detail-50x15" } };
+export const ProviderEmpty: Story = { args: { frameId: "shell-provider-empty-120x30" } };
+export const ProviderEmptyCompact: Story = { args: { frameId: "shell-provider-empty-50x15" } };
+export const ProviderError: Story = { args: { frameId: "shell-provider-error-120x30" } };
+export const ProviderErrorCompact: Story = { args: { frameId: "shell-provider-error-50x15" } };
+export const ProviderLoading: Story = { args: { frameId: "shell-provider-loading-120x30" } };
+export const ProviderLoadingCompact: Story = { args: { frameId: "shell-provider-loading-50x15" } };
+export const ProviderIdentity: Story = { args: { frameId: "shell-provider-identity-120x30" } };
+export const ProviderIdentityCompact: Story = {
+  args: { frameId: "shell-provider-identity-50x15" },
+};
