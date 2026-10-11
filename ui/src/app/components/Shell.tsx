@@ -31,6 +31,7 @@ function useShellInput(
   client: BackendClient,
   quit: () => void,
   scroll: RefObject<ScrollBoxRenderable | null>,
+  fixScroll: RefObject<ScrollBoxRenderable | null>,
 ) {
   useKeyboard((key) => {
     if (key.ctrl && key.name === "c") {
@@ -44,6 +45,10 @@ function useShellInput(
       key.preventDefault();
       if (key.name === "y") void store.confirmFix(client);
       else if (key.name === "escape" || key.name === "n") store.dismissFix();
+      else if (key.name === "down" || key.name === "up")
+        fixScroll.current?.scrollBy(key.name === "down" ? 1 : -1);
+      else if (key.name === "pagedown" || key.name === "pageup")
+        fixScroll.current?.scrollBy(key.name === "pagedown" ? 5 : -5);
       return;
     }
     if (store.getSnapshot().composing) {
@@ -552,7 +557,8 @@ export function Shell({ store, client, quit }: ShellProps) {
   const state = useSyncExternalStore(store.subscribe, store.getSnapshot);
   const scroll = useRef<ScrollBoxRenderable | null>(null);
   const { width } = useTerminalDimensions();
-  useShellInput(store, client, quit, scroll);
+  const fixScroll = useRef<ScrollBoxRenderable | null>(null);
+  useShellInput(store, client, quit, scroll, fixScroll);
   const wide = width >= 100;
 
   const diffLinesData = useMemo(
@@ -807,6 +813,7 @@ export function Shell({ store, client, quit }: ShellProps) {
         </box>
       </box>
       <FixPanel
+        scroll={fixScroll}
         preview={state.fixPreview}
         result={state.fixState}
         loading={state.fixPreviewLoading}
@@ -821,9 +828,11 @@ export function Shell({ store, client, quit }: ShellProps) {
       <box height={1} flexShrink={0} paddingX={1} backgroundColor={theme.panel}>
         <text fg={theme.muted}>
           {diffCollapsed ? "large diff · e expand  " : ""}
-          {wide
-            ? "j/k move  s split  e expand  Tab pane  a fix  r reply  t threads  v chat  f filter  g group  x cancel  q quit"
-            : "j/k  ←/→  s  e  Tab  q"}
+          {state.fixPreview
+            ? "y approve · Esc/n dismiss · ↑/↓ scroll effects"
+            : wide
+              ? "j/k move  s split  e expand  Tab pane  a fix  r reply  t threads  v chat  f filter  g group  x cancel  q quit"
+              : "j/k  ←/→  s  e  Tab  q"}
         </text>
       </box>
     </box>

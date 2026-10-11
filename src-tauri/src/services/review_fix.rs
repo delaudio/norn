@@ -28,17 +28,26 @@ pub(crate) fn checkout_fingerprint(path: &Path) -> Result<String, String> {
     );
     let output = run_git_bounded_with_control(
         path,
-        &["ls-files", "--others", "--exclude-standard", "-z"],
+        &["status", "--porcelain=v1", "-z", "--untracked-files=all"],
         None,
         1024 * 1024,
-        "untracked file list",
+        "changed file list",
         &control,
     )?;
     if !output.status.success() {
-        return Err("Cannot inspect untracked files.".to_string());
+        return Err("Cannot inspect changed files.".to_string());
     }
-    let mut hasher = Sha256::new();
-    hasher.update(snapshot.snapshot_sha256.as_bytes());
+    let index = run_git_bounded_with_control(
+        path,
+        &["ls-files", "--stage", "-z"],
+        None,
+        4 * 1024 * 1024,
+        "index identity",
+        &control,
+    )?;
+    if !index.status.success() {
+        return Err("Cannot inspect the Git index.".to_string());
+    }
     let remote = run_git_bounded_with_control(
         path,
         &["remote", "get-url", "origin"],
@@ -50,14 +59,33 @@ pub(crate) fn checkout_fingerprint(path: &Path) -> Result<String, String> {
     if !remote.status.success() {
         return Err("The fix workflow requires an origin remote.".to_string());
     }
+    let mut hasher = Sha256::new();
+    hasher.update(snapshot.snapshot_sha256.as_bytes());
+    hasher.update(index.stdout);
     hasher.update((remote.stdout.len() as u64).to_be_bytes());
     hasher.update(remote.stdout);
     let mut total_bytes = 0usize;
-    for raw_path in output
+    let mut entries = output
         .stdout
         .split(|byte| *byte == 0)
-        .filter(|entry| !entry.is_empty())
-    {
+        .filter(|entry| !entry.is_empty());
+    while let Some(entry) = entries.next() {
+        if entry.len() < 4 {
+            return Err("Invalid changed file record.".to_string());
+        }
+        hasher.update((entry.len() as u64).to_be_bytes());
+        hasher.update(entry);
+        if entry[..2]
+            .iter()
+            .any(|status| *status == b'R' || *status == b'C')
+        {
+            let old_path = entries
+                .next()
+                .ok_or_else(|| "Incomplete rename record.".to_string())?;
+            hasher.update((old_path.len() as u64).to_be_bytes());
+            hasher.update(old_path);
+        }
+        let raw_path = &entry[3..];
         let filename = std::str::from_utf8(raw_path)
             .map_err(|_| "Non-UTF8 paths cannot be approved.".to_string())?;
         let relative = Path::new(filename);
@@ -65,10 +93,19 @@ pub(crate) fn checkout_fingerprint(path: &Path) -> Result<String, String> {
             .components()
             .any(|part| !matches!(part, Component::Normal(_)))
         {
-            return Err("Unsafe untracked file path.".to_string());
+            return Err("Unsafe changed file path.".to_string());
         }
         let file_path = path.join(relative);
-        let metadata = fs::symlink_metadata(&file_path).map_err(|error| error.to_string())?;
+        let metadata = match fs::symlink_metadata(&file_path) {
+            Ok(metadata) => metadata,
+            Err(error)
+                if error.kind() == std::io::ErrorKind::NotFound && entry[..2].contains(&b'D') =>
+            {
+                hasher.update(b"deleted");
+                continue;
+            }
+            Err(error) => return Err(error.to_string()),
+        };
         if !metadata.is_file()
             || file_path
                 .canonicalize()
@@ -76,20 +113,26 @@ pub(crate) fn checkout_fingerprint(path: &Path) -> Result<String, String> {
                 .strip_prefix(path)
                 .is_err()
         {
-            return Err("Untracked links and special files cannot be approved.".to_string());
+            return Err("Changed links and special files cannot be approved.".to_string());
         }
         let mut contents = Vec::new();
-        fs::File::open(file_path)
+        let mut options = fs::OpenOptions::new();
+        options.read(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.custom_flags(libc::O_NOFOLLOW);
+        }
+        options
+            .open(file_path)
             .map_err(|error| error.to_string())?
             .take(2 * 1024 * 1024 + 1)
             .read_to_end(&mut contents)
             .map_err(|error| error.to_string())?;
         total_bytes += contents.len();
         if contents.len() > 2 * 1024 * 1024 || total_bytes > 16 * 1024 * 1024 {
-            return Err("Untracked content exceeds the fix preview budget.".to_string());
+            return Err("Changed content exceeds the fix preview budget.".to_string());
         }
-        hasher.update((raw_path.len() as u64).to_be_bytes());
-        hasher.update(raw_path);
         hasher.update((contents.len() as u64).to_be_bytes());
         hasher.update(contents);
     }

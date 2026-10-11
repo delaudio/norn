@@ -7,12 +7,12 @@ Other shortcuts and pasted text do not approve a pending fix.
 
 Rust issues a random, single-use token valid for five minutes. It binds the
 provider/repository/PR/run, saved thread payload, canonical clone, tracked
-content identity, untracked content and origin URL. Execution rechecks the
+content identity, index blob identities, changed binary/untracked content and origin URL. Execution rechecks the
 approval and the worker checks the fingerprint before the first mutation.
 Changing a target clears the UI preview. Timeout does not trigger a retry.
 
 Preview reads Git state without invoking agent tools or mutating the checkout.
-Untracked content is limited to 2 MiB per file and 16 MiB in total. Links,
+Changed and untracked content is limited to 2 MiB per file and 16 MiB in total. Links,
 special files, invalid UTF-8 paths and incomplete snapshots are refused.
 The reviewed diff is limited to 256 KiB. The complete saved conversation is
 used in the Rust-built prompt; oversized payloads are refused, not truncated.

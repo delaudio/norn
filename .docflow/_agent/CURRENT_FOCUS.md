@@ -8,7 +8,7 @@ If status files and git disagree, git is authoritative; correct this file.
 
 ## Active state
 
-- **Branch:** `issue-303-review-fix-approval` (prepared after PR #334).
+- **Branch:** `issue-303-review-fix-approval` (PR #335).
 - **Active item:** complete epic #294 through verified PRs and squash merges.
 - **Current change:** review.fix preview, snapshot-bound approval and native
   cancellation; plan 0033. PR #334 merged at `043dcf1` after both CI gates passed.
@@ -22,7 +22,7 @@ If status files and git disagree, git is authoritative; correct this file.
 ## Next item
 
 - Merge the approved-fix delivery after all checks pass, then complete
-  remaining native mutation operations for #303. Preserve `.norn.yaml` as unrelated user data.
+  approved commit/push and conflict/sync operations for #303. Preserve `.norn.yaml` as unrelated user data.
 
 ## Epic queue
 

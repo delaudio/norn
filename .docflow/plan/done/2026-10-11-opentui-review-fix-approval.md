@@ -30,8 +30,8 @@ Commit/push/conflict/sync parity follows in separate bounded deliveries.
 
 - PR #334: stored thread/run selection. Merge this delivery after #334.
 
-## Status
 
-- Claimed by: default-agent, 2026-10-11, `issue-303-review-fix-approval`.
-- Blockers: None; PR #334 merged at `043dcf1`.
-- Stopped:
+---
+
+Shipped through PR #335 (issue #303). Effective on merge to main. ADR 0020
+remains Accepted until the entire migration is complete.

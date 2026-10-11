@@ -1,3 +1,5 @@
+import type { ScrollBoxRenderable } from "@opentui/core";
+import type { RefObject } from "react";
 import type { FixPreview, FixState } from "../../transport/backendClient";
 import { theme } from "../theme";
 
@@ -5,10 +7,12 @@ export function FixPanel({
   preview,
   result,
   loading,
+  scroll,
 }: {
   preview: FixPreview | null;
   result: FixState | null;
   loading: boolean;
+  scroll: RefObject<ScrollBoxRenderable | null>;
 }) {
   if (!preview && !result && !loading) return null;
   return (
@@ -26,7 +30,7 @@ export function FixPanel({
             ? "Inspecting fix effects…"
             : `Fix · ${result?.status} · ${result?.phase}`}
       </text>
-      <scrollbox height="100%" flexGrow={1} minHeight={0}>
+      <scrollbox ref={scroll} height="100%" flexGrow={1} minHeight={0}>
         {preview ? (
           <>
             <text

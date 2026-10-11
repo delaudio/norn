@@ -2132,8 +2132,8 @@
             "underline": false
           },
           {
-            "text": "j/k move  s split  e expand  Tab pane  a fix  r reply  t threads  v chat  f filter  g group  x cancel  q quit",
-            "width": 109,
+            "text": "y approve · Esc/n dismiss · ↑/↓ scroll effects",
+            "width": 46,
             "fg": "rgba(128,128,128,1)",
             "bg": "rgba(20,20,20,1)",
             "attributes": 0,
@@ -2142,8 +2142,8 @@
             "underline": false
           },
           {
-            "text": "          ",
-            "width": 10,
+            "text": "                                                                         ",
+            "width": 73,
             "fg": "rgba(255,255,255,1)",
             "bg": "rgba(20,20,20,1)",
             "attributes": 0,
@@ -2768,8 +2768,8 @@
             "underline": false
           },
           {
-            "text": "j/k  ←/→  s  e  Tab  q",
-            "width": 22,
+            "text": "y approve · Esc/n dismiss · ↑/↓ scroll effects",
+            "width": 46,
             "fg": "rgba(128,128,128,1)",
             "bg": "rgba(20,20,20,1)",
             "attributes": 0,
@@ -2778,8 +2778,8 @@
             "underline": false
           },
           {
-            "text": "                           ",
-            "width": 27,
+            "text": "   ",
+            "width": 3,
             "fg": "rgba(255,255,255,1)",
             "bg": "rgba(20,20,20,1)",
             "attributes": 0,

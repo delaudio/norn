@@ -1050,3 +1050,25 @@ fn failed_fix_preserves_partial_edits_without_committing() {
         .unwrap();
     assert_eq!(String::from_utf8(history.stdout).unwrap().trim(), "1");
 }
+
+#[cfg(unix)]
+#[test]
+fn fix_approval_rejects_changed_binary_content_and_staged_identity() {
+    let mut fixture = FixFixture::new("#!/bin/sh\nprintf invoked > agent-ran\nexit 1\n");
+    std::fs::write(fixture.repo.path().join("tracked.txt"), b"\0binary-one").unwrap();
+    let preview = fixture.preview();
+    std::fs::write(fixture.repo.path().join("tracked.txt"), b"\0binary-two").unwrap();
+    let operation = fixture.execute(preview["approvalToken"].as_str().unwrap());
+    assert_eq!(
+        fixture.terminal(&operation)["event"]["error"]["code"],
+        "targetStale"
+    );
+    let preview = fixture.preview();
+    git(fixture.repo.path(), &["add", "tracked.txt"]);
+    let operation = fixture.execute(preview["approvalToken"].as_str().unwrap());
+    assert_eq!(
+        fixture.terminal(&operation)["event"]["error"]["code"],
+        "targetStale"
+    );
+    assert!(!fixture.repo.path().join("agent-ran").exists());
+}
