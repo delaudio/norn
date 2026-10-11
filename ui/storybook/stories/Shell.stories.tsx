@@ -98,3 +98,16 @@ export const UnsupportedImage: Story = { args: { frameId: "shell-images-unsuppor
 
 export const WrappedAnchor: Story = { args: { frameId: "shell-wrapped-anchor-120x30" } };
 export const CompactWrappedAnchor: Story = { args: { frameId: "shell-wrapped-anchor-80x24" } };
+
+export const ImportedThemePreview: Story = {
+  args: { frameId: "shell-settings-imported-theme-120x40" },
+};
+export const CompactImportedThemePreview: Story = {
+  args: { frameId: "shell-settings-imported-theme-50x20" },
+};
+export const SavedReferences: Story = { args: { frameId: "shell-references-saved-120x40" } };
+export const CompactReferences: Story = { args: { frameId: "shell-references-saved-50x20" } };
+export const ReferenceEditor: Story = { args: { frameId: "shell-references-editing-120x40" } };
+export const ReferenceConflict: Story = { args: { frameId: "shell-references-conflict-80x30" } };
+export const ReferenceRemoval: Story = { args: { frameId: "shell-references-remove-80x30" } };
+export const NoPullRequestReferences: Story = { args: { frameId: "shell-references-local-50x15" } };

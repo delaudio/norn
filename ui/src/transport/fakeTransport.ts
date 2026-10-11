@@ -1,4 +1,8 @@
-import type { WorkspaceSettings, WorkspaceValue } from "../../../src/protocol/generated/protocol";
+import type {
+  WorkspaceReference,
+  WorkspaceSettings,
+  WorkspaceValue,
+} from "../../../src/protocol/generated/protocol";
 import type { CredentialStatus } from "./backendClient";
 // Deterministic in-memory transport for tests, browser/dev mode and Storybook.
 // It implements the same contract as the subprocess transport.
@@ -127,7 +131,13 @@ export class FakeBackendTransport implements BackendTransport {
       if (method === "workspace.mutate") {
         if (params.expectedVersion !== version)
           throw new Error("User-data record changed; refresh before saving your edit.");
-        const mutation = params.mutation as { kind: string; value?: string; path?: string };
+        const mutation = params.mutation as {
+          kind: string;
+          value?: string;
+          path?: string;
+          reference?: WorkspaceReference;
+          id?: string;
+        };
         let next: WorkspaceValue;
         if (payload.kind === "prompt" && mutation.kind === "setPrompt")
           next = { kind: "prompt", value: mutation.value ?? "" };
@@ -138,6 +148,24 @@ export class FakeBackendTransport implements BackendTransport {
               mutation.kind === "removeViewed"
                 ? payload.value.filter((item) => item !== mutation.path)
                 : [...new Set([...payload.value, mutation.path ?? ""])],
+          };
+        else if (
+          payload.kind === "references" &&
+          mutation.kind === "putReference" &&
+          mutation.reference
+        )
+          next = {
+            kind: "references",
+            value: payload.value.some((item) => item.id === mutation.reference!.id)
+              ? payload.value.map((item) =>
+                  item.id === mutation.reference!.id ? structuredClone(mutation.reference!) : item,
+                )
+              : [...payload.value, structuredClone(mutation.reference)],
+          };
+        else if (payload.kind === "references" && mutation.kind === "removeReference")
+          next = {
+            kind: "references",
+            value: payload.value.filter((item) => item.id !== mutation.id),
           };
         else throw new Error("Unsupported fixture mutation.");
         this.records[key] = next;

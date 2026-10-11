@@ -384,6 +384,38 @@ pub(crate) fn prompt_for_scope(
     }))
 }
 
+pub(crate) fn references_for_scope(
+    provider: ReviewProvider,
+    workspace: &str,
+    repo: &str,
+    pr_id: u32,
+) -> Result<Vec<ReviewReference>, String> {
+    let key = format!(
+        "references.{}:{workspace}/{repo}/{pr_id}",
+        provider_name(provider)
+    );
+    empty_record(&key)?;
+    let _guard = data_lock()
+        .lock()
+        .map_err(|_| "User data is unavailable.")?;
+    let (document, _, _) = read_destination(&canonical_path()?)?;
+    Ok(document
+        .records
+        .into_iter()
+        .find_map(|record| {
+            if record.key == key {
+                if let WorkspaceValue::References(items) = record.payload {
+                    Some(items)
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        })
+        .unwrap_or_default())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

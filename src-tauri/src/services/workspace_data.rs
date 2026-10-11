@@ -1046,5 +1046,5 @@ mod tests {
 
 #[path = "workspace_records.rs"]
 mod records;
-pub(crate) use records::{prompt_for_scope, record_mutate, record_read};
+pub(crate) use records::{prompt_for_scope, record_mutate, record_read, references_for_scope};
 pub use records::{RecordMutateParams, RecordReadParams};
