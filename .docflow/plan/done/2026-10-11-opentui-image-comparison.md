@@ -35,5 +35,15 @@ bounded delivery under #302 before final cutover.
 ## Status
 
 - Claimed by: default-agent, 2026-10-11, `issue-302-image-comparison`.
-- Blockers: PR #340 awaiting CI; prepare isolated image work meanwhile.
+- Blockers: None; PR #340 merged at `72440ea`. Physical terminal smoke remains an explicit final platform gate.
 - Stopped:
+
+## Delivery
+
+Effective on merge to main of the image comparison PR. Root 123 tests/tooling,
+Archgate 17/17, 72 terminal tests/42 native frames, 616 core tests (2 ignored)
+and the no-GUI guard, 39 backend subprocess tests, strict all-feature/all-target
+Clippy, protocol drift and React Doctor pass. Decoder/capability tests cover
+Kitty/Sixel/tmux selection; physical-terminal display is not claimed. Text
+anchor/windowing/performance remains in #302; ADR 0020 remains Accepted until
+complete migration.
