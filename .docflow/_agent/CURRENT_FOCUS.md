@@ -10,11 +10,11 @@ If status files and git disagree, git is authoritative; correct this file.
 
 - **Branch:** `issue-303-approved-branch-sync` (stacked after PR #336).
 - **Active item:** complete epic #294 through verified PRs and squash merges.
-- **Current change:** plan 0035, approved branch sync/conflict resolution; PR #336 awaits CI. Previous delivery: approved commit and push controls for native fix sessions;
+- **Current change:** plan 0035, approved branch sync/conflict resolution, prepared in PR #337; PR #337 awaits CI. Previous delivery: approved commit and push controls for native fix sessions;
   plan 0034, prepared for merge in PR #336. PR #335 merged at `6367fa0` after both CI gates passed.
 - **Review instruction:** the maintainer explicitly requested no Norn reviews
   for this migration session; use code inspection and deterministic checks.
-- **Merged baseline:** main at `6367fa0`, including PRs #316–#335.
+- **Merged baseline:** main at `350103f`, including PRs #316–#336.
 - **Remaining:** commit/push/conflict/sync parity (#303); remaining image/split/performance parity (#302); settings
   and data migration (#305); staged publication (#304); parity/hardening/
   packaging/cutover (#306–#309), then close the epic with merge evidence.

@@ -35,5 +35,14 @@ complete merge commit without pulling unrelated staged paths into it.
 ## Status
 
 - Claimed by: default-agent, 2026-10-11, `issue-303-approved-branch-sync`.
-- Blockers: PR #336 CI/merge.
+- Blockers: None; PR #336 merged at `350103f`.
 - Stopped:
+
+## Delivery prepared for merge
+
+- PR: https://github.com/delaudio/norn/pull/337
+- Effective on merge to main; ADR 0020 remains Accepted until full cutover.
+- Local evidence: 34 backend tests, 48 UI tests, 24 checked native frames,
+  603 core tests (2 ignored), root gates, Archgate 17/17, protocol and Clippy.
+- React Doctor: no issues after separating effects/result rendering.
+- Dirty-checkout stash/restore parity and persistent recovery remain open.
