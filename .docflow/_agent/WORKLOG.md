@@ -246,3 +246,5 @@ Append one row per commit. Newest at the bottom.
 | 2026-10-11 | default-agent | Pre-integration docflow relative-link audit found the pre-existing ADR 0018 reference to the old ADR 0015 filename. Corrected its slug editorially without changing metadata, decision scope, status or approvals. |
 
 | 2026-10-11 | default-agent | Plan 0049 prepared delivery footer at `c4e3fff`; final completion root typecheck, 123 tests/tooling and Archgate 17/17 exit 0. Conditional on PR merge, not shipped yet. Based on main `bf7c15c`; numbering/status/relative links and next plan slot audited with no collisions after the editorial link repair. `.norn.yaml` remains unrelated and untouched. |
+
+| 2026-10-11 | default-agent | Opened PR #351 for verified local draft editor; independent plan 0050 claimed for authoritative finding-to-draft staging. Integrate sequentially after #351 CI/merge. No publication, provider/keychain access or Norn review. |
