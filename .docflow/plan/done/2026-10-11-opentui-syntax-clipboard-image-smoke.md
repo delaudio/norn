@@ -51,5 +51,28 @@ explicit, not fabricated.
 ## Status
 
 - Claimed by: default-agent, 2026-10-11, `issue-302-syntax-clipboard-smoke`.
-- Blockers: diff-navigation PR must merge before integration.
+- Blockers: None; PR #345 merged at `565d081`, both CI gates green.
 - Stopped:
+
+## Delivery
+
+Effective on merge to main of this syntax/clipboard PR. Implementation commit:
+`94c4ebc`. Pre-completion root gates pass: typecheck, 123 tests/tooling and
+Archgate 17/17. UI typecheck, 98 tests/555 assertions and 56 native frames pass.
+Rust core 623 tests pass (2 intentional ignored), no-GUI guard, 43 isolated
+backend subprocess tests and strict all-feature/all-target Clippy pass. Shared
+output fixtures and actual SQLite/stdio tests cover exact UTF-8 output, missing
+run, wrong provider and oversized refusal. Clipboard tests use in-memory fake
+captures only. React Doctor reports no issues in 15 changed UI files (its
+repository score remains 59; no global-clean claim).
+
+The Bun 1.3.8 WebWorker crash found during the full suite was corrected by
+process isolation with bounded coalescing and kill/reap ownership. A real Bun
+subprocess and 100-selection cancellation regression pass. Synthetic streaming
+recheck remains below 20 ms p95/64 rows/100 logs/512 MiB: unified 9.68 ms,
+32 rows; split 11.06 ms, 22 rows (concurrent local gate load).
+
+The image demo and physical checklist are delivered; no actual Kitty/Sixel
+visual result has been observed. Physical display remains a cutover gate, and
+installed tokenizer assets remain #308. Neither #302 nor the owning migration
+decision is declared complete here.
