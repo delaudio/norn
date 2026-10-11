@@ -2,7 +2,8 @@ import { expect, test } from "bun:test";
 import { type Renderable, type ScrollBoxRenderable, TextRenderable } from "@opentui/core";
 import { createTestRenderer } from "@opentui/core/testing";
 import { createRoot, flushSync } from "@opentui/react";
-import { measureDiffRows, VirtualDiff, visibleDiffRows } from "../src/app/components/VirtualDiff";
+import { VirtualDiff } from "../src/app/components/VirtualDiff";
+import { measureDiffRows, visibleDiffRows } from "../src/app/diffGeometry";
 
 async function fixture(texts: string[][], anchor = -1, width = 80) {
   const testRenderer = await createTestRenderer({ width, height: 20 });

@@ -68,3 +68,12 @@ and 396 MiB RSS; it is a different workload and not the expanded baseline.
 
 No Norn review was run, per the maintainer's instruction. Native tests and frame
 capture use synthetic inputs without HOME/config/keychain/provider access.
+
+## React Doctor triage
+
+Geometry exports live in a separate module so the component file exports only
+the component. Three `no-unknown-property` warnings in the native test fixture
+refer to `wrapMode`, a supported OpenTUI text property. These are high-confidence
+false positives from a DOM-oriented rule: the fixture uses `@opentui/react`'s
+renderer, passes its TypeScript prop checks and asserts native wrapping heights.
+No suppression or global rule/configuration change is applied.
