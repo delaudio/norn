@@ -33,6 +33,7 @@ export class FakeBackendTransport implements BackendTransport {
   private readonly exitListeners = new Set<(exit: BackendExit) => void>();
   private nextOperation = 1;
   private closed = false;
+  private readonly approvals = new Map<string, string>();
 
   constructor(options: FakeTransportOptions = {}) {
     this.options = options;
@@ -81,6 +82,50 @@ export class FakeBackendTransport implements BackendTransport {
           diff: this.options.diffText ?? "@@ -1 +1 @@\n-old\n+new\n",
           truncated: false,
         };
+      case "review.fix.preview": {
+        const token = String(this.approvals.size + 1).padStart(64, "0");
+        this.approvals.set(token, JSON.stringify(params.target));
+        return {
+          target: params.target,
+          approvalToken: token,
+          repoPath: "/tmp/example-clone",
+          currentBranch: "main",
+          sourceBranch: "feature",
+          destinationBranch: "main",
+          dirtyFiles: [" M src/app.ts"],
+          snapshotSha256: "a".repeat(64),
+          expiresInSeconds: 300,
+          effects: [
+            "Stash and restore local changes.",
+            "Check out feature; fetch/pull origin.",
+            "Run Claude with edit permissions.",
+            "Leave edits for inspection. No automatic commit or push.",
+          ],
+        };
+      }
+      case "review.fix.state":
+        return {
+          target: params.target,
+          state: {
+            status: "succeeded",
+            phase: "readyToCommit",
+            summary: "Fixed null handling.",
+            suggestedCommitMessage: "fix: guard null",
+            filesTouched: ["src/app.ts"],
+            tests: ["unit checks passed"],
+          },
+        };
+      case "review.fix": {
+        const token = params.approvalToken as string;
+        const approvedTarget = this.approvals.get(token);
+        this.approvals.delete(token);
+        if (approvedTarget !== JSON.stringify(params.target))
+          throw new Error("Approval missing or target changed.");
+        const operationId = `fake-fix-${this.nextOperation++}`;
+        const target = params.target as TargetIdentity;
+        this.operations.set(operationId, { target, state: "accepted", sequence: 0 });
+        return { target, operationId, state: "accepted" };
+      }
       case "review.reply": {
         const operationId = `fake-reply-${this.nextOperation++}`;
         const target = params.target as TargetIdentity;

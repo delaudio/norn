@@ -34,6 +34,9 @@ export const GroupedFindings: Story = { args: { frameId: "shell-grouped-findings
 export const Conversation: Story = { args: { frameId: "shell-conversation-120x30" } };
 export const CompactConversation: Story = { args: { frameId: "shell-conversation-50x15" } };
 
+export const FixPreview: Story = { args: { frameId: "shell-fix-preview-120x30" } };
+export const CompactFixPreview: Story = { args: { frameId: "shell-fix-preview-50x15" } };
+
 export const Gallery: Story = {
   args: { frameId: first },
   render: () => (

@@ -3,6 +3,7 @@ use std::fs;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, ExitStatus, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -447,6 +448,7 @@ pub enum AiReviewFixStatus {
     Running,
     Succeeded,
     Failed,
+    Cancelled,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -535,6 +537,7 @@ pub struct AiReviewRunStore(Arc<Mutex<AiReviewRunStoreInner>>);
 
 #[derive(Clone, Default)]
 struct FixSessionRecord {
+    cancellation: Arc<AtomicBool>,
     public: AiReviewFixState,
     source_branch: String,
     destination_branch: String,
@@ -2716,7 +2719,11 @@ fn set_fix_failed(store: &AiReviewFixStore, key: &str, error: impl Into<String>)
     let error = error.into();
     with_store(store, |inner| {
         let session = ensure_session(inner, key);
-        session.public.status = AiReviewFixStatus::Failed;
+        session.public.status = if session.cancellation.load(Ordering::Acquire) {
+            AiReviewFixStatus::Cancelled
+        } else {
+            AiReviewFixStatus::Failed
+        };
         session.public.finished_at = Some(now_ms());
         session.public.error = Some(error.clone());
         session.public.logs.push(format!("ERROR: {error}"));
@@ -2774,6 +2781,7 @@ fn begin_operation(
             claude_duration_ms: None,
             claude_session_id: None,
         };
+        session.cancellation = Arc::new(AtomicBool::new(false));
         session.source_branch.clear();
         session.destination_branch.clear();
         session.baseline_files.clear();
@@ -2825,7 +2833,7 @@ fn clone_public_state(store: &AiReviewFixStore, key: &str) -> Option<AiReviewFix
 }
 
 fn git_command(repo_path: &Path) -> Command {
-    let mut cmd = Command::new("/usr/bin/git");
+    let mut cmd = Command::new("git");
     cmd.current_dir(repo_path);
     cmd
 }
@@ -2865,14 +2873,23 @@ fn read_stream<R: std::io::Read + Send + 'static>(
     sink: Arc<Mutex<String>>,
 ) -> thread::JoinHandle<()> {
     thread::spawn(move || {
-        let mut buf = String::new();
-        for line in BufReader::new(reader).lines().map_while(Result::ok) {
-            append_log(&store, &key, format!("[{stream_name}] {line}"));
-            buf.push_str(&line);
-            buf.push('\n');
+        let mut reader = reader;
+        let mut capture = Vec::new();
+        let mut chunk = [0u8; 4096];
+        while let Ok(count) = reader.read(&mut chunk) {
+            if count == 0 {
+                break;
+            }
+            let available = (2 * 1024 * 1024usize).saturating_sub(capture.len());
+            capture.extend_from_slice(&chunk[..count.min(available)]);
+            append_log(
+                &store,
+                &key,
+                format!("[{stream_name}] received {count} bytes"),
+            );
         }
         if let Ok(mut out) = sink.lock() {
-            out.push_str(&buf);
+            *out = String::from_utf8_lossy(&capture).into_owned();
         }
     })
 }
@@ -2883,7 +2900,13 @@ fn run_logged_command(
     key: &str,
     label: &str,
 ) -> Result<CommandOutput, String> {
+    check_fix_cancellation(store, key)?;
     command.stdout(Stdio::piped()).stderr(Stdio::piped());
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        command.process_group(0);
+    }
     let mut child = command
         .spawn()
         .map_err(|e| format!("failed to start {label}: {e}"))?;
@@ -2913,11 +2936,43 @@ fn run_logged_command(
         stderr_buf.clone(),
     );
 
-    let status = child
-        .wait()
-        .map_err(|e| format!("failed while waiting for {label}: {e}"))?;
+    let deadline = Instant::now() + Duration::from_secs(DEFAULT_AI_PROVIDER_TIMEOUT_SECONDS);
+    let mut interruption = None;
+    let status = loop {
+        if check_fix_cancellation(store, key).is_err() || Instant::now() >= deadline {
+            interruption = Some(if Instant::now() >= deadline {
+                "Fix command timed out."
+            } else {
+                "Fix cancelled."
+            });
+            #[cfg(unix)]
+            unsafe {
+                libc::kill(-(child.id() as i32), libc::SIGKILL);
+            }
+            #[cfg(windows)]
+            {
+                let _ = Command::new("taskkill")
+                    .args(["/PID", &child.id().to_string(), "/T", "/F"])
+                    .output();
+            }
+            let _ = child.kill();
+            break child.wait().map_err(|error| error.to_string())?;
+        }
+        if let Some(status) = child.try_wait().map_err(|error| error.to_string())? {
+            break status;
+        }
+        thread::sleep(Duration::from_millis(25));
+    };
+    // Kill descendants still holding inherited pipes after their parent exits.
+    #[cfg(unix)]
+    unsafe {
+        libc::kill(-(child.id() as i32), libc::SIGKILL);
+    }
     let _ = stdout_thread.join();
     let _ = stderr_thread.join();
+    if let Some(error) = interruption {
+        return Err(error.to_string());
+    }
     let stdout = stdout_buf.lock().map(|s| s.clone()).unwrap_or_default();
     let stderr = stderr_buf.lock().map(|s| s.clone()).unwrap_or_default();
     Ok(CommandOutput {
@@ -3912,22 +3967,24 @@ fn run_claude_fix(
     store: &AiReviewFixStore,
     key: &str,
 ) -> Result<ParsedClaudeFixResponse, String> {
-    let tmp_path = std::env::temp_dir().join(format!("norn-ai-fix-{}.md", now_ms()));
-    fs::write(&tmp_path, payload).map_err(|e| e.to_string())?;
-
     let schema = r#"{"type":"object","properties":{"status":{"type":"string","enum":["success","failed"]},"summary":{"type":"string"},"commitMessage":{"type":"string"},"tests":{"type":"array","items":{"type":"string"}},"filesTouched":{"type":"array","items":{"type":"string"}},"failureReason":{"type":"string"}},"required":["status","summary","commitMessage","tests","filesTouched"],"additionalProperties":false}"#;
-    let shell_cmd = format!(
-        "export PATH=\"$HOME/.local/bin:$HOME/.npm/bin:/opt/homebrew/bin:/usr/local/bin:$PATH\"; claude --print --output-format json --permission-mode bypassPermissions --json-schema {} \"$(cat {})\"",
-        shell_quote(schema),
-        shell_quote(&tmp_path.to_string_lossy())
-    );
-    let mut command = Command::new("/bin/zsh");
-    command.arg("-lc").arg(shell_cmd).current_dir(repo_path);
+    let mut command = user_installed_cli_command("claude");
+    command
+        .args([
+            "--print",
+            "--output-format",
+            "json",
+            "--permission-mode",
+            "bypassPermissions",
+            "--json-schema",
+            schema,
+            payload,
+        ])
+        .current_dir(repo_path);
+    command.env("NORN_REVIEW_CHILD", "1");
 
     append_log(store, key, "Claude is applying the review feedback…");
     let output = run_logged_command(command, store, key, "claude")?;
-    let _ = fs::remove_file(&tmp_path);
-
     if output.code != Some(0) {
         return Err(format!(
             "claude exited with code {:?}\nstderr: {}\nstdout: {}",
@@ -4249,14 +4306,36 @@ fn build_conflict_resolution_payload(
 fn run_fix_pipeline(
     store: AiReviewFixStore,
     key: String,
-    workspace: String,
-    repo: String,
+    repo_path: PathBuf,
     id: u32,
     payload: String,
     source_branch: String,
     destination_branch: String,
+    expected_fingerprint: Option<String>,
 ) -> Result<(), String> {
-    let repo_path = resolve_local_repo(&workspace, &repo)?;
+    check_fix_cancellation(&store, &key)?;
+    if let Some(expected) = expected_fingerprint {
+        if crate::services::review_fix::checkout_fingerprint(&repo_path)? != expected {
+            return Err(
+                "The checkout changed before fix execution. Request a new preview.".to_string(),
+            );
+        }
+    }
+    let run_git = |args: &[&str]| -> Result<String, String> {
+        check_fix_cancellation(&store, &key)?;
+        let mut command = git_command(&repo_path);
+        command.args(args);
+        let output = run_logged_command(command, &store, &key, "git")?;
+        if output.code == Some(0) {
+            Ok(output.stdout.trim().to_string())
+        } else {
+            Err(format!(
+                "git {} failed: {}",
+                args.join(" "),
+                output.stderr.trim()
+            ))
+        }
+    };
     with_store(&store, |inner| {
         let session = ensure_session(inner, &key);
         session.public.repo_path = Some(repo_path.to_string_lossy().to_string());
@@ -4286,7 +4365,7 @@ fn run_fix_pipeline(
             &key,
             "Working tree is dirty; stashing local changes before syncing the branch.",
         );
-        run_git_checked(&repo_path, &["stash", "push", "-u", "-m", &stash_marker])?;
+        run_git(&["stash", "push", "-u", "-m", &stash_marker])?;
         stash_ref = find_stash_ref(&repo_path, &stash_marker)?;
     }
 
@@ -4301,7 +4380,14 @@ fn run_fix_pipeline(
         &key,
         format!("Checking out source branch `{source_branch}`."),
     );
-    resolve_branch(&repo_path, &source_branch)?;
+    if run_git_capture(&repo_path, &["rev-parse", "--verify", &source_branch])?.code != Some(0) {
+        run_git(&[
+            "fetch",
+            "origin",
+            &format!("{source_branch}:{source_branch}"),
+        ])?;
+    }
+    run_git(&["checkout", &source_branch])?;
 
     set_phase(
         &store,
@@ -4310,13 +4396,13 @@ fn run_fix_pipeline(
         AiReviewFixStatus::Running,
     );
     append_log(&store, &key, "Fetching latest commits from origin.");
-    run_git_checked(&repo_path, &["fetch", "origin", &source_branch])?;
+    run_git(&["fetch", "origin", &source_branch])?;
     append_log(
         &store,
         &key,
         format!("Fast-forwarding `{source_branch}` with `origin/{source_branch}`."),
     );
-    run_git_checked(&repo_path, &["pull", "--ff-only", "origin", &source_branch])?;
+    run_git(&["pull", "--ff-only", "origin", &source_branch])?;
 
     if let Some(stash) = stash_ref.as_deref() {
         set_phase(
@@ -4330,10 +4416,12 @@ fn run_fix_pipeline(
             &key,
             "Re-applying the stashed local changes before running Claude.",
         );
-        restore_stash(&repo_path, stash)?;
+        run_git(&["stash", "apply", stash])?;
+        run_git(&["stash", "drop", stash])?;
     }
 
     let baseline_status = git_status_lines(&repo_path)?;
+    let baseline_fingerprint = crate::services::review_fix::checkout_fingerprint(&repo_path)?;
     let baseline_files = files_from_status(&baseline_status);
     with_store(&store, |inner| {
         let session = ensure_session(inner, &key);
@@ -4374,9 +4462,6 @@ fn run_fix_pipeline(
             ),
         );
     }
-    if let Some(session_id) = claude.session_id.as_deref() {
-        append_log(&store, &key, format!("Claude session: {session_id}"));
-    }
     if !claude.result.status.eq_ignore_ascii_case("success") {
         let message = claude
             .result
@@ -4392,8 +4477,9 @@ fn run_fix_pipeline(
         AiReviewFixPhase::VerifyingChanges,
         AiReviewFixStatus::Running,
     );
+    check_fix_cancellation(&store, &key)?;
     let after_status = git_status_lines(&repo_path)?;
-    if after_status == baseline_status {
+    if crate::services::review_fix::checkout_fingerprint(&repo_path)? == baseline_fingerprint {
         return Err(
             "Claude finished successfully but did not leave any new working tree changes."
                 .to_string(),
@@ -6757,6 +6843,75 @@ pub fn list_ai_review_jobs(limit: Option<u32>) -> Result<Vec<review_storage::Rev
     review_storage::list_recent_review_jobs(limit.unwrap_or(20).clamp(1, 100))
 }
 
+/// Start the existing pipeline on a caller-approved canonical clone. The
+/// cancellation flag is owned by the operation and checked before every mutation.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn start_ai_review_fix_native(
+    store: &AiReviewFixStore,
+    workspace: String,
+    repo: String,
+    id: u32,
+    thread_id: Option<String>,
+    repo_path: PathBuf,
+    payload: String,
+    source_branch: String,
+    destination_branch: String,
+    cancellation: Arc<AtomicBool>,
+    expected_fingerprint: Option<String>,
+) -> Result<AiReviewFixState, String> {
+    let key = fix_key(&workspace, &repo, id, thread_id.as_deref());
+    let initial = begin_operation(
+        store,
+        &key,
+        &pr_key(&workspace, &repo, id),
+        thread_id,
+        AiReviewFixPhase::Preflight,
+        Some(repo_path.display().to_string()),
+    )?;
+    with_store(store, |inner| {
+        ensure_session(inner, &key).cancellation = cancellation
+    });
+    let worker_store = store.clone();
+    thread::spawn(move || {
+        if let Err(error) = run_fix_pipeline(
+            worker_store.clone(),
+            key.clone(),
+            repo_path,
+            id,
+            payload,
+            source_branch,
+            destination_branch,
+            expected_fingerprint,
+        ) {
+            set_fix_failed(&worker_store, &key, format!("{error} Inspect the checkout and any retained stash before retrying; partial changes are preserved."));
+        }
+    });
+    Ok(initial)
+}
+
+pub(crate) fn get_ai_review_fix_state_native(
+    store: &AiReviewFixStore,
+    workspace: &str,
+    repo: &str,
+    id: u32,
+    thread_id: Option<&str>,
+) -> Option<AiReviewFixState> {
+    clone_public_state(store, &fix_key(workspace, repo, id, thread_id))
+}
+
+fn check_fix_cancellation(store: &AiReviewFixStore, key: &str) -> Result<(), String> {
+    let cancelled = with_store(store, |inner| {
+        ensure_session(inner, key)
+            .cancellation
+            .load(Ordering::Acquire)
+    });
+    if cancelled {
+        Err("Fix cancelled.".to_string())
+    } else {
+        Ok(())
+    }
+}
+
 #[cfg(feature = "desktop")]
 #[tauri::command]
 pub fn get_ai_review_fix_state(
@@ -6788,40 +6943,20 @@ pub async fn start_ai_review_fix(
     source_branch: String,
     destination_branch: String,
 ) -> Result<AiReviewFixState, String> {
-    let pr_key = pr_key(&workspace, &repo, id);
-    let key = fix_key(&workspace, &repo, id, thread_id.as_deref());
-    let repo_path = resolve_local_repo(&workspace, &repo)
-        .ok()
-        .map(|path| path.to_string_lossy().to_string());
-    let initial = begin_operation(
+    let repo_path = resolve_local_repo(&workspace, &repo)?;
+    start_ai_review_fix_native(
         store.inner(),
-        &key,
-        &pr_key,
-        thread_id.clone(),
-        AiReviewFixPhase::Preflight,
+        workspace,
+        repo,
+        id,
+        thread_id,
         repo_path,
-    )?;
-    append_log(
-        store.inner(),
-        &key,
-        "Preparing to address the active AI review thread.",
-    );
-    let store_clone = store.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || {
-        if let Err(error) = run_fix_pipeline(
-            store_clone.clone(),
-            key.clone(),
-            workspace,
-            repo,
-            id,
-            payload,
-            source_branch,
-            destination_branch,
-        ) {
-            set_fix_failed(&store_clone, &key, error);
-        }
-    });
-    Ok(initial)
+        payload,
+        source_branch,
+        destination_branch,
+        Arc::new(AtomicBool::new(false)),
+        None,
+    )
 }
 
 #[cfg(feature = "desktop")]

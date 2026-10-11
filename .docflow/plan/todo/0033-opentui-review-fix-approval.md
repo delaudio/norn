@@ -33,5 +33,5 @@ Commit/push/conflict/sync parity follows in separate bounded deliveries.
 ## Status
 
 - Claimed by: default-agent, 2026-10-11, `issue-303-review-fix-approval`.
-- Blockers: PR #334 must pass CI and merge before this delivery is opened.
+- Blockers: None; PR #334 merged at `043dcf1`.
 - Stopped:

@@ -143,6 +143,9 @@ fn default_true() -> bool {
 }
 
 fn config_dir() -> Result<PathBuf, String> {
+    if let Some(path) = std::env::var_os("NORN_CONFIG_DIR").filter(|path| !path.is_empty()) {
+        return Ok(PathBuf::from(path));
+    }
     let mut dir =
         dirs::config_dir().ok_or_else(|| "could not resolve config directory".to_string())?;
     dir.push(APP_DIR);
@@ -154,6 +157,10 @@ fn config_path() -> Result<PathBuf, String> {
 }
 
 fn legacy_config_path() -> Result<PathBuf, String> {
+    // Explicit isolated configuration must never fall back to a user's settings.
+    if std::env::var_os("NORN_CONFIG_DIR").is_some_and(|path| !path.is_empty()) {
+        return config_path();
+    }
     let mut dir =
         dirs::config_dir().ok_or_else(|| "could not resolve config directory".to_string())?;
     dir.push(LEGACY_APP_DIR);

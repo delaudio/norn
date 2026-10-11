@@ -815,3 +815,238 @@ fn thread_request_is_typed_and_local_targets_have_no_pr_threads() {
         .send(json!({ "type": "request", "id": "shutdown", "method": "shutdown", "params": {} }));
     assert!(backend.child.wait().expect("backend exits").success());
 }
+
+#[cfg(unix)]
+struct FixFixture {
+    pending: std::cell::RefCell<Vec<Value>>,
+    repo: tempfile::TempDir,
+    _origin: tempfile::TempDir,
+    _data: tempfile::TempDir,
+    _config: tempfile::TempDir,
+    _agent: tempfile::TempDir,
+    backend: Backend,
+    target: Value,
+}
+
+#[cfg(unix)]
+impl FixFixture {
+    fn new(agent_script: &str) -> Self {
+        use std::os::unix::fs::PermissionsExt;
+        let repo = temp_repo();
+        git(repo.path(), &["checkout", "-b", "feature"]);
+        std::fs::write(repo.path().join("tracked.txt"), "base\n").unwrap();
+        git(repo.path(), &["add", "."]);
+        git(repo.path(), &["commit", "-m", "base"]);
+        let head = Command::new("git")
+            .arg("-C")
+            .arg(repo.path())
+            .args(["rev-parse", "HEAD"])
+            .output()
+            .unwrap();
+        let head = String::from_utf8(head.stdout).unwrap().trim().to_string();
+        let origin = tempfile::tempdir().unwrap();
+        git(origin.path(), &["init", "--bare"]);
+        git(
+            repo.path(),
+            &["remote", "add", "origin", origin.path().to_str().unwrap()],
+        );
+        git(repo.path(), &["push", "-u", "origin", "feature"]);
+        let config = tempfile::tempdir().unwrap();
+        let settings = json!({"repos":[{"provider":"github","workspace":"fixture","repo":"demo","localPath":repo.path().canonicalize().unwrap()}],
+            "defaultDiffView":"unified","theme":"dark"});
+        std::fs::write(config.path().join("settings.json"), settings.to_string()).unwrap();
+        let data = tempfile::tempdir().unwrap();
+        let agent = tempfile::tempdir().unwrap();
+        let binary = agent.path().join("fake-agent");
+        std::fs::write(&binary, agent_script).unwrap();
+        std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let mut backend = Backend::spawn_env(
+            repo.path(),
+            &[
+                ("NORN_CONFIG_DIR", config.path().to_str().unwrap()),
+                ("NORN_REVIEW_DATA_DIR", data.path().to_str().unwrap()),
+                ("NORN_REVIEW_AGENT_BIN", binary.to_str().unwrap()),
+            ],
+        );
+        backend.handshake();
+        backend.send(
+            json!({"type":"request","id":"init-store","method":"review.targets","params":{}}),
+        );
+        backend.wait_for(|v| v["id"] == "init-store", Duration::from_secs(10));
+        let store = json!({"activeThreadId":"thread-fix", "threads":[{"id":"thread-fix","title":"Fix review","createdAt":"1","updatedAt":"1",
+            "claudeSessionId":"private-resume", "aiProvider":"claude", "messages":[{"id":"message","role":"assistant","content":"Fix tracked.txt. Latest position.","createdAt":"1"}]}],
+            "reviewRuns":[{"id":"run-fix","schemaVersion":"1","provider":"github","workspace":"fixture","repo":"demo","prId":9,
+                "sourceBranch":"feature","destinationBranch":"feature","reviewedBaseSha":head,"reviewedHeadSha":head,"status":"succeeded","turnKind":"initial",
+                "createdAt":"1","finishedAt":"2","diffFingerprint":"fixture","threadId":"thread-fix","summaryMarkdown":"Fix tracked.txt.","findings":[]}]});
+        let connection = rusqlite::Connection::open(data.path().join("norn.sqlite3")).unwrap();
+        connection.execute("INSERT INTO ai_review_stores (review_key,workspace,repo,pr_id,store_json,created_at,updated_at) VALUES (?1,?2,?3,?4,?5,'1','1')",
+            rusqlite::params!["fixture_demo_9", "fixture", "demo", 9, store.to_string()]).unwrap();
+        let target = json!({"kind":"provider","provider":"github","workspace":"fixture","repo":"demo","prId":9,"runId":"run-fix"});
+        Self {
+            pending: std::cell::RefCell::new(Vec::new()),
+            repo,
+            _origin: origin,
+            _data: data,
+            _config: config,
+            _agent: agent,
+            backend,
+            target,
+        }
+    }
+
+    fn preview(&mut self) -> Value {
+        self.backend.send(json!({"type":"request","id":"preview","method":"review.fix.preview","params":{"target":self.target}}));
+        let result = self
+            .backend
+            .wait_for(|v| v["id"] == "preview", Duration::from_secs(15));
+        assert_eq!(result["ok"], true, "{result}");
+        result["result"].clone()
+    }
+
+    fn execute(&mut self, token: &str) -> String {
+        self.backend.send(json!({"type":"request","id":"fix","method":"review.fix","params":{"target":self.target,"approvalToken":token}}));
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        let result = loop {
+            let value = self
+                .backend
+                .next(deadline.saturating_duration_since(std::time::Instant::now()))
+                .expect("fix response");
+            if value["id"] == "fix" {
+                break value;
+            }
+            self.pending.borrow_mut().push(value);
+        };
+        assert_eq!(result["ok"], true, "{result}");
+        result["result"]["operationId"]
+            .as_str()
+            .unwrap()
+            .to_string()
+    }
+
+    fn terminal(&self, operation: &str) -> Value {
+        let pending_index = self.pending.borrow().iter().position(|v| {
+            v["operationId"] == operation
+                && ["succeeded", "failed", "cancelled"]
+                    .contains(&v["event"]["state"].as_str().unwrap_or(""))
+        });
+        if let Some(index) = pending_index {
+            return self.pending.borrow_mut().remove(index);
+        }
+        self.backend.wait_for(
+            |v| {
+                v["operationId"] == operation
+                    && ["succeeded", "failed", "cancelled"]
+                        .contains(&v["event"]["state"].as_str().unwrap_or(""))
+            },
+            Duration::from_secs(20),
+        )
+    }
+}
+
+#[cfg(unix)]
+impl Drop for FixFixture {
+    fn drop(&mut self) {
+        self.backend
+            .send(json!({"type":"request","id":"stop","method":"shutdown","params":{}}));
+        let _ = self.backend.child.wait();
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn fix_approval_rejects_changed_content_and_replay_without_starting_agent() {
+    let mut fixture = FixFixture::new("#!/bin/sh\nprintf invoked > agent-ran\nexit 1\n");
+    let preview = fixture.preview();
+    assert!(preview["effects"].as_array().unwrap().len() >= 5);
+    assert!(!preview.to_string().contains("private-resume"));
+    // A newly untracked file must invalidate approval, even if HEAD is unchanged.
+    std::fs::write(fixture.repo.path().join("new.txt"), "local edit\n").unwrap();
+    let operation = fixture.execute(preview["approvalToken"].as_str().unwrap());
+    let terminal = fixture.terminal(&operation);
+    assert_eq!(terminal["event"]["state"], "failed");
+    assert_eq!(terminal["event"]["error"]["code"], "targetStale");
+    assert!(!fixture.repo.path().join("agent-ran").exists());
+    let operation = fixture.execute(preview["approvalToken"].as_str().unwrap());
+    assert_eq!(fixture.terminal(&operation)["event"]["state"], "failed");
+}
+
+#[cfg(unix)]
+#[test]
+fn approved_fix_detects_edits_to_already_dirty_files_and_exposes_result() {
+    let mut fixture = FixFixture::new(
+        r#"#!/bin/sh
+printf 'fixed\n' > tracked.txt
+printf '%s\n' '{"structured_output":{"status":"success","summary":"Fixed tracked content","commitMessage":"fix: content","tests":["fake check"],"filesTouched":["tracked.txt"]},"session_id":"private-agent-session"}'
+"#,
+    );
+    std::fs::write(fixture.repo.path().join("tracked.txt"), "existing dirty\n").unwrap();
+    let preview = fixture.preview();
+    let operation = fixture.execute(preview["approvalToken"].as_str().unwrap());
+    assert_eq!(fixture.terminal(&operation)["event"]["state"], "succeeded");
+    assert_eq!(
+        std::fs::read_to_string(fixture.repo.path().join("tracked.txt")).unwrap(),
+        "fixed\n"
+    );
+    fixture.backend.send(json!({"type":"request","id":"result","method":"review.fix.state","params":{"target":fixture.target}}));
+    let result = fixture
+        .backend
+        .wait_for(|v| v["id"] == "result", Duration::from_secs(10));
+    assert_eq!(result["result"]["state"]["phase"], "readyToCommit");
+    assert_eq!(result["result"]["state"]["filesTouched"][0], "tracked.txt");
+    assert!(!result.to_string().contains("private-agent-session"));
+    let history = Command::new("git")
+        .arg("-C")
+        .arg(fixture.repo.path())
+        .args(["rev-list", "--count", "HEAD"])
+        .output()
+        .unwrap();
+    assert_eq!(String::from_utf8(history.stdout).unwrap().trim(), "1");
+}
+
+#[cfg(unix)]
+#[test]
+fn cancel_fix_reaps_agent_and_preserves_partial_edits() {
+    let mut fixture = FixFixture::new("#!/bin/sh\nprintf 'partial\\n' > tracked.txt\nprintf started > agent-started\nsleep 60 &\nwait\n");
+    let preview = fixture.preview();
+    let operation = fixture.execute(preview["approvalToken"].as_str().unwrap());
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    while !fixture.repo.path().join("agent-started").exists() {
+        assert!(std::time::Instant::now() < deadline, "agent did not start");
+        thread::sleep(Duration::from_millis(20));
+    }
+    fixture.backend.send(json!({"type":"request","id":"cancel-fix","method":"operation.cancel","params":{"operationId":operation}}));
+    fixture
+        .backend
+        .wait_for(|v| v["id"] == "cancel-fix", Duration::from_secs(5));
+    assert_eq!(fixture.terminal(&operation)["event"]["state"], "cancelled");
+    assert_eq!(
+        std::fs::read_to_string(fixture.repo.path().join("tracked.txt")).unwrap(),
+        "partial\n"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn failed_fix_preserves_partial_edits_without_committing() {
+    let mut fixture =
+        FixFixture::new("#!/bin/sh\nprintf 'partial failure\\n' > tracked.txt\nexit 7\n");
+    let preview = fixture.preview();
+    let operation = fixture.execute(preview["approvalToken"].as_str().unwrap());
+    let terminal = fixture.terminal(&operation);
+    assert_eq!(terminal["event"]["state"], "failed");
+    assert!(terminal["event"]["error"]["message"]
+        .as_str()
+        .unwrap()
+        .contains("partial changes are preserved"));
+    assert_eq!(
+        std::fs::read_to_string(fixture.repo.path().join("tracked.txt")).unwrap(),
+        "partial failure\n"
+    );
+    let history = Command::new("git")
+        .arg("-C")
+        .arg(fixture.repo.path())
+        .args(["rev-list", "--count", "HEAD"])
+        .output()
+        .unwrap();
+    assert_eq!(String::from_utf8(history.stdout).unwrap().trim(), "1");
+}

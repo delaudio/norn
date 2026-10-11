@@ -542,3 +542,76 @@ test("selecting a thread pins diff findings and reply to that thread's latest ru
   const load = [...requests].reverse().find((request) => request.method === "review.findings");
   expect(load?.params.target).toMatchObject({ runId: "run-2" });
 });
+
+test("fix preview requires a saved run, explicit approval and no automatic retry", async () => {
+  const transport = new FakeBackendTransport({
+    repositories,
+    targets: [
+      {
+        provider: "github",
+        workspace: "acme",
+        repo: "payments",
+        prId: 9,
+        runId: "run-fix",
+        title: "Fix",
+        status: "succeeded",
+      },
+    ],
+  });
+  const client = new BackendClient(transport);
+  const store = new ShellStore();
+  await store.connect(client);
+  await store.previewFix(client);
+  expect(store.getSnapshot().fixPreview).toBeNull();
+  await store.selectPicker(2);
+  await store.previewFix(client);
+  expect(store.getSnapshot().operation).toBeNull();
+  const preview = store.getSnapshot().fixPreview!;
+  expect(preview.effects.join(" ")).toContain("edit permissions");
+  store.dismissFix();
+  await store.confirmFix(client);
+  expect(store.getSnapshot().operation).toBeNull();
+  await store.previewFix(client);
+  await store.confirmFix(client);
+  const operation = store.getSnapshot().operation!;
+  expect(operation.id).toContain("fake-fix");
+  expect(store.getSnapshot().fixPreview).toBeNull();
+  await store.confirmFix(client);
+  expect(store.getSnapshot().operation?.id).toBe(operation.id);
+  store.applyEvent({
+    operationId: operation.id,
+    target: preview.target,
+    sequence: 1,
+    event: { kind: "state", state: "succeeded" },
+  });
+  await Bun.sleep(5);
+  expect(store.getSnapshot().fixState?.filesTouched).toEqual(["src/app.ts"]);
+});
+
+test("changing targets clears and fences a late fix approval", async () => {
+  const client = new BackendClient(
+    new FakeBackendTransport({
+      repositories,
+      delayMs: 15,
+      targets: [
+        {
+          provider: "github",
+          workspace: "acme",
+          repo: "payments",
+          prId: 9,
+          runId: "run-fix",
+          title: "Fix",
+          status: "succeeded",
+        },
+      ],
+    }),
+  );
+  const store = new ShellStore();
+  await store.connect(client);
+  await store.selectPicker(2);
+  const pending = store.previewFix(client);
+  await store.selectPicker(0);
+  await pending;
+  expect(store.getSnapshot().fixPreview).toBeNull();
+  expect(store.getSnapshot().fixPreviewLoading).toBe(false);
+});

@@ -76,6 +76,27 @@ export type Request =
       id: RequestId;
       method: "review.threads";
       params: TargetParams;
+    }
+  | {
+      type: "request";
+      id: RequestId;
+      method: "review.fix.preview";
+      params: TargetParams;
+    }
+  | {
+      type: "request";
+      id: RequestId;
+      method: "review.fix";
+      params: {
+        target: TargetIdentity;
+        approvalToken: string;
+      };
+    }
+  | {
+      type: "request";
+      id: RequestId;
+      method: "review.fix.state";
+      params: TargetParams;
     };
 export type RequestId = string;
 /**

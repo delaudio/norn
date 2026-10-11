@@ -18,6 +18,7 @@ import {
 } from "../store";
 import { theme } from "../theme";
 import { ConversationPanel } from "./ConversationPanel";
+import { FixPanel } from "./FixPanel";
 
 interface ShellProps {
   store: ShellStore;
@@ -37,6 +38,12 @@ function useShellInput(
       return;
     }
     if (key.ctrl || key.meta || key.super || key.option) {
+      return;
+    }
+    if (store.getSnapshot().fixPreview) {
+      key.preventDefault();
+      if (key.name === "y") void store.confirmFix(client);
+      else if (key.name === "escape" || key.name === "n") store.dismissFix();
       return;
     }
     if (store.getSnapshot().composing) {
@@ -88,6 +95,8 @@ function useShellInput(
       store.toggleDiffMode();
     } else if (key.name === "e") {
       store.toggleDiffExpanded();
+    } else if (key.name === "a") {
+      void store.previewFix(client);
     } else if (key.name === "r") {
       store.beginReply();
     } else if (key.name === "b") {
@@ -97,6 +106,10 @@ function useShellInput(
     }
   });
   usePaste((event) => {
+    if (store.getSnapshot().fixPreview) {
+      event.preventDefault();
+      return;
+    }
     if (store.getSnapshot().composing) {
       event.preventDefault();
       store.appendReplyText(new TextDecoder().decode(event.bytes));
@@ -793,6 +806,11 @@ export function Shell({ store, client, quit }: ShellProps) {
           />
         </box>
       </box>
+      <FixPanel
+        preview={state.fixPreview}
+        result={state.fixState}
+        loading={state.fixPreviewLoading}
+      />
       {state.composing ? (
         <box height={1} flexShrink={0} paddingX={1} backgroundColor={theme.panel}>
           <text fg={theme.primary} wrapMode="none" truncate>
@@ -804,7 +822,7 @@ export function Shell({ store, client, quit }: ShellProps) {
         <text fg={theme.muted}>
           {diffCollapsed ? "large diff · e expand  " : ""}
           {wide
-            ? "j/k move  s split  e expand  Tab pane  r reply  t threads  v chat  f filter  g group  x cancel  q quit"
+            ? "j/k move  s split  e expand  Tab pane  a fix  r reply  t threads  v chat  f filter  g group  x cancel  q quit"
             : "j/k  ←/→  s  e  Tab  q"}
         </text>
       </box>

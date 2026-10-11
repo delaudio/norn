@@ -7,6 +7,8 @@ import type {
   BackendClient,
   ChangedFile,
   FindingSummary,
+  FixPreview,
+  FixState,
   RepositorySummary,
   ReviewRunSummary,
   ReviewTarget,
@@ -132,6 +134,9 @@ export interface ShellSnapshot {
   highlightSide: "old" | "new";
   scrollRequest: number;
   diffMode: "unified" | "split";
+  fixPreview: FixPreview | null;
+  fixPreviewLoading: boolean;
+  fixState: FixState | null;
   composing: boolean;
   composerText: string;
   diffExpanded: boolean;
@@ -169,6 +174,9 @@ const INITIAL: ShellSnapshot = {
   highlightSide: "new",
   scrollRequest: 0,
   diffMode: "unified",
+  fixPreview: null,
+  fixPreviewLoading: false,
+  fixState: null,
   composing: false,
   composerText: "",
   diffExpanded: false,
@@ -331,6 +339,8 @@ export class ShellStore {
   private snapshotInFlight = false;
   private snapshotPending = false;
   private client: BackendClient | null = null;
+  private fixing = false;
+  private fixOperation: { id: string; generation: number; target: TargetIdentity } | null = null;
 
   subscribe = (listener: () => void): (() => void) => {
     this.listeners.add(listener);
@@ -480,6 +490,9 @@ export class ShellStore {
       history: [],
       threads: [],
       selectedThread: 0,
+      fixPreview: null,
+      fixPreviewLoading: false,
+      fixState: null,
       composing: false,
       composerText: "",
       diff: null,
@@ -830,6 +843,14 @@ export class ShellStore {
         reply: operation.reply,
       },
     });
+    const fix = this.fixOperation;
+    if (
+      fix?.id === operation.id &&
+      fix.generation === this.state.generation &&
+      (state === "succeeded" || state === "failed" || state === "cancelled")
+    ) {
+      void this.refreshFixState(fix);
+    }
     if (operation.reply && this.replyGeneration === this.state.generation) {
       if (state === "succeeded") {
         this.update({ composerText: "" });
@@ -987,6 +1008,88 @@ export class ShellStore {
 
   /// Start (or refresh) the authenticated browser diff session and surface its
   /// URL in the notice line.
+  async previewFix(client: BackendClient): Promise<void> {
+    if (this.fixing || this.state.fixPreviewLoading) return;
+    const operation = this.state.operation;
+    if (operation && ["accepted", "running"].includes(operation.state)) {
+      this.update({ notice: "Wait for the active operation before requesting a fix." });
+      return;
+    }
+    const target = this.activeTarget();
+    if (target?.kind !== "provider" || !target.prId || !target.runId) {
+      this.update({ notice: "Select a saved pull-request review before requesting a fix." });
+      return;
+    }
+    const generation = this.state.generation;
+    this.update({ fixPreview: null, fixPreviewLoading: true, error: null });
+    try {
+      const preview = await client.fixPreview(target);
+      if (generation === this.state.generation) this.update({ fixPreview: preview });
+    } catch (error) {
+      if (generation === this.state.generation) this.update({ error: message(error) });
+    } finally {
+      if (generation === this.state.generation) this.update({ fixPreviewLoading: false });
+    }
+  }
+
+  dismissFix(): void {
+    this.update({ fixPreview: null });
+  }
+
+  async confirmFix(client: BackendClient): Promise<void> {
+    const preview = this.state.fixPreview;
+    if (!preview || this.fixing) return;
+    const generation = this.state.generation;
+    this.fixing = true;
+    // Consume the UI approval immediately. A timeout never triggers a retry.
+    this.update({ fixPreview: null, fixState: null });
+    try {
+      const result = await client.reviewFix(preview.target, preview.approvalToken);
+      if (generation !== this.state.generation) return;
+      this.fixOperation = { id: result.operationId, generation, target: preview.target };
+      this.update({
+        operation: {
+          id: result.operationId,
+          state: result.state,
+          sequence: result.sequence ?? 0,
+          logs: [{ id: this.nextLogId++, text: "Approved fix accepted." }],
+          targetLabel: targetLabel(preview.target),
+          reply: false,
+        },
+      });
+      this.drainPendingEvents(result.operationId);
+    } catch (error) {
+      if (generation === this.state.generation)
+        this.update({
+          error: message(error),
+          notice:
+            "Fix state may have changed. Inspect the operation before requesting another preview.",
+        });
+    } finally {
+      this.fixing = false;
+    }
+  }
+
+  private async refreshFixState(fix: {
+    id: string;
+    generation: number;
+    target: TargetIdentity;
+  }): Promise<void> {
+    if (!this.client) return;
+    try {
+      const state = await this.client.fixState(fix.target);
+      if (fix.generation === this.state.generation && this.state.operation?.id === fix.id) {
+        this.update({
+          fixState: state,
+          notice:
+            "Inspect the checkout and retained stashes. Fixes do not commit or push automatically.",
+        });
+      }
+    } catch (error) {
+      if (fix.generation === this.state.generation) this.update({ error: message(error) });
+    }
+  }
+
   async openBrowser(client: BackendClient): Promise<void> {
     const target = this.activeTarget();
     if (!target) {

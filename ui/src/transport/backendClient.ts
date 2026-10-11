@@ -77,6 +77,28 @@ export interface OperationStatus {
   error: { code: string; message: string; retryable?: boolean } | null;
 }
 
+export interface FixPreview {
+  target: TargetIdentity;
+  approvalToken: string;
+  repoPath: string;
+  currentBranch: string;
+  sourceBranch: string;
+  destinationBranch: string;
+  dirtyFiles: string[];
+  effects: string[];
+  snapshotSha256: string;
+  expiresInSeconds: number;
+}
+
+export interface FixState {
+  status: string;
+  phase: string;
+  summary: string | null;
+  suggestedCommitMessage: string | null;
+  filesTouched: string[];
+  tests: string[];
+}
+
 export class BackendClient {
   constructor(private readonly transport: BackendTransport) {}
 
@@ -149,6 +171,24 @@ export class BackendClient {
   async reviewReply(target: TargetIdentity, message: string): Promise<OperationStatus> {
     const result = await this.transport.request("review.reply", { target, message });
     return result as unknown as OperationStatus;
+  }
+
+  async fixPreview(target: TargetIdentity): Promise<FixPreview> {
+    return (await this.transport.request("review.fix.preview", {
+      target,
+    })) as unknown as FixPreview;
+  }
+
+  async reviewFix(target: TargetIdentity, approvalToken: string): Promise<OperationStatus> {
+    return (await this.transport.request("review.fix", {
+      target,
+      approvalToken,
+    })) as unknown as OperationStatus;
+  }
+
+  async fixState(target: TargetIdentity): Promise<FixState | null> {
+    const result = await this.transport.request("review.fix.state", { target });
+    return (result.state as FixState | null) ?? null;
   }
 
   async startReview(

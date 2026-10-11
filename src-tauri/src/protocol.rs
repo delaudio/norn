@@ -106,6 +106,14 @@ pub struct ReviewReplyParams {
     pub message: String,
 }
 
+/// A single-use approval from `review.fix.preview`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ReviewFixParams {
+    pub target: TargetIdentity,
+    pub approval_token: String,
+}
+
 /// Parameters for `file.preview`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -196,6 +204,12 @@ pub enum Request {
         id: String,
         params: ReviewStartParams,
     },
+    #[serde(rename = "review.fix.state")]
+    ReviewFixState { id: String, params: TargetParams },
+    #[serde(rename = "review.fix.preview")]
+    ReviewFixPreview { id: String, params: TargetParams },
+    #[serde(rename = "review.fix")]
+    ReviewFix { id: String, params: ReviewFixParams },
     #[serde(rename = "review.reply")]
     ReviewReply {
         id: String,
@@ -234,6 +248,9 @@ impl Request {
             | Self::ReviewThreads { id, .. }
             | Self::BrowserOpen { id, .. }
             | Self::ReviewStart { id, .. }
+            | Self::ReviewFixState { id, .. }
+            | Self::ReviewFixPreview { id, .. }
+            | Self::ReviewFix { id, .. }
             | Self::ReviewReply { id, .. }
             | Self::OperationStatus { id, .. }
             | Self::OperationCancel { id, .. }
@@ -254,6 +271,9 @@ impl Request {
             Self::BrowserOpen { .. } => "browser.open",
             Self::ReviewStart { .. } => "review.start",
             Self::ReviewReply { .. } => "review.reply",
+            Self::ReviewFixState { .. } => "review.fix.state",
+            Self::ReviewFixPreview { .. } => "review.fix.preview",
+            Self::ReviewFix { .. } => "review.fix",
             Self::OperationStatus { .. } => "operation.status",
             Self::OperationCancel { .. } => "operation.cancel",
             Self::Shutdown { .. } => "shutdown",
@@ -283,13 +303,23 @@ impl Request {
                 }
             }
             Self::ReviewStart { params, .. } => params.target.validate()?,
+            Self::ReviewFix { params, .. } => {
+                params.target.validate()?;
+                if params.approval_token.len() != 64
+                    || !params.approval_token.bytes().all(|b| b.is_ascii_hexdigit())
+                {
+                    return Err(invalid_request("invalid fix approval token"));
+                }
+            }
             Self::ReviewReply { params, .. } => {
                 params.target.validate()?;
                 if params.message.trim().is_empty() {
                     return Err(invalid_request("`review.reply` message must not be empty"));
                 }
             }
-            Self::ReviewFiles { params, .. }
+            Self::ReviewFixState { params, .. }
+            | Self::ReviewFixPreview { params, .. }
+            | Self::ReviewFiles { params, .. }
             | Self::ReviewFindings { params, .. }
             | Self::ReviewHistory { params, .. }
             | Self::ReviewThreads { params, .. }
