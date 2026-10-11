@@ -1,0 +1,6 @@
+{
+  "type": "request",
+  "id": "fixture",
+  "method": "auth.status",
+  "params": {}
+}

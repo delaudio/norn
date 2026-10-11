@@ -113,6 +113,13 @@ pub struct ReviewCommitPreviewParams {
     pub message: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SettingsSaveParams {
+    pub expected_version: String,
+    pub settings: crate::services::settings::WorkspaceSettings,
+}
+
 /// A single-use approval from `review.fix.preview`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -177,6 +184,33 @@ pub struct TargetParams {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "method", rename_all = "camelCase")]
 pub enum Request {
+    #[serde(rename = "auth.status")]
+    AuthStatus {
+        id: String,
+        #[serde(default)]
+        params: EmptyParams,
+    },
+    #[serde(rename = "auth.set")]
+    AuthSet {
+        id: String,
+        params: crate::services::workspace_auth::AuthSetParams,
+    },
+    #[serde(rename = "auth.clear")]
+    AuthClear {
+        id: String,
+        params: crate::services::workspace_auth::AuthProviderParams,
+    },
+    #[serde(rename = "settings.get")]
+    SettingsGet {
+        id: String,
+        #[serde(default)]
+        params: EmptyParams,
+    },
+    #[serde(rename = "settings.save")]
+    SettingsSave {
+        id: String,
+        params: Box<SettingsSaveParams>,
+    },
     #[serde(rename = "repository.status")]
     RepositoryStatus {
         id: String,
@@ -264,7 +298,12 @@ pub enum Request {
 impl Request {
     pub fn id(&self) -> &str {
         match self {
-            Self::RepositoryStatus { id, .. }
+            Self::AuthStatus { id, .. }
+            | Self::AuthSet { id, .. }
+            | Self::AuthClear { id, .. }
+            | Self::SettingsGet { id, .. }
+            | Self::SettingsSave { id, .. }
+            | Self::RepositoryStatus { id, .. }
             | Self::DiffFile { id, .. }
             | Self::FilePreview { id, .. }
             | Self::ReviewFiles { id, .. }
@@ -294,6 +333,11 @@ impl Request {
 
     pub fn method(&self) -> &'static str {
         match self {
+            Self::AuthStatus { .. } => "auth.status",
+            Self::AuthSet { .. } => "auth.set",
+            Self::AuthClear { .. } => "auth.clear",
+            Self::SettingsGet { .. } => "settings.get",
+            Self::SettingsSave { .. } => "settings.save",
             Self::RepositoryStatus { .. } => "repository.status",
             Self::DiffFile { .. } => "diff.file",
             Self::FilePreview { .. } => "file.preview",
@@ -329,6 +373,19 @@ impl Request {
             return Err(invalid_request("request id must not be empty"));
         }
         match self {
+            Self::SettingsSave { params, .. } => {
+                if params.expected_version.len() != 64
+                    || !params
+                        .expected_version
+                        .bytes()
+                        .all(|byte| byte.is_ascii_hexdigit())
+                {
+                    return Err(invalid_request("invalid settings version"));
+                }
+                params.settings.validate().map_err(invalid_request)?;
+            }
+            Self::SettingsGet { .. } | Self::AuthStatus { .. } | Self::AuthClear { .. } => {}
+            Self::AuthSet { params, .. } => params.validate().map_err(invalid_request)?,
             Self::DiffFile { params, .. } => {
                 params.target.validate()?;
                 if params.path.is_empty() {
@@ -566,10 +623,12 @@ fn decode_json<T: serde::de::DeserializeOwned>(line: &[u8]) -> Result<T, Protoco
             "empty frame",
         ));
     }
-    serde_json::from_str(trimmed).map_err(|error| {
+    serde_json::from_str(trimmed).map_err(|_| {
+        // Schema errors may contain the rejected value. Never echo a request
+        // value that could be a credential into response diagnostics.
         ProtocolError::new(
             ProtocolErrorCode::InvalidRequest,
-            format!("malformed frame: {error}"),
+            "malformed protocol frame",
         )
     })
 }
@@ -691,6 +750,16 @@ mod tests {
     fn read_fixture(relative: &str) -> Vec<u8> {
         std::fs::read(fixtures_dir().join(relative))
             .unwrap_or_else(|error| panic!("failed to read fixture {relative}: {error}"))
+    }
+
+    #[test]
+    fn credential_shape_errors_and_debug_never_echo_the_secret() {
+        let invalid = br#"{"type":"request","id":"auth","method":"auth.set","params":{"provider":"fixture_sensitive_value","token":"fixture_sensitive_value"}}"#;
+        let error = decode_client_line(invalid).unwrap_err();
+        assert!(!error.message.contains("fixture_sensitive_value"));
+        let valid = br#"{"type":"request","id":"auth","method":"auth.set","params":{"provider":"github","token":"fixture_sensitive_value"}}"#;
+        let request = decode_client_line(valid).unwrap();
+        assert!(!format!("{request:?}").contains("fixture_sensitive_value"));
     }
 
     #[test]

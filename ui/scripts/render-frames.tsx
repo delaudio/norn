@@ -1,3 +1,5 @@
+import { SettingsPanel } from "../src/app/components/SettingsPanel";
+import { SettingsStore } from "../src/app/settingsStore";
 // Renders every terminal component/scene with the real OpenTUI renderer and
 // serializes bounded frame fixtures (cell spans, colors, attributes) for the
 // Storybook preview and the golden-frame visual lane.
@@ -111,7 +113,12 @@ interface Scene {
   id: string;
   cols: number;
   rows: number;
-  build: () => Promise<{ store: ShellStore; client: BackendClient }>;
+  build: () => Promise<{
+    store: ShellStore;
+    client: BackendClient;
+    view?: ReactNode;
+    afterMount?: () => void;
+  }>;
 }
 
 function readyStore(transport: BackendTransport) {
@@ -319,7 +326,51 @@ async function backgroundOperationScene() {
   return { client, store };
 }
 
+async function settingsScene(mode: "normal" | "secret" | "error" | "light") {
+  class SettingsTransport extends FakeBackendTransport {
+    async request(method: string, params: Record<string, unknown>) {
+      if (mode === "error" && method === "settings.get")
+        throw new Error(
+          "Stored preferences could not be read. Preserve the file before repairing it.",
+        );
+      return super.request(method, params);
+    }
+  }
+  const transport = new SettingsTransport({
+    repositories,
+    credentials: [{ provider: "github", available: true, source: "keychain" }],
+  });
+  const { client, store, ready } = readyStore(transport);
+  await ready;
+  const settings = new SettingsStore();
+  await settings.load(client);
+  if (mode === "light") {
+    const snapshot = await client.settings();
+    snapshot.settings.theme = "light";
+    await store.applySettings(client, snapshot.settings);
+  }
+  return {
+    client,
+    store,
+    view: <SettingsPanel settings={settings} shell={store} client={client} />,
+    afterMount:
+      mode === "secret"
+        ? () => {
+            settings.select("token");
+            settings.beginEdit();
+            settings.append("visual-fixture-only");
+          }
+        : undefined,
+  };
+}
+
 const scenes: Scene[] = [
+  { id: "shell-settings-120x40", cols: 120, rows: 40, build: () => settingsScene("normal") },
+  { id: "shell-settings-50x15", cols: 50, rows: 15, build: () => settingsScene("normal") },
+  { id: "shell-settings-secret-120x40", cols: 120, rows: 40, build: () => settingsScene("secret") },
+  { id: "shell-settings-secret-50x15", cols: 50, rows: 15, build: () => settingsScene("secret") },
+  { id: "shell-settings-error-80x24", cols: 80, rows: 24, build: () => settingsScene("error") },
+  { id: "shell-settings-light-120x40", cols: 120, rows: 40, build: () => settingsScene("light") },
   { id: "shell-background-operation-120x30", cols: 120, rows: 30, build: backgroundOperationScene },
   { id: "shell-background-operation-50x15", cols: 50, rows: 15, build: backgroundOperationScene },
   { id: "shell-sync-preview-120x30", cols: 120, rows: 30, build: () => branchScene("sync") },
@@ -363,26 +414,30 @@ function color(value: RGBA): string {
   return `rgba(${r},${g},${b},${a / 255})`;
 }
 
-function renderScene(store: ShellStore, client: BackendClient): ReactNode {
+function renderScene(store: ShellStore, client: BackendClient, view?: ReactNode): ReactNode {
   return (
     <box width="100%" height="100%" backgroundColor={theme.background}>
-      <Shell store={store} client={client} quit={() => {}} />
+      {view ?? <Shell store={store} client={client} quit={() => {}} />}
     </box>
   );
 }
 
 const frames: Record<string, TerminalFrame> = {};
 for (const scene of scenes) {
-  const { store, client } = await scene.build();
+  const { store, client, view, afterMount } = await scene.build();
   const test = await createTestRenderer({
     width: scene.cols,
     height: scene.rows,
     backgroundColor: theme.background,
   });
+  const root = createRoot(test.renderer);
   try {
-    const root = createRoot(test.renderer);
-    flushSync(() => root.render(renderScene(store, client)));
+    flushSync(() => root.render(renderScene(store, client, view)));
     await test.renderOnce();
+    if (afterMount) {
+      afterMount();
+      await test.renderOnce();
+    }
     const frame = test.captureSpans();
     frames[scene.id] = {
       cols: frame.cols,
@@ -401,6 +456,7 @@ for (const scene of scenes) {
       })),
     };
   } finally {
+    flushSync(() => root.unmount());
     test.renderer.destroy();
     client.close();
   }

@@ -9,6 +9,7 @@ import {
   useSyncExternalStore,
 } from "react";
 import type { BackendClient } from "../../transport/backendClient";
+import { SettingsStore } from "../settingsStore";
 import {
   type FilePreviewView,
   isImagePath,
@@ -19,6 +20,7 @@ import {
 import { theme } from "../theme";
 import { ConversationPanel } from "./ConversationPanel";
 import { FixPanel } from "./FixPanel";
+import { SettingsPanel } from "./SettingsPanel";
 
 interface ShellProps {
   store: ShellStore;
@@ -34,6 +36,7 @@ function useShellInput(
   fixScroll: RefObject<ScrollBoxRenderable | null>,
 ) {
   useKeyboard((key) => {
+    if (key.defaultPrevented || store.getSnapshot().settingsOpen) return;
     if (key.ctrl && key.name === "c") {
       quit();
       return;
@@ -115,6 +118,8 @@ function useShellInput(
       store.beginReply();
     } else if (key.name === "b") {
       void store.openBrowser(client);
+    } else if (key.name === "m") {
+      store.toggleSettings();
     } else if (key.name === "z") {
       void store.refreshOperation();
     } else if (key.name === "x") {
@@ -122,6 +127,7 @@ function useShellInput(
     }
   });
   usePaste((event) => {
+    if (store.getSnapshot().settingsOpen) return;
     if (store.getSnapshot().fixPreview) {
       event.preventDefault();
       return;
@@ -409,7 +415,11 @@ function DiffPanel({
     return <text fg={theme.warning}>Backend connection closed. Press q to quit.</text>;
   }
   if (state.repositories.length === 0) {
-    return <text fg={theme.muted}>No repositories configured. Run `norn setup` to add one.</text>;
+    return (
+      <text fg={theme.muted}>
+        No repositories configured. Press m for settings or run `norn setup`.
+      </text>
+    );
   }
   if (state.diffLoading) {
     return <text fg={theme.muted}>Loading diff…</text>;
@@ -566,6 +576,12 @@ function findingOptions(state: ShellSnapshot): ListOption[] {
 
 export function Shell({ store, client, quit }: ShellProps) {
   const state = useSyncExternalStore(store.subscribe, store.getSnapshot);
+  const settings = useMemo(() => new SettingsStore(), []);
+  useEffect(() => {
+    if (!state.settingsOpen) return;
+    void settings.load(client);
+    return () => settings.dispose();
+  }, [settings, client, state.settingsOpen]);
   useEffect(() => {
     if (!["accepted", "running"].includes(state.operation?.state ?? "")) return;
     const timer = setInterval(() => void store.pollOperation(), 1000);
@@ -672,6 +688,9 @@ export function Shell({ store, client, quit }: ShellProps) {
               options: findingOptions(state),
               selectedIndex: state.selectedFinding,
             };
+
+  if (state.settingsOpen)
+    return <SettingsPanel settings={settings} shell={store} client={client} />;
 
   return (
     <box width="100%" height="100%" flexDirection="column" backgroundColor={theme.background}>
@@ -847,8 +866,8 @@ export function Shell({ store, client, quit }: ShellProps) {
           {state.fixPreview
             ? "y approve · Esc/n dismiss · ↑/↓ scroll effects"
             : wide
-              ? "j/k move  s split  e expand  Tab pane  a fix  u sync · o conflicts · c commit  p push  r reply  t threads  v chat  f filter  g group  x cancel  q quit"
-              : "j/k  ←/→  s  e  Tab  q"}
+              ? "j/k move  s split  e expand  Tab pane  a fix  u sync · o conflicts · c commit  p push  r reply  t threads  v chat  f filter  g group  x cancel  m settings  q quit"
+              : "j/k  ←/→  s  e  Tab  m settings  q"}
         </text>
       </box>
     </box>

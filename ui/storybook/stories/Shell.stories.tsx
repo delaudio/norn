@@ -68,3 +68,10 @@ export const BackgroundOperation: Story = {
 export const CompactBackgroundOperation: Story = {
   args: { frameId: "shell-background-operation-50x15" },
 };
+
+export const Settings: Story = { args: { frameId: "shell-settings-120x40" } };
+export const CompactSettings: Story = { args: { frameId: "shell-settings-50x15" } };
+export const MaskedCredential: Story = { args: { frameId: "shell-settings-secret-120x40" } };
+export const CompactMaskedCredential: Story = { args: { frameId: "shell-settings-secret-50x15" } };
+export const SettingsError: Story = { args: { frameId: "shell-settings-error-80x24" } };
+export const LightSettings: Story = { args: { frameId: "shell-settings-light-120x40" } };

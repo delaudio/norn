@@ -167,6 +167,10 @@ fn legacy_config_path() -> Result<PathBuf, String> {
     Ok(dir.join(CONFIG_FILE))
 }
 
+pub(crate) fn settings_paths() -> Result<(PathBuf, PathBuf), String> {
+    Ok((config_path()?, legacy_config_path()?))
+}
+
 fn resolve_read_path(canonical: &Path, legacy: &Path) -> PathBuf {
     if canonical.exists() {
         return canonical.to_path_buf();

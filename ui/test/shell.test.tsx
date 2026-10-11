@@ -333,3 +333,46 @@ test("mounted operation polling stops after unmount", async () => {
     renderer.renderer.destroy();
   }
 });
+
+test("settings mask pasted credentials and close without running review shortcuts", async () => {
+  const renderer = await createTestRenderer({ width: 120, height: 40 });
+  const client = new BackendClient(new FakeBackendTransport({ repositories }));
+  const store = new ShellStore();
+  await store.connect(client);
+  let quits = 0;
+  const ui = mountApp(renderer.renderer, store, client, () => {
+    quits++;
+  });
+  try {
+    renderer.mockInput.pressKey("m");
+    await Bun.sleep(5);
+    await renderer.renderOnce();
+    expect(renderer.captureCharFrame()).toContain("Settings");
+    for (let i = 0; i < 22; i++) renderer.mockInput.pressTab();
+    await Bun.sleep(5);
+    await renderer.renderOnce();
+    expect(renderer.captureCharFrame()).toContain("› New credential");
+    renderer.mockInput.pressEnter();
+    await Bun.sleep(5);
+    await renderer.mockInput.pasteBracketedText("qapcrym-fixture-sensitive-value");
+    await renderer.renderOnce();
+    expect(renderer.captureCharFrame()).not.toContain("fixture-sensitive-value");
+    expect(renderer.captureCharFrame()).toContain("••");
+    expect(store.getSnapshot().operation).toBeNull();
+    expect(quits).toBe(0);
+    renderer.mockInput.pressEscape();
+    // A raw ESC needs the terminal parser's ambiguity window before q.
+    await Bun.sleep(50);
+    renderer.mockInput.pressKey("q");
+    await Bun.sleep(5);
+    await renderer.renderOnce();
+    expect(store.getSnapshot().settingsOpen).toBe(false);
+    expect(quits).toBe(0);
+    expect(await client.credentialStatus()).not.toContainEqual(
+      expect.objectContaining({ available: true }),
+    );
+  } finally {
+    ui.unmount();
+    renderer.renderer.destroy();
+  }
+});
