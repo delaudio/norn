@@ -20,8 +20,8 @@ use crate::services::review::{
     run_headless_review_native, HeadlessNativeReviewError, HeadlessNativeReviewRequest,
     ReviewFinding, ReviewFindingSeverity, ReviewProvider as ReviewRunProvider, ReviewRun,
 };
+use crate::services::review_prompt::{build_review_payload, resolve_review_prompt};
 
-const DEFAULT_REVIEW_PROMPT: &str = include_str!("../../src/lib/defaultReviewPrompt.md");
 const HEADLESS_REVIEW_BOUNDARY: &str = "## Headless reviewer boundary\n\nReview only the supplied policy, context, evidence, and diff. Do not inspect the filesystem or run commands.";
 const MAX_UNTRACKED_FILE_BYTES: u64 = 512 * 1024;
 const MAX_UNTRACKED_TOTAL_BYTES: u64 = 2 * 1024 * 1024;
@@ -249,7 +249,7 @@ pub fn run(request: HeadlessReviewRequest) -> Result<HeadlessReviewExecution, He
             .iter()
             .map(|warning| format!("{}: {}", warning.path, warning.message)),
     );
-    let prompt = resolve_prompt(config_result.config.as_ref());
+    let prompt = resolve_review_prompt(config_result.config.as_ref());
     let minimum_severity = config_result
         .config
         .as_ref()
@@ -308,13 +308,25 @@ pub fn run(request: HeadlessReviewRequest) -> Result<HeadlessReviewExecution, He
                 request.effort.or(app_config.opencode_effort),
             ),
         };
+    let (scope_label, scope_note) = match request.scope {
+        ReviewScope::WorkingTree => (
+            "working-tree",
+            "This target can contain staged, unstaged, and untracked files. Do not describe a file as committed unless the supplied evidence proves that it is committed.",
+        ),
+        ReviewScope::Branch => (
+            "branch",
+            "This target contains commits on the current branch relative to the selected base.",
+        ),
+        ReviewScope::PullRequest => ("pr", "This target contains the provider pull-request diff."),
+    };
     let payload = build_review_payload(
         &prompt,
         &resolved.title,
+        scope_label,
+        scope_note,
         &resolved.source_branch,
         &resolved.destination_branch,
         &resolved.diff,
-        request.scope,
     );
     let payload = format!("{payload}\n\n{HEADLESS_REVIEW_BOUNDARY}");
     let mut review_run = run_headless_review_native(HeadlessNativeReviewRequest {
@@ -1378,78 +1390,6 @@ fn git_error_message(output: &std::process::Output) -> String {
     }
 }
 
-fn resolve_prompt(config: Option<&repo_config::RepoReviewConfig>) -> String {
-    let prompt = config
-        .and_then(|config| config.review.as_ref())
-        .and_then(|review| review.prompt.as_ref())
-        .cloned()
-        .unwrap_or_default();
-    let replacement = prompt
-        .replace
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty());
-    let extension = prompt
-        .extend
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty());
-    let base = replacement.unwrap_or_else(|| DEFAULT_REVIEW_PROMPT.trim().to_string());
-    match extension {
-        Some(extension) => format!("{base}\n\n## Repository review policy\n{extension}"),
-        None => base,
-    }
-}
-
-fn build_review_payload(
-    prompt: &str,
-    title: &str,
-    source: &str,
-    destination: &str,
-    diff: &str,
-    scope: ReviewScope,
-) -> String {
-    let fence = markdown_fence(diff);
-    let opening_fence = format!("{fence}diff");
-    let scope_note = match scope {
-        ReviewScope::WorkingTree => {
-            "This target can contain staged, unstaged, and untracked files. Do not describe a file as committed unless the supplied evidence proves that it is committed."
-        }
-        ReviewScope::Branch => {
-            "This target contains commits on the current branch relative to the selected base."
-        }
-        ReviewScope::PullRequest => {
-            "This target contains the provider pull-request diff."
-        }
-    };
-    let mut payload = [
-        prompt.trim(),
-        "",
-        "## Review target",
-        &format!("{title} ({})", scope.label()),
-        &format!("Branch: {source} -> {destination}"),
-        scope_note,
-        "",
-        "## Diff",
-        &opening_fence,
-    ]
-    .join("\n");
-    payload.push('\n');
-    payload.push_str(diff);
-    if !diff.ends_with('\n') {
-        payload.push('\n');
-    }
-    payload.push_str(&fence);
-    payload
-}
-
-fn markdown_fence(content: &str) -> String {
-    let max_run = content
-        .split(|character| character != '`')
-        .map(str::len)
-        .max()
-        .unwrap_or(0);
-    "`".repeat(max_run.saturating_add(1).max(3))
-}
-
 #[cfg(test)]
 mod tests {
     use std::fs;
@@ -1458,10 +1398,10 @@ mod tests {
     use std::sync::atomic::{AtomicU64, Ordering};
 
     use super::{
-        branch_scope_warnings, build_review_payload, diff_sharing_authorized,
-        effective_analyzers_ran, ensure_config_valid, format_findings_markdown, format_markdown,
+        branch_scope_warnings, diff_sharing_authorized, effective_analyzers_ran,
+        ensure_config_valid, format_findings_markdown, format_markdown,
         is_safe_synthetic_diff_path, is_sensitive_untracked_path, map_native_review_error,
-        map_provider_target_error, markdown_fence, new_file_patch, public_provider_error,
+        map_provider_target_error, new_file_patch, public_provider_error,
         repo_identity_matches_target, requested_repo_identity, restricted_agent_host_with, run,
         sandbox_marker_is_restricted, strip_private_evidence_payloads, untracked_relative_path,
         validate_empty_diff_analyzers, validate_explicit_repo_identity, validate_provider_handoff,
@@ -1476,6 +1416,7 @@ mod tests {
         ReviewFindingAnchor, ReviewFindingCategory, ReviewFindingConfidence, ReviewFindingSeverity,
         ReviewFindingSource, ReviewFindingStatus, ReviewProvider as ReviewRunProvider, ReviewRun,
     };
+    use crate::services::review_prompt::{build_review_payload, markdown_fence};
 
     static TEMP_REPO_COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -1911,10 +1852,11 @@ mod tests {
         let payload = build_review_payload(
             "Review carefully.",
             "Working tree changes",
+            "working-tree",
+            "This target can contain staged, unstaged, and untracked files. Do not describe a file as committed unless the supplied evidence proves that it is committed.",
             "feature",
             "HEAD",
             "diff --git a/new.txt b/new.txt",
-            ReviewScope::WorkingTree,
         );
 
         assert!(payload.contains("staged, unstaged, and untracked files"));
@@ -1926,10 +1868,11 @@ mod tests {
         let payload = build_review_payload(
             "Review carefully.",
             "Local changes",
+            "working-tree",
+            "This target can contain staged, unstaged, and untracked files. Do not describe a file as committed unless the supplied evidence proves that it is committed.",
             "feature",
             "HEAD",
             "+change\n",
-            ReviewScope::WorkingTree,
         );
         let payload = format!("{payload}\n\n{HEADLESS_REVIEW_BOUNDARY}");
 
@@ -1942,10 +1885,11 @@ mod tests {
         let payload = build_review_payload(
             "Review carefully.",
             "Whitespace changes",
+            "branch",
+            "This target contains commits on the current branch relative to the selected base.",
             "feature",
             "main",
             diff,
-            ReviewScope::Branch,
         );
 
         assert!(payload.contains(&format!("```diff\n{diff}```")));
@@ -1957,10 +1901,11 @@ mod tests {
         let payload = build_review_payload(
             "Review carefully.",
             "Fence changes",
+            "branch",
+            "This target contains commits on the current branch relative to the selected base.",
             "feature",
             "main",
             diff,
-            ReviewScope::Branch,
         );
 
         assert_eq!(markdown_fence(diff), "````");
