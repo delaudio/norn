@@ -19,10 +19,21 @@ struct Backend {
 
 impl Backend {
     fn spawn(cwd: &Path) -> Self {
-        let mut child = Command::new(env!("CARGO_BIN_EXE_norn-backend"))
+        Self::spawn_env(cwd, &[])
+    }
+
+    fn spawn_env(cwd: &Path, extra_env: &[(&str, &str)]) -> Self {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_norn-backend"));
+        command
             .current_dir(cwd)
             .env("NORN_BACKEND_OPERATION_DELAY_MS", "200")
             .env("NORN_BROWSER_OPEN", "0")
+            // Pin the deterministic engine; individual tests override via extra_env.
+            .env("NORN_REVIEW_ENGINE", "simulated");
+        for (key, value) in extra_env {
+            command.env(key, value);
+        }
+        let mut child = command
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -541,6 +552,52 @@ fn file_preview_rejects_unsupported_types() {
         Duration::from_secs(5),
     );
     assert_eq!(response["ok"], false, "response: {response}");
+}
+
+#[test]
+fn fake_review_engine_streams_deterministic_events() {
+    let repo = temp_repo();
+    std::fs::write(repo.path().join("a.txt"), "one\n").expect("write");
+    git(repo.path(), &["add", "-A"]);
+    git(repo.path(), &["commit", "-qm", "init"]);
+    std::fs::write(repo.path().join("a.txt"), "two\n").expect("edit");
+
+    let mut backend = Backend::spawn_env(repo.path(), &[("NORN_REVIEW_ENGINE", "fake")]);
+    backend.handshake();
+    backend.send(json!({
+        "type": "request",
+        "id": "req-start",
+        "method": "review.start",
+        "params": { "target": { "kind": "local", "localSnapshotSha256": LOCAL_SHA } }
+    }));
+    let started = backend.wait_for(
+        |v| v["type"] == "response" && v["id"] == "req-start",
+        Duration::from_secs(5),
+    );
+    let operation_id = started["result"]["operationId"]
+        .as_str()
+        .expect("operation id")
+        .to_string();
+
+    let progress = backend.wait_for(
+        |v| {
+            v["type"] == "event"
+                && v["operationId"] == operation_id.as_str()
+                && v["event"]["message"] == "fake review analysed"
+        },
+        Duration::from_secs(5),
+    );
+    assert_eq!(progress["event"]["kind"], "progress");
+
+    let succeeded = backend.wait_for(
+        |v| {
+            v["type"] == "event"
+                && v["operationId"] == operation_id.as_str()
+                && v["event"]["state"] == "succeeded"
+        },
+        Duration::from_secs(5),
+    );
+    assert_eq!(succeeded["event"]["kind"], "state");
 }
 
 #[test]

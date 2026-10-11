@@ -46,6 +46,24 @@ const MAX_CONCURRENT_BROWSER_OPENS: usize = 1;
 const MAX_CONCURRENT_PREVIEWS: usize = 4;
 const MAX_ACTIVE_OPERATIONS: usize = 8;
 
+/// Which review engine executes `review.start`. Defaults to the deterministic
+/// simulated sequence; `NORN_REVIEW_ENGINE=real` runs the shared headless
+/// engine, and `fake` is a fast deterministic engine for tests.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ReviewEngine {
+    Simulated,
+    Fake,
+    Real,
+}
+
+fn review_engine() -> ReviewEngine {
+    match std::env::var("NORN_REVIEW_ENGINE").as_deref() {
+        Ok("real") => ReviewEngine::Real,
+        Ok("fake") => ReviewEngine::Fake,
+        _ => ReviewEngine::Simulated,
+    }
+}
+
 /// Every operation the backend tracks while it is running.
 struct Operation {
     cancel: Arc<AtomicBool>,
@@ -1885,7 +1903,15 @@ impl Backend {
         let operation_id = operation_id.to_string();
         let delay = self.operation_delay();
         thread::spawn(move || {
-            run_review_operation(&writer, &operations, &operation_id, &target, &cancel, delay);
+            run_review_operation(
+                review_engine(),
+                &writer,
+                &operations,
+                &operation_id,
+                &target,
+                &cancel,
+                delay,
+            );
             counter.decrement();
         });
     }
@@ -1968,6 +1994,213 @@ fn finish_cancelled(
 }
 
 fn run_review_operation(
+    engine: ReviewEngine,
+    writer: &SyncSender<ServerMessage>,
+    operations: &Operations,
+    operation_id: &str,
+    target: &TargetIdentity,
+    cancel: &AtomicBool,
+    delay: Duration,
+) {
+    match engine {
+        ReviewEngine::Simulated => {
+            run_simulated_review_operation(writer, operations, operation_id, target, cancel, delay);
+        }
+        ReviewEngine::Fake => {
+            run_fake_review_operation(writer, operations, operation_id, target, cancel)
+        }
+        ReviewEngine::Real => {
+            run_real_review_operation(writer, operations, operation_id, target, cancel)
+        }
+    }
+}
+
+/// Deterministic review engine for tests: a running state, one progress event
+/// and a terminal succeeded state, with no external processes.
+fn run_fake_review_operation(
+    writer: &SyncSender<ServerMessage>,
+    operations: &Operations,
+    operation_id: &str,
+    target: &TargetIdentity,
+    cancel: &AtomicBool,
+) {
+    set_operation(operations, operation_id, OperationState::Running, 0, None);
+    emit_event(
+        writer,
+        operations,
+        operation_id,
+        target,
+        1,
+        OperationEvent::State {
+            state: OperationState::Running,
+            error: None,
+        },
+        OperationState::Running,
+        None,
+    );
+    emit_event(
+        writer,
+        operations,
+        operation_id,
+        target,
+        2,
+        OperationEvent::Progress {
+            message: "fake review analysed".to_string(),
+            completed: Some(1),
+            total: Some(1),
+        },
+        OperationState::Running,
+        None,
+    );
+    if cancel.load(Ordering::SeqCst) {
+        finish_cancelled(writer, operations, operation_id, target, 3);
+        return;
+    }
+    emit_event(
+        writer,
+        operations,
+        operation_id,
+        target,
+        3,
+        OperationEvent::State {
+            state: OperationState::Succeeded,
+            error: None,
+        },
+        OperationState::Succeeded,
+        None,
+    );
+}
+
+/// Run the shared headless review engine for the target. Cooperative
+/// cancellation is not available mid-run; cancel is honoured before start.
+fn run_real_review_operation(
+    writer: &SyncSender<ServerMessage>,
+    operations: &Operations,
+    operation_id: &str,
+    target: &TargetIdentity,
+    cancel: &AtomicBool,
+) {
+    set_operation(operations, operation_id, OperationState::Running, 0, None);
+    emit_event(
+        writer,
+        operations,
+        operation_id,
+        target,
+        1,
+        OperationEvent::State {
+            state: OperationState::Running,
+            error: None,
+        },
+        OperationState::Running,
+        None,
+    );
+    if cancel.load(Ordering::SeqCst) {
+        finish_cancelled(writer, operations, operation_id, target, 2);
+        return;
+    }
+    let request = headless_review_request(target);
+    let outcome = crate::headless_review::run(request);
+    match outcome {
+        Ok(execution) => {
+            let failed = execution.status != "succeeded";
+            let error = failed.then(|| {
+                ProtocolError::new(
+                    ProtocolErrorCode::Internal,
+                    format!("review finished with status `{}`", execution.status),
+                )
+            });
+            emit_event(
+                writer,
+                operations,
+                operation_id,
+                target,
+                2,
+                OperationEvent::State {
+                    state: if failed {
+                        OperationState::Failed
+                    } else {
+                        OperationState::Succeeded
+                    },
+                    error: error.clone(),
+                },
+                if failed {
+                    OperationState::Failed
+                } else {
+                    OperationState::Succeeded
+                },
+                error,
+            );
+        }
+        Err(error) => {
+            let protocol_error = ProtocolError::new(ProtocolErrorCode::Internal, error.message);
+            emit_event(
+                writer,
+                operations,
+                operation_id,
+                target,
+                2,
+                OperationEvent::State {
+                    state: OperationState::Failed,
+                    error: Some(protocol_error.clone()),
+                },
+                OperationState::Failed,
+                Some(protocol_error),
+            );
+        }
+    }
+}
+
+/// Assemble the shared headless review request for a target from configuration.
+fn headless_review_request(
+    target: &TargetIdentity,
+) -> crate::headless_review::HeadlessReviewRequest {
+    let config = config::load();
+    let repo_path = resolve_repo_path(target);
+    match target {
+        TargetIdentity::Provider {
+            provider,
+            workspace,
+            repo,
+            pr_id,
+            ..
+        } => crate::headless_review::HeadlessReviewRequest {
+            repo_path,
+            scope: if pr_id.is_some() {
+                crate::headless_review::ReviewScope::PullRequest
+            } else {
+                crate::headless_review::ReviewScope::WorkingTree
+            },
+            base: None,
+            workspace: Some(workspace.clone()),
+            repo: Some(repo.clone()),
+            pr_id: *pr_id,
+            provider: Some(provider_matches(*provider)),
+            profile: None,
+            ai_provider: Some(config.ai_provider),
+            model: None,
+            effort: None,
+            run_analyzers: false,
+            allow_provider_diff: false,
+        },
+        TargetIdentity::Local { .. } => crate::headless_review::HeadlessReviewRequest {
+            repo_path,
+            scope: crate::headless_review::ReviewScope::WorkingTree,
+            base: None,
+            workspace: None,
+            repo: None,
+            pr_id: None,
+            provider: None,
+            profile: None,
+            ai_provider: Some(config.ai_provider),
+            model: None,
+            effort: None,
+            run_analyzers: false,
+            allow_provider_diff: false,
+        },
+    }
+}
+
+fn run_simulated_review_operation(
     writer: &SyncSender<ServerMessage>,
     operations: &Operations,
     operation_id: &str,
