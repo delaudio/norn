@@ -1,0 +1,13 @@
+{
+  "type": "request",
+  "id": "workspace-save",
+  "method": "workspace.mutate",
+  "params": {
+    "key": "prompt.github:fixture/demo",
+    "expectedVersion": "",
+    "mutation": {
+      "kind": "setPrompt",
+      "value": "Saved"
+    }
+  }
+}

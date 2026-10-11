@@ -95,6 +95,7 @@ struct Backend {
     active_browser: Arc<AtomicUsize>,
     active_previews: Arc<AtomicUsize>,
     active_settings: Arc<AtomicUsize>,
+    active_workspace: Arc<AtomicUsize>,
     browser: Arc<Mutex<Option<WebDiffServer>>>,
     fix_approvals: Arc<Mutex<HashMap<String, FixApproval>>>,
 }
@@ -161,6 +162,7 @@ pub fn run() -> Result<(), i32> {
         active_browser: Arc::new(AtomicUsize::new(0)),
         active_previews: Arc::new(AtomicUsize::new(0)),
         active_settings: Arc::new(AtomicUsize::new(0)),
+        active_workspace: Arc::new(AtomicUsize::new(0)),
         browser: Arc::new(Mutex::new(None)),
         fix_approvals: Arc::new(Mutex::new(HashMap::new())),
         active_operations: Arc::new(AtomicUsize::new(0)),
@@ -171,6 +173,7 @@ pub fn run() -> Result<(), i32> {
         server_version: env!("CARGO_PKG_VERSION").to_string(),
         capabilities: vec![
             "workspace-data".to_string(),
+            "workspace-records".to_string(),
             "settings".to_string(),
             "auth".to_string(),
             "repository".to_string(),
@@ -312,6 +315,56 @@ fn dispatch(request: Request, backend: &Backend) -> bool {
     let id = request.id().to_string();
     let method = request.method();
     match request {
+        Request::WorkspaceRead { .. } | Request::WorkspaceMutate { .. } => {
+            if backend
+                .active_workspace
+                .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |current| {
+                    (current < 4).then_some(current + 1)
+                })
+                .is_err()
+            {
+                backend.fail(
+                    &id,
+                    ProtocolError::new(
+                        ProtocolErrorCode::Conflict,
+                        "Too many user-data requests; retry after the current request.",
+                    ),
+                );
+                return false;
+            }
+            let control = backend.control.clone();
+            let active = backend.active_workspace.clone();
+            thread::spawn(move || {
+                let result = match request {
+                    Request::WorkspaceRead { params, .. } => {
+                        crate::services::workspace_data::record_read(params)
+                            .map(|value| json!(value))
+                    }
+                    Request::WorkspaceMutate { params, .. } => {
+                        crate::services::workspace_data::record_mutate(params)
+                            .map(|value| json!(value))
+                    }
+                    _ => unreachable!(),
+                };
+                let response = match result {
+                    Ok(value) => Response {
+                        id,
+                        ok: true,
+                        result: Some(value),
+                        error: None,
+                    },
+                    Err(message) => Response {
+                        id,
+                        ok: false,
+                        result: None,
+                        error: Some(ProtocolError::new(ProtocolErrorCode::Conflict, message)),
+                    },
+                };
+                active.fetch_sub(1, Ordering::SeqCst);
+                let _ = control.send(ServerMessage::Response(response));
+            });
+            false
+        }
         Request::DataPreview { .. }
         | Request::DataImport { .. }
         | Request::DataExport { .. }
@@ -2812,7 +2865,7 @@ fn start_inline_reply_session(
     let (source_branch, destination_branch) = run
         .map(|run| (run.source_branch, run.destination_branch))
         .unwrap_or_else(|| ("source".to_string(), "destination".to_string()));
-    let prompt = resolve_review_prompt(None);
+    let prompt = resolve_inline_prompt(target, &repo_path)?;
     let diff = git(
         &repo_path,
         &[
@@ -3376,6 +3429,47 @@ fn emit_failed(
     );
 }
 
+fn resolve_inline_prompt(
+    target: &TargetIdentity,
+    repo_path: &std::path::Path,
+) -> Result<String, ProtocolError> {
+    let canonical_repo = std::fs::canonicalize(repo_path).ok();
+    let owner = match target {
+        TargetIdentity::Provider {
+            provider,
+            workspace,
+            repo,
+            ..
+        } => Some((provider_matches(*provider), workspace.clone(), repo.clone())),
+        TargetIdentity::Local { .. } => config::load()
+            .repos
+            .into_iter()
+            .find(|entry| {
+                entry
+                    .local_path
+                    .as_deref()
+                    .and_then(|path| std::fs::canonicalize(path).ok())
+                    .is_some_and(|path| Some(path) == canonical_repo)
+            })
+            .map(|entry| (entry.provider, entry.workspace, entry.repo)),
+    };
+    if let Some((provider, workspace, repo)) = owner {
+        let user = crate::services::workspace_data::prompt_for_scope(provider, &workspace, &repo)
+            .map_err(|message| ProtocolError::new(ProtocolErrorCode::Conflict, message))?;
+        if let Some(prompt) = user.filter(|prompt| !prompt.trim().is_empty()) {
+            return Ok(prompt.trim().to_string());
+        }
+    }
+    let loaded=crate::repo_config::load_from_repo_path(repo_path).map_err(|_|ProtocolError::new(ProtocolErrorCode::InvalidParams,"Cannot read this repository's review policy; preserve it and inspect it before starting."))?;
+    if !loaded.errors.is_empty() {
+        return Err(ProtocolError::new(
+            ProtocolErrorCode::InvalidParams,
+            "This repository's review policy is invalid; correct it before starting.",
+        ));
+    }
+    Ok(resolve_review_prompt(loaded.config.as_ref()))
+}
+
 fn start_inline_session(target: &TargetIdentity) -> Result<InlineSession, ProtocolError> {
     let store = review_run_store().clone();
     let repo_path = resolve_repo_path(target).ok_or_else(|| {
@@ -3390,7 +3484,7 @@ fn start_inline_session(target: &TargetIdentity) -> Result<InlineSession, Protoc
             "no reviewable local repository for this target",
         ));
     }
-    let prompt = resolve_review_prompt(None);
+    let prompt = resolve_inline_prompt(target, &repo_path)?;
     let ai_provider = config::load().ai_provider;
 
     match target {

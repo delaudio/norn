@@ -227,7 +227,9 @@
         "auth.clear",
         "data.preview",
         "data.import",
-        "data.export"
+        "data.export",
+        "workspace.read",
+        "workspace.mutate"
       ]
     },
     "DiffFileParams": {
@@ -1286,6 +1288,732 @@
           "pattern": "^[^\\p{Cc}]+$"
         }
       }
+    },
+    "WorkspaceFindingReference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "reviewRunId",
+        "findingId",
+        "findingFingerprint"
+      ],
+      "properties": {
+        "reviewRunId": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 256
+        },
+        "findingId": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 256
+        },
+        "findingFingerprint": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 256
+        }
+      }
+    },
+    "WorkspaceDraft": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "localId",
+        "prId",
+        "path",
+        "raw",
+        "createdAt"
+      ],
+      "properties": {
+        "localId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "prId": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4294967295
+        },
+        "path": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 4096
+        },
+        "to": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 4294967295
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "from": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 4294967295
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "raw": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 65536
+        },
+        "parentId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 0,
+              "maxLength": 256
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "createdAt": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 18446744073709552000
+        },
+        "source": {
+          "anyOf": [
+            {
+              "enum": [
+                "manual",
+                "aiFinding"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "findingRef": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/WorkspaceFindingReference"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "publicationMode": {
+          "anyOf": [
+            {
+              "enum": [
+                "inline",
+                "file",
+                "general",
+                "localOnly"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "reviewBaseSha": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 0,
+              "maxLength": 256
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "reviewHeadSha": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 0,
+              "maxLength": 256
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "WorkspaceReference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "type",
+        "source",
+        "createdAt",
+        "updatedAt"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "type": {
+          "enum": [
+            "pullRequest",
+            "repository",
+            "jira",
+            "notion",
+            "note"
+          ]
+        },
+        "source": {
+          "enum": [
+            "detected",
+            "manual"
+          ]
+        },
+        "title": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 0,
+              "maxLength": 1024
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "url": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 0,
+              "maxLength": 4096
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "key": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 0,
+              "maxLength": 1024
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "workspace": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 0,
+              "maxLength": 1024
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "repo": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 0,
+              "maxLength": 1024
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "prId": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 4294967295
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "localPath": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 0,
+              "maxLength": 4096
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "body": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 0,
+              "maxLength": 65536
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "createdAt": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 18446744073709552000
+        },
+        "updatedAt": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 18446744073709552000
+        }
+      }
+    },
+    "WorkspaceValue": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "value"
+          ],
+          "properties": {
+            "kind": {
+              "const": "drafts"
+            },
+            "value": {
+              "type": "array",
+              "maxItems": 1000,
+              "items": {
+                "$ref": "#/definitions/WorkspaceDraft"
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "value"
+          ],
+          "properties": {
+            "kind": {
+              "const": "references"
+            },
+            "value": {
+              "type": "array",
+              "maxItems": 1000,
+              "items": {
+                "$ref": "#/definitions/WorkspaceReference"
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "value"
+          ],
+          "properties": {
+            "kind": {
+              "const": "viewed"
+            },
+            "value": {
+              "type": "array",
+              "maxItems": 10000,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 4096
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "value"
+          ],
+          "properties": {
+            "kind": {
+              "const": "prompt"
+            },
+            "value": {
+              "type": "string",
+              "minLength": 0,
+              "maxLength": 65536
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "value"
+          ],
+          "properties": {
+            "kind": {
+              "const": "theme"
+            },
+            "value": {
+              "enum": [
+                "dark",
+                "light"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "WorkspaceRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "key",
+        "payload"
+      ],
+      "properties": {
+        "key": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "payload": {
+          "$ref": "#/definitions/WorkspaceValue"
+        }
+      }
+    },
+    "RecordReadParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "key"
+      ],
+      "properties": {
+        "key": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "offset": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10000
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100
+        },
+        "recordVersion": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[a-fA-F0-9]{64}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "required": [
+              "offset"
+            ],
+            "properties": {
+              "offset": {
+                "minimum": 1
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "recordVersion"
+            ],
+            "properties": {
+              "recordVersion": {
+                "type": "string",
+                "pattern": "^[a-fA-F0-9]{64}$"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "RecordPage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "key",
+        "recordVersion",
+        "available",
+        "offset",
+        "nextOffset",
+        "totalItems",
+        "payload"
+      ],
+      "properties": {
+        "key": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "recordVersion": {
+          "type": "string",
+          "pattern": "^[a-fA-F0-9]{64}$"
+        },
+        "available": {
+          "type": "boolean"
+        },
+        "offset": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10000
+        },
+        "nextOffset": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 10000
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "totalItems": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10000
+        },
+        "payload": {
+          "$ref": "#/definitions/WorkspaceValue"
+        }
+      }
+    },
+    "RecordMutation": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "value"
+          ],
+          "properties": {
+            "kind": {
+              "const": "setPrompt"
+            },
+            "value": {
+              "type": "string",
+              "minLength": 0,
+              "maxLength": 65536
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "value"
+          ],
+          "properties": {
+            "kind": {
+              "const": "setTheme"
+            },
+            "value": {
+              "enum": [
+                "dark",
+                "light"
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "path"
+          ],
+          "properties": {
+            "kind": {
+              "const": "addViewed"
+            },
+            "path": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "path"
+          ],
+          "properties": {
+            "kind": {
+              "const": "removeViewed"
+            },
+            "path": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "reference"
+          ],
+          "properties": {
+            "kind": {
+              "const": "putReference"
+            },
+            "reference": {
+              "$ref": "#/definitions/WorkspaceReference"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "id"
+          ],
+          "properties": {
+            "kind": {
+              "const": "removeReference"
+            },
+            "id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "draft"
+          ],
+          "properties": {
+            "kind": {
+              "const": "putDraft"
+            },
+            "draft": {
+              "$ref": "#/definitions/WorkspaceDraft"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "localId"
+          ],
+          "properties": {
+            "kind": {
+              "const": "removeDraft"
+            },
+            "localId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            }
+          }
+        }
+      ]
+    },
+    "RecordMutateParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "key",
+        "expectedVersion",
+        "mutation"
+      ],
+      "properties": {
+        "key": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "expectedVersion": {
+          "type": "string",
+          "pattern": "^[a-fA-F0-9]{64}$"
+        },
+        "mutation": {
+          "$ref": "#/definitions/RecordMutation"
+        }
+      }
+    },
+    "RecordMutationResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "key",
+        "recordVersion",
+        "changed"
+      ],
+      "properties": {
+        "key": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "recordVersion": {
+          "type": "string",
+          "pattern": "^[a-fA-F0-9]{64}$"
+        },
+        "changed": {
+          "type": "boolean"
+        }
+      }
     }
   },
   "oneOf": [
@@ -2164,6 +2892,54 @@
               "$ref": "#/definitions/DataExportParams"
             }
           }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "type": {
+              "const": "request"
+            },
+            "id": {
+              "$ref": "#/definitions/RequestId"
+            },
+            "method": {
+              "const": "workspace.read"
+            },
+            "params": {
+              "$ref": "#/definitions/RecordReadParams"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "type": {
+              "const": "request"
+            },
+            "id": {
+              "$ref": "#/definitions/RequestId"
+            },
+            "method": {
+              "const": "workspace.mutate"
+            },
+            "params": {
+              "$ref": "#/definitions/RecordMutateParams"
+            }
+          }
         }
       ]
     },
@@ -2221,6 +2997,12 @@
             },
             {
               "$ref": "#/definitions/ReviewHistoryResult"
+            },
+            {
+              "$ref": "#/definitions/RecordPage"
+            },
+            {
+              "$ref": "#/definitions/RecordMutationResult"
             }
           ]
         }

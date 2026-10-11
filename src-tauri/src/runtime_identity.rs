@@ -204,6 +204,53 @@ pub(crate) fn rename_directory_noclobber(_source: &Path, _target: &Path) -> std:
     ))
 }
 
+/// A stable sibling lock coordinates atomic read/compare/replace across local
+/// backend/CLI processes. Never lock the destination inode: replacement changes
+/// that inode. Keep the sidecar in place; deleting it would split lock ownership.
+pub(crate) fn acquire_storage_lock(destination: &Path) -> Result<fs::File, String> {
+    let parent = destination
+        .parent()
+        .ok_or("Local data has no parent directory.")?;
+    fs::create_dir_all(parent).map_err(|_| "Cannot create the local data directory.")?;
+    let name = destination
+        .file_name()
+        .ok_or("Local data has no filename.")?;
+    let mut lock_name = OsString::from(".");
+    lock_name.push(name);
+    lock_name.push(".lock");
+    let path = parent.join(lock_name);
+    if fs::symlink_metadata(&path)
+        .is_ok_and(|meta| !meta.is_file() || meta.file_type().is_symlink())
+    {
+        return Err("Local data lock is not a regular file.".into());
+    }
+    let mut options = fs::OpenOptions::new();
+    options.read(true).write(true).create(true).truncate(false);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NOFOLLOW);
+    }
+    let file = options
+        .open(&path)
+        .map_err(|_| "Cannot open the local data lock.")?;
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+    loop {
+        match file.try_lock() {
+            Ok(()) => return Ok(file),
+            Err(std::fs::TryLockError::WouldBlock) if std::time::Instant::now() < deadline => {
+                std::thread::sleep(std::time::Duration::from_millis(5))
+            }
+            Err(std::fs::TryLockError::WouldBlock) => {
+                return Err(
+                    "Local data is busy in another process; retry after it finishes.".into(),
+                )
+            }
+            Err(_) => return Err("Cannot lock local data; no changes were written.".into()),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -288,5 +335,65 @@ mod tests {
         assert!(migrate_directory_atomically(&source, &destination).is_err());
         assert!(source.exists());
         assert!(!destination.exists());
+    }
+    #[test]
+    fn storage_lock_process_helper() {
+        let Some(destination) = std::env::var_os("NORN_LOCK_FIXTURE_DESTINATION") else {
+            return;
+        };
+        let Some(started) = std::env::var_os("NORN_LOCK_FIXTURE_STARTED") else {
+            panic!("missing fixture marker");
+        };
+        let Some(acquired) = std::env::var_os("NORN_LOCK_FIXTURE_ACQUIRED") else {
+            panic!("missing fixture marker");
+        };
+        fs::write(started, b"started").unwrap();
+        let _guard = acquire_storage_lock(Path::new(&destination)).unwrap();
+        fs::write(acquired, b"acquired").unwrap();
+    }
+
+    #[test]
+    fn storage_lock_coordinates_separate_processes_and_releases_on_drop() {
+        let root = tempfile::tempdir().unwrap();
+        let destination = root.path().join("records.json");
+        let started = root.path().join("started");
+        let acquired = root.path().join("acquired");
+        let guard = acquire_storage_lock(&destination).unwrap();
+        let mut child = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "runtime_identity::tests::storage_lock_process_helper",
+                "--nocapture",
+            ])
+            .env("NORN_LOCK_FIXTURE_DESTINATION", &destination)
+            .env("NORN_LOCK_FIXTURE_STARTED", &started)
+            .env("NORN_LOCK_FIXTURE_ACQUIRED", &acquired)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(1);
+        while !started.exists() && std::time::Instant::now() < deadline {
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        assert!(started.exists());
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        assert!(!acquired.exists());
+        drop(guard);
+        assert!(child.wait().unwrap().success());
+        assert!(acquired.exists());
+        assert!(acquire_storage_lock(&destination).is_ok());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn storage_lock_rejects_a_symlink_sidecar() {
+        let root = tempfile::tempdir().unwrap();
+        let destination = root.path().join("records.json");
+        let unrelated = root.path().join("unrelated");
+        fs::write(&unrelated, b"preserve").unwrap();
+        std::os::unix::fs::symlink(&unrelated, root.path().join(".records.json.lock")).unwrap();
+        assert!(acquire_storage_lock(&destination).is_err());
+        assert_eq!(fs::read(unrelated).unwrap(), b"preserve");
     }
 }

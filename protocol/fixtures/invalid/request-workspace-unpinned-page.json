@@ -1,0 +1,10 @@
+{
+  "type": "request",
+  "id": "workspace-read",
+  "method": "workspace.read",
+  "params": {
+    "key": "viewed.github:fixture/demo/7",
+    "offset": 100,
+    "limit": 100
+  }
+}

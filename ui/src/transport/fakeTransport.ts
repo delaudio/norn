@@ -1,4 +1,4 @@
-import type { WorkspaceSettings } from "../../../src/protocol/generated/protocol";
+import type { WorkspaceSettings, WorkspaceValue } from "../../../src/protocol/generated/protocol";
 import type { CredentialStatus } from "./backendClient";
 // Deterministic in-memory transport for tests, browser/dev mode and Storybook.
 // It implements the same contract as the subprocess transport.
@@ -21,6 +21,7 @@ export interface FakeTransportOptions {
   settings?: WorkspaceSettings;
   credentials?: CredentialStatus[];
   fixPhase?: "readyToCommit" | "readyToPush" | "completed";
+  workspaceRecords?: Record<string, WorkspaceValue>;
 }
 
 interface FakeOperation {
@@ -33,6 +34,7 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 export class FakeBackendTransport implements BackendTransport {
   private readonly options: FakeTransportOptions;
+  private records: Record<string, WorkspaceValue>;
   private readonly operations = new Map<string, FakeOperation>();
   private readonly eventListeners = new Set<(event: BackendOperationEvent) => void>();
   private readonly exitListeners = new Set<(exit: BackendExit) => void>();
@@ -51,6 +53,7 @@ export class FakeBackendTransport implements BackendTransport {
 
   constructor(options: FakeTransportOptions = {}) {
     this.options = options;
+    this.records = structuredClone(options.workspaceRecords ?? {});
     this.fixPhase = options.fixPhase ?? "readyToCommit";
     this.settingsValue = structuredClone(
       options.settings ?? {
@@ -90,11 +93,66 @@ export class FakeBackendTransport implements BackendTransport {
     await this.delay();
     return {
       serverVersion: this.options.serverVersion ?? "fake-0.0.0",
-      capabilities: ["repository", "diff", "review", "settings", "auth"],
+      capabilities: ["repository", "diff", "review", "settings", "auth", "workspace-records"],
     };
   }
 
   async request(method: string, params: Record<string, unknown>): Promise<Record<string, unknown>> {
+    if (this.closed) throw new Error("backend transport is closed");
+    if (method.startsWith("workspace.")) await this.delay();
+    if (method === "workspace.read" || method === "workspace.mutate") {
+      const key = String(params.key);
+      const stored = this.records[key];
+      const version = new Bun.CryptoHasher("sha256")
+        .update(stored ? JSON.stringify(stored) : "")
+        .digest("hex");
+      const kind = key === "theme" ? "theme" : key.split(".")[0];
+      const payload =
+        stored ??
+        ({
+          kind,
+          value: kind === "theme" ? "dark" : kind === "prompt" ? "" : [],
+        } as WorkspaceValue);
+      if (method === "workspace.mutate") {
+        if (params.expectedVersion !== version)
+          throw new Error("User-data record changed; refresh before saving your edit.");
+        const mutation = params.mutation as { kind: string; value?: string; path?: string };
+        let next: WorkspaceValue;
+        if (payload.kind === "prompt" && mutation.kind === "setPrompt")
+          next = { kind: "prompt", value: mutation.value ?? "" };
+        else if (payload.kind === "viewed" && ["addViewed", "removeViewed"].includes(mutation.kind))
+          next = {
+            kind: "viewed",
+            value:
+              mutation.kind === "removeViewed"
+                ? payload.value.filter((item) => item !== mutation.path)
+                : [...new Set([...payload.value, mutation.path ?? ""])],
+          };
+        else throw new Error("Unsupported fixture mutation.");
+        this.records[key] = next;
+        const recordVersion = new Bun.CryptoHasher("sha256")
+          .update(JSON.stringify(next))
+          .digest("hex");
+        return { key, recordVersion, changed: recordVersion !== version };
+      }
+      const offset = Number(params.offset ?? 0);
+      if (params.recordVersion && params.recordVersion !== version)
+        throw new Error("Fixture snapshot expired.");
+      const value = Array.isArray(payload.value)
+        ? payload.value.slice(offset, offset + 100)
+        : payload.value;
+      const totalItems = Array.isArray(payload.value) ? payload.value.length : stored ? 1 : 0;
+      const end = offset + (Array.isArray(value) ? value.length : 1);
+      return {
+        key,
+        recordVersion: version,
+        available: !!stored,
+        offset,
+        nextOffset: end < totalItems ? end : null,
+        totalItems,
+        payload: { kind, value },
+      };
+    }
     if (this.closed) {
       throw new Error("backend transport is closed");
     }

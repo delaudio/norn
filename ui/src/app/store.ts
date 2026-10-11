@@ -128,6 +128,8 @@ export interface PickerEntry {
 }
 
 export interface ShellSnapshot {
+  viewedFiles: string[];
+  workspaceOpen: boolean;
   settingsOpen: boolean;
   dataOpen: boolean;
   status: ShellStatus;
@@ -171,6 +173,8 @@ export interface ShellSnapshot {
 }
 
 const INITIAL: ShellSnapshot = {
+  viewedFiles: [],
+  workspaceOpen: false,
   settingsOpen: false,
   dataOpen: false,
   status: "idle",
@@ -408,6 +412,33 @@ export class ShellStore {
   toggleData(): void {
     this.update({ dataOpen: !this.state.dataOpen, settingsOpen: false, fixPreview: null });
   }
+  toggleWorkspace(): void {
+    this.update({
+      workspaceOpen: !this.state.workspaceOpen,
+      settingsOpen: false,
+      dataOpen: false,
+      fixPreview: null,
+    });
+  }
+  async refreshViewed(client: BackendClient, generation: number): Promise<void> {
+    if (generation !== this.state.generation) return;
+    const entry = this.state.picker[this.state.selectedPicker];
+    if (!entry || entry.prId === null) {
+      this.update({ viewedFiles: [] });
+      return;
+    }
+    const key = `viewed.${entry.provider}:${entry.workspace}/${entry.repo}/${entry.prId}`;
+    try {
+      const page = await client.readWorkspace(key, () => generation === this.state.generation);
+      if (generation === this.state.generation && page.payload.kind === "viewed")
+        this.update({ viewedFiles: page.payload.value });
+    } catch (error) {
+      if (generation === this.state.generation)
+        this.update({
+          notice: error instanceof Error ? error.message : "Cannot load viewed marks.",
+        });
+    }
+  }
   toggleSettings(): void {
     this.update({ settingsOpen: !this.state.settingsOpen, fixPreview: null });
   }
@@ -561,6 +592,7 @@ export class ShellStore {
       selected: selected ?? this.state.selected,
       generation,
       files: [],
+      viewedFiles: [],
       findings: [],
       selectedFile: 0,
       selectedFinding: 0,

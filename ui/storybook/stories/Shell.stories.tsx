@@ -80,6 +80,10 @@ export const DataPreview: Story = { args: { frameId: "shell-data-preview-120x30"
 export const CompactDataPreview: Story = { args: { frameId: "shell-data-preview-50x15" } };
 export const DataReadError: Story = { args: { frameId: "shell-data-error-80x24" } };
 export const DataImported: Story = { args: { frameId: "shell-data-imported-80x24" } };
+export const SavedRepositoryPrompt: Story = { args: { frameId: "shell-workspace-saved-120x30" } };
+export const UnsavedRepositoryPrompt: Story = { args: { frameId: "shell-workspace-dirty-80x24" } };
+export const PromptWriteConflict: Story = { args: { frameId: "shell-workspace-conflict-50x15" } };
+export const ClosedPromptState: Story = { args: { frameId: "shell-workspace-disposed-80x24" } };
 
 export const ImageComparison: Story = { args: { frameId: "shell-images-modified-120x30" } };
 export const CompactImageComparison: Story = { args: { frameId: "shell-images-modified-50x20" } };

@@ -208,6 +208,18 @@ export type Request =
       id: RequestId;
       method: "data.export";
       params: DataExportParams;
+    }
+  | {
+      type: "request";
+      id: RequestId;
+      method: "workspace.read";
+      params: RecordReadParams;
+    }
+  | {
+      type: "request";
+      id: RequestId;
+      method: "workspace.mutate";
+      params: RecordMutateParams;
     };
 export type RequestId = string;
 /**
@@ -227,6 +239,45 @@ export type AuthSetParams = {
   username?: string | null;
   token: string;
 };
+export type RecordReadParams = {
+  key: string;
+  offset?: number;
+  limit?: number;
+  recordVersion?: string | null;
+};
+export type RecordMutation =
+  | {
+      kind: "setPrompt";
+      value: string;
+    }
+  | {
+      kind: "setTheme";
+      value: "dark" | "light";
+    }
+  | {
+      kind: "addViewed";
+      path: string;
+    }
+  | {
+      kind: "removeViewed";
+      path: string;
+    }
+  | {
+      kind: "putReference";
+      reference: WorkspaceReference;
+    }
+  | {
+      kind: "removeReference";
+      id: string;
+    }
+  | {
+      kind: "putDraft";
+      draft: WorkspaceDraft;
+    }
+  | {
+      kind: "removeDraft";
+      localId: string;
+    };
 export type OperationState = "accepted" | "running" | "succeeded" | "failed" | "cancelled";
 export type ErrorCode =
   | "invalidRequest"
@@ -238,6 +289,36 @@ export type ErrorCode =
   | "targetStale"
   | "conflict"
   | "internal";
+export type WorkspaceValue =
+  | {
+      kind: "drafts";
+      /**
+       * @maxItems 1000
+       */
+      value: WorkspaceDraft[];
+    }
+  | {
+      kind: "references";
+      /**
+       * @maxItems 1000
+       */
+      value: WorkspaceReference[];
+    }
+  | {
+      kind: "viewed";
+      /**
+       * @maxItems 10000
+       */
+      value: string[];
+    }
+  | {
+      kind: "prompt";
+      value: string;
+    }
+  | {
+      kind: "theme";
+      value: "dark" | "light";
+    };
 export type OperationEvent =
   | {
       kind: "progress";
@@ -348,6 +429,46 @@ export interface DataImportParams {
 export interface DataExportParams {
   path: string;
 }
+export interface RecordMutateParams {
+  key: string;
+  expectedVersion: string;
+  mutation: RecordMutation;
+}
+export interface WorkspaceReference {
+  id: string;
+  type: "pullRequest" | "repository" | "jira" | "notion" | "note";
+  source: "detected" | "manual";
+  title?: string | null;
+  url?: string | null;
+  key?: string | null;
+  workspace?: string | null;
+  repo?: string | null;
+  prId?: number | null;
+  localPath?: string | null;
+  body?: string | null;
+  createdAt: number;
+  updatedAt: number;
+}
+export interface WorkspaceDraft {
+  localId: string;
+  prId: number;
+  path: string;
+  to?: number | null;
+  from?: number | null;
+  raw: string;
+  parentId?: string | null;
+  createdAt: number;
+  source?: ("manual" | "aiFinding") | null;
+  findingRef?: WorkspaceFindingReference | null;
+  publicationMode?: ("inline" | "file" | "general" | "localOnly") | null;
+  reviewBaseSha?: string | null;
+  reviewHeadSha?: string | null;
+}
+export interface WorkspaceFindingReference {
+  reviewRunId: string;
+  findingId: string;
+  findingFingerprint: string;
+}
 export interface ResponseOk {
   type: "response";
   id: RequestId;
@@ -363,7 +484,9 @@ export interface ResponseOk {
     | ReviewTargetsResult
     | BrowserOpenResult
     | FilePreviewResult
-    | ReviewHistoryResult;
+    | ReviewHistoryResult
+    | RecordPage
+    | RecordMutationResult;
 }
 export interface DiffFileResult {
   target: TargetIdentity;
@@ -461,6 +584,20 @@ export interface ReviewRunSummary {
   status: string;
   turnKind: string;
   findingsCount: number;
+}
+export interface RecordPage {
+  key: string;
+  recordVersion: string;
+  available: boolean;
+  offset: number;
+  nextOffset: number | null;
+  totalItems: number;
+  payload: WorkspaceValue;
+}
+export interface RecordMutationResult {
+  key: string;
+  recordVersion: string;
+  changed: boolean;
 }
 export interface ResponseError {
   type: "response";
