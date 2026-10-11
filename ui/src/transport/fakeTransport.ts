@@ -16,6 +16,7 @@ export interface FakeTransportOptions {
   findings?: Array<Record<string, unknown>>;
   /** Overrides the synthetic diff returned by `diff.file`. */
   diffText?: string;
+  reviewOutput?: string;
   /** Artificial latency in milliseconds for every request. */
   delayMs?: number;
   settings?: WorkspaceSettings;
@@ -199,6 +200,12 @@ export class FakeBackendTransport implements BackendTransport {
         return { runs: this.options.history ?? [] };
       case "review.threads":
         return { threads: this.options.threads ?? [] };
+      case "review.output":
+        return {
+          target: params.target,
+          runId: (params.target as { runId?: string }).runId ?? "fake-run",
+          text: this.options.reviewOutput ?? "Synthetic stored review output.",
+        };
       case "browser.open":
         return { url: `http://127.0.0.1:0/session/${"0".repeat(64)}/` };
       case "file.preview": {

@@ -1,4 +1,6 @@
 import type { WorkspaceSettings } from "../../../src/protocol/generated/protocol";
+import { SyntaxHighlighter } from "./syntaxHighlighter";
+import type { DiffSyntax, SyntaxReader } from "./syntaxTypes";
 import { setTheme } from "./theme";
 // Shell state for the OpenTUI workspace. UI state owns selection, focus and
 // scroll; the backend owns persistent data and operations. Async results and
@@ -128,6 +130,8 @@ export interface PickerEntry {
 }
 
 export interface ShellSnapshot {
+  syntax: DiffSyntax | null;
+  syntaxLoading: boolean;
   searchOpen: boolean;
   searchText: string;
   searchQuery: string;
@@ -179,6 +183,8 @@ export interface ShellSnapshot {
 }
 
 const INITIAL: ShellSnapshot = {
+  syntax: null,
+  syntaxLoading: false,
   searchOpen: false,
   searchText: "",
   searchQuery: "",
@@ -366,6 +372,73 @@ export function anchorPresent(text: string, line: number, side: "old" | "new"): 
 }
 
 export class ShellStore {
+  private copyPending = false;
+  async copyReviewOutput(client: BackendClient, copy: (text: string) => boolean): Promise<void> {
+    if (this.copyPending) return;
+    const target = this.activeTarget();
+    if (target?.kind !== "provider" || !target.prId) {
+      this.update({ notice: "Select a stored pull-request review to copy its output." });
+      return;
+    }
+    const generation = this.state.generation;
+    this.copyPending = true;
+    try {
+      const text = await client.reviewOutput(target);
+      if (
+        generation !== this.state.generation ||
+        !sameTarget(this.activeTarget(), target) ||
+        this.state.status === "closed"
+      )
+        return;
+      this.update({
+        notice: copy(text)
+          ? "Review output sent through the terminal clipboard. Paste to verify; terminal policies may block it."
+          : "Terminal clipboard is unavailable; nothing was copied.",
+      });
+    } catch {
+      if (
+        generation === this.state.generation &&
+        sameTarget(this.activeTarget(), target) &&
+        this.state.status !== "closed"
+      )
+        this.update({
+          notice:
+            "Review output could not be copied (missing output, size limit, or terminal failure).",
+        });
+    } finally {
+      this.copyPending = false;
+    }
+  }
+  constructor(private readonly syntaxReader: SyntaxReader = new SyntaxHighlighter()) {}
+  private syntaxGeneration = 0;
+  cancelSyntax(): void {
+    this.syntaxGeneration++;
+    this.syntaxReader.cancel();
+  }
+  private async loadSyntax(path: string, text: string): Promise<void> {
+    const generation = ++this.syntaxGeneration;
+    this.update({ syntax: null, syntaxLoading: true });
+    try {
+      const syntax = await this.syntaxReader.highlight(path, text);
+      if (
+        generation === this.syntaxGeneration &&
+        this.state.diff?.path === path &&
+        this.state.diff.text === text
+      )
+        this.update({ syntax, syntaxLoading: false });
+    } catch {
+      if (generation === this.syntaxGeneration)
+        this.update({
+          syntax: {
+            status: "failed",
+            language: null,
+            reason: "Syntax coloring is unavailable; complete diff text remains available.",
+            rows: {},
+          },
+          syntaxLoading: false,
+        });
+    }
+  }
   private state: ShellSnapshot = INITIAL;
   private readonly listeners = new Set<() => void>();
   private nextLogId = 1;
@@ -676,6 +749,7 @@ export class ShellStore {
   }
 
   async selectPicker(selectedPicker: number, selected?: number): Promise<void> {
+    this.cancelSyntax();
     this.clearSearch();
     const generation = this.state.generation + 1;
     this.update({
@@ -697,6 +771,8 @@ export class ShellStore {
       composing: false,
       composerText: "",
       diff: null,
+      syntax: null,
+      syntaxLoading: false,
       diffLoading: false,
       diffError: null,
       highlightLine: null,
@@ -738,6 +814,8 @@ export class ShellStore {
   /// navigation coalesces into a single pending follow-up for the latest
   /// selection instead of starting (and then discarding) one request per move.
   private async loadDiff(client: BackendClient): Promise<void> {
+    this.cancelSyntax();
+    this.update({ syntax: null, syntaxLoading: false });
     if (this.diffInFlight) {
       // Invalidate the in-flight result so it cannot overwrite the newer
       // selection, and coalesce the follow-up into one pending fetch.
@@ -776,6 +854,7 @@ export class ShellStore {
           diffExpanded: false,
           diffLineCount: result.diff.split("\n").length,
         });
+        void this.loadSyntax(result.path, result.diff);
         const highlight = this.state.highlightLine;
         if (highlight != null) {
           if (anchorPresent(result.diff, highlight, this.state.highlightSide)) {
@@ -1575,6 +1654,7 @@ export class ShellStore {
   }
 
   markClosed(): void {
+    this.cancelSyntax();
     this.update({ status: "closed" });
   }
 

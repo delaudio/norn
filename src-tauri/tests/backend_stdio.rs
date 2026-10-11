@@ -848,6 +848,63 @@ struct FixFixture {
 }
 
 #[cfg(unix)]
+#[test]
+fn review_output_is_exact_bounded_and_pinned_to_provider_and_run() {
+    let mut fixture = FixFixture::new("#!/bin/sh\nexit 99\n");
+    let request = |fixture: &mut FixFixture, target: Value| {
+        fixture.backend.send(json!({"type":"request","id":"copy-output","method":"review.output","params":{"target":target}}));
+        fixture.backend.wait_for(
+            |value| value["id"] == "copy-output",
+            Duration::from_secs(10),
+        )
+    };
+    let target = fixture.target.clone();
+    let result = request(&mut fixture, target.clone());
+    assert_eq!(result["ok"], true, "{result}");
+    assert_eq!(result["result"]["target"], target);
+    assert_eq!(result["result"]["runId"], "run-fix");
+    assert_eq!(result["result"]["text"], "Fix tracked.txt.");
+    assert!(!result.to_string().contains("private-resume"));
+    let mut wrong = target.clone();
+    wrong["provider"] = json!("bitbucket");
+    assert_eq!(request(&mut fixture, wrong)["error"]["code"], "targetStale");
+    let mut missing = target.clone();
+    missing["runId"] = json!("does-not-exist");
+    assert_eq!(request(&mut fixture, missing)["error"]["code"], "notFound");
+    let connection = rusqlite::Connection::open(fixture._data.path().join("norn.sqlite3")).unwrap();
+    let saved: String = connection
+        .query_row(
+            "SELECT store_json FROM ai_review_stores WHERE review_key='fixture_demo_9'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let mut saved: Value = serde_json::from_str(&saved).unwrap();
+    let exact = "## Complete Unicode output\n世界 👩‍💻\n";
+    saved["reviewRuns"][0]["summaryMarkdown"] = json!(exact);
+    connection
+        .execute(
+            "UPDATE ai_review_stores SET store_json=?1 WHERE review_key='fixture_demo_9'",
+            [saved.to_string()],
+        )
+        .unwrap();
+    assert_eq!(
+        request(&mut fixture, target.clone())["result"]["text"],
+        exact
+    );
+    saved["reviewRuns"][0]["summaryMarkdown"] = json!("界".repeat(30_000));
+    connection
+        .execute(
+            "UPDATE ai_review_stores SET store_json=?1 WHERE review_key='fixture_demo_9'",
+            [saved.to_string()],
+        )
+        .unwrap();
+    let oversized = request(&mut fixture, target);
+    assert_eq!(oversized["error"]["code"], "invalidParams", "{oversized}");
+    assert!(oversized.get("result").is_none());
+}
+
+#[cfg(unix)]
 impl FixFixture {
     fn new(agent_script: &str) -> Self {
         use std::os::unix::fs::PermissionsExt;

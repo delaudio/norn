@@ -20,6 +20,7 @@ import { createRoot, flushSync } from "@opentui/react";
 import type { ReactNode } from "react";
 import { Shell } from "../src/app/components/Shell";
 import { ShellStore } from "../src/app/store";
+import { parseDiffSyntax } from "../src/app/syntaxTokens";
 import { theme } from "../src/app/theme";
 import { BackendClient } from "../src/transport/backendClient";
 import { FakeBackendTransport } from "../src/transport/fakeTransport";
@@ -127,7 +128,10 @@ interface Scene {
 
 function readyStore(transport: BackendTransport) {
   const client = new BackendClient(transport);
-  const store = new ShellStore();
+  const store = new ShellStore({
+    highlight: async (path, text) => parseDiffSyntax(path, text),
+    cancel() {},
+  });
   return { client, store, ready: store.connect(client) };
 }
 
@@ -531,7 +535,26 @@ async function searchScene(mode: "editing" | "none" | "split") {
   return { client, store };
 }
 
+async function syntaxScene(mode: "unified" | "split" | "plain") {
+  const path = mode === "plain" ? "src/custom.unknown" : "src/example.tsx";
+  const scene = readyStore(
+    new FakeBackendTransport({
+      repositories,
+      files: [{ path, status: "modified", additions: 2, deletions: 2, oldPath: null }],
+      findings: [],
+      diffText:
+        "@@ -1,3 +1,3 @@\n // Keep both revisions and Unicode 世界\n-const old = <div value={1}>Before</div>;\n+const next = <div value={2}>After</div>;\n export default next;",
+    }),
+  );
+  await scene.ready;
+  if (mode === "split") scene.store.toggleDiffMode();
+  return { store: scene.store, client: scene.client };
+}
 const scenes: Scene[] = [
+  { id: "shell-syntax-unified-120x30", cols: 120, rows: 30, build: () => syntaxScene("unified") },
+  { id: "shell-syntax-split-120x30", cols: 120, rows: 30, build: () => syntaxScene("split") },
+  { id: "shell-syntax-split-50x15", cols: 50, rows: 15, build: () => syntaxScene("split") },
+  { id: "shell-syntax-plain-80x24", cols: 80, rows: 24, build: () => syntaxScene("plain") },
   { id: "shell-search-editing-120x30", cols: 120, rows: 30, build: () => searchScene("editing") },
   { id: "shell-search-none-80x24", cols: 80, rows: 24, build: () => searchScene("none") },
   { id: "shell-search-split-80x24", cols: 80, rows: 24, build: () => searchScene("split") },

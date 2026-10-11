@@ -229,7 +229,8 @@
         "data.import",
         "data.export",
         "workspace.read",
-        "workspace.mutate"
+        "workspace.mutate",
+        "review.output"
       ]
     },
     "DiffFileParams": {
@@ -2014,6 +2015,29 @@
           "type": "boolean"
         }
       }
+    },
+    "ReviewOutputResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "target",
+        "runId",
+        "text"
+      ],
+      "properties": {
+        "target": {
+          "$ref": "#/definitions/TargetIdentity"
+        },
+        "runId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "text": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 65536
+        }
+      }
     }
   },
   "oneOf": [
@@ -2940,6 +2964,30 @@
               "$ref": "#/definitions/RecordMutateParams"
             }
           }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "type": {
+              "const": "request"
+            },
+            "id": {
+              "$ref": "#/definitions/RequestId"
+            },
+            "method": {
+              "const": "review.output"
+            },
+            "params": {
+              "$ref": "#/definitions/TargetParams"
+            }
+          }
         }
       ]
     },
@@ -3003,6 +3051,9 @@
             },
             {
               "$ref": "#/definitions/RecordMutationResult"
+            },
+            {
+              "$ref": "#/definitions/ReviewOutputResult"
             }
           ]
         }

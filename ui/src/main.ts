@@ -23,7 +23,9 @@ async function main(): Promise<void> {
   }
   let client: BackendClient | null = null;
   let renderer: Awaited<ReturnType<typeof createCliRenderer>> | null = null;
+  let store: ShellStore | null = null;
   const quit = (code = 0) => {
+    store?.cancelSyntax();
     client?.close();
     renderer?.destroy();
     process.exit(code);
@@ -36,11 +38,11 @@ async function main(): Promise<void> {
       screenMode: "alternate-screen",
       useMouse: true,
     });
-    const store = new ShellStore();
+    store = new ShellStore();
     mountApp(renderer, store, client, quit);
-    client.onOperationEvent((event) => store.applyEvent(event));
+    client.onOperationEvent((event) => store?.applyEvent(event));
     client.onExit((exit) => {
-      store.markClosed();
+      store?.markClosed();
       if (exit.code !== 0 && exit.code !== null) {
         console.error(`norn-backend exited with code ${exit.code}.`);
       }
@@ -48,6 +50,7 @@ async function main(): Promise<void> {
     });
     await store.connect(client);
   } catch (error) {
+    store?.cancelSyntax();
     client?.close();
     renderer?.destroy();
     console.error(error instanceof Error ? error.message : String(error));

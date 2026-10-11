@@ -220,6 +220,12 @@ export type Request =
       id: RequestId;
       method: "workspace.mutate";
       params: RecordMutateParams;
+    }
+  | {
+      type: "request";
+      id: RequestId;
+      method: "review.output";
+      params: TargetParams;
     };
 export type RequestId = string;
 /**
@@ -486,7 +492,8 @@ export interface ResponseOk {
     | FilePreviewResult
     | ReviewHistoryResult
     | RecordPage
-    | RecordMutationResult;
+    | RecordMutationResult
+    | ReviewOutputResult;
 }
 export interface DiffFileResult {
   target: TargetIdentity;
@@ -598,6 +605,11 @@ export interface RecordMutationResult {
   key: string;
   recordVersion: string;
   changed: boolean;
+}
+export interface ReviewOutputResult {
+  target: TargetIdentity;
+  runId: string;
+  text: string;
 }
 export interface ResponseError {
   type: "response";
