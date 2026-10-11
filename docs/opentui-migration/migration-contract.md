@@ -197,10 +197,15 @@ UX is the only open product decision and is an explicit blocker on #305.
 ## 9. Vertical slice and cutover gates
 
 Current scoped parity evidence: [canonical saved-scope access](./canonical-scope-picker.md)
-is prepared under #355 / plan 0053 after publication PR #354. It preserves
+shipped under #355 / plan 0053 in PR #356 at `2a7f0fe` after publication PR #354. It preserves
 unconfigured imported PR data and actual saved-run/provider identities. It does
 not mark the complete PR-list, history, native-profile recovery or other #306
 rows shipped. #306 remains open until every retained row has merged verification.
+
+[Native provider PR reads](./provider-pr-reads.md) are the first bounded #357 /
+plan 0054 delivery. Terminal provider browsing, pre-review pinned diffs and
+explicit PR approval remain separate required work; a backend contract alone
+does not complete the provider navigation row.
 
 - **First vertical slice (#301):** real file → diff → finding through the Rust
   backend and the OpenTUI client, measured on a large diff. Material

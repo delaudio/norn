@@ -3100,6 +3100,511 @@
           }
         }
       }
+    },
+    "PrRepositoryIdentity": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "provider",
+            "workspace",
+            "repo"
+          ],
+          "properties": {
+            "provider": {
+              "const": "github"
+            },
+            "workspace": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "pattern": "^(?!\\.{1,2}$)[A-Za-z0-9_.-]+$"
+            },
+            "repo": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "pattern": "^(?!\\.{1,2}$)[A-Za-z0-9_.-]+$"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "provider",
+            "workspace",
+            "repo"
+          ],
+          "properties": {
+            "provider": {
+              "const": "bitbucket"
+            },
+            "workspace": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256,
+                  "pattern": "^(?!\\.{1,2}$)[A-Za-z0-9_.-]+$"
+                },
+                {
+                  "type": "string",
+                  "pattern": "^\\{[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12}\\}$"
+                }
+              ]
+            },
+            "repo": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256,
+                  "pattern": "^(?!\\.{1,2}$)[A-Za-z0-9_.-]+$"
+                },
+                {
+                  "type": "string",
+                  "pattern": "^\\{[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12}\\}$"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "ProviderPrListParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "repository",
+        "filter",
+        "page",
+        "limit"
+      ],
+      "properties": {
+        "repository": {
+          "$ref": "#/definitions/PrRepositoryIdentity"
+        },
+        "filter": {
+          "enum": [
+            "OPEN",
+            "DRAFT",
+            "MERGED",
+            "ALL"
+          ]
+        },
+        "page": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100
+        },
+        "query": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 0,
+              "maxLength": 256,
+              "pattern": "^[^\\u0000-\\u001f\\u007f]*$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "authorId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "pattern": "^[^\\u0000-\\u001f\\u007f]*$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "ProviderPrDetailParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "repository",
+        "prId"
+      ],
+      "properties": {
+        "repository": {
+          "$ref": "#/definitions/PrRepositoryIdentity"
+        },
+        "prId": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 2147483647
+        }
+      }
+    },
+    "ProviderUserParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "repository"
+      ],
+      "properties": {
+        "repository": {
+          "$ref": "#/definitions/PrRepositoryIdentity"
+        }
+      }
+    },
+    "ProviderPrReviewer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "displayName",
+        "accountId",
+        "role",
+        "approved"
+      ],
+      "properties": {
+        "displayName": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 256,
+          "pattern": "^[^\\u0000-\\u001f\\u007f]*$"
+        },
+        "accountId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 0,
+              "maxLength": 256,
+              "pattern": "^[^\\u0000-\\u001f\\u007f]*$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "role": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 32,
+          "pattern": "^[^\\u0000-\\u001f\\u007f]*$"
+        },
+        "approved": {
+          "type": "boolean"
+        }
+      }
+    },
+    "ProviderPrSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "title",
+        "authorDisplayName",
+        "sourceBranch",
+        "destinationBranch",
+        "state",
+        "draft",
+        "createdOn",
+        "updatedOn",
+        "reviewers",
+        "authorAccountId",
+        "commentCount"
+      ],
+      "properties": {
+        "id": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 2147483647
+        },
+        "title": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 4096,
+          "pattern": "^[^\\u0000-\\u001f\\u007f]*$"
+        },
+        "authorDisplayName": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 256,
+          "pattern": "^[^\\u0000-\\u001f\\u007f]*$"
+        },
+        "sourceBranch": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 256,
+          "pattern": "^[^\\u0000-\\u001f\\u007f]*$"
+        },
+        "destinationBranch": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 256,
+          "pattern": "^[^\\u0000-\\u001f\\u007f]*$"
+        },
+        "state": {
+          "enum": [
+            "OPEN",
+            "MERGED",
+            "DECLINED",
+            "SUPERSEDED"
+          ]
+        },
+        "draft": {
+          "type": "boolean"
+        },
+        "createdOn": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 256,
+          "pattern": "^[^\\u0000-\\u001f\\u007f]*$"
+        },
+        "updatedOn": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 256,
+          "pattern": "^[^\\u0000-\\u001f\\u007f]*$"
+        },
+        "reviewers": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "$ref": "#/definitions/ProviderPrReviewer"
+          }
+        },
+        "authorAccountId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 0,
+              "maxLength": 256,
+              "pattern": "^[^\\u0000-\\u001f\\u007f]*$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "commentCount": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4294967295
+        }
+      }
+    },
+    "ProviderPrMetadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "title",
+        "authorDisplayName",
+        "sourceBranch",
+        "destinationBranch",
+        "state",
+        "draft",
+        "createdOn",
+        "updatedOn",
+        "reviewers",
+        "descriptionRaw",
+        "sourceCommitHash",
+        "destinationCommitHash"
+      ],
+      "properties": {
+        "id": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 2147483647
+        },
+        "title": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 4096,
+          "pattern": "^[^\\u0000-\\u001f\\u007f]*$"
+        },
+        "authorDisplayName": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 256,
+          "pattern": "^[^\\u0000-\\u001f\\u007f]*$"
+        },
+        "sourceBranch": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 256,
+          "pattern": "^[^\\u0000-\\u001f\\u007f]*$"
+        },
+        "destinationBranch": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 256,
+          "pattern": "^[^\\u0000-\\u001f\\u007f]*$"
+        },
+        "state": {
+          "enum": [
+            "OPEN",
+            "MERGED",
+            "DECLINED",
+            "SUPERSEDED"
+          ]
+        },
+        "draft": {
+          "type": "boolean"
+        },
+        "createdOn": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 256,
+          "pattern": "^[^\\u0000-\\u001f\\u007f]*$"
+        },
+        "updatedOn": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 256,
+          "pattern": "^[^\\u0000-\\u001f\\u007f]*$"
+        },
+        "reviewers": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "$ref": "#/definitions/ProviderPrReviewer"
+          }
+        },
+        "descriptionRaw": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 65536,
+          "pattern": "^[^\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f\\u007f]*$"
+        },
+        "sourceCommitHash": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 7,
+              "maxLength": 64,
+              "pattern": "^[a-fA-F0-9]+$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "destinationCommitHash": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 7,
+              "maxLength": 64,
+              "pattern": "^[a-fA-F0-9]+$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "ProviderPrPage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "request",
+        "values",
+        "nextPage"
+      ],
+      "properties": {
+        "request": {
+          "$ref": "#/definitions/ProviderPrListParams"
+        },
+        "values": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "$ref": "#/definitions/ProviderPrSummary"
+          }
+        },
+        "nextPage": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 2,
+              "maximum": 100
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "ProviderPrDetail": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "request",
+        "detail",
+        "authorId",
+        "browserUrl"
+      ],
+      "properties": {
+        "request": {
+          "$ref": "#/definitions/ProviderPrDetailParams"
+        },
+        "detail": {
+          "$ref": "#/definitions/ProviderPrMetadata"
+        },
+        "authorId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 0,
+              "maxLength": 256,
+              "pattern": "^[^\\u0000-\\u001f\\u007f]*$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "browserUrl": {
+          "type": "string",
+          "maxLength": 1024,
+          "pattern": "^https://(github\\.com|bitbucket\\.org)/[A-Za-z0-9_.%-]+/[A-Za-z0-9_.%-]+/(pull|pull-requests)/[1-9][0-9]*$"
+        }
+      }
+    },
+    "ProviderCurrentUser": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "repository",
+        "accountId",
+        "displayName"
+      ],
+      "properties": {
+        "repository": {
+          "$ref": "#/definitions/PrRepositoryIdentity"
+        },
+        "accountId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\\u0000-\\u001f\\u007f]*$"
+        },
+        "displayName": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 256,
+          "pattern": "^[^\\u0000-\\u001f\\u007f]*$"
+        }
+      }
     }
   },
   "oneOf": [
@@ -4290,6 +4795,78 @@
               "$ref": "#/definitions/ScopeReadParams"
             }
           }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "type": {
+              "const": "request"
+            },
+            "id": {
+              "$ref": "#/definitions/RequestId"
+            },
+            "method": {
+              "const": "provider.prs"
+            },
+            "params": {
+              "$ref": "#/definitions/ProviderPrListParams"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "type": {
+              "const": "request"
+            },
+            "id": {
+              "$ref": "#/definitions/RequestId"
+            },
+            "method": {
+              "const": "provider.pr.detail"
+            },
+            "params": {
+              "$ref": "#/definitions/ProviderPrDetailParams"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "type": {
+              "const": "request"
+            },
+            "id": {
+              "$ref": "#/definitions/RequestId"
+            },
+            "method": {
+              "const": "provider.user"
+            },
+            "params": {
+              "$ref": "#/definitions/ProviderUserParams"
+            }
+          }
         }
       ]
     },
@@ -4383,6 +4960,15 @@
             },
             {
               "$ref": "#/definitions/ScopePage"
+            },
+            {
+              "$ref": "#/definitions/ProviderPrPage"
+            },
+            {
+              "$ref": "#/definitions/ProviderPrDetail"
+            },
+            {
+              "$ref": "#/definitions/ProviderCurrentUser"
             }
           ]
         }

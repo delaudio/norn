@@ -286,6 +286,24 @@ export type Request =
       id: RequestId;
       method: "workspace.scopes";
       params: ScopeReadParams;
+    }
+  | {
+      type: "request";
+      id: RequestId;
+      method: "provider.prs";
+      params: ProviderPrListParams;
+    }
+  | {
+      type: "request";
+      id: RequestId;
+      method: "provider.pr.detail";
+      params: ProviderPrDetailParams;
+    }
+  | {
+      type: "request";
+      id: RequestId;
+      method: "provider.user";
+      params: ProviderUserParams;
     };
 export type RequestId = string;
 /**
@@ -349,6 +367,17 @@ export type ScopeReadParams = {
   limit?: number;
   inventoryVersion?: string | null;
 };
+export type PrRepositoryIdentity =
+  | {
+      provider: "github";
+      workspace: string;
+      repo: string;
+    }
+  | {
+      provider: "bitbucket";
+      workspace: string;
+      repo: string;
+    };
 export type OperationState = "accepted" | "running" | "succeeded" | "failed" | "cancelled";
 export type ErrorCode =
   | "invalidRequest"
@@ -732,6 +761,21 @@ export interface CommentsListParams {
   limit: number;
   version: string | null;
 }
+export interface ProviderPrListParams {
+  repository: PrRepositoryIdentity;
+  filter: "OPEN" | "DRAFT" | "MERGED" | "ALL";
+  page: number;
+  limit: number;
+  query?: string | null;
+  authorId?: string | null;
+}
+export interface ProviderPrDetailParams {
+  repository: PrRepositoryIdentity;
+  prId: number;
+}
+export interface ProviderUserParams {
+  repository: PrRepositoryIdentity;
+}
 export interface ResponseOk {
   type: "response";
   id: RequestId;
@@ -759,7 +803,10 @@ export interface ResponseOk {
     | PublicationCancelResult
     | PublicationStatusResult
     | CommentsListResult
-    | ScopePage;
+    | ScopePage
+    | ProviderPrPage
+    | ProviderPrDetail
+    | ProviderCurrentUser;
 }
 export interface DiffFileResult {
   target: TargetIdentity;
@@ -1264,6 +1311,66 @@ export interface WorkspaceScope {
   referenceCount: number;
   viewedCount: number;
   localOnly: boolean;
+}
+export interface ProviderPrPage {
+  request: ProviderPrListParams;
+  /**
+   * @maxItems 100
+   */
+  values: ProviderPrSummary[];
+  nextPage: number | null;
+}
+export interface ProviderPrSummary {
+  id: number;
+  title: string;
+  authorDisplayName: string;
+  sourceBranch: string;
+  destinationBranch: string;
+  state: "OPEN" | "MERGED" | "DECLINED" | "SUPERSEDED";
+  draft: boolean;
+  createdOn: string;
+  updatedOn: string;
+  /**
+   * @maxItems 100
+   */
+  reviewers: ProviderPrReviewer[];
+  authorAccountId: string | null;
+  commentCount: number;
+}
+export interface ProviderPrReviewer {
+  displayName: string;
+  accountId: string | null;
+  role: string;
+  approved: boolean;
+}
+export interface ProviderPrDetail {
+  request: ProviderPrDetailParams;
+  detail: ProviderPrMetadata;
+  authorId: string | null;
+  browserUrl: string;
+}
+export interface ProviderPrMetadata {
+  id: number;
+  title: string;
+  authorDisplayName: string;
+  sourceBranch: string;
+  destinationBranch: string;
+  state: "OPEN" | "MERGED" | "DECLINED" | "SUPERSEDED";
+  draft: boolean;
+  createdOn: string;
+  updatedOn: string;
+  /**
+   * @maxItems 100
+   */
+  reviewers: ProviderPrReviewer[];
+  descriptionRaw: string;
+  sourceCommitHash: string | null;
+  destinationCommitHash: string | null;
+}
+export interface ProviderCurrentUser {
+  repository: PrRepositoryIdentity;
+  accountId: string;
+  displayName: string;
 }
 export interface ResponseError {
   type: "response";

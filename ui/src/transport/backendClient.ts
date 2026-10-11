@@ -6,6 +6,12 @@ import type {
   DraftStageParams,
   DraftStageResult,
   DraftTarget,
+  ProviderCurrentUser,
+  ProviderPrDetail,
+  ProviderPrDetailParams,
+  ProviderPrListParams,
+  ProviderPrPage,
+  PrRepositoryIdentity,
   PublicationItemResult,
   PublicationPrepareResult,
   PublicationScope,
@@ -185,6 +191,95 @@ export interface DataImportResult {
   destinationVersion: string;
 }
 export class BackendClient {
+  private async providerRead<T>(
+    method: string,
+    params: Record<string, unknown>,
+    requestType: string,
+    resultType: string,
+    current: () => boolean,
+  ): Promise<T> {
+    if (!current()) throw new Error("Provider selection changed.");
+    if (!validPublicationDTO(requestType, params))
+      throw new Error("Invalid provider read parameters.");
+    const result = await this.transport.request(method, params);
+    if (!current()) throw new Error("Provider selection changed.");
+    if (
+      Buffer.byteLength(JSON.stringify(result)) > 512 * 1024 ||
+      !validPublicationDTO(resultType, result)
+    )
+      throw new Error("Invalid or oversized provider PR response.");
+    const echoed = resultType === "ProviderCurrentUser" ? result.repository : result.request;
+    const expected = resultType === "ProviderCurrentUser" ? params.repository : params;
+    const canonical = (value: unknown): string => {
+      if (!value || typeof value !== "object" || Array.isArray(value)) return JSON.stringify(value);
+      const object = value as Record<string, unknown>;
+      return JSON.stringify(
+        Object.keys(object)
+          .sort()
+          .map((key) => [key, canonical(object[key])]),
+      );
+    };
+    if (canonical(echoed) !== canonical(expected))
+      throw new Error("Provider response belongs to a different selection.");
+    return result as unknown as T;
+  }
+  providerPrs(
+    params: ProviderPrListParams,
+    current: () => boolean = () => true,
+  ): Promise<ProviderPrPage> {
+    const normalized = {
+      ...params,
+      query: params.query ?? null,
+      authorId: params.authorId ?? null,
+    };
+    return this.providerRead<ProviderPrPage>(
+      "provider.prs",
+      normalized,
+      "ProviderPrListParams",
+      "ProviderPrPage",
+      current,
+    ).then((page) => {
+      if (
+        (page.nextPage !== null && page.nextPage !== params.page + 1) ||
+        new Set(page.values.map((pr) => pr.id)).size !== page.values.length ||
+        page.values.length > params.limit
+      )
+        throw new Error("Invalid provider PR page continuation.");
+      return page;
+    });
+  }
+  providerPrDetail(
+    params: ProviderPrDetailParams,
+    current: () => boolean = () => true,
+  ): Promise<ProviderPrDetail> {
+    return this.providerRead<ProviderPrDetail>(
+      "provider.pr.detail",
+      { ...params },
+      "ProviderPrDetailParams",
+      "ProviderPrDetail",
+      current,
+    ).then((result) => {
+      if (result.detail.id !== params.prId)
+        throw new Error("Provider detail belongs to a different PR.");
+      const repo = params.repository;
+      const expected = `https://${repo.provider === "github" ? "github.com" : "bitbucket.org"}/${encodeURIComponent(repo.workspace)}/${encodeURIComponent(repo.repo)}/${repo.provider === "github" ? "pull" : "pull-requests"}/${params.prId}`;
+      if (result.browserUrl !== expected)
+        throw new Error("Provider browser link belongs to a different PR.");
+      return result;
+    });
+  }
+  providerUser(
+    repository: PrRepositoryIdentity,
+    current: () => boolean = () => true,
+  ): Promise<ProviderCurrentUser> {
+    return this.providerRead(
+      "provider.user",
+      { repository },
+      "ProviderUserParams",
+      "ProviderCurrentUser",
+      current,
+    );
+  }
   async workspaceScopes(current: () => boolean = () => true): Promise<WorkspaceScope[]> {
     const scopes: WorkspaceScope[] = [];
     const seen = new Set<string>();

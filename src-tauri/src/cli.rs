@@ -302,7 +302,10 @@ fn is_cli_command(args: &[String]) -> bool {
     )
 }
 
-fn run_args(args: &[String], stdout: &mut dyn Write, stderr: &mut dyn Write) -> i32 {
+/// Dispatch explicit CLI arguments with caller-owned output streams. Callers
+/// running credential commands must install the appropriate credential adapter;
+/// the executable uses the OS adapter, owned tests use the mock keyring.
+pub fn run_args(args: &[String], stdout: &mut dyn Write, stderr: &mut dyn Write) -> i32 {
     if matches!(args.first().map(String::as_str), Some("--version" | "-V")) {
         let _ = writeln!(stdout, "norn {}", env!("CARGO_PKG_VERSION"));
         return 0;

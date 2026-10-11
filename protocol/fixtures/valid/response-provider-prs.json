@@ -1,0 +1,21 @@
+{
+  "type": "response",
+  "id": "prs",
+  "ok": true,
+  "result": {
+    "request": {
+      "repository": {
+        "provider": "github",
+        "workspace": "Owner",
+        "repo": "Repo"
+      },
+      "filter": "DRAFT",
+      "page": 1,
+      "limit": 30,
+      "query": null,
+      "authorId": null
+    },
+    "values": [],
+    "nextPage": 2
+  }
+}

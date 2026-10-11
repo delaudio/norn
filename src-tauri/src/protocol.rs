@@ -209,6 +209,21 @@ pub struct TargetParams {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "method", rename_all = "camelCase")]
 pub enum Request {
+    #[serde(rename = "provider.prs")]
+    ProviderPrs {
+        id: String,
+        params: crate::services::bitbucket::workspace_prs::ListParams,
+    },
+    #[serde(rename = "provider.pr.detail")]
+    ProviderPrDetail {
+        id: String,
+        params: crate::services::bitbucket::workspace_prs::DetailParams,
+    },
+    #[serde(rename = "provider.user")]
+    ProviderUser {
+        id: String,
+        params: crate::services::bitbucket::workspace_prs::UserParams,
+    },
     #[serde(rename = "publication.prepare")]
     PublicationPrepare {
         id: String,
@@ -426,6 +441,9 @@ impl Request {
             | Self::ReviewFiles { id, .. }
             | Self::ReviewFindings { id, .. }
             | Self::ReviewTargets { id, .. }
+            | Self::ProviderPrs { id, .. }
+            | Self::ProviderPrDetail { id, .. }
+            | Self::ProviderUser { id, .. }
             | Self::WorkspaceScopes { id, .. }
             | Self::ReviewHistory { id, .. }
             | Self::ReviewThreads { id, .. }
@@ -477,6 +495,9 @@ impl Request {
             Self::ReviewFiles { .. } => "review.files",
             Self::ReviewFindings { .. } => "review.findings",
             Self::ReviewTargets { .. } => "review.targets",
+            Self::ProviderPrs { .. } => "provider.prs",
+            Self::ProviderPrDetail { .. } => "provider.pr.detail",
+            Self::ProviderUser { .. } => "provider.user",
             Self::WorkspaceScopes { .. } => "workspace.scopes",
             Self::ReviewHistory { .. } => "review.history",
             Self::ReviewThreads { .. } => "review.threads",
@@ -566,6 +587,11 @@ impl Request {
                 {
                     return Err(invalid_request("Invalid user-data page parameters."));
                 }
+            }
+            Self::ProviderPrs { params, .. } => params.validate().map_err(invalid_request)?,
+            Self::ProviderPrDetail { params, .. } => params.validate().map_err(invalid_request)?,
+            Self::ProviderUser { params, .. } => {
+                params.repository.validate().map_err(invalid_request)?
             }
             Self::WorkspaceScopes { params, .. } => {
                 params.validate().map_err(invalid_request)?;
@@ -1024,6 +1050,11 @@ mod tests {
             "valid/request-diff-file.json",
             "valid/request-review-start.json",
             "valid/request-operation-cancel.json",
+            "valid/request-provider-prs.json",
+            "valid/request-provider-pr-detail.json",
+            "valid/request-provider-pr-uuid.json",
+            "valid/response-provider-prs.json",
+            "valid/response-provider-user.json",
             "valid/request-workspace-read.json",
             "valid/request-workspace-mutate.json",
             "valid/response-workspace-page.json",
@@ -1051,6 +1082,8 @@ mod tests {
             "invalid/unknown-field.json",
             "invalid/version-mismatch.json",
             "invalid/bad-target.json",
+            "invalid/request-provider-pr-unsafe-owner.json",
+            "invalid/request-provider-pr-local-id.json",
             "invalid/request-workspace-unpinned-page.json",
             "invalid/request-workspace-empty-version.json",
         ] {

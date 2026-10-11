@@ -1,5 +1,6 @@
 pub mod approved_comments;
 mod approved_positions;
+pub mod workspace_prs;
 
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Deserializer, Serialize};

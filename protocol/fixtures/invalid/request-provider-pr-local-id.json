@@ -1,0 +1,13 @@
+{
+  "type": "request",
+  "id": "detail",
+  "method": "provider.pr.detail",
+  "params": {
+    "repository": {
+      "provider": "github",
+      "workspace": "Owner",
+      "repo": "Repo"
+    },
+    "prId": 2147483648
+  }
+}
