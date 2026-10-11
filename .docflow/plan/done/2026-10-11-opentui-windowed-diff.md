@@ -1,0 +1,52 @@
+# Windowed text diffs and exact wrapped anchors
+
+## Owning ADRs
+
+- `../../adr/0020-opentui-rust-stdio-workspace.md` (AC 3, 4, 7).
+
+## Scope
+
+Replace full React row mounting with a visible row window and overscan in both
+unified and split modes. Preserve existing 2,000-row collapse/expand semantics,
+word wrap, old/new labels, metadata and annotation placement. Compute split row
+heights with the same native width/wrap implementation as rendered text, including
+Unicode and tabs; anchor positions use cumulative visual heights, independent of
+whether an anchored child is mounted. Resize recomputes geometry, and keyboard,
+mouse/scrollbar movement refreshes the window. Keep side/mode/file fencing and
+unified horizontal scrolling. Benchmark expanded 1,000/10,000-row diffs and record
+mount/repaint/scroll cost and bounded mounted-row counts honestly.
+
+## Exit Criteria
+
+1. Expanded large diffs mount only viewport plus bounded overscan rows; top/bottom
+   spacers preserve complete scroll extent and end-of-file access.
+2. Native-render tests cover offscreen old/new anchors, wrapped rows, Unicode/tabs,
+   resize and scrolling near both ends, with no missing or duplicate lines.
+3. Collapse and expand remain accessible and preserve correct source anchors.
+4. Expanded large-diff benchmarks record host/runtime and repeated scroll timing;
+   thresholds and limits are explicit. Remaining matched Ratatui/platform evidence
+   stays a separate final gate rather than being claimed by this partial delivery.
+5. Root lint/typecheck/test, Archgate, terminal typecheck/tests/frames and React
+   Doctor pass. No provider publication or Norn review.
+
+## Dependencies
+
+- Plan 0039 / PR #341 must merge before integration.
+
+## Status
+
+- Claimed by: default-agent, 2026-10-11, `issue-302-windowed-diff`.
+- Blockers: None; PR #341 merged with UI and verify green. Matched Ratatui/platform evidence remains a final gate.
+- Stopped:
+
+## Delivery
+
+Effective on merge to main of the text-windowing PR. Root lint/typecheck,
+123 frontend tests/tooling and Archgate 17/17; 75 UI tests (409 assertions)
+and 44 native frames; React Doctor. Expanded 10,000-row fixtures retain at
+most 39 mounted rows, with native tests proving end access, exact wrapped
+old/new anchors, Unicode/tab/odd-width geometry, actual child heights, resize
+and offscreen horizontal extent. The parent renderer failed to allocate text
+buffers on that expanded workload; the benchmark now rejects missing panels.
+See the internal windowed-diff runbook for repeatable measurements and limits.
+This delivery does not close #302 or implement all of ADR 0020.

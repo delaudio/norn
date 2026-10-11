@@ -28,6 +28,7 @@ import { ConversationPanel } from "./ConversationPanel";
 import { DataPanel } from "./DataPanel";
 import { FixPanel } from "./FixPanel";
 import { SettingsPanel } from "./SettingsPanel";
+import { VirtualDiff } from "./VirtualDiff";
 
 interface ShellProps {
   store: ShellStore;
@@ -489,6 +490,7 @@ function DiffPanel({
   collapsed,
   total,
   onPreviewError,
+  anchor,
 }: {
   state: ShellSnapshot;
   scroll: RefObject<ScrollBoxRenderable | null>;
@@ -499,7 +501,21 @@ function DiffPanel({
   windowEnd: number;
   collapsed: boolean;
   total: number;
+  anchor: number;
 }) {
+  const texts = useMemo(
+    () =>
+      state.diffMode === "split"
+        ? splitAll
+            .slice(windowStart, windowEnd)
+            .map((row) =>
+              row.kind === "pair"
+                ? [lineLabel(row.left, "old"), lineLabel(row.right, "new")]
+                : ["", ""],
+            )
+        : lines.slice(windowStart, windowEnd).map((line) => [line.text]),
+    [state.diffMode, splitAll, lines, windowStart, windowEnd],
+  );
   if (state.status === "connecting") {
     return <text fg={theme.muted}>Connecting to the Norn backend…</text>;
   }
@@ -543,38 +559,43 @@ function DiffPanel({
         {`  ·  ${state.diffMode}`}
         {collapsed ? "  ·  collapsed" : ""}
       </text>
-      <scrollbox
-        ref={scroll}
-        id="detail-scroll"
-        flexGrow={1}
-        minHeight={0}
-        marginTop={1}
-        scrollX
-        viewportCulling
-      >
-        {hiddenAbove > 0 ? (
-          <text fg={theme.muted} wrapMode="none">{`… ${hiddenAbove} lines above (collapsed)`}</text>
-        ) : null}
-        {split
-          ? splitAll.slice(windowStart, windowEnd).map((row, index) => splitRowElement(row, index))
-          : lines.slice(windowStart, windowEnd).map((line, index) => (
-              <text
-                // biome-ignore lint/suspicious/noArrayIndexKey: diff lines are immutable and position-keyed
-                key={index}
-                id={line.highlighted ? "diff-highlight" : undefined}
-                fg={line.highlighted ? theme.primary : line.fg}
-                wrapMode="none"
-              >
-                {line.text}
-              </text>
-            ))}
-        {hiddenBelow > 0 ? (
-          <text
-            fg={theme.muted}
-            wrapMode="none"
-          >{`… ${hiddenBelow} lines below — press e to expand`}</text>
-        ) : null}
-      </scrollbox>
+      <VirtualDiff
+        scroll={scroll}
+        texts={texts}
+        anchor={anchor < 0 ? -1 : anchor - windowStart}
+        request={state.scrollRequest}
+        identity={`${state.selectedPicker}:${state.picker[state.selectedPicker]?.provider}:${state.picker[state.selectedPicker]?.workspace}:${state.picker[state.selectedPicker]?.repo}:${state.picker[state.selectedPicker]?.prId}:${state.diff.path}`}
+        above={
+          hiddenAbove > 0 ? (
+            <text
+              fg={theme.muted}
+              wrapMode="none"
+            >{`… ${hiddenAbove} lines above (collapsed)`}</text>
+          ) : null
+        }
+        below={
+          hiddenBelow > 0 ? (
+            <text
+              fg={theme.muted}
+              wrapMode="none"
+            >{`… ${hiddenBelow} lines below — press e to expand`}</text>
+          ) : null
+        }
+        renderRow={(index) => {
+          const position = windowStart + index;
+          if (split) return splitRowElement(splitAll[position]!, position);
+          const line = lines[position]!;
+          return (
+            <text
+              id={line.highlighted ? "diff-highlight" : undefined}
+              fg={line.highlighted ? theme.primary : line.fg}
+              wrapMode="none"
+            >
+              {line.text}
+            </text>
+          );
+        }}
+      />
     </>
   );
 }
@@ -732,44 +753,6 @@ export function Shell({ store, client, quit }: ShellProps) {
       : diffLinesData.findIndex((line) => line.highlighted);
   const diffWindowInfo = diffWindow(diffTotal, diffAnchor, state.diffExpanded);
   const diffCollapsed = state.diff ? diffWindowInfo.collapsed : false;
-
-  // Keep the highlighted region visible. `scrollChildIntoView` uses the real
-  // layout offset, so wrapped split rows scroll correctly; a numeric fallback
-  // covers a not-yet-laid-out child and the non-wrapping unified view.
-  useEffect(() => {
-    const view = scroll.current;
-    if (!view || !state.diff) {
-      return;
-    }
-    if (diffAnchor < 0) {
-      // No anchor: preserve the reviewer's scroll position (for example when
-      // expanding an unanchored diff).
-      return;
-    }
-    // A new scroll request re-centres even when the anchor is unchanged.
-    if (state.scrollRequest < 0) {
-      return;
-    }
-    const aboveMarker = diffWindowInfo.start > 0 ? 1 : 0;
-    const target = diffAnchor - diffWindowInfo.start + aboveMarker;
-    const centered = () => Math.max(0, target - Math.floor(view.height / 2));
-    if (state.diffMode === "split" || state.diffExpanded) {
-      try {
-        view.scrollChildIntoView("diff-highlight");
-      } catch {
-        view.scrollTop = centered();
-      }
-    } else {
-      view.scrollTop = centered();
-    }
-  }, [
-    state.scrollRequest,
-    state.diff,
-    diffAnchor,
-    diffWindowInfo.start,
-    state.diffMode,
-    state.diffExpanded,
-  ]);
 
   const repo = state.repositories[state.selected];
   const entry = state.picker[state.selectedPicker];
@@ -932,6 +915,7 @@ export function Shell({ store, client, quit }: ShellProps) {
             windowEnd={diffWindowInfo.end}
             collapsed={diffCollapsed}
             total={diffTotal}
+            anchor={diffAnchor}
             onPreviewError={(side, message, requestId) =>
               store.setPreviewError(side, message, requestId)
             }

@@ -438,7 +438,33 @@ async function imageScene(status: "modified" | "added" | "deleted" | "renamed" |
   return { client, store };
 }
 
+async function wrappedAnchorScene() {
+  const anchored = [
+    {
+      id: "wrapped",
+      title: "Wrapped anchor",
+      severity: "high",
+      summary: "s",
+      anchor: { path: files[0]!.path, startLine: 550, endLine: null, side: "old" },
+    },
+  ];
+  const text = `@@ -1,600 +1,600 @@\n${Array.from({ length: 600 }, (_, index) => ` ${index === 549 ? "ANCHOR HERE" : `row ${index + 1} 界 é\t wrapped words `.repeat(3)}`).join("\n")}\n`;
+  const scene = readyStore(
+    new FakeBackendTransport({ repositories, files, findings: anchored, diffText: text }),
+  );
+  await scene.ready;
+  await Bun.sleep(5);
+  scene.store.toggleDiffMode();
+  scene.store.toggleDiffExpanded();
+  scene.store.cycleFocus();
+  scene.store.cycleFocus();
+  scene.store.move(1);
+  return { store: scene.store, client: scene.client };
+}
+
 const scenes: Scene[] = [
+  { id: "shell-wrapped-anchor-120x30", cols: 120, rows: 30, build: wrappedAnchorScene },
+  { id: "shell-wrapped-anchor-80x24", cols: 80, rows: 24, build: wrappedAnchorScene },
   { id: "shell-images-modified-120x30", cols: 120, rows: 30, build: () => imageScene("modified") },
   { id: "shell-images-modified-50x20", cols: 50, rows: 20, build: () => imageScene("modified") },
   { id: "shell-images-added-80x24", cols: 80, rows: 24, build: () => imageScene("added") },
@@ -525,6 +551,10 @@ for (const scene of scenes) {
     await test.renderOnce();
     if (afterMount) {
       afterMount();
+      await test.renderOnce();
+    }
+    for (let pass = 0; pass < 3; pass += 1) {
+      await Bun.sleep(0);
       await test.renderOnce();
     }
     const frame = test.captureSpans();

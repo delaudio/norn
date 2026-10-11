@@ -87,3 +87,6 @@ export const AddedImage: Story = { args: { frameId: "shell-images-added-80x24" }
 export const DeletedImage: Story = { args: { frameId: "shell-images-deleted-80x24" } };
 export const RenamedImage: Story = { args: { frameId: "shell-images-renamed-100x24" } };
 export const UnsupportedImage: Story = { args: { frameId: "shell-images-unsupported-80x24" } };
+
+export const WrappedAnchor: Story = { args: { frameId: "shell-wrapped-anchor-120x30" } };
+export const CompactWrappedAnchor: Story = { args: { frameId: "shell-wrapped-anchor-80x24" } };
