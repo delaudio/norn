@@ -118,7 +118,7 @@ DeepSeek models as the default catalog.
 - [All Bitbucket HTTP lives in Rust](./0002-http-in-rust.md)
 - [Credentials in the OS keychain, config in a settings file](./0003-credentials-keychain.md)
 - [Run reviews through a headless local CLI](./0007-headless-review-cli.md)
-- [Distribute managed agent review skills with installed Norn](./0015-managed-agent-review-skills.md)
+- [Distribute managed agent review skills with installed Norn](./0015-managed-agent-review-skill-distribution.md)
 - `../../src-tauri/src/services/review.rs`
 - `../../.archgate/adrs/FE-001-expose-ai-review-as-explicit-user-invoked-actions.md`
 - <https://opencode.ai/docs/cli>
