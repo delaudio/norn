@@ -8,9 +8,9 @@ If status files and git disagree, git is authoritative; correct this file.
 
 ## Active state
 
-- **Branch:** `issue-305-desktop-data-recovery` (local implementation).
+- **Branch:** `issue-302-image-comparison` (local preparation on PR #340).
 - **Active item:** complete epic #294 through verified PRs and squash merges.
-- **Current change:** plan 0038, desktop data recovery; PR #339 merged at `76ba213` with both CI gates green. PR #338 merged at `3168dcd` with all checks green.
+- **Current change:** plan 0039, before/after images; plan 0038 is PR #340 awaiting CI. PR #339 merged at `76ba213` with both CI gates green. PR #338 merged at `3168dcd` with all checks green.
 - **Review instruction:** the maintainer explicitly requested no Norn reviews
   for this migration session; use code inspection and deterministic checks.
 - **Merged baseline:** main at `76ba213`, including PRs #316–#339.
