@@ -42,3 +42,28 @@ Keep full provider/scope identity through selection, refresh and late pages.
 - Claimed by: default-agent, 2026-10-11, `issue-306-canonical-scope-picker`.
 - Blockers: implementation, local gates and verified PR integration.
 - Stopped:
+
+## Completion (effective on merge to main)
+
+Implementation `e4264db` on PR #354 baseline `4a303f1` adds content-free immutable
+scope inventory and native imported/unconfigured PR navigation. Saved targets
+use real run IDs and provider provenance; exposed legacy reads filter full
+identity, while local high-bit identifiers cannot start provider reviews.
+Evidence: `docs/opentui-migration/canonical-scope-picker.md`.
+
+Root typecheck/123 tests+tooling/lint/Archgate 12/12, UI typecheck/143 tests/864
+assertions/93 native frames, core 666+2 ignored/51 stdio/five CLI/five onboarding,
+no-GUI dependency guard and strict all-feature/all-target Clippy pass. Native
+input/resize, process restart, provider mismatch, immutable paging, maximum
+inventory and cache/expiry cases pass. React Doctor reports no changed-file
+issues. The inherited HTTP fixture's empty-connection failure was diagnosed
+and fixed with a bounded concurrent fixture and a regression; production
+provider deadlines and test assertions are unchanged. Four new native scenes
+were visually inspected; ten existing descriptions now display the provider.
+
+Prepared for verified PR integration; not yet shipped before merge. No new
+ADR/plan slot collision on synchronized main, contiguous ADRs/INDEX metadata
+and owning Accepted status pass; historical ADR 0011 coverage is unchanged.
+ADR 0020 remains Accepted until full cutover. #306–#309, native desktop-profile
+recovery and provider-less legacy history remain open parity work. No Norn
+review, actual provider/credential/agent/profile access or destructive cleanup.
