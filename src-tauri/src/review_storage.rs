@@ -48,7 +48,7 @@ const APP_DIR: &str = "norn";
 const LEGACY_APP_DIR: &str = "lachesi";
 pub(crate) const DB_FILE: &str = "norn.sqlite3";
 pub(crate) const LEGACY_DB_FILE: &str = "lachesi.sqlite3";
-const LATEST_SCHEMA_VERSION: i64 = 15;
+const LATEST_SCHEMA_VERSION: i64 = 16;
 const LEGACY_REVIEWS_DIR: &str = "reviews";
 const LEGACY_REVIEWS_MIGRATION_MARKER: &str = ".legacy-reviews-imported-v1";
 const MAX_ADMINISTRATIVE_AUDIT_TIMESTAMP_MS: i64 = 4_102_444_800_000;
@@ -487,6 +487,17 @@ fn review_key(workspace: &str, repo: &str, id: u32) -> String {
     format!("{workspace}_{repo}_{id}")
 }
 
+pub(crate) fn publication_database() -> Result<Connection, String> {
+    let connection = open()?;
+    connection
+        .pragma_update(None, "synchronous", "FULL")
+        .map_err(|_| "Cannot configure durable publication storage.".to_string())?;
+    connection
+        .busy_timeout(std::time::Duration::from_secs(2))
+        .map_err(|_| "Cannot configure publication storage timeout.".to_string())?;
+    Ok(connection)
+}
+
 fn open() -> Result<Connection, String> {
     let mut conn = Connection::open(db_path()?).map_err(|e| e.to_string())?;
     conn.pragma_update(None, "journal_mode", "WAL")
@@ -504,6 +515,11 @@ fn open() -> Result<Connection, String> {
 pub(crate) fn initialize_database() -> Result<(), String> {
     let _connection = open()?;
     Ok(())
+}
+
+#[cfg(test)]
+pub(crate) fn initialize_publication_test_database(conn: &mut Connection) -> Result<(), String> {
+    migrate(conn)
 }
 
 fn migrate(conn: &mut Connection) -> Result<(), String> {
@@ -1209,6 +1225,20 @@ fn migrate(conn: &mut Connection) -> Result<(), String> {
         .execute(
             "INSERT OR IGNORE INTO schema_migrations(version) VALUES (15)",
             [],
+        )
+        .map_err(|error| error.to_string())?;
+    migration.commit().map_err(|error| error.to_string())?;
+
+    let migration = conn
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .map_err(|error| error.to_string())?;
+    migration
+        .execute_batch(
+            "CREATE TABLE IF NOT EXISTS local_draft_publications (
+          identity_key TEXT PRIMARY KEY CHECK(length(identity_key) = 64),
+          entry_json TEXT NOT NULL CHECK(length(entry_json) <= 49152)
+        );
+        INSERT OR IGNORE INTO schema_migrations(version) VALUES (16);",
         )
         .map_err(|error| error.to_string())?;
     migration.commit().map_err(|error| error.to_string())?;
@@ -6465,7 +6495,7 @@ mod tests {
                 .expect("read migration versions");
             assert_eq!(
                 versions,
-                vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
+                vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
             );
             let store_columns: Vec<String> = conn
                 .prepare("PRAGMA table_info(ai_review_stores)")
