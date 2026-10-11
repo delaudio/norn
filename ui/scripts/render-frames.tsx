@@ -36,6 +36,7 @@ import { parseDiffSyntax } from "../src/app/syntaxTokens";
 import { theme } from "../src/app/theme";
 import { BackendClient } from "../src/transport/backendClient";
 import { FakeBackendTransport } from "../src/transport/fakeTransport";
+import { importedScopeRecords } from "../src/transport/scopeFixtures";
 import type { BackendTransport, ReadyInfo } from "../src/transport/types";
 import type { TerminalFrame } from "../storybook/frame";
 
@@ -151,6 +152,18 @@ async function emptyScene() {
   const { client, store, ready } = readyStore(new FakeBackendTransport({ repositories: [] }));
   await ready;
   return { store, client };
+}
+async function savedScopeScene() {
+  const scene = readyStore(
+    new FakeBackendTransport({ repositories: [], workspaceRecords: importedScopeRecords }),
+  );
+  await scene.ready;
+  return { store: scene.store, client: scene.client };
+}
+async function importedDraftScene() {
+  const scene = await savedScopeScene();
+  scene.store.toggleDrafts();
+  return scene;
 }
 async function onboardingScene(unsupported: boolean) {
   const scene = readyStore(
@@ -822,6 +835,10 @@ async function publicationScene(mode: "drafts" | "preview" | "partial" | "status
 }
 
 const scenes: Scene[] = [
+  { id: "shell-imported-scopes-120x30", cols: 120, rows: 30, build: savedScopeScene },
+  { id: "shell-imported-scopes-50x15", cols: 50, rows: 15, build: savedScopeScene },
+  { id: "shell-unconfigured-drafts-120x30", cols: 120, rows: 30, build: importedDraftScene },
+  { id: "shell-unconfigured-drafts-50x15", cols: 50, rows: 15, build: importedDraftScene },
   {
     id: "shell-publication-drafts-120x40",
     cols: 120,

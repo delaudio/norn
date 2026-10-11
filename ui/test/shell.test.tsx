@@ -90,7 +90,7 @@ test("reply composer accepts bracketed paste without executing pasted shortcuts"
           repo: "payments",
           prId: 7,
           title: "Review",
-          latestRunId: "run-1",
+          runId: "run-1",
           status: "completed",
         },
       ],

@@ -27,6 +27,12 @@ export const ErrorState: Story = { args: { frameId: "shell-error-80x24" } };
 export const Closed: Story = { args: { frameId: "shell-closed-80x24" } };
 export const Review: Story = { args: { frameId: "shell-review-80x24" } };
 export const ReviewTargets: Story = { args: { frameId: "shell-review-targets-120x30" } };
+export const ImportedScopes: Story = { args: { frameId: "shell-imported-scopes-120x30" } };
+export const CompactImportedScopes: Story = { args: { frameId: "shell-imported-scopes-50x15" } };
+export const UnconfiguredDrafts: Story = { args: { frameId: "shell-unconfigured-drafts-120x30" } };
+export const CompactUnconfiguredDrafts: Story = {
+  args: { frameId: "shell-unconfigured-drafts-50x15" },
+};
 export const Split: Story = { args: { frameId: "shell-split-120x30" } };
 export const LargeDiff: Story = { args: { frameId: "shell-large-diff-120x30" } };
 export const StaleAnchor: Story = { args: { frameId: "shell-stale-anchor-80x24" } };

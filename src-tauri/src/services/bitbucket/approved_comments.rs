@@ -1036,7 +1036,7 @@ mod tests {
     }
     impl Server {
         fn new(
-            handler: impl Fn(&str, &str, &str) -> (u16, Value, String) + Send + 'static,
+            handler: impl Fn(&str, &str, &str) -> (u16, Value, String) + Send + Sync + 'static,
         ) -> Self {
             let listener = TcpListener::bind("127.0.0.1:0").unwrap();
             listener.set_nonblocking(true).unwrap();
@@ -1045,63 +1045,68 @@ mod tests {
             let stop = Arc::new(AtomicBool::new(false));
             let thread_requests = requests.clone();
             let thread_stop = stop.clone();
+            let handler = Arc::new(handler);
             let worker = thread::spawn(move || {
+                let mut connections: Vec<thread::JoinHandle<()>> = Vec::new();
                 while !thread_stop.load(Ordering::Acquire) {
+                    let mut index = 0;
+                    while index < connections.len() {
+                        if connections[index].is_finished() {
+                            connections.swap_remove(index).join().unwrap();
+                        } else {
+                            index += 1;
+                        }
+                    }
                     let Ok((mut socket, _)) = listener.accept() else {
                         thread::sleep(Duration::from_millis(1));
                         continue;
                     };
-                    socket
-                        .set_read_timeout(Some(Duration::from_secs(5)))
-                        .unwrap();
-                    let mut data = Vec::new();
-                    let mut buffer = [0; 4096];
-                    loop {
-                        let count = socket.read(&mut buffer).unwrap_or(0);
-                        if count == 0 {
-                            break;
-                        }
-                        data.extend_from_slice(&buffer[..count]);
-                        if data.len() > 64 * 1024 {
-                            break;
-                        }
-                        if let Some(end) = data.windows(4).position(|bytes| bytes == b"\r\n\r\n") {
-                            let headers = String::from_utf8_lossy(&data[..end]);
-                            let length = headers
-                                .lines()
-                                .find_map(|line| {
-                                    line.to_ascii_lowercase()
-                                        .strip_prefix("content-length:")
+                    // A connected socket need not carry an HTTP request. Do not
+                    // let an idle connection block later fixture requests.
+                    if connections.len() >= 16 {
+                        continue;
+                    }
+                    let requests = thread_requests.clone();
+                    let handler = handler.clone();
+                    connections.push(thread::spawn(move || {
+                        socket.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+                        let mut data = Vec::new();
+                        let mut buffer = [0; 4096];
+                        let mut complete = false;
+                        while data.len() <= 64 * 1024 {
+                            let count = socket.read(&mut buffer).unwrap_or(0);
+                            if count == 0 { break; }
+                            data.extend_from_slice(&buffer[..count]);
+                            if let Some(end) = data.windows(4).position(|bytes| bytes == b"\r\n\r\n") {
+                                let headers = String::from_utf8_lossy(&data[..end]);
+                                let length = headers.lines().find_map(|line| {
+                                    line.to_ascii_lowercase().strip_prefix("content-length:")
                                         .and_then(|value| value.trim().parse::<usize>().ok())
-                                })
-                                .unwrap_or(0);
-                            if data.len() >= end + 4 + length {
-                                break;
+                                }).unwrap_or(0);
+                                if length > 64 * 1024 { return; }
+                                if data.len() >= end + 4 + length { complete = true; break; }
                             }
                         }
-                    }
-                    let request = String::from_utf8_lossy(&data);
-                    let mut parts = request.lines().next().unwrap_or("").split_whitespace();
-                    let method = parts.next().unwrap_or("");
-                    let path = parts.next().unwrap_or("");
-                    thread_requests
-                        .lock()
-                        .unwrap()
-                        .push((method.into(), path.into()));
-                    let (status, value, headers) = handler(method, path, &request);
-                    let body = if value.is_string()
-                        && (path.ends_with("/diff")
-                            || request
-                                .to_ascii_lowercase()
-                                .contains("application/vnd.github.v3.diff"))
-                    {
-                        value.as_str().unwrap().as_bytes().to_vec()
-                    } else {
-                        serde_json::to_vec(&value).unwrap()
-                    };
-                    let head = format!("HTTP/1.1 {status} fixture\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n{headers}\r\n", body.len());
-                    let _ = socket.write_all(head.as_bytes());
-                    let _ = socket.write_all(&body);
+                        if !complete || data.len() > 64 * 1024 { return; }
+                        let request = String::from_utf8_lossy(&data);
+                        let mut parts = request.lines().next().unwrap_or("").split_whitespace();
+                        let method = parts.next().unwrap_or("");
+                        let path = parts.next().unwrap_or("");
+                        if method.is_empty() || path.is_empty() { return; }
+                        requests.lock().unwrap().push((method.into(), path.into()));
+                        let (status, value, headers) = handler(method, path, &request);
+                        let body = if value.is_string() && (path.ends_with("/diff")
+                            || request.to_ascii_lowercase().contains("application/vnd.github.v3.diff")) {
+                            value.as_str().unwrap().as_bytes().to_vec()
+                        } else { serde_json::to_vec(&value).unwrap() };
+                        let head = format!("HTTP/1.1 {status} fixture\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n{headers}\r\n", body.len());
+                        let mut response = head.into_bytes();
+                        response.extend_from_slice(&body);
+                        let _ = socket.write_all(&response);
+                    }));
+                }
+                for connection in connections {
+                    connection.join().unwrap();
                 }
             });
             Self {
@@ -1543,14 +1548,43 @@ mod tests {
         *root_holder.lock().unwrap() = server.root.clone();
         let mut api = api(ReviewProvider::Github);
         api.root = server.root.clone();
-        assert!(api.reconcile(&draft).is_err());
+        let reconciled = api.reconcile(&draft);
+        assert!(reconciled.is_err());
         let requests = server.requests.lock().unwrap();
-        assert_eq!(requests.len(), 3);
+        assert_eq!(
+            requests.len(),
+            3,
+            "reconciliation={reconciled:?}; author={:?}; requests={requests:?}",
+            api.author.get()
+        );
         assert!(requests.iter().all(|(method, _)| method == "GET"));
         assert_eq!(
             requests.last().unwrap().1,
             "/repos/fixture/demo/pulls/9/comments?per_page=100&page=2"
         );
+    }
+    #[test]
+    fn fixture_idle_connections_neither_count_as_http_nor_block_real_requests() {
+        let server = Server::new(|_, path, _| {
+            assert_eq!(path, "/user");
+            (200, json!({"login":"synthetic-author"}), String::new())
+        });
+        let idle =
+            std::net::TcpStream::connect(server.root.strip_prefix("http://").unwrap()).unwrap();
+        let mut api = api(ReviewProvider::Github);
+        api.root = server.root.clone();
+        let response = api
+            .request(Method::GET, &format!("{}/user", server.root))
+            .timeout(Duration::from_secs(2))
+            .send()
+            .unwrap();
+        let (value, _) = bounded_json(response, PAGE_BYTES).unwrap();
+        assert_eq!(value["login"], "synthetic-author");
+        assert_eq!(
+            *server.requests.lock().unwrap(),
+            vec![("GET".into(), "/user".into())]
+        );
+        drop(idle);
     }
     #[test]
     fn large_acknowledgment_and_mismatched_scope_cannot_be_confirmed() {

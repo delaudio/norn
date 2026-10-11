@@ -1,0 +1,9 @@
+{
+  "type": "request",
+  "id": "scope-read",
+  "method": "workspace.scopes",
+  "params": {
+    "offset": 1,
+    "limit": 100
+  }
+}

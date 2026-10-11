@@ -1,0 +1,23 @@
+{
+  "type": "response",
+  "id": "scope-read",
+  "ok": true,
+  "result": {
+    "inventoryVersion": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "offset": 0,
+    "nextOffset": null,
+    "totalScopes": 1,
+    "scopes": [
+      {
+        "provider": "github",
+        "workspace": "fixture",
+        "repo": "imported",
+        "prId": 7,
+        "draftCount": 1,
+        "referenceCount": 0,
+        "viewedCount": 0,
+        "localOnly": false
+      }
+    ]
+  }
+}

@@ -3,6 +3,7 @@ import type {
   DraftPrepareParams,
   WorkspaceDraft,
   WorkspaceReference,
+  WorkspaceScope,
   WorkspaceSettings,
   WorkspaceValue,
 } from "../../../src/protocol/generated/protocol";
@@ -30,6 +31,7 @@ export interface FakeTransportOptions {
   credentials?: CredentialStatus[];
   fixPhase?: "readyToCommit" | "readyToPush" | "completed";
   workspaceRecords?: Record<string, WorkspaceValue>;
+  scopes?: WorkspaceScope[];
   availableTools?: string[];
   credentialStore?: "native" | "unsupported";
 }
@@ -53,6 +55,7 @@ export class FakeBackendTransport implements BackendTransport {
   private credentials: CredentialStatus[];
   private readonly environmentCredentials = new Set<CredentialStatus["provider"]>();
   private nextOperation = 1;
+  private readonly scopeSnapshots = new Map<string, WorkspaceScope[]>();
   private closed = false;
   private nextApproval = 1;
   private fixPhase: "readyToCommit" | "readyToPush" | "completed";
@@ -110,6 +113,7 @@ export class FakeBackendTransport implements BackendTransport {
         "settings",
         "auth",
         "workspace-records",
+        "workspace-scopes",
         "draft-staging",
         "workspace-readiness",
       ],
@@ -193,6 +197,66 @@ export class FakeBackendTransport implements BackendTransport {
       };
     }
     if (method.startsWith("workspace.")) await this.delay();
+    if (method === "workspace.scopes") {
+      const offset = Number(params.offset ?? 0);
+      const limit = Number(params.limit ?? 100);
+      let version = params.inventoryVersion as string | undefined;
+      let scopes: WorkspaceScope[];
+      if (version) {
+        const snapshot = this.scopeSnapshots.get(version);
+        if (!snapshot) throw new Error("Saved-scope snapshot expired; refresh the picker.");
+        scopes = snapshot;
+      } else {
+        const grouped = new Map<string, WorkspaceScope>();
+        for (const [key, payload] of Object.entries(this.records)) {
+          const match = key.match(
+            /^(drafts|references|viewed)\.(github|bitbucket):([^/:]+)\/([^/:]+)\/([1-9]\d*)$/,
+          );
+          if (!match || !Array.isArray(payload.value) || payload.value.length === 0) continue;
+          const provider = match[2] as WorkspaceScope["provider"];
+          const workspace = match[3]!;
+          const repo = match[4]!;
+          const prId = Number(match[5]);
+          const id = JSON.stringify([provider, workspace, repo, prId]);
+          const scope = grouped.get(id) ?? {
+            provider,
+            workspace,
+            repo,
+            prId,
+            draftCount: 0,
+            referenceCount: 0,
+            viewedCount: 0,
+            localOnly: prId >= 0x80000000,
+          };
+          if (payload.kind === "drafts") scope.draftCount = payload.value.length;
+          if (payload.kind === "references") scope.referenceCount = payload.value.length;
+          if (payload.kind === "viewed") scope.viewedCount = payload.value.length;
+          grouped.set(id, scope);
+        }
+        scopes = structuredClone(this.options.scopes ?? [...grouped.values()]);
+        version = new Bun.CryptoHasher("sha256").update(JSON.stringify(scopes)).digest("hex");
+        if (this.scopeSnapshots.size >= 4)
+          this.scopeSnapshots.delete(this.scopeSnapshots.keys().next().value!);
+        this.scopeSnapshots.set(version, scopes);
+      }
+      if (
+        !Number.isInteger(offset) ||
+        offset < 0 ||
+        offset > scopes.length ||
+        !Number.isInteger(limit) ||
+        limit < 1 ||
+        limit > 100
+      )
+        throw new Error("Invalid saved-scope page parameters.");
+      const items = scopes.slice(offset, offset + limit);
+      return {
+        inventoryVersion: version,
+        offset,
+        nextOffset: offset + items.length < scopes.length ? offset + items.length : null,
+        totalScopes: scopes.length,
+        scopes: items,
+      };
+    }
     if (method === "workspace.read" || method === "workspace.mutate") {
       const key = String(params.key);
       const stored = this.records[key];

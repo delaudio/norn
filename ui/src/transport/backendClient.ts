@@ -13,7 +13,9 @@ import type {
   RecordMutation,
   RecordMutationResult,
   RecordPage,
+  ScopePage,
   WorkspaceReadiness,
+  WorkspaceScope,
   WorkspaceSettings,
 } from "../../../src/protocol/generated/protocol";
 import { samePublicationScope, validPublicationDTO } from "./publicationValidation";
@@ -183,6 +185,55 @@ export interface DataImportResult {
   destinationVersion: string;
 }
 export class BackendClient {
+  async workspaceScopes(current: () => boolean = () => true): Promise<WorkspaceScope[]> {
+    const scopes: WorkspaceScope[] = [];
+    const seen = new Set<string>();
+    let first: ScopePage | undefined;
+    let offset = 0;
+    let bytes = 0;
+    for (let pages = 0; pages <= 100; pages++) {
+      if (!current()) throw new Error("Workspace selection changed.");
+      const result = await this.transport.request("workspace.scopes", {
+        offset,
+        limit: 100,
+        ...(first ? { inventoryVersion: first.inventoryVersion } : {}),
+      });
+      if (!current()) throw new Error("Workspace selection changed.");
+      const size = Buffer.byteLength(JSON.stringify(result));
+      bytes += size;
+      if (!validPublicationDTO("ScopePage", result) || size > 256 * 1024 || bytes > 8 * 1024 * 1024)
+        throw new Error("Invalid or oversized saved-scope page.");
+      const page = result as unknown as ScopePage;
+      if (
+        page.offset !== offset ||
+        (first &&
+          (page.inventoryVersion !== first.inventoryVersion ||
+            page.totalScopes !== first.totalScopes))
+      )
+        throw new Error("Saved-scope inventory changed; refresh the picker.");
+      first ??= page;
+      for (const scope of page.scopes) {
+        const key = JSON.stringify([scope.provider, scope.workspace, scope.repo, scope.prId]);
+        if (
+          seen.has(key) ||
+          scope.localOnly !== scope.prId >= 0x80000000 ||
+          scope.draftCount + scope.referenceCount + scope.viewedCount === 0
+        )
+          throw new Error("Invalid or duplicate saved scope.");
+        seen.add(key);
+        scopes.push(scope);
+      }
+      offset += page.scopes.length;
+      if (offset > page.totalScopes) throw new Error("Saved-scope inventory exceeds its total.");
+      if (page.nextOffset === null) {
+        if (offset !== page.totalScopes) throw new Error("Saved-scope inventory ended early.");
+        return scopes;
+      }
+      if (page.nextOffset !== offset || page.scopes.length === 0)
+        throw new Error("Saved-scope page did not advance.");
+    }
+    throw new Error("Saved-scope inventory requires too many pages.");
+  }
   constructor(private readonly transport: BackendTransport) {}
 
   async readWorkspace(key: string, current: () => boolean = () => true): Promise<RecordPage> {
