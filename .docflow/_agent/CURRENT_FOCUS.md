@@ -8,10 +8,10 @@ If status files and git disagree, git is authoritative; correct this file.
 
 ## Active state
 
-- **Branch:** `issue-303-review-fix-approval` (PR #335).
+- **Branch:** `issue-303-approved-commit-push` (prepared after PR #335).
 - **Active item:** complete epic #294 through verified PRs and squash merges.
-- **Current change:** review.fix preview, snapshot-bound approval and native
-  cancellation; plan 0033. PR #334 merged at `043dcf1` after both CI gates passed.
+- **Current change:** approved commit and push controls for native fix sessions;
+  plan 0034. PR #335 is ready and awaiting its updated CI gates.
 - **Review instruction:** the maintainer explicitly requested no Norn reviews
   for this migration session; use code inspection and deterministic checks.
 - **Merged baseline:** main at `043dcf1`, including PRs #316–#334.
