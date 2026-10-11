@@ -105,6 +105,10 @@ function useShellInput(
       void store.beginCommit(client);
     } else if (key.name === "p") {
       void store.previewPush(client);
+    } else if (key.name === "u") {
+      void store.previewBranch(client, "sync");
+    } else if (key.name === "o") {
+      void store.previewBranch(client, "conflicts");
     } else if (key.name === "a") {
       void store.previewFix(client);
     } else if (key.name === "r") {
@@ -836,7 +840,7 @@ export function Shell({ store, client, quit }: ShellProps) {
           {state.fixPreview
             ? "y approve · Esc/n dismiss · ↑/↓ scroll effects"
             : wide
-              ? "j/k move  s split  e expand  Tab pane  a fix  c commit  p push  r reply  t threads  v chat  f filter  g group  x cancel  q quit"
+              ? "j/k move  s split  e expand  Tab pane  a fix  u sync · o conflicts · c commit  p push  r reply  t threads  v chat  f filter  g group  x cancel  q quit"
               : "j/k  ←/→  s  e  Tab  q"}
         </text>
       </box>

@@ -1075,9 +1075,13 @@ export class ShellStore {
     await this.previewMutation(client, "push");
   }
 
+  async previewBranch(client: BackendClient, action: "sync" | "conflicts"): Promise<void> {
+    await this.previewMutation(client, action);
+  }
+
   private async previewMutation(
     client: BackendClient,
-    action: "fix" | "commit" | "push",
+    action: "fix" | "commit" | "push" | "sync" | "conflicts",
     commitMessage?: string,
   ): Promise<boolean> {
     if (this.fixing || this.state.fixPreviewLoading) return false;
@@ -1105,7 +1109,9 @@ export class ShellStore {
           ? await client.commitPreview(target, commitMessage ?? "")
           : action === "push"
             ? await client.pushPreview(target)
-            : await client.fixPreview(target);
+            : action === "sync" || action === "conflicts"
+              ? await client.branchPreview(target, action)
+              : await client.fixPreview(target);
       if (generation === this.state.generation) {
         this.update({ fixPreview: preview });
         return true;
@@ -1135,7 +1141,9 @@ export class ShellStore {
           ? await client.reviewCommit(preview.target, preview.approvalToken)
           : preview.action === "push"
             ? await client.reviewPush(preview.target, preview.approvalToken)
-            : await client.reviewFix(preview.target, preview.approvalToken);
+            : preview.action === "sync" || preview.action === "conflicts"
+              ? await client.reviewBranch(preview.target, preview.approvalToken, preview.action)
+              : await client.reviewFix(preview.target, preview.approvalToken);
       if (generation !== this.state.generation) return;
       this.fixOperation = { id: result.operationId, generation, target: preview.target };
       this.update({

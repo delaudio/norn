@@ -222,6 +222,14 @@ pub enum Request {
     ReviewPushPreview { id: String, params: TargetParams },
     #[serde(rename = "review.push")]
     ReviewPush { id: String, params: ReviewFixParams },
+    #[serde(rename = "review.sync.preview")]
+    ReviewSyncPreview { id: String, params: TargetParams },
+    #[serde(rename = "review.sync")]
+    ReviewSync { id: String, params: ReviewFixParams },
+    #[serde(rename = "review.conflicts.preview")]
+    ReviewConflictsPreview { id: String, params: TargetParams },
+    #[serde(rename = "review.conflicts")]
+    ReviewConflicts { id: String, params: ReviewFixParams },
     #[serde(rename = "review.fix.state")]
     ReviewFixState { id: String, params: TargetParams },
     #[serde(rename = "review.fix.preview")]
@@ -270,6 +278,10 @@ impl Request {
             | Self::ReviewCommit { id, .. }
             | Self::ReviewPushPreview { id, .. }
             | Self::ReviewPush { id, .. }
+            | Self::ReviewSyncPreview { id, .. }
+            | Self::ReviewSync { id, .. }
+            | Self::ReviewConflictsPreview { id, .. }
+            | Self::ReviewConflicts { id, .. }
             | Self::ReviewFixState { id, .. }
             | Self::ReviewFixPreview { id, .. }
             | Self::ReviewFix { id, .. }
@@ -297,6 +309,10 @@ impl Request {
             Self::ReviewCommit { .. } => "review.commit",
             Self::ReviewPushPreview { .. } => "review.push.preview",
             Self::ReviewPush { .. } => "review.push",
+            Self::ReviewSyncPreview { .. } => "review.sync.preview",
+            Self::ReviewSync { .. } => "review.sync",
+            Self::ReviewConflictsPreview { .. } => "review.conflicts.preview",
+            Self::ReviewConflicts { .. } => "review.conflicts",
             Self::ReviewFixState { .. } => "review.fix.state",
             Self::ReviewFixPreview { .. } => "review.fix.preview",
             Self::ReviewFix { .. } => "review.fix",
@@ -339,6 +355,8 @@ impl Request {
             }
             Self::ReviewCommit { params, .. }
             | Self::ReviewPush { params, .. }
+            | Self::ReviewSync { params, .. }
+            | Self::ReviewConflicts { params, .. }
             | Self::ReviewFix { params, .. } => {
                 params.target.validate()?;
                 if params.approval_token.len() != 64
@@ -353,7 +371,9 @@ impl Request {
                     return Err(invalid_request("`review.reply` message must not be empty"));
                 }
             }
-            Self::ReviewPushPreview { params, .. }
+            Self::ReviewSyncPreview { params, .. }
+            | Self::ReviewConflictsPreview { params, .. }
+            | Self::ReviewPushPreview { params, .. }
             | Self::ReviewFixState { params, .. }
             | Self::ReviewFixPreview { params, .. }
             | Self::ReviewFiles { params, .. }

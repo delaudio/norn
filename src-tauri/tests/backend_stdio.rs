@@ -1323,3 +1323,196 @@ fn approved_commit_can_be_cancelled_while_hooks_run_without_auto_retry() {
         .unwrap()
         .contains("already used"));
 }
+
+#[cfg(unix)]
+impl FixFixture {
+    fn prepare_destination(&self, conflicting: bool) {
+        git(self.repo.path(), &["checkout", "-b", "destination"]);
+        let filename = if conflicting {
+            "tracked.txt"
+        } else {
+            "destination.txt"
+        };
+        std::fs::write(self.repo.path().join(filename), "destination change\n").unwrap();
+        git(self.repo.path(), &["add", filename]);
+        git(self.repo.path(), &["commit", "-m", "destination change"]);
+        git(self.repo.path(), &["push", "origin", "destination"]);
+        git(self.repo.path(), &["checkout", "feature"]);
+        if conflicting {
+            std::fs::write(self.repo.path().join("tracked.txt"), "source change\n").unwrap();
+            git(self.repo.path(), &["add", "tracked.txt"]);
+            git(self.repo.path(), &["commit", "-m", "source change"]);
+            git(self.repo.path(), &["push", "origin", "feature"]);
+        }
+        let connection =
+            rusqlite::Connection::open(self._data.path().join("norn.sqlite3")).unwrap();
+        let saved: String = connection
+            .query_row(
+                "SELECT store_json FROM ai_review_stores WHERE review_key='fixture_demo_9'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let mut saved: Value = serde_json::from_str(&saved).unwrap();
+        saved["reviewRuns"][0]["destinationBranch"] = json!("destination");
+        connection
+            .execute(
+                "UPDATE ai_review_stores SET store_json=?1 WHERE review_key='fixture_demo_9'",
+                [saved.to_string()],
+            )
+            .unwrap();
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn approved_sync_leaves_merge_for_separate_commit_and_push() {
+    let mut fixture = FixFixture::new("#!/bin/sh\nexit 99\n");
+    fixture.prepare_destination(false);
+    let remote_before = Command::new("git")
+        .arg("-C")
+        .arg(fixture._origin.path())
+        .args(["rev-parse", "feature"])
+        .output()
+        .unwrap()
+        .stdout;
+    let preview = fixture.mutation_preview("review.sync.preview", None);
+    assert_eq!(preview["action"], "sync");
+    let operation =
+        fixture.execute_action("review.sync", preview["approvalToken"].as_str().unwrap());
+    assert_eq!(fixture.terminal(&operation)["event"]["state"], "succeeded");
+    assert!(fixture.repo.path().join("destination.txt").exists());
+    assert!(fixture.repo.path().join(".git/MERGE_HEAD").exists());
+    let preview =
+        fixture.mutation_preview("review.commit.preview", Some("merge: reviewed destination"));
+    assert_eq!(preview["filesToCommit"], json!(["destination.txt"]));
+    let operation =
+        fixture.execute_action("review.commit", preview["approvalToken"].as_str().unwrap());
+    assert_eq!(fixture.terminal(&operation)["event"]["state"], "succeeded");
+    let parents = Command::new("git")
+        .arg("-C")
+        .arg(fixture.repo.path())
+        .args(["rev-list", "--parents", "-n", "1", "HEAD"])
+        .output()
+        .unwrap();
+    assert_eq!(
+        String::from_utf8(parents.stdout)
+            .unwrap()
+            .split_whitespace()
+            .count(),
+        3
+    );
+    let remote = Command::new("git")
+        .arg("-C")
+        .arg(fixture._origin.path())
+        .args(["rev-parse", "feature"])
+        .output()
+        .unwrap()
+        .stdout;
+    assert_eq!(remote, remote_before, "sync and commit must not publish");
+    let preview = fixture.mutation_preview("review.push.preview", None);
+    let operation =
+        fixture.execute_action("review.push", preview["approvalToken"].as_str().unwrap());
+    assert_eq!(fixture.terminal(&operation)["event"]["state"], "succeeded");
+}
+
+#[cfg(unix)]
+#[test]
+fn sync_conflicts_are_preserved_then_resolved_with_a_separate_approval() {
+    let mut fixture = FixFixture::new(
+        r#"#!/bin/sh
+printf 'resolved\n' > tracked.txt
+git add -- tracked.txt
+printf '%s\n' '{"structured_output":{"status":"success","summary":"Resolved merge","commitMessage":"merge: resolve","tests":[],"filesTouched":["tracked.txt"]}}'
+"#,
+    );
+    fixture.prepare_destination(true);
+    let preview = fixture.mutation_preview("review.sync.preview", None);
+    let operation =
+        fixture.execute_action("review.sync", preview["approvalToken"].as_str().unwrap());
+    assert_eq!(fixture.terminal(&operation)["event"]["state"], "failed");
+    assert!(fixture.repo.path().join(".git/MERGE_HEAD").exists());
+    let preview = fixture.mutation_preview("review.conflicts.preview", None);
+    let operation = fixture.execute_action(
+        "review.conflicts",
+        preview["approvalToken"].as_str().unwrap(),
+    );
+    assert_eq!(fixture.terminal(&operation)["event"]["state"], "succeeded");
+    assert_eq!(
+        std::fs::read_to_string(fixture.repo.path().join("tracked.txt")).unwrap(),
+        "resolved\n"
+    );
+    let preview = fixture.mutation_preview("review.commit.preview", Some("merge: resolve"));
+    let operation =
+        fixture.execute_action("review.commit", preview["approvalToken"].as_str().unwrap());
+    assert_eq!(fixture.terminal(&operation)["event"]["state"], "succeeded");
+}
+
+#[cfg(unix)]
+#[test]
+fn branch_sync_refuses_dirty_checkout_and_stale_or_wrong_action_approval() {
+    let mut fixture = FixFixture::new("#!/bin/sh\nexit 99\n");
+    fixture.prepare_destination(false);
+    let preview = fixture.mutation_preview("review.sync.preview", None);
+    let operation = fixture.execute_action(
+        "review.conflicts",
+        preview["approvalToken"].as_str().unwrap(),
+    );
+    assert_eq!(
+        fixture.terminal(&operation)["event"]["error"]["code"],
+        "targetStale"
+    );
+    let preview = fixture.mutation_preview("review.sync.preview", None);
+    std::fs::write(
+        fixture.repo.path().join("local.txt"),
+        "preserve local work\n",
+    )
+    .unwrap();
+    let operation =
+        fixture.execute_action("review.sync", preview["approvalToken"].as_str().unwrap());
+    assert_eq!(
+        fixture.terminal(&operation)["event"]["error"]["code"],
+        "targetStale"
+    );
+    fixture.backend.send(json!({"type":"request","id":"dirty-sync","method":"review.sync.preview","params":{"target":fixture.target}}));
+    let refused = fixture
+        .backend
+        .wait_for(|v| v["id"] == "dirty-sync", Duration::from_secs(10));
+    assert_eq!(refused["ok"], false);
+    assert_eq!(
+        std::fs::read_to_string(fixture.repo.path().join("local.txt")).unwrap(),
+        "preserve local work\n"
+    );
+    assert!(!fixture.repo.path().join(".git/MERGE_HEAD").exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn unresolved_agent_result_and_unrelated_merge_edits_are_refused() {
+    let mut fixture = FixFixture::new(
+        r#"#!/bin/sh
+printf '%s\n' '{"structured_output":{"status":"success","summary":"Claims success","commitMessage":"merge","tests":[],"filesTouched":[]}}'
+"#,
+    );
+    fixture.prepare_destination(true);
+    let preview = fixture.mutation_preview("review.conflicts.preview", None);
+    let operation = fixture.execute_action(
+        "review.conflicts",
+        preview["approvalToken"].as_str().unwrap(),
+    );
+    assert_eq!(fixture.terminal(&operation)["event"]["state"], "failed");
+    assert!(fixture.repo.path().join(".git/MERGE_HEAD").exists());
+    let mut clean = FixFixture::new("#!/bin/sh\nexit 99\n");
+    clean.prepare_destination(false);
+    let preview = clean.mutation_preview("review.sync.preview", None);
+    let operation = clean.execute_action("review.sync", preview["approvalToken"].as_str().unwrap());
+    assert_eq!(clean.terminal(&operation)["event"]["state"], "succeeded");
+    std::fs::write(clean.repo.path().join("unrelated.txt"), "private\n").unwrap();
+    git(clean.repo.path(), &["add", "unrelated.txt"]);
+    clean.backend.send(json!({"type":"request","id":"unrelated-merge","method":"review.commit.preview","params":{"target":clean.target,"message":"merge"}}));
+    let refused = clean
+        .backend
+        .wait_for(|v| v["id"] == "unrelated-merge", Duration::from_secs(10));
+    assert_eq!(refused["ok"], false, "{refused}");
+    assert!(clean.repo.path().join(".git/MERGE_HEAD").exists());
+}

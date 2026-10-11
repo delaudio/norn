@@ -4581,11 +4581,17 @@ fn run_commit_pipeline(
         &key,
         "Creating commit. Pre-commit hooks may be running…",
     );
+    let merge_commit = validate_merge_commit_files(&repo_path, &files_to_stage)?;
     let mut commit = git_command(&repo_path);
-    commit
-        .env("GIT_LITERAL_PATHSPECS", "1")
-        .args(["commit", "--only", "-m", &message, "--"])
-        .args(&files_to_stage);
+    commit.env("GIT_LITERAL_PATHSPECS", "1");
+    if merge_commit {
+        // Git cannot partially commit a merge. Every changed path is approved.
+        commit.args(["commit", "-m", &message]);
+    } else {
+        commit
+            .args(["commit", "--only", "-m", &message, "--"])
+            .args(&files_to_stage);
+    }
     let output = run_logged_command(commit, &store, &key, "git commit")?;
     if output.code != Some(0) {
         return Err(format!(
@@ -6837,6 +6843,292 @@ pub fn update_ai_review_job_status(
 #[tauri::command]
 pub fn list_ai_review_jobs(limit: Option<u32>) -> Result<Vec<review_storage::ReviewJob>, String> {
     review_storage::list_recent_review_jobs(limit.unwrap_or(20).clamp(1, 100))
+}
+
+fn read_branch_git(path: &Path, args: &[&str]) -> Result<CommandOutput, String> {
+    let control = crate::local_review::GitRunControl::new(
+        Duration::from_secs(10),
+        crate::local_review::LocalReviewCancellation::new(),
+        "Branch inspection",
+    );
+    let output = crate::local_review::run_git_bounded_with_control(
+        path,
+        args,
+        None,
+        1024 * 1024,
+        "branch inspection",
+        &control,
+    )?;
+    Ok(CommandOutput {
+        code: output.status.code(),
+        stdout: String::from_utf8(output.stdout)
+            .map_err(|_| "Git inspection requires UTF-8 paths.".to_string())?,
+        stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+    })
+}
+
+fn read_branch_git_checked(path: &Path, args: &[&str]) -> Result<String, String> {
+    let output = read_branch_git(path, args)?;
+    if output.code != Some(0) {
+        return Err("Cannot inspect the branch or merge state.".to_string());
+    }
+    Ok(output.stdout.trim().to_string())
+}
+
+fn branch_conflicts(path: &Path) -> Result<Vec<String>, String> {
+    let output = read_branch_git_checked(path, &["diff", "--name-only", "--diff-filter=U", "-z"])?;
+    Ok(output
+        .split('\0')
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .collect())
+}
+
+/// A merge starts only on a clean source checkout. Resuming conflict resolution
+/// accepts an existing merge only when MERGE_HEAD is the reviewed destination.
+pub(crate) fn validate_branch_merge_checkout(
+    path: &Path,
+    source: &str,
+    destination: &str,
+    resolve: bool,
+) -> Result<(), String> {
+    if read_branch_git_checked(path, &["branch", "--show-current"])? != source {
+        return Err("Check out the saved source branch before requesting branch sync.".to_string());
+    }
+    let merge = read_branch_git(path, &["rev-parse", "--verify", "MERGE_HEAD"])?;
+    if merge.code == Some(0) {
+        let expected =
+            read_branch_git_checked(path, &["rev-parse", &format!("origin/{destination}")])?;
+        if !resolve || merge.stdout.trim() != expected.trim() {
+            return Err(
+                "Inspect the existing merge; it does not match this conflict resolution request."
+                    .to_string(),
+            );
+        }
+    } else if !git_status_lines(path)?.is_empty() {
+        return Err(
+            "Branch sync requires a clean source checkout. Preserve or commit local changes first."
+                .to_string(),
+        );
+    }
+    for state in ["CHERRY_PICK_HEAD", "REVERT_HEAD", "REBASE_HEAD"] {
+        if read_branch_git(path, &["rev-parse", "--verify", state])?.code == Some(0) {
+            return Err(
+                "Finish or inspect the existing Git operation before branch sync.".to_string(),
+            );
+        }
+    }
+    Ok(())
+}
+
+fn merge_changed_paths(path: &Path) -> Result<Vec<String>, String> {
+    let mut paths = Vec::new();
+    for args in [
+        vec!["diff", "--name-only", "-z", "HEAD", "--"],
+        vec!["ls-files", "--others", "--exclude-standard", "-z"],
+    ] {
+        let output = read_branch_git(path, &args)?;
+        if output.code != Some(0) {
+            return Err("Cannot inspect merge file changes.".to_string());
+        }
+        paths.extend(
+            output
+                .stdout
+                .split('\0')
+                .filter(|v| !v.is_empty())
+                .map(str::to_string),
+        );
+    }
+    paths.sort();
+    paths.dedup();
+    validate_fix_commit_paths(path, &paths)?;
+    Ok(paths)
+}
+
+pub(crate) fn validate_merge_commit_files(
+    path: &Path,
+    approved: &[String],
+) -> Result<bool, String> {
+    if read_branch_git(path, &["rev-parse", "--verify", "MERGE_HEAD"])?.code != Some(0) {
+        return Ok(false);
+    }
+    if !branch_conflicts(path)?.is_empty() {
+        return Err("Resolve every conflict before committing the merge.".to_string());
+    }
+    let mut selected = approved.to_vec();
+    selected.sort();
+    selected.dedup();
+    if merge_changed_paths(path)? != selected {
+        return Err("The complete merge includes unapproved changes. Inspect it before requesting a new commit preview.".to_string());
+    }
+    Ok(true)
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn start_branch_merge_native(
+    store: &AiReviewFixStore,
+    workspace: &str,
+    repo: &str,
+    id: u32,
+    thread_id: &str,
+    path: PathBuf,
+    source: String,
+    destination: String,
+    expected: String,
+    cancellation: Arc<AtomicBool>,
+    resolve: bool,
+) -> Result<AiReviewFixState, String> {
+    let key = fix_key(workspace, repo, id, Some(thread_id));
+    let initial = begin_operation(
+        store,
+        &key,
+        &pr_key(workspace, repo, id),
+        Some(thread_id.to_string()),
+        AiReviewFixPhase::Preflight,
+        Some(path.display().to_string()),
+    )?;
+    with_store(store, |inner| {
+        let session = ensure_session(inner, &key);
+        session.cancellation = cancellation;
+        session.source_branch = source.clone();
+        session.destination_branch = destination.clone();
+    });
+    let store = store.clone();
+    thread::spawn(move || {
+        let result = run_approved_branch_merge(
+            &store,
+            &key,
+            &path,
+            &source,
+            &destination,
+            &expected,
+            resolve,
+        );
+        if let Err(error) = result {
+            set_fix_failed(&store, &key, format!("{error} Inspect the checkout and merge state; partial changes are preserved. No commit or push was performed."));
+        }
+    });
+    Ok(initial)
+}
+
+fn run_approved_branch_merge(
+    store: &AiReviewFixStore,
+    key: &str,
+    path: &Path,
+    source: &str,
+    destination: &str,
+    expected: &str,
+    resolve: bool,
+) -> Result<(), String> {
+    check_fix_cancellation(store, key)?;
+    if crate::services::review_fix::checkout_fingerprint(path)? != expected {
+        return Err("The checkout changed after branch merge approval.".to_string());
+    }
+    validate_branch_merge_checkout(path, source, destination, resolve)?;
+    let run = |args: &[&str]| -> Result<CommandOutput, String> {
+        let mut command = git_command(path);
+        command.args(args);
+        run_logged_command(command, store, key, "git branch merge")
+    };
+    let existing_merge =
+        read_branch_git(path, &["rev-parse", "--verify", "MERGE_HEAD"])?.code == Some(0);
+    if !existing_merge {
+        set_phase(
+            store,
+            key,
+            AiReviewFixPhase::Syncing,
+            AiReviewFixStatus::Running,
+        );
+        for args in [
+            vec!["fetch", "origin", source, destination],
+            vec!["pull", "--ff-only", "origin", source],
+        ] {
+            let output = run(&args)?;
+            if output.code != Some(0) {
+                return Err(format!("Branch synchronization failed: {}", output.stderr));
+            }
+        }
+        set_phase(
+            store,
+            key,
+            AiReviewFixPhase::MergingDestination,
+            AiReviewFixStatus::Running,
+        );
+        let output = run(&[
+            "merge",
+            "--no-commit",
+            "--no-ff",
+            &format!("origin/{destination}"),
+        ])?;
+        if output.code != Some(0) && branch_conflicts(path)?.is_empty() {
+            return Err(format!("Destination merge failed: {}", output.stderr));
+        }
+    }
+    let conflicts = branch_conflicts(path)?;
+    let mut suggested = conflict_resolution_commit_message(source, destination);
+    let mut tests = Vec::new();
+    let mut summary =
+        "Destination merged locally. Inspect the complete merge before approving commit and push."
+            .to_string();
+    if !conflicts.is_empty() {
+        if !resolve {
+            return Err(format!("Merge conflicts remain in {} file(s). Request conflict resolution after inspecting the clone.", conflicts.len()));
+        }
+        set_phase(
+            store,
+            key,
+            AiReviewFixPhase::ResolvingConflicts,
+            AiReviewFixStatus::Running,
+        );
+        let payload = build_conflict_resolution_payload(source, destination, &conflicts, None);
+        let agent = run_claude_fix(path, &payload, store, key)?;
+        if !agent.result.status.eq_ignore_ascii_case("success") {
+            return Err(agent
+                .result
+                .failure_reason
+                .unwrap_or_else(|| "The agent could not resolve the conflicts.".to_string()));
+        }
+        if !branch_conflicts(path)?.is_empty() {
+            return Err("The agent left unresolved Git conflicts.".to_string());
+        }
+        if let Some(value) = agent.result.commit_message.filter(|s| !s.trim().is_empty()) {
+            suggested = value;
+        }
+        if let Some(value) = agent.result.summary {
+            summary = value;
+        }
+        tests = agent.result.tests;
+    }
+    check_fix_cancellation(store, key)?;
+    let is_merge = read_branch_git(path, &["rev-parse", "--verify", "MERGE_HEAD"])?.code == Some(0);
+    let paths = if is_merge {
+        merge_changed_paths(path)?
+    } else {
+        Vec::new()
+    };
+    with_store(store, |inner| {
+        let session = ensure_session(inner, key);
+        session.public.status = AiReviewFixStatus::Succeeded;
+        session.public.phase = if is_merge {
+            AiReviewFixPhase::ReadyToCommit
+        } else {
+            AiReviewFixPhase::Completed
+        };
+        session.public.finished_at = Some(now_ms());
+        session.public.error = None;
+        session.public.summary = Some(if is_merge {
+            summary
+        } else {
+            "The source already contains the destination; no merge commit or push was created."
+                .to_string()
+        });
+        session.public.files_touched = paths;
+        session.public.tests = tests;
+        session.public.suggested_commit_message = if is_merge { Some(suggested) } else { None };
+        session.public.commit_sha = None;
+    });
+    finalize_active_key(store, key);
+    Ok(())
 }
 
 pub(crate) fn validate_fix_commit_paths(repo_path: &Path, paths: &[String]) -> Result<(), String> {

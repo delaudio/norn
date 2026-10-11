@@ -381,17 +381,23 @@ fn dispatch(request: Request, backend: &Backend) -> bool {
             );
             false
         }
-        Request::ReviewPushPreview { params, .. } | Request::ReviewFixPreview { params, .. } => {
-            let action = if method == "review.push.preview" {
-                ApprovedAction::Push
-            } else {
-                ApprovedAction::Fix
+        Request::ReviewSyncPreview { params, .. }
+        | Request::ReviewConflictsPreview { params, .. }
+        | Request::ReviewPushPreview { params, .. }
+        | Request::ReviewFixPreview { params, .. } => {
+            let action = match method {
+                "review.sync.preview" => ApprovedAction::Sync,
+                "review.conflicts.preview" => ApprovedAction::Conflicts,
+                "review.push.preview" => ApprovedAction::Push,
+                _ => ApprovedAction::Fix,
             };
             backend.preview_mutation(id, params.target, action, None);
             false
         }
         Request::ReviewCommit { params, .. }
         | Request::ReviewPush { params, .. }
+        | Request::ReviewSync { params, .. }
+        | Request::ReviewConflicts { params, .. }
         | Request::ReviewFix { params, .. } => {
             if backend
                 .active_operations
@@ -409,6 +415,8 @@ fn dispatch(request: Request, backend: &Backend) -> bool {
             let action = match method {
                 "review.commit" => ApprovedAction::Commit,
                 "review.push" => ApprovedAction::Push,
+                "review.sync" => ApprovedAction::Sync,
+                "review.conflicts" => ApprovedAction::Conflicts,
                 _ => ApprovedAction::Fix,
             };
             backend.start_fix(&id, params, action);
@@ -2694,6 +2702,8 @@ fn start_inline_reply_session(
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "lowercase")]
 enum ApprovedAction {
+    Sync,
+    Conflicts,
     Fix,
     Commit,
     Push,
@@ -2818,6 +2828,17 @@ fn mutation_preview(
     let mut files = Vec::new();
     let mut commit_sha = None;
     let effects = match action {
+        ApprovedAction::Sync | ApprovedAction::Conflicts => {
+            crate::services::review::validate_branch_merge_checkout(&approval.repo_path, &approval.source, &approval.destination, action == ApprovedAction::Conflicts).map_err(fix_error)?;
+            let mut effects = vec![format!("Fetch origin and fast-forward {} before merging origin/{} without committing.", approval.source, approval.destination),
+                "Requires a clean source checkout for a new merge; no local changes are stashed or discarded.".to_string(),
+                "Conflicts or interrupted changes remain in the clone for inspection.".to_string(),
+                "No automatic commit, push or review publication. Approve these separately.".to_string()];
+            if action == ApprovedAction::Conflicts {
+                effects.push("Run Claude with file-edit permissions to resolve conflicts; an existing merge must match the saved destination.".to_string());
+            }
+            effects
+        }
         ApprovedAction::Fix => vec!["Stash and restore existing local changes if needed.".to_string(),
             "Check out the review source branch.".to_string(), "Fetch from origin and fast-forward the source branch.".to_string(),
             "Run Claude with file-edit permissions using the saved conversation.".to_string(),
@@ -2835,6 +2856,7 @@ fn mutation_preview(
                 let message = approval.message.as_ref().ok_or_else(|| fix_error("A commit message is required."))?;
                 if message.trim().is_empty() || message.chars().count() > 4096 { return Err(fix_error("A commit message between 1 and 4096 characters is required.")); }
                 validate_fix_commit_paths(&approval.repo_path, &state.files_touched).map_err(fix_error)?;
+                crate::services::review::validate_merge_commit_files(&approval.repo_path, &state.files_touched).map_err(fix_error)?;
                 files = state.files_touched;
                 approval.files = files.clone();
                 vec![format!("Stage and commit only these files: {}", files.join(", ")),
@@ -2983,6 +3005,21 @@ fn run_fix_operation(
         return;
     };
     let started = match approval.action {
+        ApprovedAction::Sync | ApprovedAction::Conflicts => {
+            crate::services::review::start_branch_merge_native(
+                fix_store(),
+                workspace,
+                repo,
+                *pr_id,
+                &approval.thread_id,
+                approval.repo_path,
+                approval.source,
+                approval.destination,
+                approval.snapshot,
+                cancel.clone(),
+                approval.action == ApprovedAction::Conflicts,
+            )
+        }
         ApprovedAction::Fix => start_ai_review_fix_native(
             fix_store(),
             workspace.clone(),
