@@ -35,8 +35,31 @@ finding feedback follow in separate increments; no live provider publication.
 
 - #352 authoritative finding staging and canonical drafts.
 
-## Status
+## Delivery
 
-- Claimed by: default-agent, 2026-10-11, `issue-304-publication-journal`.
-- Blockers: implementation/gates, #352 merge, PR CI/merge.
-- Stopped:
+Effective on merge to main of this publication-journal PR. Implementation
+`0b60c44`, based on PR #352 merge `5f518b5` (UI/verify green; verify 13m38s).
+SQLite schema 16 and the Rust publisher bind exact approved payloads to stable
+scoped local draft identity, persist writing before provider access, fence
+attempt acknowledgments and preserve unknown outcomes without expiry retries.
+Read-only exact-match reconciliation cannot POST or remove comments. Verified
+postflight mismatch and unavailable postflight evidence have distinct states;
+both retain confirmed remote identity without claiming ordinary publication.
+
+Root typecheck, 123 tests/tooling, lint and Archgate 17/17 pass. Corrected core
+638 tests (2 ignored), no-GUI dependency guard, 48 backend subprocess tests and
+strict all-feature/all-target Clippy pass. Nine journal tests initialize actual
+production migrations in owned SQLite files and cover concurrency, durable
+writing-before-send, restart, partial independent outcomes, malformed/corrupt
+storage, original payload/body matching, stale revisions and storage failures.
+Final focused tests/Clippy rerun exit 0. Initial full core attempt failed on
+sandbox loopback restrictions and the old explicit migration expectation ending
+at schema 15; updated it to 16 and reran the complete lane with authorized
+loopback permissions. No UI changes; prior UI gates remain PR #352 evidence.
+
+Pre-integration main-slot/contiguous ADRs/INDEX membership/active links pass;
+historical ADR 0011 plan coverage remains, no global audit-clean claim. Concrete
+provider adapters, single-use typed IPC/native batch approval, remote threads,
+canonical cleanup and atomic feedback integration remain #304. No live provider
+publication, real credentials/agent access or Norn review. ADR 0020 stays
+Accepted until complete cutover; remaining migration issues stay open.
