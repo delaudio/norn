@@ -13,6 +13,7 @@ pub mod cli;
 mod commands;
 mod config;
 mod credentials;
+pub mod draft_publication;
 pub mod finding_publication;
 pub mod finding_reconciliation;
 pub mod github_app_onboarding;
