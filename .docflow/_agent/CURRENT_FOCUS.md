@@ -8,9 +8,9 @@ If status files and git disagree, git is authoritative; correct this file.
 
 ## Active state
 
-- **Branch:** `issue-303-operation-resync` (PR #338).
+- **Branch:** `issue-305-settings-workspace` (stacked after PR #338).
 - **Active item:** complete epic #294 through verified PRs and squash merges.
-- **Current change:** plan 0036, operation identity and saved review resync; PR #338 awaits CI; PR #337 merged at `2f9b58e`. Previous delivery: approved commit and push controls for native fix sessions;
+- **Current change:** plan 0037, terminal settings/onboarding; plan 0036 is verified locally; PR #338 awaits CI; PR #337 merged at `2f9b58e`. Previous delivery: approved commit and push controls for native fix sessions;
   plan 0034, prepared for merge in PR #336. PR #335 merged at `6367fa0` after both CI gates passed.
 - **Review instruction:** the maintainer explicitly requested no Norn reviews
   for this migration session; use code inspection and deterministic checks.
