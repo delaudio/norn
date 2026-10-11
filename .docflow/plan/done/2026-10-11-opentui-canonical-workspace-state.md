@@ -55,3 +55,24 @@ read the maintainer's real .norn.yaml/credentials.
 - Claimed by: default-agent, 2026-10-11, `issue-305-canonical-workspace-state`.
 - Blockers: None; PR #343 merged at `ccd133d` with both CI gates green.
 - Stopped:
+
+## Delivery
+
+Effective on merge to main of the canonical-workspace PR. Implementation
+commit: `7d492d3`. The pre-completion root gate passes: typecheck, 123 tests
+plus tooling checks and Archgate 17/17 (exit 0). Local issue-specific gates:
+623 core tests with two intentionally ignored, no-GUI dependency guard, 42 real
+backend subprocess tests, strict all-feature/all-target Clippy, terminal tests
+including six workspace cases and native keyboard/paste fencing, 48 native
+frames and protocol regeneration checks. React Doctor reports no issues in
+the changed UI files; its overall heuristic score is not a clean-baseline claim.
+
+Canonical records preserve reference/draft fields for their subsequent owners.
+Prompt/viewed UI edits are explicit and generation/version fenced. Shared
+selected-repository prompt resolution reaches new review and fallback/fresh
+reply payloads; successful Claude resume retains the existing conversation
+and sends only the new message. Fake-agent tests verify policy precedence
+and invalid-policy rejection without a live review. Imported theme application,
+reference enrichment, staged publication and physical platform recovery remain
+open with their owning issues. ADR 0020 remains Accepted; this delivery does
+not claim complete migration or authorize deletion of desktop data.
