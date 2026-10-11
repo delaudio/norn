@@ -52,8 +52,8 @@ per-scene memory figure.
 
 | Expanded lines | Mount | Split repaint | Scroll p95 (100 samples) | Maximum mounted rows | RSS |
 |---|---:|---:|---:|---:|---:|
-| 1,000 | 3.58 ms | 5.34 ms | 5.41 ms | 39 | 249 MiB |
-| 10,000 | 10.86 ms | 21.83 ms | 6.50 ms | 39 | 271 MiB |
+| 1,000 | 6.33 ms | 4.27 ms | 3.49 ms | 39 | 253 MiB |
+| 10,000 | 6.74 ms | 15.16 ms | 5.25 ms | 39 | 312 MiB |
 
 Running the same expanded harness on parent `699878b` gave 17.50 ms mount,
 41.13 ms split repaint, 2.97 ms scroll p95 and 502 mounted split rows for 1,000
