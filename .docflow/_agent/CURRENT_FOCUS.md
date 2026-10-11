@@ -8,9 +8,9 @@ If status files and git disagree, git is authoritative; correct this file.
 
 ## Active state
 
-- **Branch:** `issue-305-settings-workspace` (local implementation).
+- **Branch:** `issue-305-desktop-data-recovery` (preparation on PR #339).
 - **Active item:** complete epic #294 through verified PRs and squash merges.
-- **Current change:** plan 0037, terminal settings/onboarding, prepared for PR. PR #338 merged at `3168dcd` with all checks green.
+- **Current change:** plan 0038, desktop data recovery inventory; plan 0037 is PR #339 awaiting CI. PR #338 merged at `3168dcd` with all checks green.
 - **Review instruction:** the maintainer explicitly requested no Norn reviews
   for this migration session; use code inspection and deterministic checks.
 - **Merged baseline:** main at `3168dcd`, including PRs #316–#338.
