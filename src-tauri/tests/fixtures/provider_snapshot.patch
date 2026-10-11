@@ -1,0 +1,25 @@
+diff --git "a/added \344\270\226\347\225\214.txt" "b/added \344\270\226\347\225\214.txt"
+new file mode 100644
+index 0000000..211b90f
+--- /dev/null
++++ "b/added \344\270\226\347\225\214.txt"	
+@@ -0,0 +1,2 @@
++--- header-like source
+++++ header-like source
+diff --git a/binary.png b/binary.png
+index 9b3a987..d3cab9c 100644
+Binary files a/binary.png and b/binary.png differ
+diff --git a/deleted.txt b/deleted.txt
+deleted file mode 100644
+index c8b1b42..0000000
+--- a/deleted.txt
++++ /dev/null
+@@ -1 +0,0 @@
+-delete
+diff --git a/mode.sh b/mode.sh
+old mode 100644
+new mode 100755
+diff --git "a/old name \303\250.txt" "b/new name \303\250.txt"
+similarity index 100%
+rename from "old name \303\250.txt"
+rename to "new name \303\250.txt"

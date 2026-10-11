@@ -1069,6 +1069,9 @@ mod tests {
                     let requests = thread_requests.clone();
                     let handler = handler.clone();
                     connections.push(thread::spawn(move || {
+                        // BSD/macOS can inherit O_NONBLOCK from the listener.
+                        // Worker reads must wait for delayed/fragmented headers.
+                        socket.set_nonblocking(false).unwrap();
                         socket.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
                         let mut data = Vec::new();
                         let mut buffer = [0; 4096];
@@ -1561,6 +1564,36 @@ mod tests {
         assert_eq!(
             requests.last().unwrap().1,
             "/repos/fixture/demo/pulls/9/comments?per_page=100&page=2"
+        );
+    }
+    #[test]
+    fn fixture_waits_for_delayed_and_fragmented_http_request_bytes() {
+        let server = Server::new(|method, path, _| {
+            assert_eq!(method, "GET");
+            assert_eq!(path, "/user");
+            (200, json!({"login":"synthetic-author"}), String::new())
+        });
+        let mut socket =
+            std::net::TcpStream::connect(server.root.strip_prefix("http://").unwrap()).unwrap();
+        socket
+            .set_read_timeout(Some(Duration::from_secs(2)))
+            .unwrap();
+        thread::sleep(Duration::from_millis(50));
+        socket
+            .write_all(b"GET /user HTTP/1.1\r\nHost: owned-fixture\r\n")
+            .unwrap();
+        thread::sleep(Duration::from_millis(50));
+        socket.write_all(b"Connection: close\r\n\r\n").unwrap();
+        let mut response = String::new();
+        socket.read_to_string(&mut response).unwrap();
+        assert!(
+            response.starts_with("HTTP/1.1 200"),
+            "response={response:?}"
+        );
+        assert!(response.ends_with("{\"login\":\"synthetic-author\"}"));
+        assert_eq!(
+            *server.requests.lock().unwrap(),
+            vec![("GET".into(), "/user".into())]
         );
     }
     #[test]

@@ -68,6 +68,52 @@ fn provider_reads_advertise_capability_and_reject_invalid_targets_before_credent
     assert!(!stderr.contains("credentials"));
 }
 
+#[test]
+fn snapshot_cache_requests_fail_without_credentials_and_control_remains_responsive() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut backend = Backend::spawn(dir.path());
+    backend.send(
+        json!({"type":"hello","protocolVersion":1,"client":{"name":"owned-test","version":"0"}}),
+    );
+    let ready = backend.wait_for(|v| v["type"] == "ready", Duration::from_secs(5));
+    assert!(ready["capabilities"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|v| v == "provider-snapshots"));
+    let snapshot = json!({"repository":{"provider":"github","workspace":"owned","repo":"owned"},"prId":7,"snapshotId":"e".repeat(64)});
+    for (id, method, params) in [
+        (
+            "cache-files",
+            "provider.snapshot.files",
+            json!({"snapshot":snapshot,"offset":0,"limit":100}),
+        ),
+        (
+            "cache-diff",
+            "provider.snapshot.diff",
+            json!({"snapshot":snapshot,"path":"owned.rs","offset":0}),
+        ),
+    ] {
+        backend.send(json!({"type":"request","id":id,"method":method,"params":params}));
+        let response = backend.wait_for(
+            |v| v["type"] == "response" && v["id"] == id,
+            Duration::from_secs(5),
+        );
+        assert_eq!(response["ok"], false);
+        assert!(response["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("expired or unavailable"));
+    }
+    backend.send(json!({"type":"request","id":"status-after-cache","method":"repository.status","params":{}}));
+    assert_eq!(
+        backend.wait_for(|v| v["id"] == "status-after-cache", Duration::from_secs(5))["ok"],
+        true
+    );
+    backend.send(json!({"type":"request","id":"finish-cache","method":"shutdown","params":{}}));
+    assert!(backend.child.wait().unwrap().success());
+}
+
 struct Backend {
     _isolated: tempfile::TempDir,
     child: Child,

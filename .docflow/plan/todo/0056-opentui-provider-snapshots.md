@@ -14,6 +14,11 @@ The snapshot is a transient handle separate from actual saved review run IDs.
 UI integration and review-start use of those exact pins follow in the next
 required delivery; this backend increment cannot close #357/#306.
 
+Full-gate investigation also owns the inherited test fixture failure exposed
+by this delivery: preserve production behavior/deadlines, prove the socket
+cause with an owned delayed/fragmented request, and fix accepted-socket mode
+in the two existing native HTTP test fixtures. No retries or test weakening.
+
 ## Exit Criteria
 
 1. Explicit provider/repository/PR requests obtain actual source/destination

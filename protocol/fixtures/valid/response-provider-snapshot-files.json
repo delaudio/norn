@@ -1,0 +1,32 @@
+{
+  "type": "response",
+  "id": "snapshot-files",
+  "ok": true,
+  "result": {
+    "request": {
+      "snapshot": {
+        "repository": {
+          "provider": "github",
+          "workspace": "Owner",
+          "repo": "Repo"
+        },
+        "prId": 7,
+        "snapshotId": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      },
+      "offset": 0,
+      "limit": 100
+    },
+    "files": [
+      {
+        "path": "x",
+        "oldPath": null,
+        "status": "modified",
+        "additions": 1,
+        "deletions": 1,
+        "binary": false
+      }
+    ],
+    "total": 1,
+    "nextOffset": null
+  }
+}

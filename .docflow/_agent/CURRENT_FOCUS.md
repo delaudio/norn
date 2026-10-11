@@ -13,6 +13,14 @@ Git is authoritative. Durable history lives in WORKLOG and plan/done.
   strict client contracts. Keep destination tip, review merge base and head
   distinct; opaque preview handles never replace saved run IDs. Native preview/
   review-start integration and explicit approval/browser opening follow in #357.
+- **Verification:** root/UI/protocol pass; native full suite exposed the
+  owned HTTP fixture race. Measured inherited O_NONBLOCK, an immediate
+  WouldBlock and failed delayed/fragmented regression establish the cause.
+  Both test fixtures now restore blocking sockets; delayed/fragmented and held
+  idle regressions pass, diagnostics removed. Final root/protocol/UI 164 tests/
+  994 assertions/105 frames, Rust 686 core plus two existing ignored/53 stdio/
+  six CLI/five onboarding/three bin tests, strict Clippy/fmt/no-GUI and Archgate
+  12/12 pass. Preparing exact-head CI and squash merge; #357 remains open.
 - **Local baseline:** root/protocol/UI 160 tests/970 assertions/105 native frames,
   Rust 672 core/52 stdio/six isolated CLI/five onboarding/three bin tests,
   strict all-feature Clippy/fmt/no-GUI and Archgate 12/12 passed.

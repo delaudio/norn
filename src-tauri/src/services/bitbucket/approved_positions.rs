@@ -6,7 +6,7 @@ fn invalid() -> String {
     "The diff position could not be verified. Choose a supported comment position explicitly."
         .into()
 }
-fn patch_path(value: &str, prefix: &str) -> Result<Option<String>, String> {
+pub(super) fn patch_path(value: &str, prefix: &str) -> Result<Option<String>, String> {
     let path = if value.starts_with('"') {
         let bytes = value.as_bytes();
         let mut out = Vec::new();
@@ -63,7 +63,7 @@ fn patch_path(value: &str, prefix: &str) -> Result<Option<String>, String> {
     }
     Ok(Some(path.into()))
 }
-fn range(value: &str, sign: char) -> Result<(u32, u32), String> {
+pub(super) fn range(value: &str, sign: char) -> Result<(u32, u32), String> {
     let raw = value.strip_prefix(sign).ok_or_else(invalid)?;
     let (start, count) = raw.split_once(',').unwrap_or((raw, "1"));
     if start.is_empty()
