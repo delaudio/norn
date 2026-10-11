@@ -1,7 +1,9 @@
 //! Bounded provider reads for the terminal workspace (ADR 0020, #357).
+mod snapshots;
 use super::*;
 use reqwest::{blocking::Client, redirect::Policy, Url};
 use serde_json::Value;
+pub(crate) use snapshots::snapshot_sections;
 use std::{
     collections::HashSet,
     time::{Duration, Instant},
@@ -261,6 +263,17 @@ impl Api {
         )
     }
     fn get(&self, url: &str, started: Instant) -> Result<(Value, Option<String>), String> {
+        let (bytes, link) =
+            self.get_bytes(url, started, BODY_BYTES, "application/vnd.github+json")?;
+        Ok((serde_json::from_slice(&bytes).map_err(|_| error())?, link))
+    }
+    fn get_bytes(
+        &self,
+        url: &str,
+        started: Instant,
+        maximum: usize,
+        accept: &str,
+    ) -> Result<(Vec<u8>, Option<String>), String> {
         let remaining = TOTAL_TIME
             .checked_sub(started.elapsed())
             .ok_or_else(error)?;
@@ -269,9 +282,7 @@ impl Api {
             .get(url)
             .timeout(remaining.min(Duration::from_secs(10)));
         let request = match &self.auth {
-            Auth::Github(token) => request
-                .bearer_auth(token)
-                .header("Accept", "application/vnd.github+json"),
+            Auth::Github(token) => request.bearer_auth(token).header("Accept", accept),
             Auth::Bitbucket(creds) => request.basic_auth(&creds.username, Some(&creds.token)),
         };
         let mut response = request.send().map_err(|_| error())?;
@@ -285,7 +296,7 @@ impl Api {
         if !response.status().is_success()
             || response
                 .content_length()
-                .is_some_and(|n| n > BODY_BYTES as u64)
+                .is_some_and(|n| n > maximum as u64)
         {
             return Err(error());
         }
@@ -300,13 +311,13 @@ impl Api {
         let mut bytes = Vec::new();
         response
             .by_ref()
-            .take((BODY_BYTES + 1) as u64)
+            .take((maximum + 1) as u64)
             .read_to_end(&mut bytes)
             .map_err(|_| error())?;
-        if bytes.len() > BODY_BYTES || started.elapsed() >= TOTAL_TIME {
+        if bytes.len() > maximum || started.elapsed() >= TOTAL_TIME {
             return Err(error());
         }
-        Ok((serde_json::from_slice(&bytes).map_err(|_| error())?, link))
+        Ok((bytes, link))
     }
     fn next_page(
         &self,
@@ -500,30 +511,8 @@ impl Api {
         let started = Instant::now();
         let base = format!("{}/{}", self.collection(), params.pr_id);
         let (json, _) = self.get(&base, started)?;
-        let author_id = if self.repository.provider == ReviewProvider::Github {
-            json.get("user").and_then(|v| v.get("login"))
-        } else {
-            json.get("author").and_then(|v| v.get("account_id"))
-        }
-        .and_then(Value::as_str)
-        .map(str::to_owned);
-        let mut detail = if self.repository.provider == ReviewProvider::Github {
-            let raw: GhPullRequest = serde_json::from_value(json).map_err(|_| error())?;
-            if !matches!(raw.state.as_str(), "open" | "closed") {
-                return Err(error());
-            }
-            map_gh_pr_detail(raw)
-        } else {
-            map_pr_detail(serde_json::from_value(json).map_err(|_| error())?)
-        };
-        if detail.id != params.pr_id
-            || !matches!(
-                detail.state.as_str(),
-                "OPEN" | "MERGED" | "DECLINED" | "SUPERSEDED"
-            )
-        {
-            return Err(error());
-        }
+        let (mut detail, author_id) =
+            parse_metadata(self.repository.provider, &json, params.pr_id)?;
         if self.repository.provider == ReviewProvider::Github {
             let collection = format!("{base}/reviews");
             let mut page = 1;
@@ -584,31 +573,7 @@ impl Api {
                 }
             }
         }
-        safe_text(&detail.title, 4096, false)?;
-        safe_text(&detail.description_raw, 64 * 1024, true)?;
-        for text in [
-            &detail.author_display_name,
-            &detail.source_branch,
-            &detail.destination_branch,
-            &detail.created_on,
-            &detail.updated_on,
-        ] {
-            safe_text(text, 256, false)?;
-        }
-        for revision in [&detail.source_commit_hash, &detail.destination_commit_hash]
-            .into_iter()
-            .flatten()
-        {
-            if !(7..=64).contains(&revision.len())
-                || !revision.bytes().all(|b| b.is_ascii_hexdigit())
-            {
-                return Err(error());
-            }
-        }
-        if let Some(id) = &author_id {
-            safe_text(id, 256, false)?;
-        }
-        validate_reviewers(&detail.reviewers)?;
+        validate_metadata(&detail, author_id.as_deref())?;
         let browser_url = format!(
             "https://{}/{}/{}/{}/{}",
             if self.repository.provider == ReviewProvider::Github {
@@ -633,6 +598,65 @@ impl Api {
         })
     }
 }
+fn parse_metadata(
+    provider: ReviewProvider,
+    json: &Value,
+    pr_id: u32,
+) -> Result<(PullRequestDetail, Option<String>), String> {
+    let author_id = if provider == ReviewProvider::Github {
+        json.get("user").and_then(|v| v.get("login"))
+    } else {
+        json.get("author").and_then(|v| v.get("account_id"))
+    }
+    .and_then(Value::as_str)
+    .map(str::to_owned);
+    let detail = if provider == ReviewProvider::Github {
+        let raw: GhPullRequest = serde_json::from_value(json.clone()).map_err(|_| error())?;
+        if !matches!(raw.state.as_str(), "open" | "closed") {
+            return Err(error());
+        }
+        map_gh_pr_detail(raw)
+    } else {
+        map_pr_detail(serde_json::from_value(json.clone()).map_err(|_| error())?)
+    };
+    if detail.id != pr_id
+        || !matches!(
+            detail.state.as_str(),
+            "OPEN" | "MERGED" | "DECLINED" | "SUPERSEDED"
+        )
+    {
+        return Err(error());
+    }
+    validate_metadata(&detail, author_id.as_deref())?;
+    Ok((detail, author_id))
+}
+fn validate_metadata(detail: &PullRequestDetail, author_id: Option<&str>) -> Result<(), String> {
+    safe_text(&detail.title, 4096, false)?;
+    safe_text(&detail.description_raw, 64 * 1024, true)?;
+    for text in [
+        &detail.author_display_name,
+        &detail.source_branch,
+        &detail.destination_branch,
+        &detail.created_on,
+        &detail.updated_on,
+    ] {
+        safe_text(text, 256, false)?;
+    }
+    for revision in [&detail.source_commit_hash, &detail.destination_commit_hash]
+        .into_iter()
+        .flatten()
+    {
+        if !(7..=64).contains(&revision.len()) || !revision.bytes().all(|b| b.is_ascii_hexdigit()) {
+            return Err(error());
+        }
+    }
+    if let Some(id) = author_id {
+        safe_text(id, 256, false)?;
+    }
+    validate_reviewers(&detail.reviewers)?;
+    Ok(())
+}
+
 fn github_next(link: Option<&str>) -> Result<Option<String>, String> {
     let mut next = None;
     if let Some(link) = link {
@@ -704,6 +728,8 @@ mod tests {
                             let seen = seen.clone();
                             let handler = handler.clone();
                             workers.push(thread::spawn(move || {
+                                // Accepted sockets can inherit the listener's nonblocking flag.
+                                stream.set_nonblocking(false).unwrap();
                                 stream.set_read_timeout(Some(Duration::from_secs(1))).unwrap();
                                 let mut bytes = Vec::new(); let mut chunk = [0; 2048];
                                 while bytes.len() <= 16 * 1024 && !bytes.windows(4).any(|s| s == b"\r\n\r\n") {
@@ -1041,5 +1067,292 @@ mod tests {
         ] {
             assert!(api.next_page(Some(&next), &collection, 1, 2).is_err());
         }
+    }
+    #[test]
+    fn immutable_provider_snapshots_use_actual_merge_base_and_fork_origin() {
+        use crate::services::provider_snapshot::Manager;
+        const PATCH: &str = "diff --git a/x b/x\n--- a/x\n+++ b/x\n@@ -1 +1 @@\n-old\n+new\n";
+        for provider in [ReviewProvider::Github, ReviewProvider::Bitbucket] {
+            let server = Server::new(move |path, request| {
+                if path.contains("/compare/") && !path.contains('?') || path.contains("/diff/") {
+                    if provider == ReviewProvider::Github {
+                        assert!(request
+                            .to_lowercase()
+                            .contains("accept: application/vnd.github.diff"));
+                    }
+                    return (200, String::new(), PATCH.into());
+                }
+                let value = if path.contains("/compare/") {
+                    json!({"base_commit":{"sha":"b".repeat(40)},"merge_base_commit":{"sha":"c".repeat(40)},"files":[]})
+                } else if path.contains("/merge-base/") {
+                    json!({"hash":"c".repeat(40)})
+                } else if path.contains("/diffstat/") {
+                    json!({"page":1,"values":[{"status":"modified","old":{"path":"x"},"new":{"path":"x"},"lines_added":1,"lines_removed":1}]})
+                } else if provider == ReviewProvider::Github {
+                    let mut value = gh(7, false, "open");
+                    value["changed_files"] = json!(1);
+                    value
+                } else {
+                    let mut value = bb(7, false);
+                    value["source"]["repository"] = json!({"full_name":"ForkOwner/ForkRepo"});
+                    value
+                };
+                (200, String::new(), value.to_string())
+            });
+            let capture = server
+                .api(provider)
+                .capture(DetailParams {
+                    repository: identity(provider),
+                    pr_id: 7,
+                })
+                .unwrap();
+            let info = Manager::default().insert(capture).unwrap();
+            assert_eq!(info.base_sha, "c".repeat(40));
+            assert_eq!(info.destination_sha, "b".repeat(40));
+            assert_eq!(info.file_count, 1);
+            let requests = server.requests.lock().unwrap();
+            if provider == ReviewProvider::Github {
+                assert!(requests.iter().any(|path| path.ends_with(&format!(
+                    "/compare/{}...{}",
+                    "c".repeat(40),
+                    "a".repeat(40)
+                ))));
+            } else {
+                assert!(requests.iter().any(|path| path
+                    == &format!(
+                        "/repositories/ForkOwner/ForkRepo/diff/{}..{}?topic=false&renames=true",
+                        "a".repeat(40),
+                        "c".repeat(40)
+                    )));
+            }
+            assert!(!requests.iter().any(
+                |path| path.contains("/pullrequests/7/diff") || path.contains("/pulls/7/files")
+            ));
+        }
+    }
+    #[test]
+    fn snapshots_reject_changed_metadata_partial_inventory_redirects_and_rate_limits() {
+        use crate::services::provider_snapshot::Manager;
+        const PATCH: &str = "diff --git a/x b/x\nold mode 100644\nnew mode 100755\n";
+        for fault in [
+            "head",
+            "destination",
+            "count",
+            "truncated",
+            "redirect",
+            "rate",
+        ] {
+            let seen = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+            let server = Server::new(move |path, _| {
+                if path.contains("/compare/") && !path.contains('?') {
+                    if fault == "redirect" {
+                        return (
+                            302,
+                            "Location: http://127.0.0.1:1/private\r\n".into(),
+                            String::new(),
+                        );
+                    }
+                    if fault == "rate" {
+                        return (429, "Retry-After: 60\r\n".into(), String::new());
+                    }
+                    return (200, String::new(), PATCH.into());
+                }
+                let value = if path.contains("/compare/") {
+                    json!({"base_commit":{"sha":"b".repeat(40)},"merge_base_commit":{"sha":"c".repeat(40)}})
+                } else {
+                    let second = seen.fetch_add(1, Ordering::SeqCst) > 0;
+                    let mut value = gh(7, false, "open");
+                    value["changed_files"] = json!(if fault == "truncated" { 2 } else { 1 });
+                    if second && fault == "head" {
+                        value["head"]["sha"] = json!("d".repeat(40));
+                    }
+                    if second && fault == "destination" {
+                        value["base"]["sha"] = json!("d".repeat(40));
+                    }
+                    if second && fault == "count" {
+                        value["changed_files"] = json!(2);
+                    }
+                    value
+                };
+                (200, String::new(), value.to_string())
+            });
+            let result = server
+                .api(ReviewProvider::Github)
+                .capture(DetailParams {
+                    repository: identity(ReviewProvider::Github),
+                    pr_id: 7,
+                })
+                .and_then(|capture| Manager::default().insert(capture));
+            assert!(result.is_err(), "accepted fault {fault}");
+            let requests = server.requests.lock().unwrap();
+            assert!(requests.len() <= 4);
+            assert!(!requests.iter().any(|path| path == "/private"));
+        }
+    }
+    #[test]
+    fn snapshot_complete_patch_is_not_limited_to_github_compare_json_300_files() {
+        use crate::services::provider_snapshot::Manager;
+        let patch = (0..301)
+            .map(|n| format!("diff --git a/file{n} b/file{n}\nold mode 100644\nnew mode 100755\n"))
+            .collect::<String>();
+        let server = Server::new(move |path, _| {
+            if path.contains("/compare/") && !path.contains('?') {
+                return (200, String::new(), patch.clone());
+            }
+            let value = if path.contains("/compare/") {
+                json!({"base_commit":{"sha":"b".repeat(40)},"merge_base_commit":{"sha":"c".repeat(40)},"files":[]})
+            } else {
+                let mut value = gh(7, false, "open");
+                value["changed_files"] = json!(301);
+                value
+            };
+            (200, String::new(), value.to_string())
+        });
+        let capture = server
+            .api(ReviewProvider::Github)
+            .capture(DetailParams {
+                repository: identity(ReviewProvider::Github),
+                pr_id: 7,
+            })
+            .unwrap();
+        assert_eq!(Manager::default().insert(capture).unwrap().file_count, 301);
+    }
+    #[test]
+    fn bitbucket_snapshot_diffstat_pages_validate_exact_continuation_and_scope() {
+        use crate::services::provider_snapshot::Manager;
+        for fault in [
+            "none",
+            "link",
+            "duplicate",
+            "source-changed",
+            "missing-source",
+        ] {
+            let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+            let server = Server::new(move |path, request| {
+                if path.contains("/diff/") {
+                    return (200, String::new(), "diff --git a/x b/x\nold mode 100644\nnew mode 100755\ndiff --git a/y b/y\nold mode 100644\nnew mode 100755\n".into());
+                }
+                let value = if path.contains("/merge-base/") {
+                    json!({"hash":"c".repeat(40)})
+                } else if path.contains("/diffstat/") {
+                    let second = path.ends_with("page=2");
+                    let name = if second && fault != "duplicate" {
+                        "y"
+                    } else {
+                        "x"
+                    };
+                    let mut value = json!({"page": if second { 2 } else { 1 }, "values":[{"status":"modified","old":{"path":name},"new":{"path":name},"lines_added":0,"lines_removed":0}]});
+                    if !second {
+                        let host = request
+                            .lines()
+                            .find_map(|line| {
+                                line.strip_prefix("host: ")
+                                    .or_else(|| line.strip_prefix("Host: "))
+                            })
+                            .unwrap();
+                        let collection = path.split('?').next().unwrap();
+                        value["next"] = json!(if fault == "link" {
+                            "https://private.example/steal".into()
+                        } else {
+                            format!("http://{host}{collection}?topic=false&pagelen=100&page=2")
+                        });
+                    }
+                    value
+                } else {
+                    let second = calls.fetch_add(1, Ordering::SeqCst) > 0;
+                    let mut value = bb(7, false);
+                    if fault != "missing-source" {
+                        value["source"]["repository"] = json!({"full_name": if second && fault == "source-changed" { "Other/Repo" } else { "Fork/Repo" }});
+                    }
+                    value
+                };
+                (200, String::new(), value.to_string())
+            });
+            let result = server
+                .api(ReviewProvider::Bitbucket)
+                .capture(DetailParams {
+                    repository: identity(ReviewProvider::Bitbucket),
+                    pr_id: 7,
+                })
+                .and_then(|capture| Manager::default().insert(capture));
+            if fault == "none" {
+                assert_eq!(result.unwrap().file_count, 2);
+            } else {
+                assert!(result.is_err(), "accepted {fault}");
+            }
+            assert!(!server
+                .requests
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|path| path.contains("steal")));
+        }
+    }
+    #[test]
+    fn snapshot_patch_body_limit_and_per_request_deadline_are_real() {
+        for fault in ["oversize", "slow"] {
+            let server = Server::new(move |path, _| {
+                if path.contains("/compare/") && !path.contains('?') {
+                    if fault == "slow" {
+                        thread::sleep(Duration::from_secs(11));
+                    }
+                    return (
+                        200,
+                        String::new(),
+                        "x".repeat(crate::services::provider_snapshot::PATCH_BYTES + 1),
+                    );
+                }
+                let value = if path.contains("/compare/") {
+                    json!({"base_commit":{"sha":"b".repeat(40)},"merge_base_commit":{"sha":"c".repeat(40)}})
+                } else {
+                    let mut value = gh(7, false, "open");
+                    value["changed_files"] = json!(1);
+                    value
+                };
+                (200, String::new(), value.to_string())
+            });
+            let started = Instant::now();
+            assert!(server
+                .api(ReviewProvider::Github)
+                .capture(DetailParams {
+                    repository: identity(ReviewProvider::Github),
+                    pr_id: 7
+                })
+                .is_err());
+            assert!(started.elapsed() < Duration::from_secs(12));
+            assert_eq!(
+                server
+                    .requests
+                    .lock()
+                    .unwrap()
+                    .iter()
+                    .filter(|path| path.contains("/compare/") && !path.contains('?'))
+                    .count(),
+                1
+            );
+        }
+    }
+    #[test]
+    fn snapshot_fixture_waits_for_delayed_fragmented_headers() {
+        let server = Server::new(|path, _| {
+            assert_eq!(path, "/owned");
+            (200, String::new(), "owned response".into())
+        });
+        let mut socket =
+            std::net::TcpStream::connect(server.root.strip_prefix("http://").unwrap()).unwrap();
+        socket
+            .set_read_timeout(Some(Duration::from_secs(2)))
+            .unwrap();
+        thread::sleep(Duration::from_millis(50));
+        socket
+            .write_all(b"GET /owned HTTP/1.1\r\nHost: owned-fixture\r\n")
+            .unwrap();
+        thread::sleep(Duration::from_millis(50));
+        socket.write_all(b"Connection: close\r\n\r\n").unwrap();
+        let mut response = String::new();
+        socket.read_to_string(&mut response).unwrap();
+        assert!(response.starts_with("HTTP/1.1 200"));
+        assert!(response.ends_with("owned response"));
+        assert_eq!(*server.requests.lock().unwrap(), vec!["/owned".to_string()]);
     }
 }

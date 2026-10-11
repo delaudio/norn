@@ -11,6 +11,13 @@ import type {
   ProviderPrDetailParams,
   ProviderPrListParams,
   ProviderPrPage,
+  ProviderSnapshotDiffPage,
+  ProviderSnapshotDiffParams,
+  ProviderSnapshotFile,
+  ProviderSnapshotFilesPage,
+  ProviderSnapshotFilesParams,
+  ProviderSnapshotInfo,
+  ProviderSnapshotRef,
   PrRepositoryIdentity,
   PublicationItemResult,
   PublicationPrepareResult,
@@ -190,6 +197,17 @@ export interface DataImportResult {
   backupPath: string | null;
   destinationVersion: string;
 }
+function snapshotPath(path: string): boolean {
+  return (
+    path.length > 0 &&
+    Buffer.byteLength(path) <= 4096 &&
+    !path.startsWith("/") &&
+    !path.includes("\\") &&
+    !/^[a-z]:/i.test(path) &&
+    !/\p{Cc}/u.test(path) &&
+    !path.split("/").some((part) => !part || part === "." || part === "..")
+  );
+}
 export class BackendClient {
   private async providerRead<T>(
     method: string,
@@ -279,6 +297,141 @@ export class BackendClient {
       "ProviderCurrentUser",
       current,
     );
+  }
+  providerSnapshot(
+    params: ProviderPrDetailParams,
+    current: () => boolean = () => true,
+  ): Promise<ProviderSnapshotInfo> {
+    return this.providerRead<ProviderSnapshotInfo>(
+      "provider.snapshot",
+      { ...params },
+      "ProviderPrDetailParams",
+      "ProviderSnapshotInfo",
+      current,
+    ).then((info) => {
+      const actual = info.snapshot;
+      if (
+        actual.prId !== params.prId ||
+        actual.repository.provider !== params.repository.provider ||
+        actual.repository.workspace !== params.repository.workspace ||
+        actual.repository.repo !== params.repository.repo ||
+        info.headSha.length !== info.baseSha.length ||
+        info.headSha.length !== info.destinationSha.length ||
+        (info.fileCount === 0) !== (info.patchBytes === 0)
+      )
+        throw new Error("Provider snapshot belongs to a different PR or range.");
+      return info;
+    });
+  }
+  providerSnapshotFiles(
+    params: ProviderSnapshotFilesParams,
+    current: () => boolean = () => true,
+  ): Promise<ProviderSnapshotFilesPage> {
+    return this.providerRead<ProviderSnapshotFilesPage>(
+      "provider.snapshot.files",
+      { ...params },
+      "ProviderSnapshotFilesParams",
+      "ProviderSnapshotFilesPage",
+      current,
+    ).then((page) => {
+      const end = params.offset + page.files.length;
+      if (
+        page.files.length > params.limit ||
+        end > page.total ||
+        page.nextOffset !== (end < page.total ? end : null) ||
+        (page.nextOffset !== null && end <= params.offset) ||
+        new Set(page.files.map((file) => file.path)).size !== page.files.length ||
+        page.files.some(
+          (file) =>
+            !snapshotPath(file.path) ||
+            (file.oldPath !== null && (!snapshotPath(file.oldPath) || file.oldPath === file.path)),
+        )
+      )
+        throw new Error("Invalid provider snapshot inventory continuation.");
+      return page;
+    });
+  }
+  providerSnapshotDiff(
+    params: ProviderSnapshotDiffParams,
+    current: () => boolean = () => true,
+  ): Promise<ProviderSnapshotDiffPage> {
+    if (!snapshotPath(params.path))
+      return Promise.reject(new Error("Invalid provider snapshot path."));
+    return this.providerRead<ProviderSnapshotDiffPage>(
+      "provider.snapshot.diff",
+      { ...params },
+      "ProviderSnapshotDiffParams",
+      "ProviderSnapshotDiffPage",
+      current,
+    ).then((page) => {
+      const bytes = Buffer.byteLength(page.text);
+      const end = params.offset + bytes;
+      if (
+        bytes > 65536 ||
+        end > page.totalBytes ||
+        page.nextOffset !== (end < page.totalBytes ? end : null) ||
+        (page.nextOffset !== null && bytes === 0) ||
+        Buffer.from(page.text).toString("utf8") !== page.text
+      )
+        throw new Error("Invalid provider snapshot diff continuation.");
+      return page;
+    });
+  }
+  async providerSnapshotInventory(
+    info: ProviderSnapshotInfo,
+    current: () => boolean = () => true,
+  ): Promise<ProviderSnapshotFile[]> {
+    const files: ProviderSnapshotFile[] = [];
+    const seen = new Set<string>();
+    let offset = 0;
+    let bytes = 0;
+    do {
+      const page = await this.providerSnapshotFiles(
+        { snapshot: info.snapshot, offset, limit: 100 },
+        current,
+      );
+      if (page.total !== info.fileCount) throw new Error("Provider snapshot inventory changed.");
+      for (const file of page.files) {
+        bytes += Buffer.byteLength(JSON.stringify(file));
+        if (seen.has(file.path) || files.length >= 10000 || bytes > 8 * 1024 * 1024)
+          throw new Error("Invalid or oversized provider snapshot inventory.");
+        seen.add(file.path);
+        files.push(file);
+      }
+      if (page.nextOffset === null) break;
+      offset = page.nextOffset;
+    } while (offset < info.fileCount);
+    return files;
+  }
+  async providerSnapshotPatch(
+    snapshot: ProviderSnapshotRef,
+    path: string,
+    current: () => boolean = () => true,
+  ): Promise<string> {
+    const chunks: string[] = [];
+    let offset = 0;
+    let total: number | null = null;
+    let hash: string | null = null;
+    do {
+      const page = await this.providerSnapshotDiff({ snapshot, path, offset }, current);
+      if (
+        (total !== null && total !== page.totalBytes) ||
+        (hash !== null && hash !== page.contentSha256) ||
+        chunks.length >= 130
+      )
+        throw new Error("Provider snapshot diff changed.");
+      total = page.totalBytes;
+      hash = page.contentSha256;
+      chunks.push(page.text);
+      if (page.nextOffset === null) break;
+      offset = page.nextOffset;
+    } while (total !== null && offset < total);
+    const patch = chunks.join("");
+    const actual = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(patch));
+    if (!current()) throw new Error("Provider selection changed.");
+    if (Buffer.byteLength(patch) !== total || Buffer.from(actual).toString("hex") !== hash)
+      throw new Error("Provider snapshot diff hash mismatch.");
+    return patch;
   }
   async workspaceScopes(current: () => boolean = () => true): Promise<WorkspaceScope[]> {
     const scopes: WorkspaceScope[] = [];

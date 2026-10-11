@@ -1,0 +1,34 @@
+{
+  "type": "response",
+  "id": "snapshot",
+  "ok": true,
+  "result": {
+    "request": {
+      "repository": {
+        "provider": "github",
+        "workspace": "Owner",
+        "repo": "Repo"
+      },
+      "prId": 7
+    },
+    "snapshot": {
+      "repository": {
+        "provider": "github",
+        "workspace": "Owner",
+        "repo": "Repo"
+      },
+      "prId": 7,
+      "snapshotId": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+    },
+    "title": "Owned PR",
+    "sourceBranch": "feature",
+    "destinationBranch": "main",
+    "headSha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "destinationSha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "baseSha": "cccccccccccccccccccccccccccccccccccccccc",
+    "patchSha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "fileCount": 1,
+    "patchBytes": 50,
+    "expiresAt": 1900000000000
+  }
+}

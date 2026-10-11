@@ -304,6 +304,24 @@ export type Request =
       id: RequestId;
       method: "provider.user";
       params: ProviderUserParams;
+    }
+  | {
+      type: "request";
+      id: RequestId;
+      method: "provider.snapshot";
+      params: ProviderPrDetailParams;
+    }
+  | {
+      type: "request";
+      id: RequestId;
+      method: "provider.snapshot.files";
+      params: ProviderSnapshotFilesParams;
+    }
+  | {
+      type: "request";
+      id: RequestId;
+      method: "provider.snapshot.diff";
+      params: ProviderSnapshotDiffParams;
     };
 export type RequestId = string;
 /**
@@ -776,6 +794,21 @@ export interface ProviderPrDetailParams {
 export interface ProviderUserParams {
   repository: PrRepositoryIdentity;
 }
+export interface ProviderSnapshotFilesParams {
+  snapshot: ProviderSnapshotRef;
+  offset: number;
+  limit: number;
+}
+export interface ProviderSnapshotRef {
+  repository: PrRepositoryIdentity;
+  prId: number;
+  snapshotId: string;
+}
+export interface ProviderSnapshotDiffParams {
+  snapshot: ProviderSnapshotRef;
+  path: string;
+  offset: number;
+}
 export interface ResponseOk {
   type: "response";
   id: RequestId;
@@ -806,7 +839,10 @@ export interface ResponseOk {
     | ScopePage
     | ProviderPrPage
     | ProviderPrDetail
-    | ProviderCurrentUser;
+    | ProviderCurrentUser
+    | ProviderSnapshotInfo
+    | ProviderSnapshotFilesPage
+    | ProviderSnapshotDiffPage;
 }
 export interface DiffFileResult {
   target: TargetIdentity;
@@ -1371,6 +1407,44 @@ export interface ProviderCurrentUser {
   repository: PrRepositoryIdentity;
   accountId: string;
   displayName: string;
+}
+export interface ProviderSnapshotInfo {
+  request: ProviderPrDetailParams;
+  snapshot: ProviderSnapshotRef;
+  title: string;
+  sourceBranch: string;
+  destinationBranch: string;
+  headSha: string;
+  destinationSha: string;
+  baseSha: string;
+  patchSha256: string;
+  fileCount: number;
+  patchBytes: number;
+  expiresAt: number;
+}
+export interface ProviderSnapshotFilesPage {
+  request: ProviderSnapshotFilesParams;
+  /**
+   * @maxItems 100
+   */
+  files: ProviderSnapshotFile[];
+  total: number;
+  nextOffset: number | null;
+}
+export interface ProviderSnapshotFile {
+  path: string;
+  oldPath: string | null;
+  status: "added" | "deleted" | "renamed" | "copied" | "modified";
+  additions: number;
+  deletions: number;
+  binary: boolean;
+}
+export interface ProviderSnapshotDiffPage {
+  request: ProviderSnapshotDiffParams;
+  text: string;
+  totalBytes: number;
+  contentSha256: string;
+  nextOffset: number | null;
 }
 export interface ResponseError {
   type: "response";

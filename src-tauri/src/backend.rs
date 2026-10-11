@@ -97,6 +97,7 @@ struct Backend {
     active_settings: Arc<AtomicUsize>,
     active_workspace: Arc<AtomicUsize>,
     active_provider_reads: Arc<AtomicUsize>,
+    provider_snapshots: Arc<crate::services::provider_snapshot::Manager>,
     active_publication: Arc<AtomicUsize>,
     active_publication_reads: Arc<AtomicUsize>,
     publication: Arc<crate::services::draft_publication::Manager>,
@@ -168,6 +169,7 @@ pub fn run() -> Result<(), i32> {
         active_settings: Arc::new(AtomicUsize::new(0)),
         active_workspace: Arc::new(AtomicUsize::new(0)),
         active_provider_reads: Arc::new(AtomicUsize::new(0)),
+        provider_snapshots: Arc::new(crate::services::provider_snapshot::Manager::default()),
         active_publication: Arc::new(AtomicUsize::new(0)),
         active_publication_reads: Arc::new(AtomicUsize::new(0)),
         publication: Arc::new(crate::services::draft_publication::Manager::new(
@@ -186,6 +188,7 @@ pub fn run() -> Result<(), i32> {
             "workspace-records".to_string(),
             "workspace-scopes".to_string(),
             "provider-pr-reads".to_string(),
+            "provider-snapshots".to_string(),
             "draft-staging".to_string(),
             "draft-publication".to_string(),
             "remote-comments".to_string(),
@@ -409,9 +412,13 @@ fn dispatch(request: Request, backend: &Backend) -> bool {
             });
             false
         }
-        Request::ProviderPrs { .. }
+        Request::ProviderSnapshot { .. }
+        | Request::ProviderSnapshotFiles { .. }
+        | Request::ProviderSnapshotDiff { .. }
+        | Request::ProviderPrs { .. }
         | Request::ProviderPrDetail { .. }
         | Request::ProviderUser { .. } => {
+            let snapshots = backend.provider_snapshots.clone();
             let active = backend.active_provider_reads.clone();
             if active
                 .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| {
@@ -436,6 +443,18 @@ fn dispatch(request: Request, backend: &Backend) -> bool {
                     Err("Provider read canceled during shutdown.".into())
                 } else {
                     match request {
+                        Request::ProviderSnapshot { params, .. } => {
+                            Api::from_stored(params.repository.clone())
+                                .and_then(|api| api.capture(params))
+                                .and_then(|capture| snapshots.insert(capture))
+                                .map(|value| json!(value))
+                        }
+                        Request::ProviderSnapshotFiles { params, .. } => {
+                            snapshots.files(params).map(|value| json!(value))
+                        }
+                        Request::ProviderSnapshotDiff { params, .. } => {
+                            snapshots.diff(params).map(|value| json!(value))
+                        }
                         Request::ProviderPrs { params, .. } => {
                             Api::from_stored(params.repository.clone())
                                 .and_then(|api| api.list(params))

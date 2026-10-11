@@ -1,0 +1,18 @@
+{
+  "type": "request",
+  "id": "snapshot-offset",
+  "method": "provider.snapshot.diff",
+  "params": {
+    "snapshot": {
+      "repository": {
+        "provider": "github",
+        "workspace": "Owner",
+        "repo": "Repo"
+      },
+      "prId": 7,
+      "snapshotId": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+    },
+    "path": "x",
+    "offset": 8388609
+  }
+}

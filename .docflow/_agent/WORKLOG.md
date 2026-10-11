@@ -304,3 +304,35 @@ Plan 0053 completion prepared after implementation `e4264db`, effective only on 
   false positives without suppression. Prepared done receipt is not effective
   until exact-head CI and squash merge. #357/#306 remain open; no Norn review,
   live provider action, private credential/profile access or release publication.
+
+- 2026-10-12 (Rome): PR #366 merged at `dd7562d29b712df6576ed31582123c4a8005e523`
+  after exact `8acede54cc6cc503872e16507f224d35e0591c98` UI/verify success (verify
+  13m43s); plan 0055 shipped. Claimed plan 0056 immutable native provider snapshots
+  on synchronized main. Prepared actual owned Git fixture for destination-tip /
+  merge-base distinction; no provider call. #357 remains open for all remaining
+  deliveries, and #306–#309/epic remain active. No Norn review.
+
+
+## 2026-10-12 — plan 0056 immutable provider snapshots prepared
+
+- Claimed plan 0056 after verified PR #366 merge at `dd7562d`.
+- Added actual native GH/BB immutable merge-base/head snapshots, distinct
+  destination pin, complete bounded patch inventory, scoped opaque cache and
+  generated snapshot/files/diff IPC with strict TS page/hash/generation checks.
+- Owned evidence covers fork/multi-page/301-file comparisons, Unicode/rename/
+  copy/empty/binary/mode changes, stale metadata, malformed/truncated inventory,
+  redirect/429/size/deadline errors, expiry/LRU/restart and byte/frame bounds.
+- Full-suite failure diagnosed as inherited O_NONBLOCK on accepted macOS test
+  sockets: delayed/fragmented regression failed before fix; restore blocking
+  mode in both owned fixtures, preserving limits/deadlines and production code.
+  Temporary diagnostics removed; regression and full uninstrumented suite pass.
+- Root 123 tests plus tooling/typecheck/lint/protocol, UI 164 tests/994 asserts/
+  105 unchanged frames, Rust 686 core plus two existing ignored/53 stdio/six CLI/
+  five onboarding/three bin tests, strict all-feature/all-target Clippy/fmt,
+  no-GUI dependency guard and Archgate 12/12 pass. ADR 0020 remains Accepted.
+- Native terminal preview/review-start and approve/browser integration remain
+  #357 follow-ons; no private credentials/data/live provider mutation used.
+- Preparing PR and exact-head CI/squash merge; this entry is not a shipping claim.
+
+- Prepared plan/done receipt for feature `09443bf`; effective only after exact-head
+  CI and squash merge. No issue/ADR completion claimed by the prepared path.

@@ -3605,6 +3605,276 @@
           "pattern": "^[^\\u0000-\\u001f\\u007f]*$"
         }
       }
+    },
+    "ProviderSnapshotRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "repository",
+        "prId",
+        "snapshotId"
+      ],
+      "properties": {
+        "repository": {
+          "$ref": "#/definitions/PrRepositoryIdentity"
+        },
+        "prId": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 2147483647
+        },
+        "snapshotId": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      }
+    },
+    "ProviderSnapshotFilesParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "snapshot",
+        "offset",
+        "limit"
+      ],
+      "properties": {
+        "snapshot": {
+          "$ref": "#/definitions/ProviderSnapshotRef"
+        },
+        "offset": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10000
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100
+        }
+      }
+    },
+    "ProviderSnapshotDiffParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "snapshot",
+        "path",
+        "offset"
+      ],
+      "properties": {
+        "snapshot": {
+          "$ref": "#/definitions/ProviderSnapshotRef"
+        },
+        "path": {
+          "type": "string",
+          "maxLength": 4096
+        },
+        "offset": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 8388608
+        }
+      }
+    },
+    "ProviderSnapshotFile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "oldPath",
+        "status",
+        "additions",
+        "deletions",
+        "binary"
+      ],
+      "properties": {
+        "path": {
+          "type": "string",
+          "maxLength": 4096
+        },
+        "oldPath": {
+          "anyOf": [
+            {
+              "type": "string",
+              "maxLength": 4096
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "status": {
+          "enum": [
+            "added",
+            "deleted",
+            "renamed",
+            "copied",
+            "modified"
+          ]
+        },
+        "additions": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4294967295
+        },
+        "deletions": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4294967295
+        },
+        "binary": {
+          "type": "boolean"
+        }
+      }
+    },
+    "ProviderSnapshotInfo": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "request",
+        "snapshot",
+        "title",
+        "sourceBranch",
+        "destinationBranch",
+        "headSha",
+        "destinationSha",
+        "baseSha",
+        "patchSha256",
+        "fileCount",
+        "patchBytes",
+        "expiresAt"
+      ],
+      "properties": {
+        "request": {
+          "$ref": "#/definitions/ProviderPrDetailParams"
+        },
+        "snapshot": {
+          "$ref": "#/definitions/ProviderSnapshotRef"
+        },
+        "title": {
+          "type": "string",
+          "maxLength": 4096
+        },
+        "sourceBranch": {
+          "type": "string",
+          "maxLength": 256
+        },
+        "destinationBranch": {
+          "type": "string",
+          "maxLength": 256
+        },
+        "headSha": {
+          "type": "string",
+          "pattern": "^(?:[0-9a-f]{40}|[0-9a-f]{64})$"
+        },
+        "destinationSha": {
+          "type": "string",
+          "pattern": "^(?:[0-9a-f]{40}|[0-9a-f]{64})$"
+        },
+        "baseSha": {
+          "type": "string",
+          "pattern": "^(?:[0-9a-f]{40}|[0-9a-f]{64})$"
+        },
+        "patchSha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "fileCount": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10000
+        },
+        "patchBytes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 8388608
+        },
+        "expiresAt": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        }
+      }
+    },
+    "ProviderSnapshotFilesPage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "request",
+        "files",
+        "total",
+        "nextOffset"
+      ],
+      "properties": {
+        "request": {
+          "$ref": "#/definitions/ProviderSnapshotFilesParams"
+        },
+        "files": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "$ref": "#/definitions/ProviderSnapshotFile"
+          }
+        },
+        "total": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10000
+        },
+        "nextOffset": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 10000
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "ProviderSnapshotDiffPage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "request",
+        "text",
+        "totalBytes",
+        "contentSha256",
+        "nextOffset"
+      ],
+      "properties": {
+        "request": {
+          "$ref": "#/definitions/ProviderSnapshotDiffParams"
+        },
+        "text": {
+          "type": "string",
+          "maxLength": 65536
+        },
+        "totalBytes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 8388608
+        },
+        "contentSha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "nextOffset": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 8388608
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
     }
   },
   "oneOf": [
@@ -4867,6 +5137,78 @@
               "$ref": "#/definitions/ProviderUserParams"
             }
           }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "type": {
+              "const": "request"
+            },
+            "id": {
+              "$ref": "#/definitions/RequestId"
+            },
+            "method": {
+              "const": "provider.snapshot"
+            },
+            "params": {
+              "$ref": "#/definitions/ProviderPrDetailParams"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "type": {
+              "const": "request"
+            },
+            "id": {
+              "$ref": "#/definitions/RequestId"
+            },
+            "method": {
+              "const": "provider.snapshot.files"
+            },
+            "params": {
+              "$ref": "#/definitions/ProviderSnapshotFilesParams"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "type": {
+              "const": "request"
+            },
+            "id": {
+              "$ref": "#/definitions/RequestId"
+            },
+            "method": {
+              "const": "provider.snapshot.diff"
+            },
+            "params": {
+              "$ref": "#/definitions/ProviderSnapshotDiffParams"
+            }
+          }
         }
       ]
     },
@@ -4969,6 +5311,15 @@
             },
             {
               "$ref": "#/definitions/ProviderCurrentUser"
+            },
+            {
+              "$ref": "#/definitions/ProviderSnapshotInfo"
+            },
+            {
+              "$ref": "#/definitions/ProviderSnapshotFilesPage"
+            },
+            {
+              "$ref": "#/definitions/ProviderSnapshotDiffPage"
             }
           ]
         }

@@ -1,0 +1,18 @@
+{
+  "type": "request",
+  "id": "snapshot-files",
+  "method": "provider.snapshot.files",
+  "params": {
+    "snapshot": {
+      "repository": {
+        "provider": "github",
+        "workspace": "Owner",
+        "repo": "Repo"
+      },
+      "prId": 7,
+      "snapshotId": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+    },
+    "offset": 0,
+    "limit": 100
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "type": "request",
+  "id": "snapshot",
+  "method": "provider.snapshot",
+  "params": {
+    "repository": {
+      "provider": "github",
+      "workspace": "Owner",
+      "repo": "Repo"
+    },
+    "prId": 7
+  }
+}

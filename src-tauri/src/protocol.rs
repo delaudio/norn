@@ -209,6 +209,21 @@ pub struct TargetParams {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "method", rename_all = "camelCase")]
 pub enum Request {
+    #[serde(rename = "provider.snapshot")]
+    ProviderSnapshot {
+        id: String,
+        params: crate::services::bitbucket::workspace_prs::DetailParams,
+    },
+    #[serde(rename = "provider.snapshot.files")]
+    ProviderSnapshotFiles {
+        id: String,
+        params: crate::services::provider_snapshot::FilesParams,
+    },
+    #[serde(rename = "provider.snapshot.diff")]
+    ProviderSnapshotDiff {
+        id: String,
+        params: crate::services::provider_snapshot::DiffParams,
+    },
     #[serde(rename = "provider.prs")]
     ProviderPrs {
         id: String,
@@ -441,6 +456,9 @@ impl Request {
             | Self::ReviewFiles { id, .. }
             | Self::ReviewFindings { id, .. }
             | Self::ReviewTargets { id, .. }
+            | Self::ProviderSnapshot { id, .. }
+            | Self::ProviderSnapshotFiles { id, .. }
+            | Self::ProviderSnapshotDiff { id, .. }
             | Self::ProviderPrs { id, .. }
             | Self::ProviderPrDetail { id, .. }
             | Self::ProviderUser { id, .. }
@@ -495,6 +513,9 @@ impl Request {
             Self::ReviewFiles { .. } => "review.files",
             Self::ReviewFindings { .. } => "review.findings",
             Self::ReviewTargets { .. } => "review.targets",
+            Self::ProviderSnapshot { .. } => "provider.snapshot",
+            Self::ProviderSnapshotFiles { .. } => "provider.snapshot.files",
+            Self::ProviderSnapshotDiff { .. } => "provider.snapshot.diff",
             Self::ProviderPrs { .. } => "provider.prs",
             Self::ProviderPrDetail { .. } => "provider.pr.detail",
             Self::ProviderUser { .. } => "provider.user",
@@ -587,6 +608,13 @@ impl Request {
                 {
                     return Err(invalid_request("Invalid user-data page parameters."));
                 }
+            }
+            Self::ProviderSnapshot { params, .. } => params.validate().map_err(invalid_request)?,
+            Self::ProviderSnapshotFiles { params, .. } => {
+                params.validate().map_err(invalid_request)?
+            }
+            Self::ProviderSnapshotDiff { params, .. } => {
+                params.validate().map_err(invalid_request)?
             }
             Self::ProviderPrs { params, .. } => params.validate().map_err(invalid_request)?,
             Self::ProviderPrDetail { params, .. } => params.validate().map_err(invalid_request)?,
@@ -1050,6 +1078,12 @@ mod tests {
             "valid/request-diff-file.json",
             "valid/request-review-start.json",
             "valid/request-operation-cancel.json",
+            "valid/request-provider-snapshot.json",
+            "valid/request-provider-snapshot-files.json",
+            "valid/request-provider-snapshot-diff.json",
+            "valid/response-provider-snapshot.json",
+            "valid/response-provider-snapshot-files.json",
+            "valid/response-provider-snapshot-diff.json",
             "valid/request-provider-prs.json",
             "valid/request-provider-pr-detail.json",
             "valid/request-provider-pr-uuid.json",
@@ -1082,6 +1116,9 @@ mod tests {
             "invalid/unknown-field.json",
             "invalid/version-mismatch.json",
             "invalid/bad-target.json",
+            "invalid/request-provider-snapshot-local.json",
+            "invalid/request-provider-snapshot-id.json",
+            "invalid/request-provider-snapshot-offset.json",
             "invalid/request-provider-pr-unsafe-owner.json",
             "invalid/request-provider-pr-local-id.json",
             "invalid/request-workspace-unpinned-page.json",
