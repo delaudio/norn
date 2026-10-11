@@ -180,3 +180,97 @@ fn onboarding_e2e_guided_init_requires_yes() {
 
     let _ = fs::remove_dir_all(&repo);
 }
+
+#[test]
+fn workspace_data_cli_preview_confirm_repeat_and_export_use_isolated_storage() {
+    let data = tempfile::tempdir().unwrap();
+    let config = tempfile::tempdir().unwrap();
+    let source = data.path().join("desktop-export.json");
+    fs::write(&source,r#"{"schemaVersion":1,"source":"desktopLocalStorage","entries":[{"key":"norn.reviewPrompt.v1.owner/repo","value":"custom instructions"}]}"#).unwrap();
+    let original = fs::read(&source).unwrap();
+    let run = |args: &[&str]| {
+        Command::new(env!("CARGO_BIN_EXE_norn"))
+            .env("NORN_DATA_DIR", data.path())
+            .env("NORN_CONFIG_DIR", config.path())
+            .args(args)
+            .output()
+            .unwrap()
+    };
+    let preview = run(&[
+        "data",
+        "preview",
+        source.to_str().unwrap(),
+        "--provider",
+        "github",
+    ]);
+    assert!(
+        preview.status.success(),
+        "{}",
+        String::from_utf8_lossy(&preview.stderr)
+    );
+    let value: Value = serde_json::from_slice(&preview.stdout).unwrap();
+    assert_eq!(value["additionsCount"], 1);
+    assert!(!data.path().join("workspace-data-v1.json").exists());
+    let unconfirmed = run(&["data", "import", source.to_str().unwrap()]);
+    assert_eq!(unconfirmed.status.code(), Some(2));
+    assert!(!data.path().join("workspace-data-v1.json").exists());
+    let import = run(&[
+        "data",
+        "import",
+        source.to_str().unwrap(),
+        "--provider",
+        "github",
+        "--input-version",
+        value["inputVersion"].as_str().unwrap(),
+        "--destination-version",
+        value["destinationVersion"].as_str().unwrap(),
+        "--confirm",
+    ]);
+    assert!(
+        import.status.success(),
+        "{}",
+        String::from_utf8_lossy(&import.stderr)
+    );
+    let result: Value = serde_json::from_slice(&import.stdout).unwrap();
+    assert_eq!(result["imported"], 1);
+    let destination = fs::read(data.path().join("workspace-data-v1.json")).unwrap();
+    let repeat_preview = run(&[
+        "data",
+        "preview",
+        source.to_str().unwrap(),
+        "--provider",
+        "github",
+    ]);
+    assert!(repeat_preview.status.success());
+    let value: Value = serde_json::from_slice(&repeat_preview.stdout).unwrap();
+    assert_eq!(value["unchangedCount"], 1);
+    let repeat = run(&[
+        "data",
+        "import",
+        source.to_str().unwrap(),
+        "--provider",
+        "github",
+        "--input-version",
+        value["inputVersion"].as_str().unwrap(),
+        "--destination-version",
+        value["destinationVersion"].as_str().unwrap(),
+        "--confirm",
+    ]);
+    assert!(repeat.status.success());
+    assert_eq!(
+        fs::read(data.path().join("workspace-data-v1.json")).unwrap(),
+        destination
+    );
+    assert_eq!(fs::read(&source).unwrap(), original);
+    let export = data.path().join("new-export.json");
+    let exported = run(&["data", "export", export.to_str().unwrap()]);
+    assert!(exported.status.success());
+    let before = fs::read(&export).unwrap();
+    assert_eq!(
+        run(&["data", "export", export.to_str().unwrap()])
+            .status
+            .code(),
+        Some(2)
+    );
+    assert_eq!(fs::read(&export).unwrap(), before);
+}

@@ -1602,34 +1602,4 @@ fn user_data_preview_import_and_repeat_are_bound_to_isolated_storage() {
     backend.send(json!({"type":"request","id":"stop","method":"shutdown","params":{}}));
     let _ = backend.wait_for(|v| v["id"] == "stop", Duration::from_secs(5));
     assert!(backend.child.wait().unwrap().success());
-    let preview_cli = Command::new(env!("CARGO_BIN_EXE_norn"))
-        .env("NORN_DATA_DIR", data.path())
-        .env("NORN_CONFIG_DIR", config.path())
-        .args([
-            "data",
-            "preview",
-            source.to_str().unwrap(),
-            "--provider",
-            "github",
-        ])
-        .output()
-        .unwrap();
-    assert!(
-        preview_cli.status.success(),
-        "{}",
-        String::from_utf8_lossy(&preview_cli.stderr)
-    );
-    let value: Value = serde_json::from_slice(&preview_cli.stdout).unwrap();
-    assert_eq!(value["unchangedCount"], 2);
-    let unconfirmed = Command::new(env!("CARGO_BIN_EXE_norn"))
-        .env("NORN_DATA_DIR", data.path())
-        .env("NORN_CONFIG_DIR", config.path())
-        .args(["data", "import", source.to_str().unwrap()])
-        .output()
-        .unwrap();
-    assert_eq!(unconfirmed.status.code(), Some(2));
-    assert_eq!(
-        std::fs::read(data.path().join("workspace-data-v1.json")).unwrap(),
-        destination
-    );
 }
