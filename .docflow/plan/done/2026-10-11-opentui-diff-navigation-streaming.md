@@ -48,3 +48,20 @@ separate deterministic rendering evidence from physical terminal image smoke.
 - Claimed by: default-agent, 2026-10-11, `issue-302-diff-navigation-streaming`.
 - Blockers: None; PR #344 merged at `5eb33fd` with both CI gates green.
 - Stopped:
+
+## Delivery
+
+Effective on merge to main of this diff-navigation PR. Implementation commit:
+`2d0cea7`. The pre-completion root gate exits 0: typecheck, 123 tests/tooling
+and Archgate 17/17. UI typecheck, 87 tests/493 assertions and 52 native frames
+pass; literal search input, actual source navigation, scroll restoration and
+listener counts are exercised in one React container. Three separate stream
+processes pass 20 ms batch+frame p95, 64 mounted rows, 100 retained logs and
+512 MiB current RSS budgets with the same selected patch hash.
+
+Root lint/protocol checks pass. React Doctor reports one native `wrapMode`
+test-property DOM-rule false positive; installed types and real renderer tests
+cover it, with no suppression. There are no Rust behavior changes in this
+increment. Syntax highlighting, clipboard and physical image terminal smoke
+remain #302; protocol/real IPC lifecycle hardening remains #307. Neither #302
+nor ADR 0020 is declared complete by this delivery.
