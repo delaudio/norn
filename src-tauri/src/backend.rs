@@ -31,6 +31,12 @@ use crate::protocol::{
     ProtocolErrorCode, ProviderKind, Ready, Request, Response, ServerMessage, TargetIdentity,
     MAX_FRAME_BYTES, PROTOCOL_VERSION,
 };
+use crate::services::review::{
+    cancel_inline_review_native, cancel_local_inline_review_native, get_ai_review_run_state_native,
+    get_local_ai_review_run_state_native, start_inline_review_native,
+    start_local_inline_review_native, AiReviewRunStatus, AiReviewRunStore,
+};
+use crate::services::review_prompt::{build_review_payload, resolve_review_prompt};
 
 const WRITER_QUEUE_BOUND: usize = 256;
 const EXIT_PROTOCOL_MISMATCH: i32 = 3;
@@ -1824,6 +1830,12 @@ fn spawn_git(repo_path: &Path, args: &[&str]) -> Option<Child> {
     Some(child)
 }
 
+/// Process-wide store for inline review sessions started by the backend.
+fn review_run_store() -> &'static AiReviewRunStore {
+    static STORE: OnceLock<AiReviewRunStore> = OnceLock::new();
+    STORE.get_or_init(AiReviewRunStore::default)
+}
+
 fn git_children() -> &'static Mutex<HashSet<u32>> {
     static CHILDREN: OnceLock<Mutex<HashSet<u32>>> = OnceLock::new();
     CHILDREN.get_or_init(|| Mutex::new(HashSet::new()))
@@ -2071,8 +2083,8 @@ fn run_fake_review_operation(
     );
 }
 
-/// Run the shared headless review engine for the target. Cooperative
-/// cancellation is not available mid-run; cancel is honoured before start.
+/// Run the inline review session for the target, streaming its logs as progress
+/// events and honouring cancellation by terminating the agent process.
 fn run_real_review_operation(
     writer: &SyncSender<ServerMessage>,
     operations: &Operations,
@@ -2098,106 +2110,361 @@ fn run_real_review_operation(
         finish_cancelled(writer, operations, operation_id, target, 2);
         return;
     }
-    let request = headless_review_request(target);
-    let outcome = crate::headless_review::run(request);
-    match outcome {
-        Ok(execution) => {
-            let failed = execution.status != "succeeded";
-            let error = failed.then(|| {
-                ProtocolError::new(
-                    ProtocolErrorCode::Internal,
-                    format!("review finished with status `{}`", execution.status),
-                )
-            });
-            emit_event(
-                writer,
-                operations,
-                operation_id,
-                target,
-                2,
-                OperationEvent::State {
-                    state: if failed {
-                        OperationState::Failed
-                    } else {
-                        OperationState::Succeeded
-                    },
-                    error: error.clone(),
-                },
-                if failed {
-                    OperationState::Failed
-                } else {
-                    OperationState::Succeeded
-                },
-                error,
-            );
-        }
+
+    let session = match start_inline_session(target) {
+        Ok(session) => session,
         Err(error) => {
-            let protocol_error = ProtocolError::new(ProtocolErrorCode::Internal, error.message);
-            emit_event(
+            emit_failed(writer, operations, operation_id, target, 2, error);
+            return;
+        }
+    };
+
+    let mut seen_logs = 0usize;
+    let deadline = Instant::now() + Duration::from_secs(ai_review_timeout_secs());
+    let mut sequence = 2u64;
+    loop {
+        if let Some(state) = (session.read)() {
+            if state.thread_id != session.thread_id {
+                emit_failed(
+                    writer,
+                    operations,
+                    operation_id,
+                    target,
+                    sequence + 1,
+                    ProtocolError::new(
+                        ProtocolErrorCode::Internal,
+                        "the review session was replaced by a newer run",
+                    ),
+                );
+                return;
+            }
+            for log in state.logs.iter().skip(seen_logs) {
+                emit_event(
+                    writer,
+                    operations,
+                    operation_id,
+                    target,
+                    sequence,
+                    OperationEvent::Progress {
+                        message: log.clone(),
+                        completed: None,
+                        total: None,
+                    },
+                    OperationState::Running,
+                    None,
+                );
+                sequence += 1;
+            }
+            seen_logs = state.logs.len();
+            match state.status {
+                AiReviewRunStatus::Succeeded => {
+                    emit_event(
+                        writer,
+                        operations,
+                        operation_id,
+                        target,
+                        sequence,
+                        OperationEvent::State {
+                            state: OperationState::Succeeded,
+                            error: None,
+                        },
+                        OperationState::Succeeded,
+                        None,
+                    );
+                    return;
+                }
+                AiReviewRunStatus::Failed => {
+                    emit_failed(
+                        writer,
+                        operations,
+                        operation_id,
+                        target,
+                        sequence,
+                        ProtocolError::new(
+                            ProtocolErrorCode::Internal,
+                            state.error.unwrap_or_else(|| "review failed".to_string()),
+                        ),
+                    );
+                    return;
+                }
+                AiReviewRunStatus::Cancelled => {
+                    finish_cancelled(writer, operations, operation_id, target, sequence);
+                    return;
+                }
+                AiReviewRunStatus::Idle | AiReviewRunStatus::Running => {}
+            }
+        }
+        if cancel.load(Ordering::SeqCst) {
+            let next = sequence + 1;
+            match (session.cancel)() {
+                Ok(()) => finish_cancelled(writer, operations, operation_id, target, next),
+                Err(error) => emit_failed(
+                    writer,
+                    operations,
+                    operation_id,
+                    target,
+                    next,
+                    ProtocolError::new(ProtocolErrorCode::Internal, error),
+                ),
+            }
+            return;
+        }
+        if Instant::now() >= deadline {
+            let _ = (session.cancel)();
+            emit_failed(
                 writer,
                 operations,
                 operation_id,
                 target,
-                2,
-                OperationEvent::State {
-                    state: OperationState::Failed,
-                    error: Some(protocol_error.clone()),
-                },
-                OperationState::Failed,
-                Some(protocol_error),
+                sequence + 1,
+                ProtocolError::new(ProtocolErrorCode::Internal, "review timed out"),
             );
+            return;
         }
+        thread::sleep(Duration::from_millis(100));
     }
 }
 
-/// Assemble the shared headless review request for a target from configuration.
-fn headless_review_request(
+struct InlineSession {
+    thread_id: Option<String>,
+    read: Box<dyn Fn() -> Option<crate::services::review::AiReviewRunState> + Send>,
+    cancel: Box<dyn Fn() -> Result<(), String> + Send>,
+}
+
+fn ai_review_timeout_secs() -> u64 {
+    std::env::var("NORN_AI_PROVIDER_TIMEOUT_SECONDS")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .unwrap_or(300)
+        .clamp(30, 3600)
+}
+
+fn emit_failed(
+    writer: &SyncSender<ServerMessage>,
+    operations: &Operations,
+    operation_id: &str,
     target: &TargetIdentity,
-) -> crate::headless_review::HeadlessReviewRequest {
-    let config = config::load();
-    let repo_path = resolve_repo_path(target);
+    sequence: u64,
+    error: ProtocolError,
+) {
+    emit_event(
+        writer,
+        operations,
+        operation_id,
+        target,
+        sequence,
+        OperationEvent::State {
+            state: OperationState::Failed,
+            error: Some(error.clone()),
+        },
+        OperationState::Failed,
+        Some(error),
+    );
+}
+
+fn start_inline_session(target: &TargetIdentity) -> Result<InlineSession, ProtocolError> {
+    let store = review_run_store().clone();
+    let repo_path = resolve_repo_path(target).ok_or_else(|| {
+        ProtocolError::new(
+            ProtocolErrorCode::TargetStale,
+            "no reviewable local repository for this target",
+        )
+    })?;
+    if !is_git_repo(&repo_path) {
+        return Err(ProtocolError::new(
+            ProtocolErrorCode::TargetStale,
+            "no reviewable local repository for this target",
+        ));
+    }
+    let prompt = resolve_review_prompt(None);
+    let ai_provider = config::load().ai_provider;
+
     match target {
         TargetIdentity::Provider {
-            provider,
             workspace,
             repo,
-            pr_id,
+            pr_id: Some(pr_id),
+            run_id,
             ..
-        } => crate::headless_review::HeadlessReviewRequest {
-            repo_path,
-            scope: if pr_id.is_some() {
-                crate::headless_review::ReviewScope::PullRequest
-            } else {
-                crate::headless_review::ReviewScope::WorkingTree
-            },
-            base: None,
-            workspace: Some(workspace.clone()),
-            repo: Some(repo.clone()),
-            pr_id: *pr_id,
-            provider: Some(provider_matches(*provider)),
-            profile: None,
-            ai_provider: Some(config.ai_provider),
-            model: None,
-            effort: None,
-            run_analyzers: false,
-            allow_provider_diff: false,
-        },
-        TargetIdentity::Local { .. } => crate::headless_review::HeadlessReviewRequest {
-            repo_path,
-            scope: crate::headless_review::ReviewScope::WorkingTree,
-            base: None,
-            workspace: None,
-            repo: None,
-            pr_id: None,
-            provider: None,
-            profile: None,
-            ai_provider: Some(config.ai_provider),
-            model: None,
-            effort: None,
-            run_analyzers: false,
-            allow_provider_diff: false,
-        },
+        } => {
+            let Some((base, head)) = reviewed_range(target)? else {
+                return Err(ProtocolError::new(
+                    ProtocolErrorCode::TargetStale,
+                    "no stored reviewed range for this pull request",
+                ));
+            };
+            if !revisions_available(&repo_path, &base, &head) {
+                return Err(ProtocolError::new(
+                    ProtocolErrorCode::TargetStale,
+                    "reviewed revisions are not available in the local checkout",
+                ));
+            }
+            let diff = git(
+                &repo_path,
+                &[
+                    "diff",
+                    "--no-ext-diff",
+                    "--no-textconv",
+                    "-M",
+                    base.as_str(),
+                    head.as_str(),
+                ],
+            )
+            .ok_or_else(|| {
+                ProtocolError::new(
+                    ProtocolErrorCode::Internal,
+                    "failed to generate the reviewed diff",
+                )
+            })?;
+            let run = crate::services::review::load_ai_review_store_native(workspace, repo, *pr_id)
+                .ok()
+                .flatten()
+                .and_then(|store| select_review_run(Some(store), run_id.as_deref()));
+            let (source_branch, destination_branch) = run
+                .map(|run| (run.source_branch, run.destination_branch))
+                .unwrap_or_else(|| ("source".to_string(), "destination".to_string()));
+            let payload = build_review_payload(
+                &prompt,
+                &format!("Pull request #{pr_id}"),
+                "pr",
+                "This target contains the provider pull-request diff.",
+                &source_branch,
+                &destination_branch,
+                &diff,
+            );
+            let workspace = workspace.clone();
+            let repo = repo.clone();
+            let pr_id = *pr_id;
+            let started = start_inline_review_native(
+                store.clone(),
+                workspace.clone(),
+                repo.clone(),
+                pr_id,
+                format!("Pull request #{pr_id}"),
+                source_branch,
+                destination_branch,
+                Some(base),
+                Some(head),
+                payload,
+                None,
+                None,
+                Some("Review".to_string()),
+                true,
+                ai_provider,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+            )
+            .map_err(inline_start_error)?;
+            let thread_id = started.thread_id.clone();
+            let read_store = store.clone();
+            let read_workspace = workspace.clone();
+            let read_repo = repo.clone();
+            Ok(InlineSession {
+                thread_id,
+                read: Box::new(move || {
+                    get_ai_review_run_state_native(&read_store, &read_workspace, &read_repo, pr_id)
+                }),
+                cancel: Box::new(move || {
+                    cancel_inline_review_native(&store, &workspace, &repo, pr_id).map(|_| ())
+                }),
+            })
+        }
+        TargetIdentity::Local {
+            local_snapshot_sha256,
+        } => {
+            let files = changed_file_entries(&repo_path, None)?;
+            let diff = working_tree_patch(&repo_path, &files)?;
+            let source_branch = git(&repo_path, &["rev-parse", "--abbrev-ref", "HEAD"])
+                .map(|value| value.trim().to_string())
+                .unwrap_or_else(|| "HEAD".to_string());
+            let payload = build_review_payload(
+                &prompt,
+                "Local changes",
+                "working-tree",
+                "This target can contain staged, unstaged, and untracked files. Do not describe a file as committed unless the supplied evidence proves that it is committed.",
+                &source_branch,
+                "HEAD",
+                &diff,
+            );
+            let (workspace, repo) = local_review_identity(&repo_path);
+            let snapshot = local_snapshot_sha256.clone();
+            let started = start_local_inline_review_native(
+                store.clone(),
+                workspace.clone(),
+                repo.clone(),
+                0,
+                snapshot.clone(),
+                "Local changes".to_string(),
+                source_branch,
+                "HEAD".to_string(),
+                None,
+                payload,
+                None,
+                Some("Review".to_string()),
+                true,
+                ai_provider,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+            )
+            .map_err(inline_start_error)?;
+            let thread_id = started.thread_id.clone();
+            let read_store = store.clone();
+            let read_workspace = workspace.clone();
+            let read_repo = repo.clone();
+            let read_snapshot = snapshot.clone();
+            Ok(InlineSession {
+                thread_id,
+                read: Box::new(move || {
+                    get_local_ai_review_run_state_native(
+                        &read_store,
+                        &read_workspace,
+                        &read_repo,
+                        &read_snapshot,
+                    )
+                    .ok()
+                    .flatten()
+                }),
+                cancel: Box::new(move || {
+                    cancel_local_inline_review_native(&store, &workspace, &repo, &snapshot)
+                        .map(|_| ())
+                }),
+            })
+        }
+        TargetIdentity::Provider { pr_id: None, .. } => Err(ProtocolError::new(
+            ProtocolErrorCode::TargetStale,
+            "select a pull request to start an inline review",
+        )),
     }
+}
+
+fn inline_start_error(error: String) -> ProtocolError {
+    ProtocolError::new(ProtocolErrorCode::Internal, error)
+}
+
+/// Best-effort workspace/repo identity for a local checkout: a configured
+/// repository whose local path matches, otherwise a placeholder.
+fn local_review_identity(repo_path: &Path) -> (String, String) {
+    let canonical = std::fs::canonicalize(repo_path).unwrap_or_else(|_| repo_path.to_path_buf());
+    for repo in config::load().repos {
+        if let Some(local_path) = repo.local_path {
+            let candidate =
+                std::fs::canonicalize(&local_path).unwrap_or_else(|_| PathBuf::from(&local_path));
+            if candidate == canonical {
+                return (repo.workspace, repo.repo);
+            }
+        }
+    }
+    ("local".to_string(), "local".to_string())
 }
 
 fn run_simulated_review_operation(
