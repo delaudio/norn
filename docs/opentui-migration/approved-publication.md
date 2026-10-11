@@ -75,7 +75,7 @@ lookup/state-reset diagnostics were corrected; native `flexShrink` is declared
 by installed OpenTUI types and verified by frames/input, not a DOM attribute.
 No diagnostic suppression or live publication smoke test.
 
-Remaining work: #305 native profile recovery and scope access, #306 parity,
+GitHub #305 was already closed at 16:16:54 UTC. Remaining work includes native profile recovery/runtime evidence and scope access under #306 parity,
 #307 hardening, #308 installation and #309 removal/cutover. ADR 0020 remains
 Accepted until the complete migration ships. Historical ADR 0011 plan coverage
 still prevents claiming a globally clean documentation audit.

@@ -77,6 +77,6 @@ native `flexShrink`; no suppressions. Main slot/contiguous ADRs/INDEX metadata
 and active references pass; historical ADR 0011 coverage remains unchanged.
 
 Prepared for PR integration, not yet shipped before merge. ADR 0020 remains
-Accepted until complete cutover. #305–#309 and the epic remain open. No live
+Accepted until complete cutover. #306–#309 and the epic remain open. GitHub #305 was already closed at 16:16:54 UTC; its native-profile/runtime evidence gaps remain explicit parity/hardening work. No live
 provider publication, real credential/agent access, Norn review or user-data
 removal. The unrelated `.norn.yaml` remains untouched.
