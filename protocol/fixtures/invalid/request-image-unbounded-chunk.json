@@ -1,0 +1,13 @@
+{
+  "type": "request",
+  "id": "request-image-unbounded-chunk",
+  "method": "file.preview",
+  "params": {
+    "target": {
+      "kind": "local",
+      "localSnapshotSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "path": "pic.png",
+    "maxBytes": 196609
+  }
+}

@@ -648,9 +648,66 @@
         },
         "path": {
           "type": "string",
-          "minLength": 1
+          "minLength": 1,
+          "maxLength": 4096,
+          "pattern": "^[^\\p{Cc}]+$"
+        },
+        "side": {
+          "enum": [
+            "old",
+            "new",
+            null
+          ]
+        },
+        "offset": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 2097152
+        },
+        "maxBytes": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1,
+          "maximum": 196608
+        },
+        "contentSha256": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[0-9a-fA-F]{64}$"
         }
-      }
+      },
+      "allOf": [
+        {
+          "if": {
+            "required": [
+              "offset"
+            ],
+            "properties": {
+              "offset": {
+                "minimum": 1,
+                "type": "integer"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "contentSha256"
+            ],
+            "properties": {
+              "contentSha256": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      ]
     },
     "FilePreviewResult": {
       "type": "object",
@@ -659,7 +716,14 @@
         "path",
         "mimeType",
         "size",
-        "dataBase64"
+        "dataBase64",
+        "side",
+        "available",
+        "offset",
+        "nextOffset",
+        "contentSha256",
+        "width",
+        "height"
       ],
       "properties": {
         "path": {
@@ -670,10 +734,57 @@
         },
         "size": {
           "type": "integer",
-          "minimum": 0
+          "minimum": 0,
+          "maximum": 2097152
         },
         "dataBase64": {
-          "type": "string"
+          "type": "string",
+          "maxLength": 262144
+        },
+        "side": {
+          "enum": [
+            "old",
+            "new"
+          ]
+        },
+        "available": {
+          "type": "boolean"
+        },
+        "offset": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 2097152
+        },
+        "nextOffset": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 2097152
+        },
+        "contentSha256": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "width": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1,
+          "maximum": 8192
+        },
+        "height": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1,
+          "maximum": 8192
         }
       }
     },

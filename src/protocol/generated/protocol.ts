@@ -214,6 +214,14 @@ export type RequestId = string;
  * Identity of the review target a request or event applies to.
  */
 export type TargetIdentity = ProviderTarget | LocalTarget;
+export type FilePreviewParams = {
+  target: TargetIdentity;
+  path: string;
+  side?: "old" | "new" | null;
+  offset?: number | null;
+  maxBytes?: number | null;
+  contentSha256?: string | null;
+};
 export type AuthSetParams = {
   provider: "github" | "bitbucket" | "jira" | "notion";
   username?: string | null;
@@ -291,10 +299,6 @@ export interface TargetParams {
   target: TargetIdentity;
 }
 export interface EmptyResult {}
-export interface FilePreviewParams {
-  target: TargetIdentity;
-  path: string;
-}
 export interface ReviewReplyParams {
   target: TargetIdentity;
   message: string;
@@ -440,6 +444,13 @@ export interface FilePreviewResult {
   mimeType: string;
   size: number;
   dataBase64: string;
+  side: "old" | "new";
+  available: boolean;
+  offset: number;
+  nextOffset: number | null;
+  contentSha256: string | null;
+  width: number | null;
+  height: number | null;
 }
 export interface ReviewHistoryResult {
   runs: ReviewRunSummary[];

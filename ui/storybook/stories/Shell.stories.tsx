@@ -80,3 +80,10 @@ export const DataPreview: Story = { args: { frameId: "shell-data-preview-120x30"
 export const CompactDataPreview: Story = { args: { frameId: "shell-data-preview-50x15" } };
 export const DataReadError: Story = { args: { frameId: "shell-data-error-80x24" } };
 export const DataImported: Story = { args: { frameId: "shell-data-imported-80x24" } };
+
+export const ImageComparison: Story = { args: { frameId: "shell-images-modified-120x30" } };
+export const CompactImageComparison: Story = { args: { frameId: "shell-images-modified-50x20" } };
+export const AddedImage: Story = { args: { frameId: "shell-images-added-80x24" } };
+export const DeletedImage: Story = { args: { frameId: "shell-images-deleted-80x24" } };
+export const RenamedImage: Story = { args: { frameId: "shell-images-renamed-100x24" } };
+export const UnsupportedImage: Story = { args: { frameId: "shell-images-unsupported-80x24" } };

@@ -1,5 +1,10 @@
-import { type ScrollBoxRenderable, TextAttributes } from "@opentui/core";
-import { useKeyboard, usePaste, useTerminalDimensions } from "@opentui/react";
+import {
+  CliRenderEvents,
+  resolveImageRenderProtocol,
+  type ScrollBoxRenderable,
+  TextAttributes,
+} from "@opentui/core";
+import { useKeyboard, usePaste, useRenderer, useTerminalDimensions } from "@opentui/react";
 import {
   type ReactNode,
   type RefObject,
@@ -387,6 +392,93 @@ function DiffImage({
   );
 }
 
+function useImageProtocol() {
+  const renderer = useRenderer();
+  const subscribe = useMemo(
+    () => (listener: () => void) => {
+      renderer.on(CliRenderEvents.CAPABILITIES, listener);
+      renderer.on(CliRenderEvents.RESIZE, listener);
+      return () => {
+        renderer.off(CliRenderEvents.CAPABILITIES, listener);
+        renderer.off(CliRenderEvents.RESIZE, listener);
+      };
+    },
+    [renderer],
+  );
+  return useSyncExternalStore(subscribe, () =>
+    resolveImageRenderProtocol("auto", renderer.capabilities, renderer.resolution !== null),
+  );
+}
+
+function ImageComparison({
+  file,
+  preview,
+  onError,
+}: {
+  file: { path: string; status: string };
+  preview: import("../store").ImageComparisonView | null;
+  onError: (side: "old" | "new", message: string, requestId: number) => void;
+}) {
+  const { width } = useTerminalDimensions();
+  const protocol = useImageProtocol();
+  const panes = [
+    { side: "old" as const, label: "BEFORE", value: preview?.before, error: preview?.beforeError },
+    { side: "new" as const, label: "AFTER", value: preview?.after, error: preview?.afterError },
+  ];
+  return (
+    <box flexDirection="column" flexGrow={1} minHeight={0}>
+      <text
+        fg={theme.primary}
+        height={1}
+        wrapMode="none"
+        truncate
+      >{`${file.path} · ${file.status} image comparison`}</text>
+      <box flexDirection={width >= 80 ? "row" : "column"} flexGrow={1} minHeight={0}>
+        {panes.map((pane) => (
+          <box
+            key={pane.side}
+            flexDirection="column"
+            flexGrow={1}
+            flexBasis={0}
+            minWidth={0}
+            minHeight={0}
+            paddingX={1}
+          >
+            <text fg={theme.secondary} height={1} truncate>
+              {pane.label}
+            </text>
+            <box flexGrow={1} minHeight={0} alignItems="center" justifyContent="center">
+              {pane.error ? (
+                <text fg={theme.warning}>{`Preview unavailable: ${pane.error}`}</text>
+              ) : pane.value ? (
+                pane.value.available ? (
+                  <DiffImage
+                    preview={pane.value}
+                    onError={(message) => onError(pane.side, message, preview!.requestId)}
+                  />
+                ) : (
+                  <text fg={theme.muted}>
+                    {pane.side === "old"
+                      ? "No before image (new file)."
+                      : "No after image (deleted file)."}
+                  </text>
+                )
+              ) : (
+                <text fg={theme.muted}>Loading image…</text>
+              )}
+            </box>
+          </box>
+        ))}
+      </box>
+      <text fg={theme.muted} height={1} truncate>
+        {protocol === "blocks"
+          ? "No native graphics protocol detected: showing block previews; b opens the browser comparison."
+          : `${protocol} image previews · b opens the authenticated browser comparison.`}
+      </text>
+    </box>
+  );
+}
+
 function DiffPanel({
   state,
   scroll,
@@ -401,7 +493,7 @@ function DiffPanel({
   state: ShellSnapshot;
   scroll: RefObject<ScrollBoxRenderable | null>;
   lines: DiffLine[];
-  onPreviewError: (message: string) => void;
+  onPreviewError: (side: "old" | "new", message: string, requestId: number) => void;
   splitAll: SplitRow[];
   windowStart: number;
   windowEnd: number;
@@ -430,30 +522,9 @@ function DiffPanel({
   const previewFile = state.files[state.selectedFile];
   if (previewFile && isImagePath(previewFile.path)) {
     const preview = state.preview?.path === previewFile.path ? state.preview : null;
-    return (
-      <>
-        <text
-          fg={theme.primary}
-          attributes={TextAttributes.BOLD}
-          height={1}
-          wrapMode="none"
-          truncate
-        >
-          {previewFile.path}
-          {"  ·  image"}
-        </text>
-        <box flexGrow={1} minHeight={0} marginTop={1} alignItems="center" justifyContent="center">
-          {preview ? (
-            <DiffImage preview={preview} onError={onPreviewError} />
-          ) : state.previewError ? (
-            <text fg={theme.warning}>{`Image preview unavailable: ${state.previewError}`}</text>
-          ) : (
-            <text fg={theme.muted}>Loading image preview…</text>
-          )}
-        </box>
-      </>
-    );
+    return <ImageComparison file={previewFile} preview={preview} onError={onPreviewError} />;
   }
+
   if (!state.diff) {
     return (
       <text fg={theme.muted}>
@@ -861,7 +932,9 @@ export function Shell({ store, client, quit }: ShellProps) {
             windowEnd={diffWindowInfo.end}
             collapsed={diffCollapsed}
             total={diffTotal}
-            onPreviewError={(message) => store.setPreviewError(message)}
+            onPreviewError={(side, message, requestId) =>
+              store.setPreviewError(side, message, requestId)
+            }
           />
         </box>
       </box>

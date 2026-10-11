@@ -389,7 +389,7 @@ test("image files load a bounded preview", async () => {
   await store.connect(client);
   await new Promise((resolve) => setTimeout(resolve, 5));
   expect(store.getSnapshot().preview?.path).toBe("images/logo.png");
-  expect(store.getSnapshot().preview?.mimeType).toBe("image/png");
+  expect(store.getSnapshot().preview?.after?.mimeType).toBe("image/png");
 });
 
 test("a running operation survives a target switch", async () => {

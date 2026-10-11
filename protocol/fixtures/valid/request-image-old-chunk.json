@@ -1,0 +1,16 @@
+{
+  "type": "request",
+  "id": "request-image-old-chunk",
+  "method": "file.preview",
+  "params": {
+    "target": {
+      "kind": "local",
+      "localSnapshotSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "path": "assets/renamed.bmp",
+    "side": "old",
+    "offset": 196608,
+    "maxBytes": 196608,
+    "contentSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+  }
+}

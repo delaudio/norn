@@ -1,0 +1,15 @@
+{
+  "type": "request",
+  "id": "request-image-new-chunk",
+  "method": "file.preview",
+  "params": {
+    "target": {
+      "kind": "local",
+      "localSnapshotSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "path": "assets/diagram.png",
+    "side": "new",
+    "offset": 0,
+    "maxBytes": 196608
+  }
+}

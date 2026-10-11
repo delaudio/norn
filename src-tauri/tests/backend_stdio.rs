@@ -505,7 +505,9 @@ fn browser_open_returns_an_authenticated_session_url() {
 #[test]
 fn file_preview_returns_bounded_image_bytes() {
     let repo = temp_repo();
-    std::fs::write(repo.path().join("pic.png"), [0x89u8, 0x50, 0x4e, 0x47]).expect("write");
+    use base64::Engine as _;
+    let png=base64::engine::general_purpose::STANDARD.decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==").unwrap();
+    std::fs::write(repo.path().join("pic.png"), &png).expect("write");
 
     let mut backend = Backend::spawn(repo.path());
     backend.handshake();
@@ -524,7 +526,7 @@ fn file_preview_returns_bounded_image_bytes() {
     );
     assert_eq!(response["ok"], true, "response: {response}");
     assert_eq!(response["result"]["mimeType"], "image/png");
-    assert_eq!(response["result"]["size"], 4);
+    assert_eq!(response["result"]["size"], png.len());
     assert!(!response["result"]["dataBase64"]
         .as_str()
         .unwrap_or("")
@@ -1602,4 +1604,154 @@ fn user_data_preview_import_and_repeat_are_bound_to_isolated_storage() {
     backend.send(json!({"type":"request","id":"stop","method":"shutdown","params":{}}));
     let _ = backend.wait_for(|v| v["id"] == "stop", Duration::from_secs(5));
     assert!(backend.child.wait().unwrap().success());
+}
+
+fn bitmap_bytes(color: [u8; 3]) -> Vec<u8> {
+    let image =
+        image::DynamicImage::ImageRgb8(image::ImageBuffer::from_pixel(512, 512, image::Rgb(color)));
+    let mut bytes = std::io::Cursor::new(Vec::new());
+    image.write_to(&mut bytes, image::ImageFormat::Bmp).unwrap();
+    bytes.into_inner()
+}
+fn preview_chunk(
+    backend: &mut Backend,
+    path: &str,
+    side: &str,
+    offset: usize,
+    hash: Option<&str>,
+) -> Value {
+    let id = format!("image-{side}-{offset}");
+    let mut params = json!({"target":{"kind":"local","localSnapshotSha256":LOCAL_SHA},"path":path,"side":side,"offset":offset,"maxBytes":196608});
+    if let Some(hash) = hash {
+        params["contentSha256"] = json!(hash);
+    }
+    backend.send(json!({"type":"request","id":id,"method":"file.preview","params":params}));
+    backend.wait_for(|v| v["id"] == id, Duration::from_secs(5))
+}
+#[test]
+fn image_comparison_chunks_are_bounded_and_fenced_against_content_drift() {
+    use base64::Engine as _;
+    let repo = temp_repo();
+    let before = bitmap_bytes([255, 0, 0]);
+    let after = bitmap_bytes([0, 0, 255]);
+    std::fs::write(repo.path().join("pic.bmp"), &before).unwrap();
+    git(repo.path(), &["add", "-A"]);
+    git(repo.path(), &["commit", "-qm", "base image"]);
+    std::fs::write(repo.path().join("pic.bmp"), &after).unwrap();
+    let mut backend = Backend::spawn(repo.path());
+    backend.handshake();
+    for (side, expected) in [("old", &before), ("new", &after)] {
+        let mut offset = 0;
+        let mut hash = None;
+        let mut collected = Vec::new();
+        loop {
+            let response = preview_chunk(&mut backend, "pic.bmp", side, offset, hash.as_deref());
+            assert_eq!(response["ok"], true, "{response}");
+            assert!(serde_json::to_vec(&response).unwrap().len() < 1_048_576);
+            let chunk = &response["result"];
+            assert_eq!(chunk["width"], 512);
+            assert_eq!(chunk["height"], 512);
+            let bytes = base64::engine::general_purpose::STANDARD
+                .decode(chunk["dataBase64"].as_str().unwrap())
+                .unwrap();
+            assert!(bytes.len() <= 196608);
+            collected.extend(bytes);
+            hash = Some(chunk["contentSha256"].as_str().unwrap().to_owned());
+            if chunk["nextOffset"].is_null() {
+                break;
+            }
+            offset = chunk["nextOffset"].as_u64().unwrap() as usize;
+        }
+        assert_eq!(&collected, expected);
+    }
+    let first = preview_chunk(&mut backend, "pic.bmp", "new", 0, None);
+    let hash = first["result"]["contentSha256"].as_str().unwrap();
+    let mut changed = after.clone();
+    changed.push(0);
+    std::fs::write(repo.path().join("pic.bmp"), changed).unwrap();
+    let stale = preview_chunk(&mut backend, "pic.bmp", "new", 196608, Some(hash));
+    assert_eq!(stale["ok"], false);
+    assert_eq!(stale["error"]["code"], "targetStale");
+    assert!(stale["result"].is_null());
+    std::fs::write(repo.path().join("not-changed.bmp"), &before).unwrap();
+    git(repo.path(), &["add", "not-changed.bmp"]);
+    git(repo.path(), &["commit", "-qm", "unrelated image"]);
+    let unrelated = preview_chunk(&mut backend, "not-changed.bmp", "new", 0, None);
+    assert_eq!(unrelated["ok"], false);
+}
+#[test]
+fn image_comparison_preserves_missing_sides_and_rename_sources() {
+    let repo = temp_repo();
+    let bytes = bitmap_bytes([20, 40, 60]);
+    std::fs::write(repo.path().join("before.bmp"), &bytes).unwrap();
+    git(repo.path(), &["add", "-A"]);
+    git(repo.path(), &["commit", "-qm", "base"]);
+    git(repo.path(), &["mv", "before.bmp", "after.bmp"]);
+    let mut backend = Backend::spawn(repo.path());
+    backend.handshake();
+    let old = preview_chunk(&mut backend, "after.bmp", "old", 0, None);
+    let new = preview_chunk(&mut backend, "after.bmp", "new", 0, None);
+    assert_eq!(old["ok"], true, "{old}");
+    assert_eq!(new["ok"], true, "{new}");
+    assert_eq!(
+        old["result"]["contentSha256"],
+        new["result"]["contentSha256"]
+    );
+    git(repo.path(), &["commit", "-qm", "rename"]);
+    std::fs::remove_file(repo.path().join("after.bmp")).unwrap();
+    let deleted = preview_chunk(&mut backend, "after.bmp", "new", 0, None);
+    assert_eq!(deleted["ok"], true);
+    assert_eq!(deleted["result"]["available"], false);
+    let before = preview_chunk(&mut backend, "after.bmp", "old", 0, None);
+    assert_eq!(before["ok"], true);
+    assert_eq!(before["result"]["available"], true);
+    std::fs::write(repo.path().join("new.bmp"), &bytes).unwrap();
+    let absent = preview_chunk(&mut backend, "new.bmp", "old", 0, None);
+    assert_eq!(absent["ok"], true);
+    assert_eq!(absent["result"]["available"], false);
+    let present = preview_chunk(&mut backend, "new.bmp", "new", 0, None);
+    assert_eq!(present["ok"], true);
+    assert_eq!(present["result"]["available"], true);
+}
+#[test]
+fn image_comparison_refuses_malformed_oversized_and_symlink_content() {
+    let repo = temp_repo();
+    std::fs::write(repo.path().join("invalid.png"), b"not an image").unwrap();
+    let mut oversized = bitmap_bytes([0, 0, 0]);
+    oversized.resize(2 * 1024 * 1024 + 1, 0);
+    std::fs::write(repo.path().join("huge.bmp"), oversized).unwrap();
+    let mut backend = Backend::spawn(repo.path());
+    backend.handshake();
+    assert_eq!(
+        preview_chunk(&mut backend, "invalid.png", "new", 0, None)["ok"],
+        false
+    );
+    assert_eq!(
+        preview_chunk(&mut backend, "huge.bmp", "new", 0, None)["ok"],
+        false
+    );
+    let wide = image::DynamicImage::ImageRgb8(image::ImageBuffer::from_pixel(
+        8193,
+        1,
+        image::Rgb([0, 0, 0]),
+    ));
+    let mut encoded = std::io::Cursor::new(Vec::new());
+    wide.write_to(&mut encoded, image::ImageFormat::Png)
+        .unwrap();
+    std::fs::write(repo.path().join("wide.png"), encoded.into_inner()).unwrap();
+    assert_eq!(
+        preview_chunk(&mut backend, "wide.png", "new", 0, None)["ok"],
+        false
+    );
+    #[cfg(unix)]
+    {
+        std::fs::write(repo.path().join("target.bmp"), bitmap_bytes([0, 0, 0])).unwrap();
+        std::os::unix::fs::symlink("target.bmp", repo.path().join("link.bmp")).unwrap();
+        let response = preview_chunk(&mut backend, "link.bmp", "new", 0, None);
+        assert_eq!(response["ok"], false);
+        assert!(response["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("outside the checkout"));
+    }
 }
