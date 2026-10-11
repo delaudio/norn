@@ -42,3 +42,35 @@ exactly which native recovery observations remain for packaging/cutover.
 - Claimed by: default-agent, 2026-10-11, `issue-305-imported-theme-recovery`.
 - Blockers: local validation, PR #348 merge and this PR CI/merge.
 - Stopped:
+
+## Delivery
+
+Effective on merge to main of this settings/recovery PR. Implementation
+`c128831`, prepared above physical image PR #348 (its merge remains required
+before integrating). Imported themes use `workspace.read`, a separate modal
+preview/staging action, record-version/content revalidation and the existing
+explicit settings save/CAS. Other draft fields and the archived record are
+retained; missing data/conflicts/disposal/duplicate input fail or fence safely.
+Opening user data now retains an open settings session instead of disposing its
+unsaved draft; returning restores it without credential or settings reload.
+
+Root typecheck, 123 tests/tooling (including the new archive workflow contract),
+lint and Archgate 17/17 pass. UI typecheck, 109 tests/648 assertions and
+61 native frames pass. Native input covers modal approval, no premature save,
+draft retention across the user-data overlay and explicit save. React Doctor
+reports 12 unknown-DOM-property warnings for native `flexShrink` props in
+SettingsPanel; these are accepted by the installed OpenTUI types and exercised
+by actual native layout/input/frame tests. No suppression or global-clean claim.
+
+Pinned archive `72440eaef4177b809664bf6b563647d7659f3e52` is the complete merged
+desktop export bridge. Its actual exporter executes against six bounded
+synthetic canonical/legacy DOM fixtures with source/cache/credential checks.
+The archived production frontend and embedded desktop compile on local macOS
+26.2; two isolated directory-copy/symlink-rejection tests pass. No desktop was
+launched and no native profile/keychain/provider/agent was accessed. The new
+three-platform recovery CI must pass before merge; it compiles the same archive
+and tests isolated profile copying, without claiming actual native profile
+recovery. Cross-platform run evidence remains pending until that CI completes.
+
+Draft/reference consumption and remaining native recovery/cutover gates stay
+explicit. #305 and the migration decision remain open/Accepted; no Norn review.
