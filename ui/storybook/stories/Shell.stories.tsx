@@ -84,6 +84,10 @@ export const SavedRepositoryPrompt: Story = { args: { frameId: "shell-workspace-
 export const UnsavedRepositoryPrompt: Story = { args: { frameId: "shell-workspace-dirty-80x24" } };
 export const PromptWriteConflict: Story = { args: { frameId: "shell-workspace-conflict-50x15" } };
 export const ClosedPromptState: Story = { args: { frameId: "shell-workspace-disposed-80x24" } };
+export const EditingDiffSearch: Story = { args: { frameId: "shell-search-editing-120x30" } };
+export const NoDiffSearchMatch: Story = { args: { frameId: "shell-search-none-80x24" } };
+export const SplitDiffSearch: Story = { args: { frameId: "shell-search-split-80x24" } };
+export const CompactSplitDiffSearch: Story = { args: { frameId: "shell-search-split-50x15" } };
 
 export const ImageComparison: Story = { args: { frameId: "shell-images-modified-120x30" } };
 export const CompactImageComparison: Story = { args: { frameId: "shell-images-modified-50x20" } };

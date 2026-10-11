@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "host": "darwin",
+  "arch": "arm64",
+  "bunVersion": "1.3.8",
+  "dimensions": {
+    "width": 120,
+    "height": 30
+  },
+  "selectedPatchSha256": "0b33d13a40636687e85424118f3af7a204f797434d8178a38d6ecbf2f33609ff",
+  "selectedPatchBytes": 487866,
+  "budgets": {
+    "batchAndFrameP95Ms": 20,
+    "maximumMountedRows": 64,
+    "retainedLogs": 100,
+    "currentRssBytes": 536870912
+  },
+  "results": [
+    {
+      "mode": "unified",
+      "lines": 10000,
+      "events": 10000,
+      "samples": 100,
+      "eventsPerBatch": 100,
+      "maximumMountedRows": 33,
+      "elapsedMs": 370.49470800000006,
+      "batchAndFrameP95Ms": 6.858040999999957,
+      "eventsPerSecond": 26990.938828740298,
+      "currentRssBytes": 227999744,
+      "retainedLogs": 100
+    },
+    {
+      "mode": "split",
+      "lines": 10000,
+      "events": 10000,
+      "samples": 100,
+      "eventsPerBatch": 100,
+      "maximumMountedRows": 23,
+      "elapsedMs": 267.22641699999997,
+      "batchAndFrameP95Ms": 4.718374999999924,
+      "eventsPerSecond": 37421.44999085177,
+      "currentRssBytes": 289275904,
+      "retainedLogs": 100
+    }
+  ],
+  "limitations": [
+    "Synthetic normalized events; not a live agent/provider or installed pair.",
+    "Two native frames per 100-event batch; not physical terminal latency.",
+    "RSS is cumulative current process memory across modes."
+  ]
+}
