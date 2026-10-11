@@ -46,9 +46,9 @@ const MAX_CONCURRENT_BROWSER_OPENS: usize = 1;
 const MAX_CONCURRENT_PREVIEWS: usize = 4;
 const MAX_ACTIVE_OPERATIONS: usize = 8;
 
-/// Which review engine executes `review.start`. Defaults to the deterministic
-/// simulated sequence; `NORN_REVIEW_ENGINE=real` runs the shared headless
-/// engine, and `fake` is a fast deterministic engine for tests.
+/// Which review engine executes `review.start`. The shared headless engine is
+/// the default; `NORN_REVIEW_ENGINE=simulated` keeps the deterministic
+/// placeholder and `fake` is a fast deterministic engine for tests.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum ReviewEngine {
     Simulated,
@@ -58,9 +58,9 @@ enum ReviewEngine {
 
 fn review_engine() -> ReviewEngine {
     match std::env::var("NORN_REVIEW_ENGINE").as_deref() {
-        Ok("real") => ReviewEngine::Real,
+        Ok("simulated") => ReviewEngine::Simulated,
         Ok("fake") => ReviewEngine::Fake,
-        _ => ReviewEngine::Simulated,
+        _ => ReviewEngine::Real,
     }
 }
 
