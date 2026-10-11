@@ -300,7 +300,28 @@ async function branchScene(action: "sync" | "conflicts") {
   return { client, store };
 }
 
+async function backgroundOperationScene() {
+  class BackgroundTransport extends FakeBackendTransport {
+    async request(method: string, params: Record<string, unknown>) {
+      if (method === "review.start")
+        return { operationId: "background-review", state: "accepted", sequence: 0 };
+      if (method === "operation.status")
+        return { operationId: "background-review", state: "running", sequence: 1, error: null };
+      return super.request(method, params);
+    }
+  }
+  const { client, store, ready } = readyStore(
+    new BackgroundTransport({ repositories, targets, files, findings }),
+  );
+  await ready;
+  await store.startReview(client);
+  await store.selectPicker(1);
+  return { client, store };
+}
+
 const scenes: Scene[] = [
+  { id: "shell-background-operation-120x30", cols: 120, rows: 30, build: backgroundOperationScene },
+  { id: "shell-background-operation-50x15", cols: 50, rows: 15, build: backgroundOperationScene },
   { id: "shell-sync-preview-120x30", cols: 120, rows: 30, build: () => branchScene("sync") },
   {
     id: "shell-conflicts-preview-120x30",

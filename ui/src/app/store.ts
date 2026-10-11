@@ -65,6 +65,20 @@ function graphemes(text: string): string[] {
   return Array.from(text);
 }
 
+function sameTarget(a: TargetIdentity | null, b: TargetIdentity | null): boolean {
+  if (!a || !b || a.kind !== b.kind) return false;
+  if (a.kind === "local" && b.kind === "local")
+    return a.localSnapshotSha256 === b.localSnapshotSha256;
+  if (a.kind !== "provider" || b.kind !== "provider") return false;
+  return (
+    a.provider === b.provider &&
+    a.workspace === b.workspace &&
+    a.repo === b.repo &&
+    a.prId === b.prId &&
+    a.runId === b.runId
+  );
+}
+
 function targetLabel(target: TargetIdentity): string {
   if (target.kind === "local") {
     return "local";
@@ -342,6 +356,18 @@ export class ShellStore {
   private snapshotPending = false;
   private client: BackendClient | null = null;
   private fixing = false;
+  private operationTarget: TargetIdentity | null = null;
+  private operationKind: "review" | "reply" | "fix" = "review";
+  private operationGeneration = -1;
+  private resyncInFlight = false;
+  private resyncPending = false;
+  private resyncGapPending = false;
+  private refreshedOperation: string | null = null;
+
+  private requestInFlight(): boolean {
+    return this.starting || this.replying || this.fixing;
+  }
+
   private fixOperation: { id: string; generation: number; target: TargetIdentity } | null = null;
 
   subscribe = (listener: () => void): (() => void) => {
@@ -425,7 +451,12 @@ export class ShellStore {
     const files = await filesOutcome;
     if (generation === this.state.generation) {
       if (files.ok) {
-        this.update({ files: files.value, selectedFile: 0, notice: null });
+        const path = this.state.files[this.state.selectedFile]?.path;
+        const selectedFile = Math.max(
+          0,
+          files.value.findIndex((file) => file.path === path),
+        );
+        this.update({ files: files.value, selectedFile, notice: null });
       } else {
         this.update({ files: [], error: message(files.error) });
       }
@@ -462,6 +493,16 @@ export class ShellStore {
     if (generation !== this.state.generation) {
       return;
     }
+    if (this.fixOperation && sameTarget(this.fixOperation.target, target)) {
+      try {
+        const fixState = await client.fixState(target);
+        if (generation === this.state.generation) this.update({ fixState });
+      } catch (error) {
+        if (generation === this.state.generation)
+          this.update({ notice: `Could not inspect fix state: ${message(error)}.` });
+      }
+    }
+    if (generation !== this.state.generation) return;
     // Keep the focused pane consistent: resolve the selected finding when the
     // findings pane is active, otherwise show the selected file's diff.
     if (this.state.focus === "findings") {
@@ -617,7 +658,6 @@ export class ShellStore {
       // Keep `selected` aligned while the entry is a working-tree repository so
       // repository-scoped mistakes never point at the wrong row.
       const selected = selectedPicker < this.state.repositories.length ? selectedPicker : undefined;
-      this.pendingEvents = [];
       void this.selectPicker(selectedPicker, selected);
       return true;
     }
@@ -785,7 +825,7 @@ export class ShellStore {
 
   async startReview(client: BackendClient): Promise<void> {
     const target = this.activeTarget();
-    if (!target || this.starting) {
+    if (!target || this.requestInFlight()) {
       return;
     }
     const active = this.state.operation;
@@ -796,9 +836,9 @@ export class ShellStore {
     this.starting = true;
     try {
       const result = await client.startReview(target);
-      if (generation !== this.state.generation) {
-        return;
-      }
+      this.operationTarget = target;
+      this.operationKind = "review";
+      this.operationGeneration = generation;
       this.update({
         operation: {
           id: result.operationId,
@@ -810,9 +850,15 @@ export class ShellStore {
         },
       });
       this.drainPendingEvents(result.operationId);
+      // Events can finish before the control response is delivered.
+      void this.resyncOperation();
     } catch (error) {
       if (generation === this.state.generation) {
-        this.update({ error: message(error) });
+        this.update({
+          error: message(error),
+          notice:
+            "Review start may have succeeded. Inspect operation history before starting another review.",
+        });
       }
     } finally {
       this.starting = false;
@@ -822,11 +868,14 @@ export class ShellStore {
   applyEvent(event: BackendOperationEvent): void {
     const operation = this.state.operation;
     if (!operation || event.operationId !== operation.id) {
-      if (this.pendingEvents.length < 256) {
+      if (this.requestInFlight() && this.pendingEvents.length < 256) {
         this.pendingEvents.push(event);
       }
       return;
     }
+    if (this.operationTarget && !sameTarget(this.operationTarget, event.target)) return;
+    if (event.sequence <= operation.sequence) return;
+    if (event.sequence > operation.sequence + 1) void this.resyncOperation(true);
     this.applyEventToOperation(operation, event);
   }
 
@@ -846,21 +895,8 @@ export class ShellStore {
         reply: operation.reply,
       },
     });
-    const fix = this.fixOperation;
-    if (
-      fix?.id === operation.id &&
-      fix.generation === this.state.generation &&
-      (state === "succeeded" || state === "failed" || state === "cancelled")
-    ) {
-      void this.refreshFixState(fix);
-    }
-    if (operation.reply && this.replyGeneration === this.state.generation) {
-      if (state === "succeeded") {
-        this.update({ composerText: "" });
-      } else if (state === "failed" || state === "cancelled") {
-        // Restore the submitted draft so it is not lost on failure.
-        this.update({ composing: true });
-      }
+    if (state === "succeeded" || state === "failed" || state === "cancelled") {
+      void this.refreshCompletedOperation(operation.id, state);
     }
   }
 
@@ -872,6 +908,136 @@ export class ShellStore {
         this.applyEvent(event);
       }
     }
+  }
+
+  private async resyncOperation(gap = false): Promise<void> {
+    this.resyncGapPending ||= gap;
+    if (this.resyncInFlight) {
+      this.resyncPending = true;
+      return;
+    }
+    const client = this.client;
+    if (!client) return;
+    this.resyncInFlight = true;
+    try {
+      do {
+        this.resyncPending = false;
+        const needsSnapshot = this.resyncGapPending;
+        this.resyncGapPending = false;
+        const operation = this.state.operation;
+        if (!operation) return;
+        const snapshot = await client.operationStatus(operation.id);
+        const current = this.state.operation;
+        if (current?.id !== operation.id) continue;
+        const omitted = needsSnapshot || snapshot.sequence > current.sequence + 1;
+        if (snapshot.sequence >= current.sequence) {
+          const logs =
+            snapshot.error &&
+            (snapshot.sequence > current.sequence || snapshot.state !== current.state)
+              ? [
+                  ...current.logs,
+                  {
+                    id: this.nextLogId++,
+                    text: `Operation ${snapshot.state}: ${snapshot.error.message.slice(0, 2048)}`,
+                  },
+                ].slice(-100)
+              : current.logs;
+          this.update({
+            operation: { ...current, state: snapshot.state, sequence: snapshot.sequence, logs },
+          });
+          if (["succeeded", "failed", "cancelled"].includes(snapshot.state)) {
+            await this.refreshCompletedOperation(operation.id, snapshot.state);
+          }
+        }
+        const generation = this.state.generation;
+        if (omitted && sameTarget(this.activeTarget(), this.operationTarget))
+          await this.loadSnapshot(client, generation);
+        if (omitted && this.state.operation?.id === operation.id)
+          this.update({ notice: "Operation status refreshed; some streamed output was omitted." });
+      } while (this.resyncPending);
+    } catch (error) {
+      this.update({
+        notice: `Could not refresh operation status: ${message(error)}. Inspect it before retrying.`,
+      });
+    } finally {
+      this.resyncInFlight = false;
+    }
+  }
+
+  private async refreshCompletedOperation(id: string, state: string): Promise<void> {
+    const operation = this.state.operation;
+    if (operation?.id === id && operation.reply && this.replyGeneration === this.state.generation) {
+      if (state === "succeeded") this.update({ composerText: "" });
+      else if (state === "failed" || state === "cancelled") this.update({ composing: true });
+    }
+    if (this.refreshedOperation === id) return;
+    this.refreshedOperation = id;
+    const target = this.operationTarget;
+    const client = this.client;
+    const generation = this.state.generation;
+    if (
+      !client ||
+      !target ||
+      !sameTarget(this.activeTarget(), target) ||
+      this.operationGeneration !== generation
+    )
+      return;
+    if (this.operationKind === "fix") {
+      const fix = this.fixOperation;
+      if (fix?.id === id) await this.refreshFixState(fix);
+      if (sameTarget(this.activeTarget(), target) && generation === this.state.generation)
+        await this.loadSnapshot(client, generation);
+      return;
+    }
+    if (state !== "succeeded") return;
+    try {
+      const targets = await client.reviewTargets();
+      if (generation !== this.state.generation || !sameTarget(this.activeTarget(), target)) return;
+      const picker = buildPicker(this.state.repositories, targets);
+      const next =
+        target.kind === "provider" && target.prId
+          ? picker.findIndex(
+              (entry) =>
+                entry.kind === "review" &&
+                entry.provider === target.provider &&
+                entry.workspace === target.workspace &&
+                entry.repo === target.repo &&
+                entry.prId === target.prId,
+            )
+          : -1;
+      if (next >= 0) {
+        this.update({
+          picker,
+          selectedPicker: next,
+          generation: generation + 1,
+          fixPreview: null,
+          fixState: null,
+          composing: false,
+          composerText: "",
+        });
+        await this.loadSnapshot(client, generation + 1);
+      } else {
+        await this.loadSnapshot(client, generation);
+      }
+    } catch (error) {
+      if (generation === this.state.generation)
+        this.update({ notice: `Review finished; saved state refresh failed: ${message(error)}.` });
+    }
+  }
+
+  async pollOperation(): Promise<void> {
+    if (
+      this.state.status !== "ready" ||
+      !["accepted", "running"].includes(this.state.operation?.state ?? "")
+    )
+      return;
+    await this.resyncOperation();
+  }
+
+  async refreshOperation(): Promise<void> {
+    this.refreshedOperation = null;
+    await this.resyncOperation();
+    if (this.client) await this.loadSnapshot(this.client, this.state.generation);
   }
 
   async cancel(client: BackendClient): Promise<void> {
@@ -984,15 +1150,16 @@ export class ShellStore {
       return;
     }
     const generation = this.state.generation;
+    if (this.requestInFlight()) return;
     this.replying = true;
     this.replyGeneration = generation;
     // Close the composer while the request is in flight; restore the draft on failure.
     this.update({ composing: false });
     try {
       const result = await client.reviewReply(target, replyMessage);
-      if (generation !== this.state.generation) {
-        return;
-      }
+      this.operationTarget = target;
+      this.operationKind = "reply";
+      this.operationGeneration = generation;
       this.update({
         operation: {
           id: result.operationId,
@@ -1004,6 +1171,8 @@ export class ShellStore {
         },
       });
       this.drainPendingEvents(result.operationId);
+      // Events can finish before the control response is delivered.
+      void this.resyncOperation();
     } catch (error) {
       if (generation === this.state.generation) {
         this.update({ composing: true, error: message(error) });
@@ -1084,7 +1253,7 @@ export class ShellStore {
     action: "fix" | "commit" | "push" | "sync" | "conflicts",
     commitMessage?: string,
   ): Promise<boolean> {
-    if (this.fixing || this.state.fixPreviewLoading) return false;
+    if (this.requestInFlight() || this.state.fixPreviewLoading) return false;
     const operation = this.state.operation;
     if (operation && ["accepted", "running"].includes(operation.state)) {
       this.update({ notice: "Wait for the active operation before requesting a fix." });
@@ -1130,7 +1299,7 @@ export class ShellStore {
 
   async confirmFix(client: BackendClient): Promise<void> {
     const preview = this.state.fixPreview;
-    if (!preview || this.fixing) return;
+    if (!preview || this.requestInFlight()) return;
     const generation = this.state.generation;
     this.fixing = true;
     // Consume the UI approval immediately. A timeout never triggers a retry.
@@ -1144,7 +1313,9 @@ export class ShellStore {
             : preview.action === "sync" || preview.action === "conflicts"
               ? await client.reviewBranch(preview.target, preview.approvalToken, preview.action)
               : await client.reviewFix(preview.target, preview.approvalToken);
-      if (generation !== this.state.generation) return;
+      this.operationTarget = preview.target;
+      this.operationKind = "fix";
+      this.operationGeneration = generation;
       this.fixOperation = { id: result.operationId, generation, target: preview.target };
       this.update({
         operation: {
@@ -1157,6 +1328,8 @@ export class ShellStore {
         },
       });
       this.drainPendingEvents(result.operationId);
+      // Events can finish before the control response is delivered.
+      void this.resyncOperation();
     } catch (error) {
       if (generation === this.state.generation)
         this.update({

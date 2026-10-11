@@ -61,3 +61,10 @@ export const ConflictsPreview: Story = { args: { frameId: "shell-conflicts-previ
 export const CompactConflictsPreview: Story = {
   args: { frameId: "shell-conflicts-preview-50x15" },
 };
+
+export const BackgroundOperation: Story = {
+  args: { frameId: "shell-background-operation-120x30" },
+};
+export const CompactBackgroundOperation: Story = {
+  args: { frameId: "shell-background-operation-50x15" },
+};
