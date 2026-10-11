@@ -37,6 +37,11 @@ export const CompactConversation: Story = { args: { frameId: "shell-conversation
 export const FixPreview: Story = { args: { frameId: "shell-fix-preview-120x30" } };
 export const CompactFixPreview: Story = { args: { frameId: "shell-fix-preview-50x15" } };
 
+export const CommitComposer: Story = { args: { frameId: "shell-commit-composer-120x30" } };
+export const CommitPreview: Story = { args: { frameId: "shell-commit-preview-120x30" } };
+export const PushPreview: Story = { args: { frameId: "shell-push-preview-120x30" } };
+export const CompactPushPreview: Story = { args: { frameId: "shell-push-preview-50x15" } };
+
 export const Gallery: Story = {
   args: { frameId: first },
   render: () => (

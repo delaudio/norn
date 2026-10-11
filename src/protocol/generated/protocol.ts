@@ -97,6 +97,39 @@ export type Request =
       id: RequestId;
       method: "review.fix.state";
       params: TargetParams;
+    }
+  | {
+      type: "request";
+      id: RequestId;
+      method: "review.commit.preview";
+      params: {
+        target: TargetIdentity;
+        message: string;
+      };
+    }
+  | {
+      type: "request";
+      id: RequestId;
+      method: "review.commit";
+      params: {
+        target: TargetIdentity;
+        approvalToken: string;
+      };
+    }
+  | {
+      type: "request";
+      id: RequestId;
+      method: "review.push.preview";
+      params: TargetParams;
+    }
+  | {
+      type: "request";
+      id: RequestId;
+      method: "review.push";
+      params: {
+        target: TargetIdentity;
+        approvalToken: string;
+      };
     };
 export type RequestId = string;
 /**

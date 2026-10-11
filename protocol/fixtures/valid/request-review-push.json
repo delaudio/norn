@@ -1,0 +1,1 @@
+{"type": "request", "id": "push", "method": "review.push", "params": {"target": {"kind": "provider", "provider": "github", "workspace": "acme", "repo": "demo", "prId": 9, "runId": "run-1"}, "approvalToken": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}}

@@ -1,0 +1,1 @@
+{"type": "request", "id": "commit", "method": "review.commit", "params": {"target": {"kind": "provider", "provider": "github", "workspace": "acme", "repo": "demo", "prId": 9, "runId": "run-1"}, "approvalToken": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}

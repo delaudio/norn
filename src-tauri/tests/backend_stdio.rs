@@ -903,8 +903,28 @@ impl FixFixture {
         result["result"].clone()
     }
 
+    fn mutation_preview(&mut self, method: &str, message: Option<&str>) -> Value {
+        let mut params = json!({"target":self.target});
+        if let Some(message) = message {
+            params["message"] = json!(message);
+        }
+        self.backend.send(
+            json!({"type":"request","id":"mutation-preview","method":method,"params":params}),
+        );
+        let result = self.backend.wait_for(
+            |value| value["id"] == "mutation-preview",
+            Duration::from_secs(15),
+        );
+        assert_eq!(result["ok"], true, "{result}");
+        result["result"].clone()
+    }
+
     fn execute(&mut self, token: &str) -> String {
-        self.backend.send(json!({"type":"request","id":"fix","method":"review.fix","params":{"target":self.target,"approvalToken":token}}));
+        self.execute_action("review.fix", token)
+    }
+
+    fn execute_action(&mut self, method: &str, token: &str) -> String {
+        self.backend.send(json!({"type":"request","id":"fix","method":method,"params":{"target":self.target,"approvalToken":token}}));
         let deadline = std::time::Instant::now() + Duration::from_secs(10);
         let result = loop {
             let value = self
@@ -1071,4 +1091,235 @@ fn fix_approval_rejects_changed_binary_content_and_staged_identity() {
         "targetStale"
     );
     assert!(!fixture.repo.path().join("agent-ran").exists());
+}
+
+#[cfg(unix)]
+const SUCCESSFUL_FIX_AGENT: &str = r#"#!/bin/sh
+printf 'fixed\n' > tracked.txt
+printf '%s\n' '{"structured_output":{"status":"success","summary":"Fixed tracked content","commitMessage":"fix: content","tests":["fake check"],"filesTouched":["tracked.txt"]}}'
+"#;
+
+#[cfg(unix)]
+#[test]
+fn approved_commit_excludes_unrelated_staged_files_and_pushes_exact_source_ref() {
+    let mut fixture = FixFixture::new(SUCCESSFUL_FIX_AGENT);
+    let preview = fixture.preview();
+    let operation = fixture.execute(preview["approvalToken"].as_str().unwrap());
+    assert_eq!(fixture.terminal(&operation)["event"]["state"], "succeeded");
+    std::fs::write(
+        fixture.repo.path().join("unrelated.txt"),
+        "private local work\n",
+    )
+    .unwrap();
+    git(fixture.repo.path(), &["add", "unrelated.txt"]);
+    let message = "fix: Unicode ✓ \"$HOME\" `literal`";
+    let preview = fixture.mutation_preview("review.commit.preview", Some(message));
+    assert_eq!(preview["action"], "commit");
+    assert_eq!(preview["filesToCommit"], json!(["tracked.txt"]));
+    assert_eq!(preview["commitMessage"], message);
+    let operation =
+        fixture.execute_action("review.commit", preview["approvalToken"].as_str().unwrap());
+    assert_eq!(fixture.terminal(&operation)["event"]["state"], "succeeded");
+    let committed = Command::new("git")
+        .arg("-C")
+        .arg(fixture.repo.path())
+        .args(["show", "--format=", "--name-only", "HEAD"])
+        .output()
+        .unwrap();
+    assert_eq!(
+        String::from_utf8(committed.stdout).unwrap().trim(),
+        "tracked.txt"
+    );
+    let staged = Command::new("git")
+        .arg("-C")
+        .arg(fixture.repo.path())
+        .args(["diff", "--cached", "--name-only"])
+        .output()
+        .unwrap();
+    assert_eq!(
+        String::from_utf8(staged.stdout).unwrap().trim(),
+        "unrelated.txt"
+    );
+    let actual_message = Command::new("git")
+        .arg("-C")
+        .arg(fixture.repo.path())
+        .args(["log", "-1", "--format=%B"])
+        .output()
+        .unwrap();
+    assert_eq!(
+        String::from_utf8(actual_message.stdout).unwrap().trim(),
+        message
+    );
+    let preview = fixture.mutation_preview("review.push.preview", None);
+    assert_eq!(preview["action"], "push");
+    let commit = preview["commitSha"].as_str().unwrap().to_string();
+    let operation =
+        fixture.execute_action("review.push", preview["approvalToken"].as_str().unwrap());
+    assert_eq!(fixture.terminal(&operation)["event"]["state"], "succeeded");
+    let remote = Command::new("git")
+        .arg("-C")
+        .arg(fixture._origin.path())
+        .args(["rev-parse", "refs/heads/feature"])
+        .output()
+        .unwrap();
+    assert_eq!(String::from_utf8(remote.stdout).unwrap().trim(), commit);
+    fixture.backend.send(json!({"type":"request","id":"final-state","method":"review.fix.state","params":{"target":fixture.target}}));
+    let final_state = fixture
+        .backend
+        .wait_for(|v| v["id"] == "final-state", Duration::from_secs(5));
+    assert_eq!(final_state["result"]["state"]["phase"], "completed");
+    assert_eq!(final_state["result"]["state"]["commitSha"], commit);
+}
+
+#[cfg(unix)]
+#[test]
+fn commit_approval_cannot_be_used_for_push_or_replayed_or_after_content_changes() {
+    let mut fixture = FixFixture::new(SUCCESSFUL_FIX_AGENT);
+    let preview = fixture.preview();
+    let operation = fixture.execute(preview["approvalToken"].as_str().unwrap());
+    assert_eq!(fixture.terminal(&operation)["event"]["state"], "succeeded");
+    let preview = fixture.mutation_preview("review.commit.preview", Some("fix: content"));
+    let operation =
+        fixture.execute_action("review.push", preview["approvalToken"].as_str().unwrap());
+    assert!(fixture.terminal(&operation)["event"]["error"]["message"]
+        .as_str()
+        .unwrap()
+        .contains("different action"));
+    let operation =
+        fixture.execute_action("review.commit", preview["approvalToken"].as_str().unwrap());
+    assert!(fixture.terminal(&operation)["event"]["error"]["message"]
+        .as_str()
+        .unwrap()
+        .contains("already used"));
+    let preview = fixture.mutation_preview("review.commit.preview", Some("fix: content"));
+    std::fs::write(
+        fixture.repo.path().join("tracked.txt"),
+        "changed after preview\n",
+    )
+    .unwrap();
+    let operation =
+        fixture.execute_action("review.commit", preview["approvalToken"].as_str().unwrap());
+    assert_eq!(
+        fixture.terminal(&operation)["event"]["error"]["code"],
+        "targetStale"
+    );
+    let count = Command::new("git")
+        .arg("-C")
+        .arg(fixture.repo.path())
+        .args(["rev-list", "--count", "HEAD"])
+        .output()
+        .unwrap();
+    assert_eq!(String::from_utf8(count.stdout).unwrap().trim(), "1");
+}
+
+#[cfg(unix)]
+#[test]
+fn commit_validates_paths_and_preserves_staged_work_that_predates_the_fix() {
+    let mut fixture = FixFixture::new(SUCCESSFUL_FIX_AGENT);
+    std::fs::write(
+        fixture.repo.path().join("unrelated.txt"),
+        "existing staged work\n",
+    )
+    .unwrap();
+    git(fixture.repo.path(), &["add", "unrelated.txt"]);
+    let preview = fixture.preview();
+    let operation = fixture.execute(preview["approvalToken"].as_str().unwrap());
+    assert_eq!(fixture.terminal(&operation)["event"]["state"], "succeeded");
+    let staged = Command::new("git")
+        .arg("-C")
+        .arg(fixture.repo.path())
+        .args(["diff", "--cached", "--name-only"])
+        .output()
+        .unwrap();
+    assert_eq!(
+        String::from_utf8(staged.stdout).unwrap().trim(),
+        "unrelated.txt"
+    );
+    let preview = fixture.mutation_preview("review.commit.preview", Some("fix: content"));
+    let operation =
+        fixture.execute_action("review.commit", preview["approvalToken"].as_str().unwrap());
+    assert_eq!(fixture.terminal(&operation)["event"]["state"], "succeeded");
+    let staged = Command::new("git")
+        .arg("-C")
+        .arg(fixture.repo.path())
+        .args(["diff", "--cached", "--name-only"])
+        .output()
+        .unwrap();
+    assert_eq!(
+        String::from_utf8(staged.stdout).unwrap().trim(),
+        "unrelated.txt"
+    );
+    let mut unsafe_fixture = FixFixture::new(
+        r#"#!/bin/sh
+printf 'fixed\n' > tracked.txt
+printf '%s\n' '{"structured_output":{"status":"success","summary":"Fixed content","commitMessage":"fix: content","tests":[],"filesTouched":["../outside.txt"]}}'
+"#,
+    );
+    let preview = unsafe_fixture.preview();
+    let operation = unsafe_fixture.execute(preview["approvalToken"].as_str().unwrap());
+    assert_eq!(
+        unsafe_fixture.terminal(&operation)["event"]["state"],
+        "succeeded"
+    );
+    unsafe_fixture.backend.send(json!({"type":"request","id":"unsafe-path","method":"review.commit.preview","params":{"target":unsafe_fixture.target,"message":"fix: content"}}));
+    let result = unsafe_fixture
+        .backend
+        .wait_for(|v| v["id"] == "unsafe-path", Duration::from_secs(10));
+    assert_eq!(result["ok"], false);
+    assert!(result["error"]["message"]
+        .as_str()
+        .unwrap()
+        .contains("approved clone"));
+}
+
+#[cfg(unix)]
+#[test]
+fn approved_commit_can_be_cancelled_while_hooks_run_without_auto_retry() {
+    use std::os::unix::fs::PermissionsExt;
+    let mut fixture = FixFixture::new(SUCCESSFUL_FIX_AGENT);
+    let preview = fixture.preview();
+    let operation = fixture.execute(preview["approvalToken"].as_str().unwrap());
+    assert_eq!(fixture.terminal(&operation)["event"]["state"], "succeeded");
+    let hook = fixture.repo.path().join(".git/hooks/pre-commit");
+    std::fs::write(
+        &hook,
+        "#!/bin/sh\nprintf started > .git/commit-hook-started\nsleep 60 &\nwait\n",
+    )
+    .unwrap();
+    std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let preview = fixture.mutation_preview("review.commit.preview", Some("fix: content"));
+    let operation =
+        fixture.execute_action("review.commit", preview["approvalToken"].as_str().unwrap());
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    while !fixture
+        .repo
+        .path()
+        .join(".git/commit-hook-started")
+        .exists()
+    {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "commit hook did not start"
+        );
+        thread::sleep(Duration::from_millis(20));
+    }
+    fixture.backend.send(json!({"type":"request","id":"cancel-commit","method":"operation.cancel","params":{"operationId":operation}}));
+    fixture.backend.wait_for(
+        |value| value["id"] == "cancel-commit",
+        Duration::from_secs(5),
+    );
+    assert_eq!(fixture.terminal(&operation)["event"]["state"], "cancelled");
+    let count = Command::new("git")
+        .arg("-C")
+        .arg(fixture.repo.path())
+        .args(["rev-list", "--count", "HEAD"])
+        .output()
+        .unwrap();
+    assert_eq!(String::from_utf8(count.stdout).unwrap().trim(), "1");
+    let operation =
+        fixture.execute_action("review.commit", preview["approvalToken"].as_str().unwrap());
+    assert!(fixture.terminal(&operation)["event"]["error"]["message"]
+        .as_str()
+        .unwrap()
+        .contains("already used"));
 }

@@ -137,6 +137,7 @@ export interface ShellSnapshot {
   fixPreview: FixPreview | null;
   fixPreviewLoading: boolean;
   fixState: FixState | null;
+  composerKind: "reply" | "commit";
   composing: boolean;
   composerText: string;
   diffExpanded: boolean;
@@ -177,6 +178,7 @@ const INITIAL: ShellSnapshot = {
   fixPreview: null,
   fixPreviewLoading: false,
   fixState: null,
+  composerKind: "reply",
   composing: false,
   composerText: "",
   diffExpanded: false,
@@ -493,6 +495,7 @@ export class ShellStore {
       fixPreview: null,
       fixPreviewLoading: false,
       fixState: null,
+      composerKind: "reply",
       composing: false,
       composerText: "",
       diff: null,
@@ -938,7 +941,11 @@ export class ShellStore {
       this.update({ notice: "Press Enter to load the selected thread before replying." });
       return;
     }
-    this.update({ composing: true });
+    this.update({
+      composing: true,
+      composerKind: "reply",
+      composerText: this.state.composerKind === "reply" ? this.state.composerText : "",
+    });
   }
 
   cancelReply(): void {
@@ -1009,27 +1016,106 @@ export class ShellStore {
   /// Start (or refresh) the authenticated browser diff session and surface its
   /// URL in the notice line.
   async previewFix(client: BackendClient): Promise<void> {
-    if (this.fixing || this.state.fixPreviewLoading) return;
+    await this.previewMutation(client, "fix");
+  }
+
+  private loadedConversationSelected(): boolean {
+    return (
+      this.state.focus !== "threads" ||
+      this.state.threads[this.state.selectedThread]?.latestRunId ===
+        this.state.picker[this.state.selectedPicker]?.runId
+    );
+  }
+
+  async beginCommit(client: BackendClient): Promise<void> {
+    if (!this.loadedConversationSelected()) {
+      this.update({ notice: "Press Enter to load the selected thread before committing." });
+      return;
+    }
+    const target = this.activeTarget();
+    if (
+      !target ||
+      (this.state.operation && ["accepted", "running"].includes(this.state.operation.state))
+    )
+      return;
+    const generation = this.state.generation;
+    try {
+      const result = await client.fixState(target);
+      if (generation !== this.state.generation) return;
+      if (result?.phase !== "readyToCommit" || result.status !== "succeeded") {
+        this.update({ notice: "Complete a successful fix before committing." });
+        return;
+      }
+      this.update({
+        fixState: result,
+        composerKind: "commit",
+        composing: true,
+        composerText:
+          this.state.composerKind === "commit" && this.state.composerText
+            ? this.state.composerText
+            : (result.suggestedCommitMessage ?? ""),
+      });
+    } catch (error) {
+      if (generation === this.state.generation) this.update({ error: message(error) });
+    }
+  }
+
+  async previewCommit(client: BackendClient): Promise<void> {
+    const text = this.state.composerText.trim();
+    if (!text || Array.from(text).length > 4096) {
+      this.update({ notice: "Enter a commit message between 1 and 4096 characters." });
+      return;
+    }
+    const generation = this.state.generation;
+    const approved = await this.previewMutation(client, "commit", text);
+    if (approved && generation === this.state.generation) this.update({ composing: false });
+  }
+
+  async previewPush(client: BackendClient): Promise<void> {
+    await this.previewMutation(client, "push");
+  }
+
+  private async previewMutation(
+    client: BackendClient,
+    action: "fix" | "commit" | "push",
+    commitMessage?: string,
+  ): Promise<boolean> {
+    if (this.fixing || this.state.fixPreviewLoading) return false;
     const operation = this.state.operation;
     if (operation && ["accepted", "running"].includes(operation.state)) {
       this.update({ notice: "Wait for the active operation before requesting a fix." });
-      return;
+      return false;
+    }
+    if (!this.loadedConversationSelected()) {
+      this.update({
+        notice: "Press Enter to load the selected thread before changing the checkout.",
+      });
+      return false;
     }
     const target = this.activeTarget();
     if (target?.kind !== "provider" || !target.prId || !target.runId) {
       this.update({ notice: "Select a saved pull-request review before requesting a fix." });
-      return;
+      return false;
     }
     const generation = this.state.generation;
     this.update({ fixPreview: null, fixPreviewLoading: true, error: null });
     try {
-      const preview = await client.fixPreview(target);
-      if (generation === this.state.generation) this.update({ fixPreview: preview });
+      const preview =
+        action === "commit"
+          ? await client.commitPreview(target, commitMessage ?? "")
+          : action === "push"
+            ? await client.pushPreview(target)
+            : await client.fixPreview(target);
+      if (generation === this.state.generation) {
+        this.update({ fixPreview: preview });
+        return true;
+      }
     } catch (error) {
       if (generation === this.state.generation) this.update({ error: message(error) });
     } finally {
       if (generation === this.state.generation) this.update({ fixPreviewLoading: false });
     }
+    return false;
   }
 
   dismissFix(): void {
@@ -1044,7 +1130,12 @@ export class ShellStore {
     // Consume the UI approval immediately. A timeout never triggers a retry.
     this.update({ fixPreview: null, fixState: null });
     try {
-      const result = await client.reviewFix(preview.target, preview.approvalToken);
+      const result =
+        preview.action === "commit"
+          ? await client.reviewCommit(preview.target, preview.approvalToken)
+          : preview.action === "push"
+            ? await client.reviewPush(preview.target, preview.approvalToken)
+            : await client.reviewFix(preview.target, preview.approvalToken);
       if (generation !== this.state.generation) return;
       this.fixOperation = { id: result.operationId, generation, target: preview.target };
       this.update({
@@ -1052,7 +1143,7 @@ export class ShellStore {
           id: result.operationId,
           state: result.state,
           sequence: result.sequence ?? 0,
-          logs: [{ id: this.nextLogId++, text: "Approved fix accepted." }],
+          logs: [{ id: this.nextLogId++, text: `Approved ${preview.action ?? "fix"} accepted.` }],
           targetLabel: targetLabel(preview.target),
           reply: false,
         },
@@ -1082,7 +1173,7 @@ export class ShellStore {
         this.update({
           fixState: state,
           notice:
-            "Inspect the checkout and retained stashes. Fixes do not commit or push automatically.",
+            "Inspect the operation result. Further commits, pushes and publication require separate approval.",
         });
       }
     } catch (error) {

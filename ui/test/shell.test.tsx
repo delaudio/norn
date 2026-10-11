@@ -211,3 +211,48 @@ test("fix confirmation intercepts shortcuts and requires a fresh explicit approv
     renderer.renderer.destroy();
   }
 });
+
+test("commit composer opens a preview and requires y before executing", async () => {
+  const renderer = await createTestRenderer({ width: 100, height: 30 });
+  const client = new BackendClient(
+    new FakeBackendTransport({
+      repositories,
+      targets: [
+        {
+          provider: "github",
+          workspace: "acme",
+          repo: "payments",
+          prId: 9,
+          runId: "run-fix",
+          title: "Fix",
+          status: "succeeded",
+        },
+      ],
+    }),
+  );
+  const store = new ShellStore();
+  await store.connect(client);
+  await store.selectPicker(2);
+  const ui = mountApp(renderer.renderer, store, client, () => {});
+  try {
+    renderer.mockInput.pressKey("c");
+    await Bun.sleep(5);
+    await renderer.renderOnce();
+    expect(renderer.captureCharFrame()).toContain("Commit › fix: guard null");
+    renderer.mockInput.pressKey("r");
+    expect(store.getSnapshot().composerText).toBe("fix: guard nullr");
+    renderer.mockInput.pressEnter();
+    await Bun.sleep(5);
+    await renderer.renderOnce();
+    expect(renderer.captureCharFrame()).toContain("Approve commit?");
+    expect(store.getSnapshot().operation).toBeNull();
+    renderer.mockInput.pressKey("p");
+    expect(store.getSnapshot().fixPreview?.action).toBe("commit");
+    renderer.mockInput.pressKey("y");
+    await Bun.sleep(5);
+    expect(store.getSnapshot().operation?.id).toContain("fake-commit");
+  } finally {
+    ui.unmount();
+    renderer.renderer.destroy();
+  }
+});

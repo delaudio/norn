@@ -25,7 +25,11 @@ export function FixPanel({
     >
       <text fg={theme.primary} height={1} wrapMode="none" truncate>
         {preview
-          ? "Approve filesystem changes? · y approve · Esc/n dismiss"
+          ? preview.action === "commit"
+            ? "Approve commit? · y approve · Esc/n dismiss"
+            : preview.action === "push"
+              ? "Approve push? · y approve · Esc/n dismiss"
+              : "Approve filesystem changes? · y approve · Esc/n dismiss"
           : loading
             ? "Inspecting fix effects…"
             : `Fix · ${result?.status} · ${result?.phase}`}
@@ -38,7 +42,7 @@ export function FixPanel({
             >{`${preview.repoPath} · ${preview.currentBranch} → ${preview.sourceBranch}`}</text>
             <text
               fg={theme.muted}
-            >{`${preview.dirtyFiles.length} local edit(s) · approval expires in ${preview.expiresInSeconds}s`}</text>
+            >{`${preview.dirtyFileCount ?? preview.dirtyFiles.length} local edit(s) · approval expires in ${preview.expiresInSeconds}s`}</text>
             {preview.effects.map((effect) => (
               <text key={effect} fg={theme.text}>
                 {effect}
@@ -48,7 +52,9 @@ export function FixPanel({
         ) : result ? (
           <>
             <text fg={theme.text}>
-              {result.summary ?? "Inspect partial edits in the checkout."}
+              {result.commitSha
+                ? `Commit: ${result.commitSha}`
+                : (result.summary ?? "Inspect partial edits in the checkout.")}
             </text>
             <text
               fg={theme.muted}

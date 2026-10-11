@@ -56,7 +56,8 @@ function useShellInput(
       if (key.name === "escape") {
         store.cancelReply();
       } else if (key.name === "return") {
-        void store.submitReply(client);
+        if (store.getSnapshot().composerKind === "commit") void store.previewCommit(client);
+        else void store.submitReply(client);
       } else if (key.name === "backspace") {
         store.backspaceReply();
       } else if (key.sequence.length > 0 && key.sequence >= " ") {
@@ -100,6 +101,10 @@ function useShellInput(
       store.toggleDiffMode();
     } else if (key.name === "e") {
       store.toggleDiffExpanded();
+    } else if (key.name === "c") {
+      void store.beginCommit(client);
+    } else if (key.name === "p") {
+      void store.previewPush(client);
     } else if (key.name === "a") {
       void store.previewFix(client);
     } else if (key.name === "r") {
@@ -821,7 +826,7 @@ export function Shell({ store, client, quit }: ShellProps) {
       {state.composing ? (
         <box height={1} flexShrink={0} paddingX={1} backgroundColor={theme.panel}>
           <text fg={theme.primary} wrapMode="none" truncate>
-            {`Reply › ${state.composerText}`}
+            {`${state.composerKind === "commit" ? "Commit" : "Reply"} › ${state.composerText}`}
           </text>
         </box>
       ) : null}
@@ -831,7 +836,7 @@ export function Shell({ store, client, quit }: ShellProps) {
           {state.fixPreview
             ? "y approve · Esc/n dismiss · ↑/↓ scroll effects"
             : wide
-              ? "j/k move  s split  e expand  Tab pane  a fix  r reply  t threads  v chat  f filter  g group  x cancel  q quit"
+              ? "j/k move  s split  e expand  Tab pane  a fix  c commit  p push  r reply  t threads  v chat  f filter  g group  x cancel  q quit"
               : "j/k  ←/→  s  e  Tab  q"}
         </text>
       </box>

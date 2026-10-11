@@ -34,9 +34,10 @@ use crate::protocol::{
 use crate::services::review::{
     cancel_inline_review_native, cancel_local_inline_review_native, get_ai_review_fix_state_native,
     get_ai_review_run_state_native, get_local_ai_review_run_state_native,
-    reply_inline_review_native, start_ai_review_fix_native, start_inline_review_native,
-    start_local_inline_review_native, AiReviewFixStatus, AiReviewFixStore, AiReviewRunStatus,
-    AiReviewRunStore,
+    reply_inline_review_native, start_ai_review_commit_native, start_ai_review_fix_native,
+    start_ai_review_push_native, start_inline_review_native, start_local_inline_review_native,
+    validate_fix_commit_paths, AiReviewFixPhase, AiReviewFixStatus, AiReviewFixStore,
+    AiReviewRunStatus, AiReviewRunStore,
 };
 use crate::services::review_prompt::{build_review_payload, resolve_review_prompt};
 
@@ -304,6 +305,7 @@ fn read_loop(reader: &mut impl BufRead, backend: &Backend) {
 /// Returns true when the backend should shut down.
 fn dispatch(request: Request, backend: &Backend) -> bool {
     let id = request.id().to_string();
+    let method = request.method();
     match request {
         Request::RepositoryStatus { .. } => {
             backend.respond(&id, json!({ "repos": repositories() }));
@@ -370,36 +372,27 @@ fn dispatch(request: Request, backend: &Backend) -> bool {
             }
             false
         }
-        Request::ReviewFixPreview { params, .. } => {
-            if backend
-                .active_previews
-                .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |current| {
-                    (current < MAX_CONCURRENT_PREVIEWS).then_some(current + 1)
-                })
-                .is_err()
-            {
-                backend.fail(
-                    &id,
-                    ProtocolError::new(ProtocolErrorCode::Conflict, "too many previews"),
-                );
-                return false;
-            }
-            let control = backend.control.clone();
-            let approvals = backend.fix_approvals.clone();
-            let counter = ActiveCounter(backend.active_previews.clone());
-            thread::spawn(move || {
-                let result = fix_preview(&params.target, &approvals);
-                let _ = control.send(ServerMessage::Response(Response {
-                    id,
-                    ok: result.is_ok(),
-                    result: result.as_ref().ok().cloned(),
-                    error: result.err(),
-                }));
-                counter.decrement();
-            });
+        Request::ReviewCommitPreview { params, .. } => {
+            backend.preview_mutation(
+                id,
+                params.target,
+                ApprovedAction::Commit,
+                Some(params.message),
+            );
             false
         }
-        Request::ReviewFix { params, .. } => {
+        Request::ReviewPushPreview { params, .. } | Request::ReviewFixPreview { params, .. } => {
+            let action = if method == "review.push.preview" {
+                ApprovedAction::Push
+            } else {
+                ApprovedAction::Fix
+            };
+            backend.preview_mutation(id, params.target, action, None);
+            false
+        }
+        Request::ReviewCommit { params, .. }
+        | Request::ReviewPush { params, .. }
+        | Request::ReviewFix { params, .. } => {
             if backend
                 .active_operations
                 .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |current| {
@@ -413,7 +406,12 @@ fn dispatch(request: Request, backend: &Backend) -> bool {
                 );
                 return false;
             }
-            backend.start_fix(&id, params);
+            let action = match method {
+                "review.commit" => ApprovedAction::Commit,
+                "review.push" => ApprovedAction::Push,
+                _ => ApprovedAction::Fix,
+            };
+            backend.start_fix(&id, params, action);
             false
         }
         Request::ReviewReply { params, .. } => {
@@ -2100,7 +2098,47 @@ impl Backend {
         });
     }
 
-    fn start_fix(&self, request_id: &str, params: protocol::ReviewFixParams) {
+    fn preview_mutation(
+        &self,
+        id: String,
+        target: TargetIdentity,
+        action: ApprovedAction,
+        message: Option<String>,
+    ) {
+        if self
+            .active_previews
+            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |current| {
+                (current < MAX_CONCURRENT_PREVIEWS).then_some(current + 1)
+            })
+            .is_err()
+        {
+            self.fail(
+                &id,
+                ProtocolError::new(ProtocolErrorCode::Conflict, "too many previews"),
+            );
+            return;
+        }
+        let control = self.control.clone();
+        let approvals = self.fix_approvals.clone();
+        let counter = ActiveCounter(self.active_previews.clone());
+        thread::spawn(move || {
+            let result = mutation_preview(&target, action, message, &approvals);
+            let _ = control.send(ServerMessage::Response(Response {
+                id,
+                ok: result.is_ok(),
+                result: result.as_ref().ok().cloned(),
+                error: result.err(),
+            }));
+            counter.decrement();
+        });
+    }
+
+    fn start_fix(
+        &self,
+        request_id: &str,
+        params: protocol::ReviewFixParams,
+        action: ApprovedAction,
+    ) {
         let operation_id = format!("op-{}", self.next_operation.fetch_add(1, Ordering::SeqCst));
         let cancel = Arc::new(AtomicBool::new(false));
         {
@@ -2132,6 +2170,7 @@ impl Backend {
                 &params,
                 cancel,
                 &approvals,
+                action,
             );
             counter.decrement();
         });
@@ -2652,8 +2691,19 @@ fn start_inline_reply_session(
     })
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "lowercase")]
+enum ApprovedAction {
+    Fix,
+    Commit,
+    Push,
+}
+
 #[derive(Clone, Debug)]
 struct FixApproval {
+    action: ApprovedAction,
+    message: Option<String>,
+    files: Vec<String>,
     target: TargetIdentity,
     repo_path: PathBuf,
     snapshot: String,
@@ -2692,6 +2742,17 @@ fn fix_context(target: &TargetIdentity) -> Result<FixApproval, ProtocolError> {
         .iter()
         .find(|run| run.id == *run_id)
         .ok_or_else(|| fix_error("The selected review no longer exists."))?;
+    let expected_provider = match provider {
+        ProviderKind::Github => crate::services::review::ReviewProvider::Github,
+        ProviderKind::Bitbucket => crate::services::review::ReviewProvider::Bitbucket,
+    };
+    if run.provider != expected_provider
+        || run.workspace != *workspace
+        || run.repo != *repo
+        || run.pr_id != *pr_id
+    {
+        return Err(fix_error("The saved review belongs to a different target."));
+    }
     let thread = store
         .threads
         .iter()
@@ -2707,7 +2768,6 @@ fn fix_context(target: &TargetIdentity) -> Result<FixApproval, ProtocolError> {
             return Err(fix_error("The saved review has an invalid branch."));
         }
     }
-    let _ = provider;
     let snapshot =
         crate::services::review_fix::checkout_fingerprint(&repo_path).map_err(fix_error)?;
     let (base, head) = reviewed_range(target)?
@@ -2730,6 +2790,9 @@ fn fix_context(target: &TargetIdentity) -> Result<FixApproval, ProtocolError> {
         return Err(fix_error("The conversation is too large for a fix."));
     }
     Ok(FixApproval {
+        action: ApprovedAction::Fix,
+        message: None,
+        files: Vec::new(),
         target: target.clone(),
         repo_path,
         snapshot,
@@ -2741,26 +2804,66 @@ fn fix_context(target: &TargetIdentity) -> Result<FixApproval, ProtocolError> {
     })
 }
 
-fn fix_preview(
+fn mutation_preview(
     target: &TargetIdentity,
+    action: ApprovedAction,
+    message: Option<String>,
     approvals: &Mutex<HashMap<String, FixApproval>>,
 ) -> Result<serde_json::Value, ProtocolError> {
-    let approval = fix_context(target)?;
+    let mut approval = fix_context(target)?;
+    approval.action = action;
+    approval.message = message;
+    let current_branch = git(&approval.repo_path, &["branch", "--show-current"])
+        .ok_or_else(|| fix_error("Cannot inspect the current branch."))?;
+    let mut files = Vec::new();
+    let mut commit_sha = None;
+    let effects = match action {
+        ApprovedAction::Fix => vec!["Stash and restore existing local changes if needed.".to_string(),
+            "Check out the review source branch.".to_string(), "Fetch from origin and fast-forward the source branch.".to_string(),
+            "Run Claude with file-edit permissions using the saved conversation.".to_string(),
+            "Leave edits for inspection; committing, pushing and publication require separate actions.".to_string()],
+        ApprovedAction::Commit | ApprovedAction::Push => {
+            let TargetIdentity::Provider { workspace, repo, pr_id: Some(pr_id), .. } = target else { return Err(fix_error("Select a saved pull-request review.")); };
+            let state = get_ai_review_fix_state_native(fix_store(), workspace, repo, *pr_id, Some(&approval.thread_id))
+                .ok_or_else(|| fix_error("No fix session exists for the selected conversation."))?;
+            if state.status != AiReviewFixStatus::Succeeded || current_branch.trim() != approval.source ||
+                state.repo_path.as_deref().and_then(|path| Path::new(path).canonicalize().ok()).as_ref() != Some(&approval.repo_path) {
+                return Err(fix_error("The fix session or current branch changed."));
+            }
+            if action == ApprovedAction::Commit {
+                if state.phase != AiReviewFixPhase::ReadyToCommit { return Err(fix_error("Complete a fix before committing.")); }
+                let message = approval.message.as_ref().ok_or_else(|| fix_error("A commit message is required."))?;
+                if message.trim().is_empty() || message.chars().count() > 4096 { return Err(fix_error("A commit message between 1 and 4096 characters is required.")); }
+                validate_fix_commit_paths(&approval.repo_path, &state.files_touched).map_err(fix_error)?;
+                files = state.files_touched;
+                approval.files = files.clone();
+                vec![format!("Stage and commit only these files: {}", files.join(", ")),
+                    format!("Commit message: {message}"), "Unrelated staged files remain staged and are excluded from this commit.".to_string(),
+                    "Git commit hooks may run. This action does not push or publish review comments.".to_string()]
+            } else {
+                if state.phase != AiReviewFixPhase::ReadyToPush || state.commit_sha.is_none() ||
+                    git(&approval.repo_path, &["rev-parse", "HEAD"]).map(|head| head.trim().to_string()) != state.commit_sha {
+                    return Err(fix_error("Create a commit and keep its source branch and HEAD unchanged before pushing."));
+                }
+                commit_sha = state.commit_sha;
+                vec![format!("Push commit {} from {} to origin/{}.", commit_sha.as_deref().unwrap_or(""), approval.source, approval.source),
+                    "Use an explicit branch refspec without force push.".to_string(),
+                    "Git pre-push hooks may run. No review comments are published.".to_string(),
+                    "If interrupted, inspect the remote before trying again; a failed response does not prove nothing was pushed.".to_string()]
+            }
+        }
+    };
     let mut random = [0u8; 32];
     getrandom::getrandom(&mut random)
         .map_err(|_| fix_error("Could not create an approval token."))?;
     let token = hex::encode(random);
-    let current_branch =
-        git(&approval.repo_path, &["branch", "--show-current"]).unwrap_or_default();
     let dirty = git(&approval.repo_path, &["status", "--porcelain=v1"])
         .ok_or_else(|| fix_error("Could not inspect local changes."))?;
-    let result = json!({ "target": target, "approvalToken": token, "expiresInSeconds": 300,
-        "repoPath": approval.repo_path, "currentBranch": current_branch.trim(), "sourceBranch": approval.source,
-        "destinationBranch": approval.destination, "dirtyFiles": dirty.lines().take(100).collect::<Vec<_>>(),
-        "effects": ["Stash and restore existing local changes if needed.", "Check out the review source branch.",
-            "Fetch from origin and fast-forward the source branch.", "Run Claude with file-edit permissions using the saved conversation.",
-            "Leave edits for inspection; committing, pushing and publication require separate actions."],
-        "snapshotSha256": approval.snapshot });
+    let result = json!({"target":target,"action":action,"approvalToken":token,"expiresInSeconds":300,
+        "repoPath":approval.repo_path,"currentBranch":current_branch.trim(),"sourceBranch":approval.source,
+        "destinationBranch":approval.destination,"dirtyFiles":dirty.lines().take(50).map(|line| line.chars().take(512).collect::<String>()).collect::<Vec<_>>(),
+        "dirtyFileCount":dirty.lines().count(),"dirtyFilesTruncated":dirty.lines().count() > 50 || dirty.lines().any(|line| line.chars().count() > 512),
+        "effects":effects,"filesToCommit":files,"commitMessage":approval.message,"commitSha":commit_sha,"snapshotSha256":approval.snapshot});
     let mut approvals = approvals
         .lock()
         .map_err(|_| fix_error("Approval storage is unavailable."))?;
@@ -2777,12 +2880,18 @@ fn fix_preview(
 fn consume_fix_approval(
     params: &protocol::ReviewFixParams,
     approvals: &Mutex<HashMap<String, FixApproval>>,
+    action: ApprovedAction,
 ) -> Result<FixApproval, ProtocolError> {
     let approval = approvals
         .lock()
         .map_err(|_| fix_error("Approval storage is unavailable."))?
         .remove(&params.approval_token)
         .ok_or_else(|| fix_error("Approval is missing or already used. Request a new preview."))?;
+    if approval.action != action {
+        return Err(fix_error(
+            "Approval belongs to a different action. Request a new preview.",
+        ));
+    }
     if approval.target != params.target || approval.expires <= Instant::now() {
         return Err(fix_error(
             "Approval expired or belongs to a different review. Request a new preview.",
@@ -2824,7 +2933,7 @@ fn fix_state_response(target: &TargetIdentity) -> Result<serde_json::Value, Prot
         get_ai_review_fix_state_native(fix_store(), workspace, repo, *pr_id, Some(thread_id))
     });
     Ok(json!({ "target": target, "state": state.map(|state| json!({
-        "status": state.status, "phase": state.phase,
+        "status": state.status, "phase": state.phase, "commitSha": state.commit_sha,
         "summary": state.summary.map(|s| s.chars().take(4096).collect::<String>()),
         "suggestedCommitMessage": state.suggested_commit_message.map(|s| s.chars().take(4096).collect::<String>()),
         "filesTouched": state.files_touched.iter().take(100).map(|s| s.chars().take(1024).collect::<String>()).collect::<Vec<_>>(),
@@ -2844,10 +2953,11 @@ fn run_fix_operation(
     params: &protocol::ReviewFixParams,
     cancel: Arc<AtomicBool>,
     approvals: &Mutex<HashMap<String, FixApproval>>,
+    action: ApprovedAction,
 ) {
     let target = &params.target;
     let start = || -> Result<FixApproval, ProtocolError> {
-        let approval = consume_fix_approval(params, approvals)?;
+        let approval = consume_fix_approval(params, approvals, action)?;
         if cancel.load(Ordering::Acquire) {
             return Err(ProtocolError::new(
                 ProtocolErrorCode::Cancelled,
@@ -2872,19 +2982,46 @@ fn run_fix_operation(
     else {
         return;
     };
-    if let Err(error) = start_ai_review_fix_native(
-        fix_store(),
-        workspace.clone(),
-        repo.clone(),
-        *pr_id,
-        Some(approval.thread_id.clone()),
-        approval.repo_path,
-        approval.payload,
-        approval.source,
-        approval.destination,
-        cancel.clone(),
-        Some(approval.snapshot),
-    ) {
+    let started = match approval.action {
+        ApprovedAction::Fix => start_ai_review_fix_native(
+            fix_store(),
+            workspace.clone(),
+            repo.clone(),
+            *pr_id,
+            Some(approval.thread_id.clone()),
+            approval.repo_path,
+            approval.payload,
+            approval.source,
+            approval.destination,
+            cancel.clone(),
+            Some(approval.snapshot),
+        ),
+        ApprovedAction::Commit => start_ai_review_commit_native(
+            fix_store(),
+            workspace,
+            repo,
+            *pr_id,
+            &approval.thread_id,
+            approval.message.unwrap_or_default(),
+            approval.repo_path,
+            approval.source,
+            approval.snapshot,
+            cancel.clone(),
+            approval.files,
+        ),
+        ApprovedAction::Push => start_ai_review_push_native(
+            fix_store(),
+            workspace,
+            repo,
+            *pr_id,
+            &approval.thread_id,
+            approval.repo_path,
+            approval.source,
+            approval.snapshot,
+            cancel.clone(),
+        ),
+    };
+    if let Err(error) = started {
         emit_failed(
             writer,
             operations,
@@ -3397,6 +3534,9 @@ mod tests {
             local_snapshot_sha256: "a".repeat(64),
         };
         let approval = FixApproval {
+            action: ApprovedAction::Fix,
+            message: None,
+            files: Vec::new(),
             target: target.clone(),
             repo_path: PathBuf::from("unused"),
             snapshot: "snapshot".to_string(),
@@ -3411,14 +3551,18 @@ mod tests {
             target: target.clone(),
             approval_token: "a".repeat(64),
         };
-        assert!(consume_fix_approval(&params, &approvals)
-            .unwrap_err()
-            .message
-            .contains("expired"));
-        assert!(consume_fix_approval(&params, &approvals)
-            .unwrap_err()
-            .message
-            .contains("already used"));
+        assert!(
+            consume_fix_approval(&params, &approvals, ApprovedAction::Fix)
+                .unwrap_err()
+                .message
+                .contains("expired")
+        );
+        assert!(
+            consume_fix_approval(&params, &approvals, ApprovedAction::Fix)
+                .unwrap_err()
+                .message
+                .contains("already used")
+        );
         let mut approval = approval;
         approval.expires = Instant::now() + Duration::from_secs(300);
         approvals.lock().unwrap().insert("a".repeat(64), approval);
@@ -3428,10 +3572,12 @@ mod tests {
             },
             ..params
         };
-        assert!(consume_fix_approval(&other, &approvals)
-            .unwrap_err()
-            .message
-            .contains("different review"));
+        assert!(
+            consume_fix_approval(&other, &approvals, ApprovedAction::Fix)
+                .unwrap_err()
+                .message
+                .contains("different review")
+        );
         assert!(approvals.lock().unwrap().is_empty());
     }
 

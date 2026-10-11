@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::{BufRead, BufReader};
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::process::{Child, Command, ExitStatus, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -4416,7 +4416,7 @@ fn run_fix_pipeline(
             &key,
             "Re-applying the stashed local changes before running Claude.",
         );
-        run_git(&["stash", "apply", stash])?;
+        run_git(&["stash", "apply", "--index", stash])?;
         run_git(&["stash", "drop", stash])?;
     }
 
@@ -4559,26 +4559,17 @@ fn run_commit_pipeline(
     })?;
     let repo_path = PathBuf::from(repo_path_str);
 
-    append_log(&store, &key, "Staging Claude's changes.");
-    if files_to_stage.is_empty() {
-        run_git_checked(&repo_path, &["add", "-A"])?;
-    } else {
-        let mut add = git_command(&repo_path);
-        add.arg("add").arg("--");
-        for path in &files_to_stage {
-            add.arg(path);
-        }
-        let output = add
-            .output()
-            .map_err(|e| format!("failed to stage files for commit: {e}"))?;
-        if !output.status.success() {
-            return Err(format!(
-                "git add failed with code {:?}\nstderr: {}\nstdout: {}",
-                output.status.code(),
-                String::from_utf8_lossy(&output.stderr).trim(),
-                String::from_utf8_lossy(&output.stdout).trim()
-            ));
-        }
+    validate_fix_commit_paths(&repo_path, &files_to_stage)?;
+    check_fix_cancellation(&store, &key)?;
+    append_log(&store, &key, "Staging the approved fix files.");
+    let mut add = git_command(&repo_path);
+    add.env("GIT_LITERAL_PATHSPECS", "1")
+        .arg("add")
+        .arg("--")
+        .args(&files_to_stage);
+    let output = run_logged_command(add, &store, &key, "git add")?;
+    if output.code != Some(0) {
+        return Err(format!("Failed to stage approved files: {}", output.stderr));
     }
 
     if git_status_lines(&repo_path)?.is_empty() {
@@ -4591,7 +4582,10 @@ fn run_commit_pipeline(
         "Creating commit. Pre-commit hooks may be running…",
     );
     let mut commit = git_command(&repo_path);
-    commit.arg("commit").arg("-m").arg(&message);
+    commit
+        .env("GIT_LITERAL_PATHSPECS", "1")
+        .args(["commit", "--only", "-m", &message, "--"])
+        .args(&files_to_stage);
     let output = run_logged_command(commit, &store, &key, "git commit")?;
     if output.code != Some(0) {
         return Err(format!(
@@ -4647,17 +4641,19 @@ fn run_push_pipeline(store: AiReviewFixStore, key: String) -> Result<(), String>
         &key,
         "Pushing the branch. Pre-push hooks may be running…",
     );
-    let has_upstream = run_git_capture(
-        &repo_path,
-        &["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"],
-    )?
-    .code
-        == Some(0);
-    let mut push = git_command(&repo_path);
-    push.arg("push");
-    if !has_upstream {
-        push.arg("-u").arg("origin").arg(&source_branch);
+    if run_git_checked(&repo_path, &["branch", "--show-current"])? != source_branch
+        || run_git_checked(&repo_path, &["rev-parse", "HEAD"])? != commit_sha
+    {
+        return Err(
+            "The source branch or committed HEAD changed; request a new preview.".to_string(),
+        );
     }
+    let mut push = git_command(&repo_path);
+    push.args([
+        "push",
+        "origin",
+        &format!("{source_branch}:refs/heads/{source_branch}"),
+    ]);
     let output = run_logged_command(push, &store, &key, "git push")?;
     if output.code != Some(0) {
         return Err(format!(
@@ -6841,6 +6837,164 @@ pub fn update_ai_review_job_status(
 #[tauri::command]
 pub fn list_ai_review_jobs(limit: Option<u32>) -> Result<Vec<review_storage::ReviewJob>, String> {
     review_storage::list_recent_review_jobs(limit.unwrap_or(20).clamp(1, 100))
+}
+
+pub(crate) fn validate_fix_commit_paths(repo_path: &Path, paths: &[String]) -> Result<(), String> {
+    if paths.is_empty()
+        || paths.len() > 100
+        || paths.iter().map(String::len).sum::<usize>() > 32 * 1024
+    {
+        return Err("A bounded set of fix files is required to commit.".to_string());
+    }
+    let root = repo_path
+        .canonicalize()
+        .map_err(|error| error.to_string())?;
+    for value in paths {
+        let relative = Path::new(value);
+        if value.is_empty()
+            || relative
+                .components()
+                .any(|component| !matches!(component, Component::Normal(_)))
+        {
+            return Err("Fix file paths must remain within the approved clone.".to_string());
+        }
+        let full = root.join(relative);
+        let mut existing = full.clone();
+        while !existing.exists() {
+            if !existing.pop() {
+                return Err("Invalid fix file path.".to_string());
+            }
+        }
+        if !existing
+            .canonicalize()
+            .map_err(|error| error.to_string())?
+            .starts_with(&root)
+            || fs::symlink_metadata(&full).is_ok_and(|metadata| metadata.file_type().is_symlink())
+        {
+            return Err(
+                "Fix file paths must not traverse links outside the approved clone.".to_string(),
+            );
+        }
+    }
+    Ok(())
+}
+
+/// Extracted commit/push seam; the operation worker rechecks the approved clone
+/// and content before touching the index or remote. The same pipeline serves Tauri.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn start_ai_review_commit_native(
+    store: &AiReviewFixStore,
+    workspace: &str,
+    repo: &str,
+    id: u32,
+    thread_id: &str,
+    message: String,
+    repo_path: PathBuf,
+    source_branch: String,
+    expected: String,
+    cancellation: Arc<AtomicBool>,
+    approved_files: Vec<String>,
+) -> Result<AiReviewFixState, String> {
+    if message.trim().is_empty() || message.chars().count() > 4096 {
+        return Err("A commit message between 1 and 4096 characters is required.".to_string());
+    }
+    let key = fix_key(workspace, repo, id, Some(thread_id));
+    let initial = begin_session_step(store, &key, AiReviewFixPhase::Committing, |session| {
+        if session.public.status != AiReviewFixStatus::Succeeded
+            || session.public.phase != AiReviewFixPhase::ReadyToCommit
+        {
+            return Err("Complete a successful fix before committing.".to_string());
+        }
+        validate_native_mutation_session(session, &repo_path, &source_branch)?;
+        if session.public.files_touched != approved_files {
+            return Err("The approved fix file set changed.".to_string());
+        }
+        validate_fix_commit_paths(&repo_path, &approved_files)?;
+        session.public.suggested_commit_message = Some(message.clone());
+        session.cancellation = cancellation;
+        Ok(())
+    })?;
+    let worker_store = store.clone();
+    thread::spawn(move || {
+        let result = (|| {
+            check_fix_cancellation(&worker_store, &key)?;
+            if run_git_checked(&repo_path, &["branch", "--show-current"])? != source_branch
+                || crate::services::review_fix::checkout_fingerprint(&repo_path)? != expected
+            {
+                return Err("The checkout changed before committing.".to_string());
+            }
+            run_commit_pipeline(worker_store.clone(), key.clone(), message)
+        })();
+        if let Err(error) = result {
+            set_fix_failed(
+                &worker_store,
+                &key,
+                format!("{error} Inspect the index and commit history before retrying."),
+            );
+        }
+    });
+    Ok(initial)
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn start_ai_review_push_native(
+    store: &AiReviewFixStore,
+    workspace: &str,
+    repo: &str,
+    id: u32,
+    thread_id: &str,
+    repo_path: PathBuf,
+    source_branch: String,
+    expected: String,
+    cancellation: Arc<AtomicBool>,
+) -> Result<AiReviewFixState, String> {
+    let key = fix_key(workspace, repo, id, Some(thread_id));
+    let initial = begin_session_step(store, &key, AiReviewFixPhase::Pushing, |session| {
+        if session.public.status != AiReviewFixStatus::Succeeded
+            || session.public.phase != AiReviewFixPhase::ReadyToPush
+            || session.public.commit_sha.is_none()
+        {
+            return Err("Create a successful commit before pushing.".to_string());
+        }
+        validate_native_mutation_session(session, &repo_path, &source_branch)?;
+        session.cancellation = cancellation;
+        Ok(())
+    })?;
+    let worker_store = store.clone();
+    thread::spawn(move || {
+        let result = (|| {
+            check_fix_cancellation(&worker_store, &key)?;
+            if run_git_checked(&repo_path, &["branch", "--show-current"])? != source_branch
+                || crate::services::review_fix::checkout_fingerprint(&repo_path)? != expected
+            {
+                return Err("The checkout changed before pushing.".to_string());
+            }
+            run_push_pipeline(worker_store.clone(), key.clone())
+        })();
+        if let Err(error) = result {
+            set_fix_failed(&worker_store, &key, format!("{error} The remote may have changed. Inspect local and remote branches before retrying; no automatic retry will occur."));
+        }
+    });
+    Ok(initial)
+}
+
+fn validate_native_mutation_session(
+    session: &FixSessionRecord,
+    repo_path: &Path,
+    source: &str,
+) -> Result<(), String> {
+    if session
+        .public
+        .repo_path
+        .as_deref()
+        .and_then(|path| Path::new(path).canonicalize().ok())
+        .as_deref()
+        != Some(repo_path)
+        || session.source_branch != source
+    {
+        return Err("The fix session's clone or source branch changed.".to_string());
+    }
+    Ok(())
 }
 
 /// Start the existing pipeline on a caller-approved canonical clone. The

@@ -59,11 +59,31 @@ pub(crate) fn checkout_fingerprint(path: &Path) -> Result<String, String> {
     if !remote.status.success() {
         return Err("The fix workflow requires an origin remote.".to_string());
     }
+    let push_remote = run_git_bounded_with_control(
+        path,
+        &["remote", "get-url", "--push", "--all", "origin"],
+        None,
+        16 * 1024,
+        "push destination",
+        &control,
+    )?;
+    if !push_remote.status.success()
+        || push_remote
+            .stdout
+            .split(|byte| *byte == b'\n')
+            .filter(|line| !line.is_empty())
+            .count()
+            != 1
+    {
+        return Err("Fix publication requires one origin push destination.".to_string());
+    }
     let mut hasher = Sha256::new();
     hasher.update(snapshot.snapshot_sha256.as_bytes());
     hasher.update(index.stdout);
     hasher.update((remote.stdout.len() as u64).to_be_bytes());
     hasher.update(remote.stdout);
+    hasher.update((push_remote.stdout.len() as u64).to_be_bytes());
+    hasher.update(push_remote.stdout);
     let mut total_bytes = 0usize;
     let mut entries = output
         .stdout
