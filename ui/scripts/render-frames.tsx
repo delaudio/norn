@@ -1,6 +1,7 @@
 import { DataPanel } from "../src/app/components/DataPanel";
 import { DraftPanel } from "../src/app/components/DraftPanel";
 import { DraftStagingPanel } from "../src/app/components/DraftStagingPanel";
+import { ProviderPanel } from "../src/app/components/ProviderPanel";
 import { PublicationPanel } from "../src/app/components/PublicationPanel";
 import { ReferencePanel } from "../src/app/components/ReferencePanel";
 import { SettingsPanel } from "../src/app/components/SettingsPanel";
@@ -8,10 +9,15 @@ import { WorkspacePanel } from "../src/app/components/WorkspacePanel";
 import { DataStore } from "../src/app/dataStore";
 import { DraftStagingStore } from "../src/app/draftStagingStore";
 import { DraftStore } from "../src/app/draftStore";
+import { ProviderStore } from "../src/app/providerStore";
 import { PublicationStore } from "../src/app/publicationStore";
 import { ReferenceStore } from "../src/app/referenceStore";
 import { SettingsStore } from "../src/app/settingsStore";
 import { WorkspaceStore } from "../src/app/workspaceStore";
+import {
+  FakeProviderTransport,
+  providerFixtureRepositories,
+} from "../src/transport/fakeProviderTransport";
 import {
   FakePublicationTransport,
   publicationFixtureScope,
@@ -834,7 +840,46 @@ async function publicationScene(mode: "drafts" | "preview" | "partial" | "status
   };
 }
 
+async function providerScene(kind: "list" | "detail" | "empty" | "error" | "loading" | "identity") {
+  const transport = new FakeProviderTransport();
+  if (kind === "empty") transport.empty = true;
+  if (kind === "error") transport.fault = "list";
+  if (kind === "identity") transport.fault = "user";
+  if (kind === "loading") transport.gate = new Promise<void>(() => {});
+  const { client, store, ready } = readyStore(transport);
+  await ready;
+  const providers = new ProviderStore();
+  providers.load(
+    client,
+    providerFixtureRepositories.map((repo) => ({ ...repo, localPath: null })),
+    [],
+  );
+  for (let i = 0; i < 10; i++) await Bun.sleep(0);
+  if (kind === "detail") {
+    providers.showDetail(client);
+    for (let i = 0; i < 6; i++) await Bun.sleep(0);
+  }
+  return {
+    client,
+    store,
+    view: (
+      <ProviderPanel
+        store={providers}
+        client={client}
+        onClose={() => {}}
+        onWorkspace={async () => {}}
+        onSettings={() => {}}
+        quit={() => {}}
+      />
+    ),
+  };
+}
+
 const scenes: Scene[] = [
+  ...(["list", "detail", "empty", "error", "loading", "identity"] as const).flatMap((kind) => [
+    { id: `shell-provider-${kind}-120x30`, cols: 120, rows: 30, build: () => providerScene(kind) },
+    { id: `shell-provider-${kind}-50x15`, cols: 50, rows: 15, build: () => providerScene(kind) },
+  ]),
   { id: "shell-imported-scopes-120x30", cols: 120, rows: 30, build: savedScopeScene },
   { id: "shell-imported-scopes-50x15", cols: 50, rows: 15, build: savedScopeScene },
   { id: "shell-unconfigured-drafts-120x30", cols: 120, rows: 30, build: importedDraftScene },

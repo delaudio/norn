@@ -20,6 +20,7 @@ import { DiffScrollPositions } from "../diffScrollPositions";
 import { DraftStagingStore } from "../draftStagingStore";
 import { DraftStore } from "../draftStore";
 import { imageProtocol } from "../imageProtocol";
+import { ProviderStore } from "../providerStore";
 import { PublicationStore } from "../publicationStore";
 import { ReferenceStore } from "../referenceStore";
 import { SettingsStore } from "../settingsStore";
@@ -38,6 +39,7 @@ import { DataPanel } from "./DataPanel";
 import { DraftPanel } from "./DraftPanel";
 import { DraftStagingPanel } from "./DraftStagingPanel";
 import { FixPanel } from "./FixPanel";
+import { ProviderPanel } from "./ProviderPanel";
 import { PublicationPanel } from "./PublicationPanel";
 import { ReferencePanel } from "./ReferencePanel";
 import { SettingsPanel } from "./SettingsPanel";
@@ -61,6 +63,7 @@ function useShellInput(
   useKeyboard((key) => {
     if (
       key.defaultPrevented ||
+      store.getSnapshot().providerOpen ||
       store.getSnapshot().settingsOpen ||
       store.getSnapshot().dataOpen ||
       store.getSnapshot().workspaceOpen ||
@@ -113,6 +116,8 @@ function useShellInput(
     key.preventDefault();
     if (key.name === "q") {
       quit();
+    } else if (key.name === "f2") {
+      store.toggleProvider();
     } else if (key.name === "tab") {
       store.cycleFocus();
     } else if (key.name === "down" || key.name === "j" || key.name === "up" || key.name === "k") {
@@ -186,6 +191,7 @@ function useShellInput(
   });
   usePaste((event) => {
     if (
+      store.getSnapshot().providerOpen ||
       store.getSnapshot().settingsOpen ||
       store.getSnapshot().dataOpen ||
       store.getSnapshot().workspaceOpen ||
@@ -913,6 +919,13 @@ function WorkspaceStatus({ state }: { state: ShellSnapshot }) {
 
 export function Shell({ store, client, quit }: ShellProps) {
   const state = useSyncExternalStore(store.subscribe, store.getSnapshot);
+  const providers = useMemo(() => new ProviderStore(), []);
+  useEffect(() => {
+    if (!state.providerOpen) return;
+    const snapshot = store.getSnapshot();
+    providers.load(client, snapshot.repositories, snapshot.picker, snapshot.providerReads);
+    return () => providers.dispose();
+  }, [providers, client, store, state.providerOpen]);
   const positions = useMemo(() => new DiffScrollPositions(), []);
   useEffect(() => () => positions.clear(), [positions]);
   useEffect(() => () => store.cancelSyntax(), [store]);
@@ -1123,6 +1136,22 @@ export function Shell({ store, client, quit }: ShellProps) {
               selectedIndex: state.selectedFinding,
             };
 
+  if (state.providerOpen)
+    return (
+      <ProviderPanel
+        store={providers}
+        client={client}
+        onClose={() => store.toggleProvider()}
+        onWorkspace={(repository, id, title, status) =>
+          store.selectProviderPr(repository, id, title, status)
+        }
+        onSettings={() => {
+          store.toggleProvider();
+          store.toggleSettings();
+        }}
+        quit={quit}
+      />
+    );
   if (state.findingStage)
     return (
       <DraftStagingPanel
@@ -1333,8 +1362,8 @@ export function Shell({ store, client, quit }: ShellProps) {
           {state.fixPreview
             ? "y approve · Esc/n dismiss · ↑/↓ scroll effects"
             : wide
-              ? "q quit · Tab pane · j/k move · i stage finding · d drafts · w refs · m settings · n prompt/viewed · s split · e expand · a fix · r reply · t threads · v chat · f filter · g group · x cancel · u sync · o conflicts · c commit · p push"
-              : "j/k  ←/→  s  e  Tab  m settings  n prompt  i stage  d drafts  w refs  q"}
+              ? "F2 PRs · q quit · Tab pane · j/k move · i stage finding · d drafts · w refs · m settings · n prompt/viewed · s split · e expand · a fix · r reply · t threads · v chat · f filter · g group · x cancel · u sync · o conflicts · c commit · p push"
+              : "F2 PRs  j/k  ←/→  s  e  Tab  m settings  n prompt  i stage  d drafts  w refs  q"}
         </text>
       </box>
     </box>

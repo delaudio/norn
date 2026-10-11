@@ -1,7 +1,8 @@
 # Native provider pull-request reads
 
-Internal migration evidence for the first #357 delivery, plan 0054, based on
-PR #356 merge `2a7f0fe605d3012c2e2b9a0c03e1d15b60f7c574`. This delivery prepares
+Internal migration evidence for the first #357 delivery, plan 0054, shipped in
+PR #365 at `2f2cd50d3314b09528f323f40778c0eb45cc4879`, after exact-head
+`8e2e36d` UI/verify CI success. This delivery supplies
 the backend contract; terminal browsing, pinned pre-review diffs and explicit
 PR approval remain required before #357/#306 can close.
 
@@ -60,7 +61,7 @@ Final local gates pass: root typecheck/123 tests plus tooling/lint/Archgate 12/1
 generated protocol, UI typecheck/148 tests/886 assertions/93 frames, Rust 672 core
 plus two existing ignored/52 stdio/six CLI/five onboarding/three binary tests,
 strict all-feature/all-target Clippy and no-GUI dependency guard. Exact-head CI
-and PR integration remain required before this delivery is shipped. Existing native frames remain unchanged because this delivery
+passed before the verified squash merge cited above. Existing native frames remain unchanged because this delivery
 does not add a terminal screen. Do not count a typed backend as the complete
 provider-navigation parity row or waive the remaining #357 actions.
 

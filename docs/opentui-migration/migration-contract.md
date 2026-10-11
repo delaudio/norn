@@ -203,9 +203,11 @@ not mark the complete PR-list, history, native-profile recovery or other #306
 rows shipped. #306 remains open until every retained row has merged verification.
 
 [Native provider PR reads](./provider-pr-reads.md) are the first bounded #357 /
-plan 0054 delivery. Terminal provider browsing, pre-review pinned diffs and
-explicit PR approval remain separate required work; a backend contract alone
-does not complete the provider navigation row.
+plan 0054 delivery, merged in PR #365 at `2f2cd50`. The second bounded delivery,
+[native provider browsing](./native-pr-browser.md), supplies repository/author/state
+filters, per-repository pages and metadata/reviewers in plan 0055. Pre-review pinned
+diffs and explicit PR approval remain required work; these two deliveries do not
+complete the provider navigation row or close #357/#306.
 
 - **First vertical slice (#301):** real file → diff → finding through the Rust
   backend and the OpenTUI client, measured on a large diff. Material

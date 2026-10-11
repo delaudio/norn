@@ -4,21 +4,27 @@ Git is authoritative. Durable history lives in WORKLOG and plan/done.
 
 ## Active state
 
-- **Goal:** complete all remaining epic #294 work through verified PRs and squash
-  merges; no Norn reviews, as explicitly instructed by the maintainer.
-- **Branch:** `issue-357-provider-pr-reads`; plan 0054 prepared completion at verified feature `8f1a120`.
-- **Merged baseline:** PR #356 at `2a7f0fe605d3012c2e2b9a0c03e1d15b60f7c574`,
-  exact-head UI/verify CI green; #355 closed. #302/#303/#304/#305 closed.
-- **Current work:** local gates passed for bounded native PR list/detail/current-
-  user reads and strict protocol; exact-head CI/PR integration pending. Terminal browsing, pinned
-  pre-review diffs and explicit PR approval follow; #357/#306 remain open.
+- **Goal:** complete all remaining epic #294 work through verified PRs/squash
+  merges; no Norn reviews, per explicit maintainer instruction.
+- **Branch:** `issue-357-native-pr-browser`; plan 0055 implemented at `df7ab05`; prepared receipt
+  in plan/done, effective only on verified PR merge.
+- **Merged baseline:** PR #365 at `2f2cd50d3314b09528f323f40778c0eb45cc4879`,
+  exact `8e2e36d` UI/verify green. #355 closed; #357/#306 remain open.
+- **Current work:** integrate second #357 delivery after exact-head UI/verify CI.
+  Native filters/pages/detail/full-scope selection implemented and locally
+  verified; pre-review pinned diffs and explicit approval follow.
+- **Verified bridge:** root/protocol/UI 160 tests/105 frames, Rust 672 core/52
+  stdio/six CLI/five onboarding, strict all-feature Clippy/no-GUI. CLI status now
+  runs under an owned child mock keyring; inherited publication fixture
+  intermittency remains tracked in #307, never called fixed by a rerun.
 - **User data:** unrelated untracked `.norn.yaml` must not be read or staged.
 
 ## Next items
 
-- Finish #357, then #358–#364 in order, reconcile #306, harden #307, package #308,
-  remove legacy surfaces #309 and close epic only after verified full delivery.
-- Native-profile recovery/platform runtime is unobserved; no mock/compile waiver.
-  ADR 0020 remains Accepted until full cutover. Verification uses owned resources,
-  synthetic provider fixtures and fake agents, never private profiles, actual
-  credentials, live provider mutations or release publication.
+- Finish #357, #358–#364, reconcile #306, harden #307, matched packaging #308,
+  removal/cutover #309 and epic closure only after full verified delivery.
+- Native-profile recovery/platform runtime remains unobserved. ADR 0020 remains
+  Accepted until full cutover. Tests use owned resources/synthetic providers/fake
+  agents, never actual credentials/private profiles/live provider mutations.
+- Temporary next-plan brief: `/tmp/norn-plan-0055.md`; repository plan above is
+  authoritative after claim. Implementation stays single-agent/sequential.
