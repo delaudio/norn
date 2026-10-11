@@ -2110,15 +2110,24 @@ fn run_real_review_operation(
         finish_cancelled(writer, operations, operation_id, target, 2);
         return;
     }
-
-    let session = match start_inline_session(target) {
-        Ok(session) => session,
-        Err(error) => {
-            emit_failed(writer, operations, operation_id, target, 2, error);
-            return;
+    match start_inline_session(target) {
+        Ok(session) => {
+            monitor_inline_session(writer, operations, operation_id, target, cancel, session)
         }
-    };
+        Err(error) => emit_failed(writer, operations, operation_id, target, 2, error),
+    }
+}
 
+/// Stream a started inline session until it finishes, fails, is cancelled, or
+/// times out. Session reads/cancellation are bound to the started thread id.
+fn monitor_inline_session(
+    writer: &SyncSender<ServerMessage>,
+    operations: &Operations,
+    operation_id: &str,
+    target: &TargetIdentity,
+    cancel: &AtomicBool,
+    session: InlineSession,
+) {
     let mut seen_logs = 0usize;
     let deadline = Instant::now() + Duration::from_secs(ai_review_timeout_secs());
     let mut sequence = 2u64;
