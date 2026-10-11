@@ -8,9 +8,9 @@ If status files and git disagree, git is authoritative; correct this file.
 
 ## Active state
 
-- **Branch:** `issue-303-approved-commit-push` (PR #336).
+- **Branch:** `issue-303-approved-branch-sync` (stacked after PR #336).
 - **Active item:** complete epic #294 through verified PRs and squash merges.
-- **Current change:** approved commit and push controls for native fix sessions;
+- **Current change:** plan 0035, approved branch sync/conflict resolution; PR #336 awaits CI. Previous delivery: approved commit and push controls for native fix sessions;
   plan 0034, prepared for merge in PR #336. PR #335 merged at `6367fa0` after both CI gates passed.
 - **Review instruction:** the maintainer explicitly requested no Norn reviews
   for this migration session; use code inspection and deterministic checks.
