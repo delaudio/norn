@@ -6500,11 +6500,28 @@ pub fn cancel_inline_review_native(
     repo: &str,
     id: u32,
 ) -> Result<AiReviewRunState, String> {
-    let key = pr_key(workspace, repo, id);
+    cancel_inline_review_for_key(store, &pr_key(workspace, repo, id))
+}
+
+/// Request cancellation of a running local inline review.
+pub fn cancel_local_inline_review_native(
+    store: &AiReviewRunStore,
+    workspace: &str,
+    repo: &str,
+    snapshot_sha256: &str,
+) -> Result<AiReviewRunState, String> {
+    let target = ReviewStoreTarget::local(snapshot_sha256.to_string(), 0)?;
+    cancel_inline_review_for_key(store, &target.session_key(workspace, repo))
+}
+
+fn cancel_inline_review_for_key(
+    store: &AiReviewRunStore,
+    key: &str,
+) -> Result<AiReviewRunState, String> {
     let (state, run_id, pid) = with_review_run_store(store, |inner| {
         let session = inner
             .sessions
-            .get_mut(&key)
+            .get_mut(key)
             .ok_or_else(|| "No AI review is active for this pull request.".to_string())?;
         if session.public.status != AiReviewRunStatus::Running {
             return Err("There is no running AI review to cancel.".to_string());
@@ -6525,7 +6542,7 @@ pub fn cancel_inline_review_native(
 
     if let Some(pid) = pid {
         if let Err(error) = kill_process(pid) {
-            set_inline_review_failed(store, &key, run_id, error.clone());
+            set_inline_review_failed(store, key, run_id, error.clone());
             return Err(error);
         }
     }

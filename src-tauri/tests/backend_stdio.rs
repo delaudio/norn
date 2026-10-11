@@ -601,6 +601,172 @@ fn fake_review_engine_streams_deterministic_events() {
 }
 
 #[test]
+fn inline_review_streams_and_succeeds_with_a_fake_agent() {
+    let repo = temp_repo();
+    std::fs::write(repo.path().join("a.txt"), "one\n").expect("write");
+    git(repo.path(), &["add", "-A"]);
+    git(repo.path(), &["commit", "-qm", "init"]);
+    std::fs::write(repo.path().join("a.txt"), "two\n").expect("edit");
+
+    let data_dir = tempfile::tempdir().expect("data dir");
+    let agent_dir = tempfile::tempdir().expect("agent dir");
+    let agent_path = agent_dir.path().join("fake-claude");
+    let script = r#"#!/bin/sh
+printf '%s\n' '{"result":"No review findings were produced.","session_id":"fake-session"}'
+"#;
+    std::fs::write(&agent_path, script).expect("write agent");
+    let mut perms = std::fs::metadata(&agent_path)
+        .expect("metadata")
+        .permissions();
+    use std::os::unix::fs::PermissionsExt;
+    perms.set_mode(0o755);
+    std::fs::set_permissions(&agent_path, perms).expect("chmod");
+
+    let mut backend = Backend::spawn_env(
+        repo.path(),
+        &[
+            ("NORN_REVIEW_ENGINE", "real"),
+            (
+                "NORN_REVIEW_AGENT_BIN",
+                agent_path.to_str().expect("agent path"),
+            ),
+            (
+                "NORN_REVIEW_DATA_DIR",
+                data_dir.path().to_str().expect("data dir"),
+            ),
+        ],
+    );
+    backend.handshake();
+    backend.send(json!({
+        "type": "request",
+        "id": "req-inline",
+        "method": "review.start",
+        "params": { "target": { "kind": "local", "localSnapshotSha256": LOCAL_SHA } }
+    }));
+    let started = backend.wait_for(
+        |v| v["type"] == "response" && v["id"] == "req-inline",
+        Duration::from_secs(5),
+    );
+    let operation_id = started["result"]["operationId"]
+        .as_str()
+        .expect("operation id")
+        .to_string();
+
+    backend.wait_for(
+        |v| {
+            v["type"] == "event"
+                && v["operationId"] == operation_id.as_str()
+                && v["event"]["kind"] == "progress"
+        },
+        Duration::from_secs(15),
+    );
+    let terminal = backend.wait_for(
+        |v| {
+            v["type"] == "event"
+                && v["operationId"] == operation_id.as_str()
+                && v["event"]["state"] == "succeeded"
+        },
+        Duration::from_secs(15),
+    );
+    assert_eq!(terminal["event"]["state"], "succeeded");
+}
+
+#[test]
+fn inline_review_can_be_cancelled() {
+    let repo = temp_repo();
+    std::fs::write(repo.path().join("a.txt"), "one\n").expect("write");
+    git(repo.path(), &["add", "-A"]);
+    git(repo.path(), &["commit", "-qm", "init"]);
+    std::fs::write(repo.path().join("a.txt"), "two\n").expect("edit");
+
+    let data_dir = tempfile::tempdir().expect("data dir");
+    let agent_dir = tempfile::tempdir().expect("agent dir");
+    let started_marker = agent_dir.path().join("started");
+    let done_marker = agent_dir.path().join("done");
+    let agent_path = agent_dir.path().join("slow-claude");
+    let script = r#"#!/bin/sh
+if [ -n "$NORN_FAKE_STARTED" ]; then printf 'up' > "$NORN_FAKE_STARTED"; fi
+sleep 10
+if [ -n "$NORN_FAKE_DONE" ]; then printf 'done' > "$NORN_FAKE_DONE"; fi
+printf '%s\n' '{"result":"late","session_id":"fake-session"}'
+"#;
+    std::fs::write(&agent_path, script).expect("write agent");
+    let mut perms = std::fs::metadata(&agent_path)
+        .expect("metadata")
+        .permissions();
+    use std::os::unix::fs::PermissionsExt;
+    perms.set_mode(0o755);
+    std::fs::set_permissions(&agent_path, perms).expect("chmod");
+
+    let mut backend = Backend::spawn_env(
+        repo.path(),
+        &[
+            ("NORN_REVIEW_ENGINE", "real"),
+            (
+                "NORN_REVIEW_AGENT_BIN",
+                agent_path.to_str().expect("agent path"),
+            ),
+            (
+                "NORN_REVIEW_DATA_DIR",
+                data_dir.path().to_str().expect("data dir"),
+            ),
+            (
+                "NORN_FAKE_STARTED",
+                started_marker.to_str().expect("started marker"),
+            ),
+            ("NORN_FAKE_DONE", done_marker.to_str().expect("done marker")),
+        ],
+    );
+    backend.handshake();
+    backend.send(json!({
+        "type": "request",
+        "id": "req-inline-cancel",
+        "method": "review.start",
+        "params": { "target": { "kind": "local", "localSnapshotSha256": LOCAL_SHA } }
+    }));
+    let started = backend.wait_for(
+        |v| v["type"] == "response" && v["id"] == "req-inline-cancel",
+        Duration::from_secs(5),
+    );
+    let operation_id = started["result"]["operationId"]
+        .as_str()
+        .expect("operation id")
+        .to_string();
+
+    let marker_deadline = std::time::Instant::now() + Duration::from_secs(10);
+    while !started_marker.exists() {
+        assert!(
+            std::time::Instant::now() < marker_deadline,
+            "fake agent never started"
+        );
+        thread::sleep(Duration::from_millis(50));
+    }
+
+    backend.send(json!({
+        "type": "request",
+        "id": "req-cancel-inline",
+        "method": "operation.cancel",
+        "params": { "operationId": operation_id }
+    }));
+    backend.wait_for(
+        |v| {
+            v["type"] == "event"
+                && v["operationId"] == operation_id.as_str()
+                && v["event"]["state"] == "cancelled"
+        },
+        Duration::from_secs(15),
+    );
+
+    // Wait beyond the agent's own 10s completion delay to prove it was
+    // terminated rather than left running.
+    thread::sleep(Duration::from_millis(11_000));
+    assert!(
+        !done_marker.exists(),
+        "the cancelled agent process still completed"
+    );
+}
+
+#[test]
 fn malformed_frames_do_not_stop_the_backend() {
     let repo = temp_repo();
     let mut backend = Backend::spawn(repo.path());
