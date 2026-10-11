@@ -665,6 +665,13 @@ fn dispatch(request: Request, backend: &Backend) -> bool {
             };
             false
         }
+        Request::ReviewOutput { params, .. } => {
+            match review_output_response(&params.target) {
+                Ok(value) => backend.respond(&id, value),
+                Err(error) => backend.fail(&id, error),
+            };
+            false
+        }
         Request::FilePreview { params, .. } => {
             if backend
                 .active_previews
@@ -784,6 +791,65 @@ fn review_targets_response() -> serde_json::Value {
         }
     }
     json!({ "targets": targets })
+}
+
+fn review_output_response(target: &TargetIdentity) -> Result<serde_json::Value, ProtocolError> {
+    let TargetIdentity::Provider {
+        provider,
+        workspace,
+        repo,
+        pr_id: Some(pr_id),
+        run_id,
+    } = target
+    else {
+        return Err(ProtocolError::new(
+            ProtocolErrorCode::NotFound,
+            "Select a stored pull-request review to copy its output.",
+        ));
+    };
+    let store = crate::services::review::load_ai_review_store_native(workspace, repo, *pr_id)
+        .map_err(|_| {
+            ProtocolError::new(
+                ProtocolErrorCode::Internal,
+                "Stored review output is unavailable.",
+            )
+        })?;
+    let run = select_review_run(store, run_id.as_deref()).ok_or_else(|| {
+        ProtocolError::new(
+            ProtocolErrorCode::NotFound,
+            "Selected stored review was not found.",
+        )
+    })?;
+    if run.provider
+        != match provider {
+            ProviderKind::Github => crate::services::review::ReviewProvider::Github,
+            ProviderKind::Bitbucket => crate::services::review::ReviewProvider::Bitbucket,
+        }
+        || run.workspace != *workspace
+        || run.repo != *repo
+        || run.pr_id != *pr_id
+    {
+        return Err(ProtocolError::new(
+            ProtocolErrorCode::TargetStale,
+            "Stored review does not match the selected target.",
+        ));
+    }
+    let text = run
+        .summary_markdown
+        .filter(|text| !text.trim().is_empty())
+        .ok_or_else(|| {
+            ProtocolError::new(
+                ProtocolErrorCode::NotFound,
+                "Selected review has no stored output.",
+            )
+        })?;
+    if text.len() > 64 * 1024 {
+        return Err(ProtocolError::new(
+            ProtocolErrorCode::InvalidParams,
+            "Review output exceeds the 64 KiB terminal clipboard limit; nothing was copied.",
+        ));
+    }
+    Ok(json!({ "target": target, "runId": run.id, "text": text }))
 }
 
 fn review_threads_response(target: &TargetIdentity) -> Result<serde_json::Value, ProtocolError> {

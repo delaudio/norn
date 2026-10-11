@@ -351,6 +351,29 @@ export class BackendClient {
     const result = await this.transport.request("review.threads", { target });
     return (result.threads as ReviewThreadSummary[]) ?? [];
   }
+  async reviewOutput(target: TargetIdentity): Promise<string> {
+    const result = await this.transport.request("review.output", { target });
+    const actual = result.target as TargetIdentity | undefined;
+    if (
+      target.kind !== "provider" ||
+      actual?.kind !== "provider" ||
+      actual.provider !== target.provider ||
+      actual.workspace !== target.workspace ||
+      actual.repo !== target.repo ||
+      actual.prId !== target.prId ||
+      actual.runId !== target.runId ||
+      typeof result.runId !== "string" ||
+      !result.runId ||
+      (target.runId !== undefined && target.runId !== null && result.runId !== target.runId) ||
+      typeof result.text !== "string" ||
+      !result.text.trim() ||
+      Buffer.byteLength(result.text) > 64 * 1024
+    )
+      throw new Error(
+        "Selected stored review output is unavailable or exceeds the clipboard limit.",
+      );
+    return result.text;
+  }
 
   async browserOpen(target: TargetIdentity): Promise<{ url: string }> {
     const result = await this.transport.request("browser.open", { target });

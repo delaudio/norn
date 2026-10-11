@@ -1,0 +1,1 @@
+{"type":"response","id":"output","ok":true,"result":{"target":{"kind":"provider","provider":"github","workspace":"acme","repo":"app","prId":7,"runId":"run-1"},"runId":"run-1","text":"## Complete output\nSynthetic Unicode 世界\n"}}

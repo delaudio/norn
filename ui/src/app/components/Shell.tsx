@@ -24,6 +24,7 @@ import {
   type ShellStore,
   visibleFindings,
 } from "../store";
+import type { DiffSyntax } from "../syntaxTypes";
 import { theme } from "../theme";
 import { WorkspaceStore } from "../workspaceStore";
 import { ConversationPanel } from "./ConversationPanel";
@@ -46,6 +47,7 @@ function useShellInput(
   scroll: RefObject<ScrollBoxRenderable | null>,
   fixScroll: RefObject<ScrollBoxRenderable | null>,
 ) {
+  const renderer = useRenderer();
   useKeyboard((key) => {
     if (
       key.defaultPrevented ||
@@ -151,6 +153,8 @@ function useShellInput(
       store.beginReply();
     } else if (key.name === "b") {
       void store.openBrowser(client);
+    } else if (key.name === "y") {
+      void store.copyReviewOutput(client, (text) => renderer.copyToClipboardOSC52(text));
     } else if (key.name === "m") {
       store.toggleSettings();
     } else if (key.name === "n") {
@@ -187,6 +191,7 @@ function useShellInput(
 export type DiffLineKind = "hunk" | "context" | "add" | "del" | "meta";
 
 interface DiffLine {
+  rawIndex: number;
   text: string;
   fg: string;
   highlighted: boolean;
@@ -245,7 +250,7 @@ export function diffLines(text: string, highlight: number | null, side: "old" | 
       oldLine += 1;
       newLine += 1;
     }
-    lines.push({ text: raw, fg, highlighted, kind, oldNumber, newNumber });
+    lines.push({ rawIndex: lines.length, text: raw, fg, highlighted, kind, oldNumber, newNumber });
   }
   return lines;
 }
@@ -335,7 +340,54 @@ function lineLabel(line: DiffLine | null, side: "old" | "new"): string {
   return `${String(number ?? "").padStart(4, " ")} ${line.text}`;
 }
 
-function splitRowElement(row: SplitRow, key: number): ReactNode {
+const syntaxColors: Record<string, string> = {
+  comment: "#8892a6",
+  string: "#a5d6a7",
+  keyword: "#c792ea",
+  function: "#82aaff",
+  number: "#f78c6c",
+  boolean: "#f78c6c",
+  operator: "#89ddff",
+  punctuation: "#a6accd",
+  "class-name": "#ffcb6b",
+  property: "#82aaff",
+  tag: "#f07178",
+  "attr-name": "#c792ea",
+  "attr-value": "#a5d6a7",
+  regex: "#a5d6a7",
+};
+function sourceContent(
+  line: DiffLine | null,
+  syntax: DiffSyntax | null,
+  side?: "old" | "new",
+): ReactNode {
+  if (!line) return "";
+  const prefix = side
+    ? `${String((side === "old" ? line.oldNumber : line.newNumber) ?? "").padStart(4, " ")} `
+    : "";
+  const parts = syntax?.rows[line.rawIndex];
+  if (!parts || line.highlighted) return `${prefix}${line.text}`;
+  let sourceOffset = 0;
+  return (
+    <>
+      {prefix}
+      {line.text.slice(0, 1)}
+      {parts.map((part) => {
+        const start = sourceOffset;
+        sourceOffset += part.text.length;
+        return (
+          <span
+            key={`${line.rawIndex}:${start}:${part.token}`}
+            fg={part.token ? (syntaxColors[part.token] ?? line.fg) : line.fg}
+          >
+            {part.text}
+          </span>
+        );
+      })}
+    </>
+  );
+}
+function splitRowElement(row: SplitRow, key: number, syntax: DiffSyntax | null): ReactNode {
   if (row.kind === "hunk") {
     return (
       <text
@@ -396,7 +448,7 @@ function splitRowElement(row: SplitRow, key: number): ReactNode {
           height="100%"
           width="100%"
         >
-          {lineLabel(row.left, "old")}
+          {sourceContent(row.left, syntax, "old")}
         </text>
       </box>
       <box width="50%" minWidth={0} height="100%">
@@ -406,7 +458,7 @@ function splitRowElement(row: SplitRow, key: number): ReactNode {
           height="100%"
           width="100%"
         >
-          {lineLabel(row.right, "new")}
+          {sourceContent(row.right, syntax, "new")}
         </text>
       </box>
     </box>
@@ -636,7 +688,17 @@ function DiffPanel({
         {state.diff.truncated ? " (truncated)" : ""}
         {`  ·  ${state.diffMode}`}
         {collapsed ? "  ·  collapsed" : ""}
+        {state.syntaxLoading
+          ? "  ·  coloring…"
+          : state.syntax?.status === "ready"
+            ? `  ·  ${state.syntax.language}`
+            : "  ·  plain text"}
       </text>
+      {state.syntax && state.syntax.status !== "ready" && state.syntax.reason ? (
+        <text fg={theme.muted} height={1} truncate>
+          {state.syntax.reason}
+        </text>
+      ) : null}
       <VirtualDiff
         scroll={scroll}
         texts={texts}
@@ -662,7 +724,7 @@ function DiffPanel({
         }
         renderRow={(index) => {
           const position = windowStart + index;
-          if (split) return splitRowElement(splitAll[position]!, position);
+          if (split) return splitRowElement(splitAll[position]!, position, state.syntax);
           const line = lines[position]!;
           return (
             <text
@@ -670,7 +732,7 @@ function DiffPanel({
               fg={line.highlighted ? theme.primary : line.fg}
               wrapMode="none"
             >
-              {line.text}
+              {sourceContent(line, state.syntax)}
             </text>
           );
         }}
@@ -798,6 +860,7 @@ export function Shell({ store, client, quit }: ShellProps) {
   const state = useSyncExternalStore(store.subscribe, store.getSnapshot);
   const positions = useMemo(() => new DiffScrollPositions(), []);
   useEffect(() => () => positions.clear(), [positions]);
+  useEffect(() => () => store.cancelSyntax(), [store]);
   const workspace = useMemo(() => new WorkspaceStore(), []);
   const workspaceEntry = state.picker[state.selectedPicker];
   useEffect(() => {
