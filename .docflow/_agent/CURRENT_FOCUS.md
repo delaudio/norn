@@ -8,10 +8,10 @@ If status files and git disagree, git is authoritative; correct this file.
 
 ## Active state
 
-- **Branch:** `issue-303-finding-thread-navigation` (PR #334).
+- **Branch:** `issue-303-review-fix-approval` (prepared after PR #334).
 - **Active item:** complete epic #294 through verified PRs and squash merges.
-- **Current change:** severity filters and file/severity grouping, bounded
-  saved conversations and selection of the correct run/thread; plan 0032.
+- **Current change:** review.fix preview, snapshot-bound approval and native
+  cancellation; plan 0033. PR #334 is awaiting its final CI gate.
 - **Review instruction:** the maintainer explicitly requested no Norn reviews
   for this migration session; use code inspection and deterministic checks.
 - **Merged baseline:** main at `cdf6bdf`, including PRs #316–#333.
