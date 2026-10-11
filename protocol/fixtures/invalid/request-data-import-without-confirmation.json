@@ -1,0 +1,11 @@
+{
+  "type": "request",
+  "id": "unconfirmed",
+  "method": "data.import",
+  "params": {
+    "path": "/tmp/synthetic.json",
+    "inputVersion": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "destinationVersion": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "confirm": false
+  }
+}

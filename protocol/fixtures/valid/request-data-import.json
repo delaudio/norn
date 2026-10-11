@@ -1,0 +1,12 @@
+{
+  "type": "request",
+  "id": "request-data-import",
+  "method": "data.import",
+  "params": {
+    "path": "/tmp/synthetic-desktop-export.json",
+    "provider": "github",
+    "inputVersion": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "destinationVersion": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "confirm": true
+  }
+}

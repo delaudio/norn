@@ -224,7 +224,10 @@
         "settings.save",
         "auth.status",
         "auth.set",
-        "auth.clear"
+        "auth.clear",
+        "data.preview",
+        "data.import",
+        "data.export"
       ]
     },
     "DiffFileParams": {
@@ -1099,6 +1102,79 @@
           }
         }
       ]
+    },
+    "DataPreviewParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path"
+      ],
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096,
+          "pattern": "^[^\\p{Cc}]+$"
+        },
+        "provider": {
+          "enum": [
+            "github",
+            "bitbucket",
+            null
+          ]
+        }
+      }
+    },
+    "DataImportParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "inputVersion",
+        "destinationVersion",
+        "confirm"
+      ],
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096,
+          "pattern": "^[^\\p{Cc}]+$"
+        },
+        "provider": {
+          "enum": [
+            "github",
+            "bitbucket",
+            null
+          ]
+        },
+        "inputVersion": {
+          "type": "string",
+          "pattern": "^[0-9a-fA-F]{64}$"
+        },
+        "destinationVersion": {
+          "type": "string",
+          "pattern": "^[0-9a-fA-F]{64}$"
+        },
+        "confirm": {
+          "const": true
+        }
+      }
+    },
+    "DataExportParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path"
+      ],
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096,
+          "pattern": "^[^\\p{Cc}]+$"
+        }
+      }
     }
   },
   "oneOf": [
@@ -1903,6 +1979,78 @@
             },
             "params": {
               "$ref": "#/definitions/AuthProviderParams"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "type": {
+              "const": "request"
+            },
+            "id": {
+              "$ref": "#/definitions/RequestId"
+            },
+            "method": {
+              "const": "data.preview"
+            },
+            "params": {
+              "$ref": "#/definitions/DataPreviewParams"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "type": {
+              "const": "request"
+            },
+            "id": {
+              "$ref": "#/definitions/RequestId"
+            },
+            "method": {
+              "const": "data.import"
+            },
+            "params": {
+              "$ref": "#/definitions/DataImportParams"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "type": {
+              "const": "request"
+            },
+            "id": {
+              "$ref": "#/definitions/RequestId"
+            },
+            "method": {
+              "const": "data.export"
+            },
+            "params": {
+              "$ref": "#/definitions/DataExportParams"
             }
           }
         }

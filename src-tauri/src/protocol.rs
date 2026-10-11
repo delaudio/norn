@@ -120,6 +120,27 @@ pub struct SettingsSaveParams {
     pub settings: crate::services::settings::WorkspaceSettings,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct DataPreviewParams {
+    pub path: String,
+    pub provider: Option<crate::config::ReviewProvider>,
+}
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct DataImportParams {
+    pub path: String,
+    pub provider: Option<crate::config::ReviewProvider>,
+    pub input_version: String,
+    pub destination_version: String,
+    pub confirm: bool,
+}
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct DataExportParams {
+    pub path: String,
+}
+
 /// A single-use approval from `review.fix.preview`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -184,6 +205,21 @@ pub struct TargetParams {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "method", rename_all = "camelCase")]
 pub enum Request {
+    #[serde(rename = "data.preview")]
+    DataPreview {
+        id: String,
+        params: DataPreviewParams,
+    },
+    #[serde(rename = "data.import")]
+    DataImport {
+        id: String,
+        params: DataImportParams,
+    },
+    #[serde(rename = "data.export")]
+    DataExport {
+        id: String,
+        params: DataExportParams,
+    },
     #[serde(rename = "auth.status")]
     AuthStatus {
         id: String,
@@ -298,7 +334,10 @@ pub enum Request {
 impl Request {
     pub fn id(&self) -> &str {
         match self {
-            Self::AuthStatus { id, .. }
+            Self::DataPreview { id, .. }
+            | Self::DataImport { id, .. }
+            | Self::DataExport { id, .. }
+            | Self::AuthStatus { id, .. }
             | Self::AuthSet { id, .. }
             | Self::AuthClear { id, .. }
             | Self::SettingsGet { id, .. }
@@ -333,6 +372,9 @@ impl Request {
 
     pub fn method(&self) -> &'static str {
         match self {
+            Self::DataPreview { .. } => "data.preview",
+            Self::DataImport { .. } => "data.import",
+            Self::DataExport { .. } => "data.export",
             Self::AuthStatus { .. } => "auth.status",
             Self::AuthSet { .. } => "auth.set",
             Self::AuthClear { .. } => "auth.clear",
@@ -373,6 +415,22 @@ impl Request {
             return Err(invalid_request("request id must not be empty"));
         }
         match self {
+            Self::DataPreview { params, .. } => validate_data_path(&params.path)?,
+            Self::DataExport { params, .. } => validate_data_path(&params.path)?,
+            Self::DataImport { params, .. } => {
+                validate_data_path(&params.path)?;
+                if !params.confirm
+                    || [&params.input_version, &params.destination_version]
+                        .iter()
+                        .any(|value| {
+                            value.len() != 64 || !value.bytes().all(|byte| byte.is_ascii_hexdigit())
+                        })
+                {
+                    return Err(invalid_request(
+                        "Explicit import confirmation and valid preview versions are required.",
+                    ));
+                }
+            }
             Self::SettingsSave { params, .. } => {
                 if params.expected_version.len() != 64
                     || !params
@@ -735,6 +793,16 @@ impl SequenceGuard {
     /// Highest sequence observed so far for an operation, if any.
     pub fn highest(&self, operation_id: &str) -> Option<u64> {
         self.highest.get(operation_id).copied()
+    }
+}
+
+fn validate_data_path(path: &str) -> Result<(), ProtocolError> {
+    if path.is_empty() || path.chars().count() > 4096 || path.chars().any(char::is_control) {
+        Err(invalid_request(
+            "User-data path must contain 1–4096 printable characters.",
+        ))
+    } else {
+        Ok(())
     }
 }
 

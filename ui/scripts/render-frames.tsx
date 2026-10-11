@@ -1,4 +1,6 @@
+import { DataPanel } from "../src/app/components/DataPanel";
 import { SettingsPanel } from "../src/app/components/SettingsPanel";
+import { DataStore } from "../src/app/dataStore";
 import { SettingsStore } from "../src/app/settingsStore";
 // Renders every terminal component/scene with the real OpenTUI renderer and
 // serializes bounded frame fixtures (cell spans, colors, attributes) for the
@@ -364,7 +366,58 @@ async function settingsScene(mode: "normal" | "secret" | "error" | "light") {
   };
 }
 
+async function dataScene(mode: "preview" | "error" | "done") {
+  class DataTransport extends FakeBackendTransport {
+    async request(method: string, params: Record<string, unknown>) {
+      if (method === "data.preview") {
+        if (mode === "error")
+          throw new Error("Export file could not be read. Preserve the source and retry.");
+        return {
+          inputVersion: "a".repeat(64),
+          destinationVersion: "b".repeat(64),
+          additionsCount: 2,
+          unchangedCount: 1,
+          conflictsCount: 1,
+          rejectedCount: 1,
+          detailsTruncated: false,
+          additions: ["prompt.github:demo/workspace", "viewed.github:demo/workspace/7"],
+          unchanged: ["theme"],
+          conflicts: ["drafts.github:demo/workspace/7"],
+          rejected: [{ entry: 4, reason: "Historical scope requires an explicit provider." }],
+        };
+      }
+      if (method === "data.import")
+        return {
+          imported: 2,
+          unchanged: 1,
+          conflicts: 1,
+          rejectedCount: 1,
+          detailsTruncated: false,
+          rejected: [],
+          backupPath: "/synthetic/user-data-backup.json",
+          destinationVersion: "c".repeat(64),
+        };
+      return super.request(method, params);
+    }
+  }
+  const { client, store, ready } = readyStore(
+    new DataTransport({ repositories, targets, files, findings }),
+  );
+  await ready;
+  const data = new DataStore();
+  data.beginEdit();
+  data.append("/synthetic/desktop-export.json");
+  data.finishEdit();
+  await data.preview(client);
+  if (mode === "done") await data.confirm(client);
+  return { client, store, view: <DataPanel data={data} client={client} onClose={() => {}} /> };
+}
+
 const scenes: Scene[] = [
+  { id: "shell-data-preview-120x30", cols: 120, rows: 30, build: () => dataScene("preview") },
+  { id: "shell-data-preview-50x15", cols: 50, rows: 15, build: () => dataScene("preview") },
+  { id: "shell-data-error-80x24", cols: 80, rows: 24, build: () => dataScene("error") },
+  { id: "shell-data-imported-80x24", cols: 80, rows: 24, build: () => dataScene("done") },
   { id: "shell-settings-120x40", cols: 120, rows: 40, build: () => settingsScene("normal") },
   { id: "shell-settings-50x15", cols: 50, rows: 15, build: () => settingsScene("normal") },
   { id: "shell-settings-secret-120x40", cols: 120, rows: 40, build: () => settingsScene("secret") },

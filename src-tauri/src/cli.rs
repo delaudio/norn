@@ -283,6 +283,7 @@ fn is_cli_command(args: &[String]) -> bool {
         args.first().map(String::as_str),
         Some(
             "auth"
+                | "data"
                 | "skills"
                 | "config"
                 | "policy"
@@ -398,6 +399,7 @@ fn run_args(args: &[String], stdout: &mut dyn Write, stderr: &mut dyn Write) -> 
                 2
             }
         },
+        Some("data") => crate::services::workspace_data::run_cli(&args[1..], stdout, stderr),
         Some("service") => crate::self_hosted_service::run(&args[1..], stdout, stderr),
         Some("auth") => crate::terminal_auth::run(&args[1..], stdout, stderr),
         Some("skills") => crate::agent_skills::run(&args[1..], stdout, stderr),
@@ -1988,6 +1990,8 @@ Credentials:
   norn auth login github|bitbucket [--username <name>] [--token-stdin]
   norn auth logout github|bitbucket
 Agent skills:
+  norn data preview|import|export <file.json> [--help]
+
   norn skills install|status|uninstall --agent codex|claude|all
                                       [--force] [--format human|json] [--json]
 Doctor:

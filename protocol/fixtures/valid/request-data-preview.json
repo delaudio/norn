@@ -1,0 +1,9 @@
+{
+  "type": "request",
+  "id": "request-data-preview",
+  "method": "data.preview",
+  "params": {
+    "path": "/tmp/synthetic-desktop-export.json",
+    "provider": "github"
+  }
+}

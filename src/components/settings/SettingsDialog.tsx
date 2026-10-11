@@ -35,6 +35,7 @@ import type {
   ReviewTerminal,
   ReviewTerminalOption,
 } from "@/types";
+import { DesktopDataExport } from "./DesktopDataExport";
 
 type TestState =
   | { status: "idle" }
@@ -762,6 +763,7 @@ export function SettingsPage({ onBack, ...props }: SettingsPageProps) {
           </span>
         </div>
       </div>
+      <DesktopDataExport />
       <div className="min-h-0 flex-1">
         <SettingsForm key={formKey} {...props} layout="page" onCancel={onBack} onSaved={onBack} />
       </div>
@@ -779,6 +781,7 @@ export function SettingsDialog({ open, onOpenChange, ...props }: SettingsDialogP
             Track Bitbucket Cloud and GitHub repositories with separate local credentials.
           </DialogDescription>
         </DialogHeader>
+        <DesktopDataExport />
         {open && (
           <SettingsForm
             {...props}

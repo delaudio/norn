@@ -101,3 +101,14 @@ Code review should still reject broader violations that are not yet machine-chec
 - `src/lib/menuBarPrSnapshotStorage.ts`
 - `src/components/pr-sidebar/PrSidebar.tsx`
 - [Route native calls through typed frontend service modules above tauriCall](./FE-003-route-native-calls-through-typed-frontend-service-modules.md)
+
+## Temporary migration export exception (2026-10-11)
+
+`src/lib/desktopDataExport.ts` may read the existing allowlisted user-content
+keys for the explicit desktop export action under migration issue #305. It
+creates no storage keys, performs no storage writes/deletes and excludes credentials
+and caches. Components call that owner module. The automated rule additionally
+rejects storage mutation calls in this module. Bounded synthetic export tests
+prove exclusion, no source writes and failure on changing/oversized input. This
+exception remains only until the desktop adapter is retired; canonical new
+persistence is Rust-owned.

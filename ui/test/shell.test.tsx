@@ -376,3 +376,87 @@ test("settings mask pasted credentials and close without running review shortcut
     renderer.renderer.destroy();
   }
 });
+
+test("user-data paths isolate review shortcuts and require preview before Ctrl+Y import", async () => {
+  class DataTransport extends FakeBackendTransport {
+    imports = 0;
+    previews = 0;
+    async request(method: string, params: Record<string, unknown>) {
+      if (method === "data.preview") {
+        this.previews++;
+        return {
+          inputVersion: "a".repeat(64),
+          destinationVersion: "b".repeat(64),
+          additionsCount: 1,
+          unchangedCount: 0,
+          conflictsCount: 0,
+          rejectedCount: 0,
+          detailsTruncated: false,
+          additions: ["theme"],
+          unchanged: [],
+          conflicts: [],
+          rejected: [],
+        };
+      }
+      if (method === "data.import") {
+        this.imports++;
+        return {
+          imported: 1,
+          unchanged: 0,
+          conflicts: 0,
+          rejectedCount: 0,
+          detailsTruncated: false,
+          rejected: [],
+          backupPath: "/synthetic/backup.json",
+          destinationVersion: "c".repeat(64),
+        };
+      }
+      return super.request(method, params);
+    }
+  }
+  const renderer = await createTestRenderer({ width: 100, height: 30 });
+  const transport = new DataTransport({ repositories });
+  const client = new BackendClient(transport);
+  const store = new ShellStore();
+  await store.connect(client);
+  let quits = 0;
+  const ui = mountApp(renderer.renderer, store, client, () => {
+    quits++;
+  });
+  try {
+    renderer.mockInput.pressKey("m");
+    await Bun.sleep(5);
+    renderer.mockInput.pressKey("d", { ctrl: true });
+    await Bun.sleep(5);
+    await renderer.renderOnce();
+    expect(renderer.captureCharFrame()).toContain("User data");
+    renderer.mockInput.pressKey("y", { ctrl: true });
+    await Bun.sleep(5);
+    expect(transport.imports).toBe(0);
+    renderer.mockInput.pressEnter();
+    await Bun.sleep(5);
+    await renderer.mockInput.pasteBracketedText("/synthetic/qarp-sync-export.json");
+    await renderer.renderOnce();
+    expect(store.getSnapshot().operation).toBeNull();
+    expect(quits).toBe(0);
+    renderer.mockInput.pressEnter();
+    await Bun.sleep(5);
+    renderer.mockInput.pressKey("p", { ctrl: true });
+    await Bun.sleep(5);
+    await renderer.renderOnce();
+    expect(transport.previews).toBe(1);
+    expect(transport.imports).toBe(0);
+    renderer.mockInput.pressKey("y", { ctrl: true });
+    await Bun.sleep(5);
+    await renderer.renderOnce();
+    expect(transport.imports).toBe(1);
+    expect(renderer.captureCharFrame()).toContain("Imported 1");
+    renderer.mockInput.pressKey("q");
+    await Bun.sleep(5);
+    expect(store.getSnapshot().dataOpen).toBe(false);
+    expect(quits).toBe(0);
+  } finally {
+    ui.unmount();
+    renderer.renderer.destroy();
+  }
+});

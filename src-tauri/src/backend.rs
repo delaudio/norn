@@ -170,6 +170,7 @@ pub fn run() -> Result<(), i32> {
         protocol_version: PROTOCOL_VERSION,
         server_version: env!("CARGO_PKG_VERSION").to_string(),
         capabilities: vec![
+            "workspace-data".to_string(),
             "settings".to_string(),
             "auth".to_string(),
             "repository".to_string(),
@@ -311,7 +312,10 @@ fn dispatch(request: Request, backend: &Backend) -> bool {
     let id = request.id().to_string();
     let method = request.method();
     match request {
-        Request::SettingsGet { .. }
+        Request::DataPreview { .. }
+        | Request::DataImport { .. }
+        | Request::DataExport { .. }
+        | Request::SettingsGet { .. }
         | Request::SettingsSave { .. }
         | Request::AuthStatus { .. }
         | Request::AuthSet { .. }
@@ -336,6 +340,24 @@ fn dispatch(request: Request, backend: &Backend) -> bool {
             let active = backend.active_settings.clone();
             thread::spawn(move || {
                 let result = match request {
+                    Request::DataPreview { params, .. } => {
+                        crate::services::workspace_data::preview(
+                            std::path::Path::new(&params.path),
+                            params.provider,
+                        )
+                        .map(|value| json!(value))
+                    }
+                    Request::DataImport { params, .. } => crate::services::workspace_data::import(
+                        std::path::Path::new(&params.path),
+                        params.provider,
+                        &params.input_version,
+                        &params.destination_version,
+                    )
+                    .map(|value| json!(value)),
+                    Request::DataExport { params, .. } => {
+                        crate::services::workspace_data::export(std::path::Path::new(&params.path))
+                            .map(|value| json!({"exported":value}))
+                    }
                     Request::SettingsSave { params, .. } => {
                         crate::services::settings::save(&params.expected_version, params.settings)
                             .map(|value| json!(value))

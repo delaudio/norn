@@ -120,6 +120,29 @@ export interface CredentialStatus {
   source: "keychain" | "environment" | "none";
 }
 
+export interface DataImportPreview {
+  inputVersion: string;
+  destinationVersion: string;
+  additionsCount: number;
+  unchangedCount: number;
+  conflictsCount: number;
+  rejectedCount: number;
+  detailsTruncated: boolean;
+  additions: string[];
+  unchanged: string[];
+  conflicts: string[];
+  rejected: Array<{ entry: number; reason: string }>;
+}
+export interface DataImportResult {
+  imported: number;
+  unchanged: number;
+  conflicts: number;
+  rejectedCount: number;
+  detailsTruncated: boolean;
+  rejected: Array<{ entry: number; reason: string }>;
+  backupPath: string | null;
+  destinationVersion: string;
+}
 export class BackendClient {
   constructor(private readonly transport: BackendTransport) {}
 
@@ -127,6 +150,31 @@ export class BackendClient {
     return this.transport.start();
   }
 
+  async previewData(
+    path: string,
+    provider: "github" | "bitbucket" | null,
+  ): Promise<DataImportPreview> {
+    return (await this.transport.request("data.preview", {
+      path,
+      provider,
+    })) as unknown as DataImportPreview;
+  }
+  async importData(
+    path: string,
+    provider: "github" | "bitbucket" | null,
+    preview: DataImportPreview,
+  ): Promise<DataImportResult> {
+    return (await this.transport.request("data.import", {
+      path,
+      provider,
+      inputVersion: preview.inputVersion,
+      destinationVersion: preview.destinationVersion,
+      confirm: true,
+    })) as unknown as DataImportResult;
+  }
+  async exportData(path: string): Promise<number> {
+    return (await this.transport.request("data.export", { path })).exported as number;
+  }
   async settings(): Promise<SettingsSnapshot> {
     return (await this.transport.request("settings.get", {})) as unknown as SettingsSnapshot;
   }

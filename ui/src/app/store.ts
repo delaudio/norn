@@ -126,6 +126,7 @@ export interface PickerEntry {
 
 export interface ShellSnapshot {
   settingsOpen: boolean;
+  dataOpen: boolean;
   status: ShellStatus;
   error: string | null;
   notice: string | null;
@@ -168,6 +169,7 @@ export interface ShellSnapshot {
 
 const INITIAL: ShellSnapshot = {
   settingsOpen: false,
+  dataOpen: false,
   status: "idle",
   error: null,
   notice: null,
@@ -400,6 +402,9 @@ export class ShellStore {
     return entry ? pickerTargetIdentity(entry) : null;
   }
 
+  toggleData(): void {
+    this.update({ dataOpen: !this.state.dataOpen, settingsOpen: false, fixPreview: null });
+  }
   toggleSettings(): void {
     this.update({ settingsOpen: !this.state.settingsOpen, fixPreview: null });
   }

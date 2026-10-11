@@ -190,6 +190,24 @@ export type Request =
       id: RequestId;
       method: "auth.clear";
       params: AuthProviderParams;
+    }
+  | {
+      type: "request";
+      id: RequestId;
+      method: "data.preview";
+      params: DataPreviewParams;
+    }
+  | {
+      type: "request";
+      id: RequestId;
+      method: "data.import";
+      params: DataImportParams;
+    }
+  | {
+      type: "request";
+      id: RequestId;
+      method: "data.export";
+      params: DataExportParams;
     };
 export type RequestId = string;
 /**
@@ -311,6 +329,20 @@ export interface WorkspaceSettings {
 }
 export interface AuthProviderParams {
   provider: "github" | "bitbucket" | "jira" | "notion";
+}
+export interface DataPreviewParams {
+  path: string;
+  provider?: "github" | "bitbucket" | null;
+}
+export interface DataImportParams {
+  path: string;
+  provider?: "github" | "bitbucket" | null;
+  inputVersion: string;
+  destinationVersion: string;
+  confirm: true;
+}
+export interface DataExportParams {
+  path: string;
 }
 export interface ResponseOk {
   type: "response";

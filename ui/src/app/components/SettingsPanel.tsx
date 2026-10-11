@@ -45,7 +45,8 @@ export function SettingsPanel({
           if (value) await shell.applySettings(client, value);
         })
         .catch((error) => shell.setError(error instanceof Error ? error.message : String(error)));
-    } else if (key.ctrl && key.name === "k") void settings.saveCredential(client);
+    } else if (key.ctrl && key.name === "d") shell.toggleData();
+    else if (key.ctrl && key.name === "k") void settings.saveCredential(client);
     else if (key.name === "escape" || key.name === "q") shell.toggleSettings();
     else if (key.name === "j" || key.name === "down" || key.name === "tab") settings.move(1);
     else if (key.name === "k" || key.name === "up") settings.move(-1);
@@ -65,7 +66,8 @@ export function SettingsPanel({
         Settings · Enter edit/cycle · Esc discard and close
       </text>
       <text fg={theme.muted} height={1} truncate>
-        Ctrl+S preferences · Ctrl+K credential · a add repo · d remove repo · x clear keychain
+        Ctrl+D user data · Ctrl+S preferences · Ctrl+K credential · a add repo · d remove repo · x
+        clear keychain
       </text>
       <text fg={theme.muted} height={1} truncate>
         Secrets stay in the OS store. Existing environment credentials are preserved.
