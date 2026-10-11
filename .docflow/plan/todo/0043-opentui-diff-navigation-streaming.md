@@ -46,5 +46,5 @@ separate deterministic rendering evidence from physical terminal image smoke.
 ## Status
 
 - Claimed by: default-agent, 2026-10-11, `issue-302-diff-navigation-streaming`.
-- Blockers: PR #344 must merge before this increment is integrated.
+- Blockers: None; PR #344 merged at `5eb33fd` with both CI gates green.
 - Stopped:

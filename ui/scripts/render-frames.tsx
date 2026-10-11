@@ -507,7 +507,35 @@ async function workspaceScene(mode: "saved" | "dirty" | "conflict" | "disposed")
   };
 }
 
+async function searchScene(mode: "editing" | "none" | "split") {
+  const transport = new FakeBackendTransport({
+    repositories,
+    files,
+    diffText: [
+      "diff --git a/a.ts b/a.ts",
+      "--- a/a.ts",
+      "+++ b/a.ts",
+      "@@ -1,1000 +1,1000 @@",
+      ...Array.from(
+        { length: 1000 },
+        (_, index) => ` ${index === 500 ? "MATCH_NEEDLE 界✓ " : ""}ROW-${index}`,
+      ),
+    ].join("\n"),
+  });
+  const { client, store, ready } = readyStore(transport);
+  await ready;
+  if (mode === "split") store.toggleDiffMode();
+  store.beginSearch();
+  store.appendSearch(mode === "none" ? "absent-query" : "MATCH_NEEDLE");
+  if (mode !== "editing") store.applySearch();
+  return { client, store };
+}
+
 const scenes: Scene[] = [
+  { id: "shell-search-editing-120x30", cols: 120, rows: 30, build: () => searchScene("editing") },
+  { id: "shell-search-none-80x24", cols: 80, rows: 24, build: () => searchScene("none") },
+  { id: "shell-search-split-80x24", cols: 80, rows: 24, build: () => searchScene("split") },
+  { id: "shell-search-split-50x15", cols: 50, rows: 15, build: () => searchScene("split") },
   { id: "shell-workspace-saved-120x30", cols: 120, rows: 30, build: () => workspaceScene("saved") },
   { id: "shell-workspace-dirty-80x24", cols: 80, rows: 24, build: () => workspaceScene("dirty") },
   {

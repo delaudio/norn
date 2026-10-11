@@ -128,6 +128,12 @@ export interface PickerEntry {
 }
 
 export interface ShellSnapshot {
+  searchOpen: boolean;
+  searchText: string;
+  searchQuery: string;
+  searchMatches: number[];
+  searchSelected: number;
+  searchRow: number | null;
   viewedFiles: string[];
   workspaceOpen: boolean;
   settingsOpen: boolean;
@@ -173,6 +179,12 @@ export interface ShellSnapshot {
 }
 
 const INITIAL: ShellSnapshot = {
+  searchOpen: false,
+  searchText: "",
+  searchQuery: "",
+  searchMatches: [],
+  searchSelected: 0,
+  searchRow: null,
   viewedFiles: [],
   workspaceOpen: false,
   settingsOpen: false,
@@ -420,6 +432,84 @@ export class ShellStore {
       fixPreview: null,
     });
   }
+  private clearSearch(): void {
+    this.update({
+      searchOpen: false,
+      searchText: "",
+      searchQuery: "",
+      searchMatches: [],
+      searchSelected: 0,
+      searchRow: null,
+    });
+  }
+  beginSearch(): void {
+    if (!this.state.diff || this.state.diffLoading || this.state.preview || this.state.composing)
+      return;
+    this.update({ searchOpen: true, searchText: this.state.searchQuery });
+  }
+  appendSearch(text: string): void {
+    if (!this.state.searchOpen) return;
+    if (/\p{Cc}/u.test(text) || Buffer.byteLength(this.state.searchText + text) > 512) {
+      this.update({
+        notice:
+          "Search is limited to 512 UTF-8 bytes without control characters; paste was not applied.",
+      });
+      return;
+    }
+    this.update({ searchText: this.state.searchText + text });
+  }
+  backspaceSearch(): void {
+    this.update({ searchText: [...this.state.searchText].slice(0, -1).join("") });
+  }
+  cancelSearch(): void {
+    this.update({ searchOpen: false, searchText: this.state.searchQuery });
+  }
+  clearSearchText(): void {
+    this.update({ searchText: "" });
+  }
+  applySearch(): void {
+    if (!this.state.searchOpen || !this.state.diff) return;
+    if (this.state.diffLoading) {
+      this.update({
+        notice: "Wait for this file's diff to finish loading before applying search.",
+      });
+      return;
+    }
+    const query = this.state.searchText;
+    const matches: number[] = [];
+    if (query) {
+      const needle = query.toLocaleLowerCase("en-US");
+      for (const [index, line] of this.state.diff.text.split("\n").entries()) {
+        if (line.toLocaleLowerCase("en-US").includes(needle)) matches.push(index);
+        if (matches.length >= 10000) break;
+      }
+    }
+    this.update({
+      searchOpen: false,
+      searchQuery: query,
+      searchMatches: matches,
+      searchSelected: 0,
+      searchRow: matches[0] ?? null,
+      highlightLine: null,
+      scrollRequest: this.state.scrollRequest + 1,
+      notice: query
+        ? matches.length
+          ? `${matches.length}${matches.length === 10000 ? "+ (bounded)" : ""} matching rows · ] next · [ previous`
+          : "No matching rows in this file's diff."
+        : "Search cleared.",
+    });
+  }
+  nextSearch(delta: number): void {
+    const matches = this.state.searchMatches;
+    if (!matches.length) return;
+    const selected = (this.state.searchSelected + delta + matches.length) % matches.length;
+    this.update({
+      searchSelected: selected,
+      searchRow: matches[selected] ?? null,
+      scrollRequest: this.state.scrollRequest + 1,
+      notice: `Match ${selected + 1}/${matches.length} · ] next · [ previous`,
+    });
+  }
   async refreshViewed(client: BackendClient, generation: number): Promise<void> {
     if (generation !== this.state.generation) return;
     const entry = this.state.picker[this.state.selectedPicker];
@@ -586,6 +676,7 @@ export class ShellStore {
   }
 
   async selectPicker(selectedPicker: number, selected?: number): Promise<void> {
+    this.clearSearch();
     const generation = this.state.generation + 1;
     this.update({
       selectedPicker,
@@ -673,6 +764,11 @@ export class ShellStore {
     try {
       const result = await client.diffFile(target, file.path, { oldPath: file.oldPath });
       if (request === this.diffRequest && generation === this.state.generation) {
+        if (
+          (this.state.searchOpen || this.state.searchQuery) &&
+          (this.state.diff?.path !== result.path || this.state.diff.text !== result.diff)
+        )
+          this.clearSearch();
         this.update({
           diff: { path: file.path, text: result.diff, truncated: result.truncated },
           diffLoading: false,
@@ -736,6 +832,7 @@ export class ShellStore {
       if (selectedFile === this.state.selectedFile) {
         return false;
       }
+      this.clearSearch();
       this.update({ selectedFile, highlightLine: null, highlightSide: "new", notice: null });
       if (this.client) {
         void this.loadDiff(this.client);
@@ -757,6 +854,7 @@ export class ShellStore {
   /// guessing: a missing target file or a null/outdated anchor surfaces a notice.
   /// Returns true when it started a diff load for the anchor file.
   private jumpToFinding(): boolean {
+    this.clearSearch();
     const finding = visibleFindings(this.state)[this.state.selectedFinding];
     if (!finding) {
       return false;
@@ -808,7 +906,13 @@ export class ShellStore {
   }
 
   toggleDiffMode(): void {
-    this.update({ diffMode: this.state.diffMode === "unified" ? "split" : "unified" });
+    this.update({
+      diffMode: this.state.diffMode === "unified" ? "split" : "unified",
+      scrollRequest:
+        this.state.highlightLine !== null || this.state.searchRow !== null
+          ? this.state.scrollRequest + 1
+          : this.state.scrollRequest,
+    });
   }
 
   toggleDiffExpanded(): void {

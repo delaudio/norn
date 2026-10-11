@@ -523,3 +523,79 @@ test("prompt panel fences pasted shortcuts, saves explicitly and restores viewed
     renderer.renderer.destroy();
   }
 });
+
+test("native search paste never executes shortcuts and navigates offscreen matches in both modes", async () => {
+  const renderer = await createTestRenderer({ width: 120, height: 30 });
+  const patch = [
+    "diff --git a/a.ts b/a.ts",
+    "--- a/a.ts",
+    "+++ b/a.ts",
+    "@@ -1,1000 +1,1000 @@",
+    ...Array.from(
+      { length: 1000 },
+      (_, i) => ` ${i === 500 || i === 800 ? "qaprcm_NEEDLE" : "plain"} ROW-${i}`,
+    ),
+  ].join("\n");
+  const client = new BackendClient(
+    new FakeBackendTransport({
+      repositories,
+      diffText: patch,
+      files: [{ path: "a.ts", status: "modified", additions: 0, deletions: 0, oldPath: null }],
+    }),
+  );
+  const store = new ShellStore();
+  await store.connect(client);
+  let quits = 0;
+  const ui = mountApp(renderer.renderer, store, client, () => {
+    quits++;
+  });
+  const settle = async () => {
+    for (let i = 0; i < 4; i++) {
+      await renderer.renderOnce();
+      await Bun.sleep(0);
+    }
+  };
+  try {
+    renderer.mockInput.pressKey("/");
+    await renderer.mockInput.pasteBracketedText("qaprcm_NEEDLE");
+    await settle();
+    expect(store.getSnapshot().searchOpen).toBe(true);
+    expect(store.getSnapshot().operation).toBeNull();
+    expect(quits).toBe(0);
+    renderer.mockInput.pressEnter();
+    await settle();
+    expect(store.getSnapshot().searchMatches).toEqual([504, 804]);
+    expect(ui.scroll!.scrollTop).toBeGreaterThan(450);
+    expect(renderer.captureCharFrame()).toContain("ROW-500");
+    renderer.mockInput.pressKey("]");
+    await settle();
+    expect(renderer.captureCharFrame()).toContain("ROW-800");
+    renderer.mockInput.pressKey("s");
+    await settle();
+    expect(store.getSnapshot().diffMode).toBe("split");
+    expect(renderer.captureCharFrame()).toContain("qaprcm_NEEDLE");
+    expect(ui.scroll!.scrollTop).toBeGreaterThan(750);
+    renderer.mockInput.pressKey("[");
+    await settle();
+    expect(renderer.captureCharFrame()).toContain("qaprcm_NEEDLE");
+    expect(ui.scroll!.scrollTop).toBeGreaterThan(450);
+    expect(ui.scroll!.scrollTop).toBeLessThan(600);
+    renderer.mockInput.pressKey("/");
+    renderer.mockInput.pressKey("u", { ctrl: true });
+    await renderer.mockInput.pasteBracketedText("diff --git");
+    renderer.mockInput.pressEnter();
+    await settle();
+    expect(ui.scroll!.scrollTop).toBe(0);
+    expect(renderer.captureCharFrame()).toContain("diff --git");
+    renderer.mockInput.pressKey("/");
+    await renderer.mockInput.pasteBracketedText(" cancelled");
+    renderer.mockInput.pressEscape();
+    await Bun.sleep(50);
+    await settle();
+    expect(store.getSnapshot().searchQuery).toBe("diff --git");
+    expect(store.getSnapshot().searchOpen).toBe(false);
+  } finally {
+    ui.unmount();
+    renderer.renderer.destroy();
+  }
+});

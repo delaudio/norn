@@ -14,12 +14,18 @@ export function measureDiffRows(
 ): RowGeometry {
   const heights = texts.map(() => 1);
   let maximumWidth = width;
-  const columns = texts[0]?.length ?? 1;
+  // Split views also contain full-width metadata rows. Their first row must
+  // not accidentally select unified geometry for all following pairs.
+  const columns = texts.reduce((maximum, row) => Math.max(maximum, row.length), 1);
   for (let column = 0; column < columns; column += 1) {
     const buffer = TextBuffer.create(method);
     const view = TextBufferView.create(buffer);
     try {
-      buffer.setText(texts.map((row) => row[column] ?? "").join("\n"));
+      buffer.setText(
+        texts
+          .map((row) => (columns === 2 && row.length === 1 ? "" : (row[column] ?? "")))
+          .join("\n"),
+      );
       view.setWrapMode(columns === 2 ? "word" : "none");
       view.setWrapWidth(
         columns === 2

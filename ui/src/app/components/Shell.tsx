@@ -15,6 +15,7 @@ import {
 } from "react";
 import type { BackendClient } from "../../transport/backendClient";
 import { DataStore } from "../dataStore";
+import { DiffScrollPositions } from "../diffScrollPositions";
 import { SettingsStore } from "../settingsStore";
 import {
   type FilePreviewView,
@@ -53,6 +54,16 @@ function useShellInput(
       store.getSnapshot().workspaceOpen
     )
       return;
+    if (store.getSnapshot().searchOpen) {
+      key.preventDefault();
+      if (key.name === "escape") store.cancelSearch();
+      else if (key.name === "return") store.applySearch();
+      else if (key.name === "backspace") store.backspaceSearch();
+      else if (key.ctrl && key.name === "u") store.clearSearchText();
+      else if (!key.ctrl && !key.meta && !key.super && !key.option && key.sequence >= " ")
+        store.appendSearch(key.sequence);
+      return;
+    }
     if (key.ctrl && key.name === "c") {
       quit();
       return;
@@ -118,6 +129,12 @@ function useShellInput(
       store.toggleConversation();
     } else if (key.name === "s") {
       store.toggleDiffMode();
+    } else if (key.sequence === "/") {
+      store.beginSearch();
+    } else if (key.sequence === "]") {
+      store.nextSearch(1);
+    } else if (key.sequence === "[") {
+      store.nextSearch(-1);
     } else if (key.name === "e") {
       store.toggleDiffExpanded();
     } else if (key.name === "c") {
@@ -151,6 +168,11 @@ function useShellInput(
       store.getSnapshot().workspaceOpen
     )
       return;
+    if (store.getSnapshot().searchOpen) {
+      event.preventDefault();
+      store.appendSearch(new TextDecoder().decode(event.bytes));
+      return;
+    }
     if (store.getSnapshot().fixPreview) {
       event.preventDefault();
       return;
@@ -229,8 +251,8 @@ export function diffLines(text: string, highlight: number | null, side: "old" | 
 }
 
 type SplitRow =
-  | { kind: "hunk"; text: string }
-  | { kind: "note"; text: string; side: "old" | "new" | null }
+  | { kind: "hunk"; text: string; highlighted?: boolean }
+  | { kind: "note"; text: string; side: "old" | "new" | null; highlighted?: boolean }
   | { kind: "pair"; left: DiffLine | null; right: DiffLine | null };
 
 /// Pair removed and added runs side by side so the split view keeps old/new line
@@ -245,14 +267,18 @@ export function splitRows(lines: DiffLine[]): SplitRow[] {
       break;
     }
     if (line.kind === "hunk") {
-      rows.push({ kind: "hunk", text: line.text });
+      rows.push({
+        kind: "hunk",
+        text: line.text,
+        ...(line.highlighted ? { highlighted: true } : {}),
+      });
       index += 1;
       continue;
     }
     if (line.kind === "del" || line.kind === "add") {
       const removed: DiffLine[] = [];
       const added: DiffLine[] = [];
-      const notes: Array<{ text: string; side: "old" | "new" | null }> = [];
+      const notes: Array<{ text: string; side: "old" | "new" | null; highlighted?: boolean }> = [];
       let lastSide: "old" | "new" | null = null;
       while (index < lines.length) {
         const current = lines[index];
@@ -266,7 +292,11 @@ export function splitRows(lines: DiffLine[]): SplitRow[] {
           added.push(current);
           lastSide = "new";
         } else if (current.kind === "meta") {
-          notes.push({ text: current.text, side: lastSide });
+          notes.push({
+            text: current.text,
+            side: lastSide,
+            ...(current.highlighted ? { highlighted: true } : {}),
+          });
         } else {
           break;
         }
@@ -277,12 +307,17 @@ export function splitRows(lines: DiffLine[]): SplitRow[] {
         rows.push({ kind: "pair", left: removed[offset] ?? null, right: added[offset] ?? null });
       }
       for (const note of notes) {
-        rows.push({ kind: "note", text: note.text, side: note.side });
+        rows.push({ kind: "note", ...note });
       }
       continue;
     }
     if (line.kind === "meta") {
-      rows.push({ kind: "note", text: line.text, side: null });
+      rows.push({
+        kind: "note",
+        text: line.text,
+        side: null,
+        ...(line.highlighted ? { highlighted: true } : {}),
+      });
       index += 1;
       continue;
     }
@@ -303,7 +338,12 @@ function lineLabel(line: DiffLine | null, side: "old" | "new"): string {
 function splitRowElement(row: SplitRow, key: number): ReactNode {
   if (row.kind === "hunk") {
     return (
-      <text key={key} fg={theme.muted} wrapMode="none">
+      <text
+        key={key}
+        id={row.highlighted ? "diff-highlight" : undefined}
+        fg={row.highlighted ? theme.primary : theme.muted}
+        wrapMode="none"
+      >
         {row.text}
       </text>
     );
@@ -311,20 +351,30 @@ function splitRowElement(row: SplitRow, key: number): ReactNode {
   if (row.kind === "note") {
     if (row.side === null) {
       return (
-        <text key={key} fg={theme.muted} wrapMode="none">
+        <text
+          key={key}
+          id={row.highlighted ? "diff-highlight" : undefined}
+          fg={row.highlighted ? theme.primary : theme.muted}
+          wrapMode="none"
+        >
           {row.text}
         </text>
       );
     }
     return (
-      <box key={key} flexDirection="row" height={1}>
+      <box
+        key={key}
+        id={row.highlighted ? "diff-highlight" : undefined}
+        flexDirection="row"
+        height={1}
+      >
         <box width="50%" minWidth={0}>
-          <text fg={theme.muted} wrapMode="none" truncate>
+          <text fg={row.highlighted ? theme.primary : theme.muted} wrapMode="none" truncate>
             {row.side === "old" ? row.text : ""}
           </text>
         </box>
         <box width="50%" minWidth={0}>
-          <text fg={theme.muted} wrapMode="none" truncate>
+          <text fg={row.highlighted ? theme.primary : theme.muted} wrapMode="none" truncate>
             {row.side === "new" ? row.text : ""}
           </text>
         </box>
@@ -333,19 +383,28 @@ function splitRowElement(row: SplitRow, key: number): ReactNode {
   }
   const highlighted = row.left?.highlighted === true || row.right?.highlighted === true;
   return (
-    <box key={key} id={highlighted ? "diff-highlight" : undefined} flexDirection="row">
-      <box width="50%" minWidth={0}>
+    <box
+      key={key}
+      id={highlighted ? "diff-highlight" : undefined}
+      flexDirection="row"
+      height="100%"
+    >
+      <box width="50%" minWidth={0} height="100%">
         <text
           fg={row.left?.highlighted ? theme.primary : (row.left?.fg ?? theme.text)}
           wrapMode="word"
+          height="100%"
+          width="100%"
         >
           {lineLabel(row.left, "old")}
         </text>
       </box>
-      <box width="50%" minWidth={0}>
+      <box width="50%" minWidth={0} height="100%">
         <text
           fg={row.right?.highlighted ? theme.primary : (row.right?.fg ?? theme.text)}
           wrapMode="word"
+          height="100%"
+          width="100%"
         >
           {lineLabel(row.right, "new")}
         </text>
@@ -359,9 +418,10 @@ function splitRowElement(row: SplitRow, key: number): ReactNode {
 const MAX_RENDERED_DIFF_ROWS = 2000;
 
 function splitHighlightIndex(rows: SplitRow[]): number {
-  return rows.findIndex(
-    (row) =>
-      row.kind === "pair" && (row.left?.highlighted === true || row.right?.highlighted === true),
+  return rows.findIndex((row) =>
+    row.kind === "pair"
+      ? row.left?.highlighted === true || row.right?.highlighted === true
+      : row.highlighted === true,
   );
 }
 
@@ -496,6 +556,8 @@ function ImageComparison({
 
 function DiffPanel({
   state,
+  positions,
+  identity,
   scroll,
   lines,
   splitAll,
@@ -507,6 +569,8 @@ function DiffPanel({
   anchor,
 }: {
   state: ShellSnapshot;
+  positions: DiffScrollPositions;
+  identity: string;
   scroll: RefObject<ScrollBoxRenderable | null>;
   lines: DiffLine[];
   onPreviewError: (side: "old" | "new", message: string, requestId: number) => void;
@@ -525,7 +589,7 @@ function DiffPanel({
             .map((row) =>
               row.kind === "pair"
                 ? [lineLabel(row.left, "old"), lineLabel(row.right, "new")]
-                : ["", ""],
+                : [row.text],
             )
         : lines.slice(windowStart, windowEnd).map((line) => [line.text]),
     [state.diffMode, splitAll, lines, windowStart, windowEnd],
@@ -578,7 +642,8 @@ function DiffPanel({
         texts={texts}
         anchor={anchor < 0 ? -1 : anchor - windowStart}
         request={state.scrollRequest}
-        identity={`${state.selectedPicker}:${state.picker[state.selectedPicker]?.provider}:${state.picker[state.selectedPicker]?.workspace}:${state.picker[state.selectedPicker]?.repo}:${state.picker[state.selectedPicker]?.prId}:${state.diff.path}`}
+        identity={identity}
+        positions={positions}
         above={
           hiddenAbove > 0 ? (
             <text
@@ -731,6 +796,8 @@ function WorkspaceStatus({ state }: { state: ShellSnapshot }) {
 
 export function Shell({ store, client, quit }: ShellProps) {
   const state = useSyncExternalStore(store.subscribe, store.getSnapshot);
+  const positions = useMemo(() => new DiffScrollPositions(), []);
+  useEffect(() => () => positions.clear(), [positions]);
   const workspace = useMemo(() => new WorkspaceStore(), []);
   const workspaceEntry = state.picker[state.selectedPicker];
   useEffect(() => {
@@ -763,10 +830,14 @@ export function Shell({ store, client, quit }: ShellProps) {
   useShellInput(store, client, quit, scroll, fixScroll);
   const wide = width >= 100;
 
-  const diffLinesData = useMemo(
-    () => (state.diff ? diffLines(state.diff.text, state.highlightLine, state.highlightSide) : []),
-    [state.diff, state.highlightLine, state.highlightSide],
-  );
+  const diffLinesData = useMemo(() => {
+    const lines = state.diff
+      ? diffLines(state.diff.text, state.highlightLine, state.highlightSide)
+      : [];
+    return state.searchRow === null
+      ? lines
+      : lines.map((line, index) => ({ ...line, highlighted: index === state.searchRow }));
+  }, [state.diff, state.highlightLine, state.highlightSide, state.searchRow]);
   const splitAll = useMemo(
     () => (state.diffMode === "split" ? splitRows(diffLinesData) : []),
     [state.diffMode, diffLinesData],
@@ -781,6 +852,21 @@ export function Shell({ store, client, quit }: ShellProps) {
 
   const repo = state.repositories[state.selected];
   const entry = state.picker[state.selectedPicker];
+  const contentHash = useMemo(
+    () => (state.diff ? new Bun.CryptoHasher("sha256").update(state.diff.text).digest("hex") : ""),
+    [state.diff],
+  );
+  const diffIdentity = JSON.stringify([
+    entry?.provider,
+    entry?.workspace,
+    entry?.repo,
+    entry?.prId,
+    entry?.runId,
+    state.diff?.path,
+    contentHash,
+    state.diffMode,
+    state.diffExpanded,
+  ]);
   const detailTitle = entry
     ? entry.kind === "review"
       ? `${entry.workspace}/${entry.repo} #${entry.prId}`
@@ -942,6 +1028,8 @@ export function Shell({ store, client, quit }: ShellProps) {
           </text>
           <DiffPanel
             state={state}
+            positions={positions}
+            identity={diffIdentity}
             scroll={scroll}
             lines={diffLinesData}
             splitAll={splitAll}
@@ -954,6 +1042,19 @@ export function Shell({ store, client, quit }: ShellProps) {
               store.setPreviewError(side, message, requestId)
             }
           />
+          {state.searchOpen ? (
+            <text
+              fg={theme.primary}
+              height={1}
+              truncate
+            >{`Search: ${state.searchText} · Enter apply · Esc cancel · Ctrl+U clear`}</text>
+          ) : state.searchQuery ? (
+            <text
+              fg={theme.muted}
+              height={1}
+              truncate
+            >{`Search ${state.searchQuery} · ${state.searchMatches.length ? state.searchSelected + 1 : 0}/${state.searchMatches.length} · ] next · [ previous`}</text>
+          ) : null}
         </box>
       </box>
       <FixPanel
