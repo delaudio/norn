@@ -336,3 +336,18 @@ Plan 0053 completion prepared after implementation `e4264db`, effective only on 
 
 - Prepared plan/done receipt for feature `09443bf`; effective only after exact-head
   CI and squash merge. No issue/ADR completion claimed by the prepared path.
+
+
+## 2026-10-12 — PR #367 shipped; claim plan 0057 native provider preview
+
+- PR #367 squash merged at `22b5b1a441593b2dce9423dd3006b0b143dabf2b` after
+  exact `5718adb2016426a18acea17330a219d373cd75ec` UI and verify success;
+  CI run 38183029202, verify 11m45s. Prepared plan 0056 receipt is effective.
+- #357 remains open: immutable backend bridge shipped, native preview/review
+  start and explicit approve/external browser still required.
+- Claimed plan 0057 on `issue-357-native-provider-preview` before code. Native
+  pinned provider raster/tree/blob acquisition preserves remote image previews
+  without requiring a local clone; keep bounded cache and browser source fences.
+- Read official GH trees/blobs/contents and BB commit-file metadata docs. Raw GH
+  contents can dereference symlinks; use verified regular Git blob semantics.
+- ADR 0020 remains Accepted; no cutover/profile/platform/install proof waived.
