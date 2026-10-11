@@ -256,6 +256,12 @@ pub enum Request {
         #[serde(default)]
         params: EmptyParams,
     },
+    #[serde(rename = "workspace.readiness")]
+    WorkspaceReadiness {
+        id: String,
+        #[serde(default)]
+        params: EmptyParams,
+    },
     #[serde(rename = "settings.save")]
     SettingsSave {
         id: String,
@@ -359,6 +365,7 @@ impl Request {
             | Self::AuthSet { id, .. }
             | Self::AuthClear { id, .. }
             | Self::SettingsGet { id, .. }
+            | Self::WorkspaceReadiness { id, .. }
             | Self::SettingsSave { id, .. }
             | Self::RepositoryStatus { id, .. }
             | Self::DiffFile { id, .. }
@@ -400,6 +407,7 @@ impl Request {
             Self::AuthSet { .. } => "auth.set",
             Self::AuthClear { .. } => "auth.clear",
             Self::SettingsGet { .. } => "settings.get",
+            Self::WorkspaceReadiness { .. } => "workspace.readiness",
             Self::SettingsSave { .. } => "settings.save",
             Self::RepositoryStatus { .. } => "repository.status",
             Self::DiffFile { .. } => "diff.file",
@@ -490,7 +498,10 @@ impl Request {
                 }
                 params.settings.validate().map_err(invalid_request)?;
             }
-            Self::SettingsGet { .. } | Self::AuthStatus { .. } | Self::AuthClear { .. } => {}
+            Self::SettingsGet { .. }
+            | Self::WorkspaceReadiness { .. }
+            | Self::AuthStatus { .. }
+            | Self::AuthClear { .. } => {}
             Self::AuthSet { params, .. } => params.validate().map_err(invalid_request)?,
             Self::DiffFile { params, .. } => {
                 params.target.validate()?;

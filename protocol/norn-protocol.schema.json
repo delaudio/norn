@@ -230,7 +230,8 @@
         "data.export",
         "workspace.read",
         "workspace.mutate",
-        "review.output"
+        "review.output",
+        "workspace.readiness"
       ]
     },
     "DiffFileParams": {
@@ -2038,6 +2039,70 @@
           "maxLength": 65536
         }
       }
+    },
+    "WorkspaceReadiness": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "configuredRepos",
+        "selectedAgent",
+        "tools",
+        "configRootAvailable",
+        "dataRootAvailable",
+        "credentialStore"
+      ],
+      "properties": {
+        "configuredRepos": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100
+        },
+        "selectedAgent": {
+          "enum": [
+            "claude",
+            "codex",
+            "opencode"
+          ]
+        },
+        "tools": {
+          "type": "array",
+          "minItems": 4,
+          "maxItems": 4,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "name",
+              "available"
+            ],
+            "properties": {
+              "name": {
+                "enum": [
+                  "git",
+                  "claude",
+                  "codex",
+                  "opencode"
+                ]
+              },
+              "available": {
+                "type": "boolean"
+              }
+            }
+          }
+        },
+        "configRootAvailable": {
+          "type": "boolean"
+        },
+        "dataRootAvailable": {
+          "type": "boolean"
+        },
+        "credentialStore": {
+          "enum": [
+            "native",
+            "unsupported"
+          ]
+        }
+      }
     }
   },
   "oneOf": [
@@ -2988,6 +3053,30 @@
               "$ref": "#/definitions/TargetParams"
             }
           }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "type": {
+              "const": "request"
+            },
+            "id": {
+              "$ref": "#/definitions/RequestId"
+            },
+            "method": {
+              "const": "workspace.readiness"
+            },
+            "params": {
+              "$ref": "#/definitions/EmptyParams"
+            }
+          }
         }
       ]
     },
@@ -3054,6 +3143,9 @@
             },
             {
               "$ref": "#/definitions/ReviewOutputResult"
+            },
+            {
+              "$ref": "#/definitions/WorkspaceReadiness"
             }
           ]
         }

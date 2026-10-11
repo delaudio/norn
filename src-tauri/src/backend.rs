@@ -174,6 +174,7 @@ pub fn run() -> Result<(), i32> {
         capabilities: vec![
             "workspace-data".to_string(),
             "workspace-records".to_string(),
+            "workspace-readiness".to_string(),
             "settings".to_string(),
             "auth".to_string(),
             "repository".to_string(),
@@ -369,6 +370,7 @@ fn dispatch(request: Request, backend: &Backend) -> bool {
         | Request::DataImport { .. }
         | Request::DataExport { .. }
         | Request::SettingsGet { .. }
+        | Request::WorkspaceReadiness { .. }
         | Request::SettingsSave { .. }
         | Request::AuthStatus { .. }
         | Request::AuthSet { .. }
@@ -417,6 +419,9 @@ fn dispatch(request: Request, backend: &Backend) -> bool {
                     }
                     Request::AuthStatus { .. } => {
                         Ok(json!({"credentials":crate::services::workspace_auth::statuses()}))
+                    }
+                    Request::WorkspaceReadiness { .. } => {
+                        crate::services::workspace_readiness::snapshot().map(|value| json!(value))
                     }
                     Request::AuthSet { params, .. } => {
                         let provider = params.provider;

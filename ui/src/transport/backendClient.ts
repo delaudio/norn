@@ -3,6 +3,7 @@ import type {
   RecordMutation,
   RecordMutationResult,
   RecordPage,
+  WorkspaceReadiness,
   WorkspaceSettings,
 } from "../../../src/protocol/generated/protocol";
 // Typed facade over a BackendTransport. Domain methods are added as later
@@ -17,6 +18,7 @@ export interface RepositorySummary {
   repo: string;
   localPath: string | null;
 }
+export type { WorkspaceReadiness };
 
 export interface DiffFileResult {
   target: TargetIdentity;
@@ -373,6 +375,42 @@ export class BackendClient {
         "Selected stored review output is unavailable or exceeds the clipboard limit.",
       );
     return result.text;
+  }
+  async readiness(): Promise<WorkspaceReadiness> {
+    const result = await this.transport.request("workspace.readiness", {});
+    const tools = result.tools as WorkspaceReadiness["tools"];
+    if (
+      Object.keys(result).some(
+        (key) =>
+          ![
+            "configuredRepos",
+            "selectedAgent",
+            "tools",
+            "configRootAvailable",
+            "dataRootAvailable",
+            "credentialStore",
+          ].includes(key),
+      ) ||
+      !Number.isInteger(result.configuredRepos) ||
+      Number(result.configuredRepos) < 0 ||
+      Number(result.configuredRepos) > 100 ||
+      !["claude", "codex", "opencode"].includes(String(result.selectedAgent)) ||
+      !["native", "unsupported"].includes(String(result.credentialStore)) ||
+      typeof result.configRootAvailable !== "boolean" ||
+      typeof result.dataRootAvailable !== "boolean" ||
+      !Array.isArray(tools) ||
+      tools.length !== 4 ||
+      new Set(tools.map((tool) => tool?.name)).size !== 4 ||
+      tools.some(
+        (tool) =>
+          !tool ||
+          Object.keys(tool).some((key) => !["name", "available"].includes(key)) ||
+          !["git", "claude", "codex", "opencode"].includes(tool.name) ||
+          typeof tool.available !== "boolean",
+      )
+    )
+      throw new Error("Readiness status is unavailable or invalid.");
+    return result as unknown as WorkspaceReadiness;
   }
 
   async browserOpen(target: TargetIdentity): Promise<{ url: string }> {

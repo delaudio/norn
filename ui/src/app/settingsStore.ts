@@ -1,5 +1,10 @@
 import type { WorkspaceSettings } from "../../../src/protocol/generated/protocol";
-import type { BackendClient, CredentialStatus, SettingsSnapshot } from "../transport/backendClient";
+import type {
+  BackendClient,
+  CredentialStatus,
+  SettingsSnapshot,
+  WorkspaceReadiness,
+} from "../transport/backendClient";
 
 export interface SettingsField {
   id: string;
@@ -9,6 +14,8 @@ export interface SettingsField {
   sensitive?: boolean;
 }
 export interface SettingsState {
+  readiness: WorkspaceReadiness | null;
+  readinessLoading: boolean;
   loading: boolean;
   saving: boolean;
   credentialsLoading: boolean;
@@ -49,6 +56,8 @@ export class SettingsStore {
   private original: SettingsSnapshot | null = null;
   private generation = 0;
   private state: SettingsState = {
+    readiness: null,
+    readinessLoading: false,
     loading: false,
     saving: false,
     credentialsLoading: false,
@@ -84,6 +93,7 @@ export class SettingsStore {
       this.original = snapshot;
       this.update({ draft: structuredClone(snapshot.settings), loading: false });
       await this.loadCredentials(client, generation);
+      if (generation === this.generation) await this.refreshReadiness(client);
     } catch (error) {
       if (generation === this.generation) this.update({ loading: false, error: errorText(error) });
     }
@@ -103,6 +113,8 @@ export class SettingsStore {
     this.generation++;
     this.original = null;
     this.update({
+      readiness: null,
+      readinessLoading: false,
       draft: null,
       selected: 0,
       loading: false,
@@ -117,6 +129,22 @@ export class SettingsStore {
       editing: false,
       clearConfirmation: false,
     });
+  }
+  async refreshReadiness(client: BackendClient): Promise<void> {
+    if (this.state.readinessLoading) return;
+    const generation = this.generation;
+    this.update({ readinessLoading: true });
+    try {
+      const readiness = await client.readiness();
+      if (generation === this.generation) this.update({ readiness });
+    } catch {
+      if (generation === this.generation)
+        this.update({
+          error: "Readiness status could not be refreshed. Unsaved fields are retained.",
+        });
+    } finally {
+      if (generation === this.generation) this.update({ readinessLoading: false });
+    }
   }
   fields(): SettingsField[] {
     const draft = this.state.draft;
@@ -306,6 +334,8 @@ export class SettingsStore {
         draft: structuredClone(snapshot.settings),
         notice: "Preferences saved. Credentials are saved separately.",
       });
+      await this.refreshReadiness(client);
+      if (generation !== this.generation) return null;
       return snapshot.settings;
     } catch (error) {
       if (generation === this.generation)

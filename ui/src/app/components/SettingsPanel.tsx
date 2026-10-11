@@ -46,6 +46,7 @@ export function SettingsPanel({
         })
         .catch((error) => shell.setError(error instanceof Error ? error.message : String(error)));
     } else if (key.ctrl && key.name === "d") shell.toggleData();
+    else if (key.ctrl && key.name === "r") void settings.refreshReadiness(client);
     else if (key.ctrl && key.name === "k") void settings.saveCredential(client);
     else if (key.name === "escape" || key.name === "q") shell.toggleSettings();
     else if (key.name === "j" || key.name === "down" || key.name === "tab") settings.move(1);
@@ -81,7 +82,7 @@ export function SettingsPanel({
       ) : null}
       {state.error ? <text fg={theme.error}>{state.error}</text> : null}
       {state.notice ? <text fg={theme.warning}>{state.notice}</text> : null}
-      <text fg={theme.secondary} truncate>
+      <text fg={theme.secondary} height={1} truncate>
         {state.credentials
           .map(
             (status) =>
@@ -89,6 +90,20 @@ export function SettingsPanel({
           )
           .join(" · ")}
       </text>
+      <text fg={theme.muted} height={1} truncate>
+        {state.readinessLoading
+          ? "Checking tool paths…"
+          : state.readiness
+            ? `Tools: ${state.readiness.tools.map((tool) => `${tool.name} ${tool.available ? "found" : "missing"}`).join(" · ")} · Ctrl+R refresh`
+            : "Ctrl+R checks tool paths. Presence does not verify authentication."}
+      </text>
+      {state.readiness ? (
+        <text fg={theme.warning} height={1} truncate>
+          {state.readiness.credentialStore === "unsupported"
+            ? "Native credential store unavailable on this build; existing environment credentials work. No plaintext fallback."
+            : `Selected agent: ${state.readiness.selectedAgent} · tool presence does not verify login or provider connection.`}
+        </text>
+      ) : null}
       {state.clearConfirmation ? (
         <text
           fg={theme.warning}
