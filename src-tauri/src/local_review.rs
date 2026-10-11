@@ -201,6 +201,23 @@ pub(crate) fn get_local_review_snapshot_native_with_cancellation(
     )
 }
 
+pub(crate) fn local_review_snapshot_for_approval_path(
+    provider: ReviewProvider,
+    workspace: &str,
+    repo: &str,
+    repo_path: &Path,
+) -> Result<LocalReviewSnapshot, String> {
+    local_review_snapshot_for_path_with_control(
+        provider,
+        workspace,
+        repo,
+        repo_path,
+        LocalReviewCancellation::new(),
+        LOCAL_GIT_TIMEOUT,
+        false,
+    )
+}
+
 pub(crate) fn local_review_snapshot_for_configured_path(
     provider: ReviewProvider,
     workspace: &str,

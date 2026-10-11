@@ -160,3 +160,54 @@ test("streams review events into a bounded operation panel", async () => {
     app.renderer.renderer.destroy();
   }
 });
+
+test("fix confirmation intercepts shortcuts and requires a fresh explicit approval", async () => {
+  const renderer = await createTestRenderer({ width: 100, height: 30 });
+  const client = new BackendClient(
+    new FakeBackendTransport({
+      repositories,
+      targets: [
+        {
+          provider: "github",
+          workspace: "acme",
+          repo: "payments",
+          prId: 9,
+          runId: "run-fix",
+          title: "Fix",
+          status: "succeeded",
+        },
+      ],
+    }),
+  );
+  const store = new ShellStore();
+  await store.connect(client);
+  await store.selectPicker(2);
+  let quits = 0;
+  const ui = mountApp(renderer.renderer, store, client, () => {
+    quits += 1;
+  });
+  try {
+    renderer.mockInput.pressKey("a");
+    await Bun.sleep(5);
+    await renderer.renderOnce();
+    expect(renderer.captureCharFrame()).toContain("Approve filesystem changes?");
+    renderer.mockInput.pressKey("q");
+    renderer.mockInput.pressKey("r");
+    expect(quits).toBe(0);
+    expect(store.getSnapshot().composing).toBe(false);
+    expect(store.getSnapshot().operation).toBeNull();
+    renderer.mockInput.pressKey("n");
+    await renderer.renderOnce();
+    expect(store.getSnapshot().fixPreview).toBeNull();
+    renderer.mockInput.pressKey("y");
+    expect(store.getSnapshot().operation).toBeNull();
+    renderer.mockInput.pressKey("a");
+    await Bun.sleep(5);
+    renderer.mockInput.pressKey("y");
+    await Bun.sleep(5);
+    expect(store.getSnapshot().operation?.id).toContain("fake-fix");
+  } finally {
+    ui.unmount();
+    renderer.renderer.destroy();
+  }
+});

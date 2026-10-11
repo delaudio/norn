@@ -208,7 +208,10 @@
         "file.preview",
         "review.history",
         "review.reply",
-        "review.threads"
+        "review.threads",
+        "review.fix.preview",
+        "review.fix",
+        "review.fix.state"
       ]
     },
     "DiffFileParams": {
@@ -1051,6 +1054,92 @@
             },
             "method": {
               "const": "review.threads"
+            },
+            "params": {
+              "$ref": "#/definitions/TargetParams"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "type": {
+              "const": "request"
+            },
+            "id": {
+              "$ref": "#/definitions/RequestId"
+            },
+            "method": {
+              "const": "review.fix.preview"
+            },
+            "params": {
+              "$ref": "#/definitions/TargetParams"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "type": {
+              "const": "request"
+            },
+            "id": {
+              "$ref": "#/definitions/RequestId"
+            },
+            "method": {
+              "const": "review.fix"
+            },
+            "params": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "target",
+                "approvalToken"
+              ],
+              "properties": {
+                "target": {
+                  "$ref": "#/definitions/TargetIdentity"
+                },
+                "approvalToken": {
+                  "type": "string",
+                  "pattern": "^[0-9a-fA-F]{64}$"
+                }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "type": {
+              "const": "request"
+            },
+            "id": {
+              "$ref": "#/definitions/RequestId"
+            },
+            "method": {
+              "const": "review.fix.state"
             },
             "params": {
               "$ref": "#/definitions/TargetParams"

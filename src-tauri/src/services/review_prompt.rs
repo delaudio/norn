@@ -72,6 +72,37 @@ pub fn markdown_fence(content: &str) -> String {
     "`".repeat(max_run.saturating_add(1).max(3))
 }
 
+/// Build the native fix prompt from the full persisted conversation.
+pub(crate) fn build_fix_payload(
+    pr_id: u32,
+    source: &str,
+    destination: &str,
+    thread: &crate::services::review::AiReviewThread,
+    diff: &str,
+) -> String {
+    let mut lines = vec![
+        "You are a senior software engineer fixing actionable findings from an AI pull request review.".to_string(),
+        "Work in the current git branch and make the minimum code changes needed to address valid issues.".to_string(),
+        "You may inspect and edit files, and run local checks if useful.".to_string(),
+        "Do not create commits, do not push, and do not change git history.".to_string(),
+        "Use the full review conversation as context, not only the first review message.".to_string(),
+        "If later assistant messages refine or contradict earlier ones, treat the latest assistant position as authoritative.".to_string(),
+        "If a finding is incorrect or not actionable, leave the code unchanged for that item and explain it briefly in the summary.".to_string(),
+        r#"Return ONLY JSON matching this shape: {"status":"success|failed","summary":"string","commitMessage":"string","tests":["..."],"filesTouched":["..."],"failureReason":"string?"}."#.to_string(),
+        format!("\n## Pull request\nPull request #{pr_id}\nBranch: {source} -> {destination}\n\n## Review conversation"),
+    ];
+    for message in &thread.messages {
+        let speaker = if message.role == crate::services::review::AiReviewMessageRole::Assistant {
+            "Assistant"
+        } else {
+            "Reviewer"
+        };
+        lines.push(format!("### {speaker}\n{}", message.content.trim()));
+    }
+    lines.push(format!("\n## Diff\n```diff\n{}\n```", diff.trim()));
+    lines.join("\n\n")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -256,7 +256,19 @@ async function conversationScene() {
   return { client, store };
 }
 
+async function fixPreviewScene() {
+  const { client, store, ready } = readyStore(
+    new FakeBackendTransport({ repositories, targets, files, findings }),
+  );
+  await ready;
+  await store.selectPicker(2);
+  await store.previewFix(client);
+  return { client, store };
+}
+
 const scenes: Scene[] = [
+  { id: "shell-fix-preview-120x30", cols: 120, rows: 30, build: fixPreviewScene },
+  { id: "shell-fix-preview-50x15", cols: 50, rows: 15, build: fixPreviewScene },
   { id: "shell-grouped-findings-120x30", cols: 120, rows: 30, build: groupedFindingsScene },
   { id: "shell-conversation-120x30", cols: 120, rows: 30, build: conversationScene },
   { id: "shell-conversation-50x15", cols: 50, rows: 15, build: conversationScene },

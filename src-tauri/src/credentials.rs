@@ -50,6 +50,14 @@ pub struct Credentials {
 }
 
 fn entry_for_service(service: &str, account: &str) -> Result<Entry, String> {
+    #[cfg(test)]
+    {
+        // Library tests must not query or mutate the developer's OS credentials.
+        static MOCK_KEYCHAIN: std::sync::Once = std::sync::Once::new();
+        MOCK_KEYCHAIN.call_once(|| {
+            keyring::set_default_credential_builder(keyring::mock::default_credential_builder());
+        });
+    }
     Entry::new(service, account).map_err(|e| e.to_string())
 }
 
