@@ -211,7 +211,11 @@
         "review.threads",
         "review.fix.preview",
         "review.fix",
-        "review.fix.state"
+        "review.fix.state",
+        "review.commit.preview",
+        "review.commit",
+        "review.push.preview",
+        "review.push"
       ]
     },
     "DiffFileParams": {
@@ -1143,6 +1147,145 @@
             },
             "params": {
               "$ref": "#/definitions/TargetParams"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "type": {
+              "const": "request"
+            },
+            "id": {
+              "$ref": "#/definitions/RequestId"
+            },
+            "method": {
+              "const": "review.commit.preview"
+            },
+            "params": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "target",
+                "message"
+              ],
+              "properties": {
+                "target": {
+                  "$ref": "#/definitions/TargetIdentity"
+                },
+                "message": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 4096
+                }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "type": {
+              "const": "request"
+            },
+            "id": {
+              "$ref": "#/definitions/RequestId"
+            },
+            "method": {
+              "const": "review.commit"
+            },
+            "params": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "target",
+                "approvalToken"
+              ],
+              "properties": {
+                "target": {
+                  "$ref": "#/definitions/TargetIdentity"
+                },
+                "approvalToken": {
+                  "type": "string",
+                  "pattern": "^[0-9a-fA-F]{64}$"
+                }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "type": {
+              "const": "request"
+            },
+            "id": {
+              "$ref": "#/definitions/RequestId"
+            },
+            "method": {
+              "const": "review.push.preview"
+            },
+            "params": {
+              "$ref": "#/definitions/TargetParams"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "type": {
+              "const": "request"
+            },
+            "id": {
+              "$ref": "#/definitions/RequestId"
+            },
+            "method": {
+              "const": "review.push"
+            },
+            "params": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "target",
+                "approvalToken"
+              ],
+              "properties": {
+                "target": {
+                  "$ref": "#/definitions/TargetIdentity"
+                },
+                "approvalToken": {
+                  "type": "string",
+                  "pattern": "^[0-9a-fA-F]{64}$"
+                }
+              }
             }
           }
         }

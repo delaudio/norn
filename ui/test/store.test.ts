@@ -615,3 +615,89 @@ test("changing targets clears and fences a late fix approval", async () => {
   expect(store.getSnapshot().fixPreview).toBeNull();
   expect(store.getSnapshot().fixPreviewLoading).toBe(false);
 });
+
+test("commit composition previews exact text and push requires separate approval", async () => {
+  class RecordingTransport extends FakeBackendTransport {
+    requests: string[] = [];
+    async request(method: string, params: Record<string, unknown>) {
+      this.requests.push(method);
+      return super.request(method, params);
+    }
+  }
+  const transport = new RecordingTransport({
+    repositories,
+    targets: [
+      {
+        provider: "github",
+        workspace: "acme",
+        repo: "payments",
+        prId: 9,
+        runId: "run-fix",
+        title: "Fix",
+        status: "succeeded",
+      },
+    ],
+  });
+  const client = new BackendClient(transport);
+  const store = new ShellStore();
+  await store.connect(client);
+  await store.selectPicker(2);
+  await store.beginCommit(client);
+  expect(store.getSnapshot().composerKind).toBe("commit");
+  expect(store.getSnapshot().composing).toBe(true);
+  store.appendReplyText(" ✓");
+  await store.previewCommit(client);
+  const preview = store.getSnapshot().fixPreview!;
+  expect(preview.action).toBe("commit");
+  expect(preview.commitMessage).toBe("fix: guard null ✓");
+  expect(store.getSnapshot().operation).toBeNull();
+  expect(store.getSnapshot().composing).toBe(false);
+  await store.confirmFix(client);
+  const commit = store.getSnapshot().operation!;
+  expect(commit.id).toContain("fake-commit");
+  store.applyEvent({
+    operationId: commit.id,
+    target: preview.target,
+    sequence: 1,
+    event: { kind: "state", state: "succeeded" },
+  });
+  await Bun.sleep(5);
+  expect(store.getSnapshot().fixState?.phase).toBe("readyToPush");
+  expect(store.getSnapshot().fixState?.commitSha).toBe("c".repeat(40));
+  await store.previewPush(client);
+  expect(store.getSnapshot().fixPreview?.action).toBe("push");
+  expect(transport.requests).not.toContain("review.push");
+  await store.confirmFix(client);
+  expect(store.getSnapshot().operation?.id).toContain("fake-push");
+  expect(transport.requests).not.toContain("review.reply");
+  expect(transport.requests.filter((method) => method === "review.commit")).toHaveLength(1);
+  expect(transport.requests.filter((method) => method === "review.push")).toHaveLength(1);
+});
+
+test("a late commit-state response cannot open the composer on another target", async () => {
+  const client = new BackendClient(
+    new FakeBackendTransport({
+      repositories,
+      delayMs: 15,
+      targets: [
+        {
+          provider: "github",
+          workspace: "acme",
+          repo: "payments",
+          prId: 9,
+          runId: "run-fix",
+          title: "Fix",
+          status: "succeeded",
+        },
+      ],
+    }),
+  );
+  const store = new ShellStore();
+  await store.connect(client);
+  await store.selectPicker(2);
+  const pending = store.beginCommit(client);
+  await store.selectPicker(0);
+  await pending;
+  expect(store.getSnapshot().composing).toBe(false);
+  expect(store.getSnapshot().fixPreview).toBeNull();
+});

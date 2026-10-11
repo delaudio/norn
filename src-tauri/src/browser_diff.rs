@@ -436,7 +436,11 @@ fn handle_connection(
     populate_lock: Arc<Mutex<()>>,
     browser_assets: Arc<BrowserAssets>,
 ) -> std::io::Result<()> {
-    let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
+    // Accepted sockets can inherit nonblocking mode from the listener on BSD.
+    // Each worker owns a blocking, time-bounded stream, including delayed headers.
+    stream.set_nonblocking(false)?;
+    stream.set_read_timeout(Some(Duration::from_secs(5)))?;
+    stream.set_write_timeout(Some(Duration::from_secs(5)))?;
     let request_head = match read_request_head(&mut stream) {
         Ok(Some(request)) => request,
         Ok(None) => return Ok(()),
@@ -1383,6 +1387,27 @@ mod tests {
         let serialized = serde_json::to_string(&state).expect("serialize local state");
         assert!(serialized.contains("\"targetKind\":\"local\""));
         assert!(serialized.contains("\"prId\":0"));
+    }
+
+    #[test]
+    fn browser_server_waits_for_delayed_request_headers() {
+        let server =
+            WebDiffServer::start(Arc::new(RwLock::new(WebDiffState::default()))).expect("server");
+        let mut stream = TcpStream::connect(("127.0.0.1", server.port)).expect("connect");
+        stream
+            .set_read_timeout(Some(Duration::from_secs(2)))
+            .expect("timeout");
+        thread::sleep(Duration::from_millis(100));
+        write!(
+            stream,
+            "HEAD /session/{}/ HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n",
+            server.session_token
+        )
+        .expect("delayed headers");
+        let mut response = Vec::new();
+        stream.read_to_end(&mut response).expect("response");
+        assert!(complete_http_response(&response, false));
+        assert!(String::from_utf8_lossy(&response).starts_with("HTTP/1.1 200 OK"));
     }
 
     #[test]

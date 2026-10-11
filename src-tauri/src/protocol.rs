@@ -106,6 +106,13 @@ pub struct ReviewReplyParams {
     pub message: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ReviewCommitPreviewParams {
+    pub target: TargetIdentity,
+    pub message: String,
+}
+
 /// A single-use approval from `review.fix.preview`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -204,6 +211,17 @@ pub enum Request {
         id: String,
         params: ReviewStartParams,
     },
+    #[serde(rename = "review.commit.preview")]
+    ReviewCommitPreview {
+        id: String,
+        params: ReviewCommitPreviewParams,
+    },
+    #[serde(rename = "review.commit")]
+    ReviewCommit { id: String, params: ReviewFixParams },
+    #[serde(rename = "review.push.preview")]
+    ReviewPushPreview { id: String, params: TargetParams },
+    #[serde(rename = "review.push")]
+    ReviewPush { id: String, params: ReviewFixParams },
     #[serde(rename = "review.fix.state")]
     ReviewFixState { id: String, params: TargetParams },
     #[serde(rename = "review.fix.preview")]
@@ -248,6 +266,10 @@ impl Request {
             | Self::ReviewThreads { id, .. }
             | Self::BrowserOpen { id, .. }
             | Self::ReviewStart { id, .. }
+            | Self::ReviewCommitPreview { id, .. }
+            | Self::ReviewCommit { id, .. }
+            | Self::ReviewPushPreview { id, .. }
+            | Self::ReviewPush { id, .. }
             | Self::ReviewFixState { id, .. }
             | Self::ReviewFixPreview { id, .. }
             | Self::ReviewFix { id, .. }
@@ -271,6 +293,10 @@ impl Request {
             Self::BrowserOpen { .. } => "browser.open",
             Self::ReviewStart { .. } => "review.start",
             Self::ReviewReply { .. } => "review.reply",
+            Self::ReviewCommitPreview { .. } => "review.commit.preview",
+            Self::ReviewCommit { .. } => "review.commit",
+            Self::ReviewPushPreview { .. } => "review.push.preview",
+            Self::ReviewPush { .. } => "review.push",
             Self::ReviewFixState { .. } => "review.fix.state",
             Self::ReviewFixPreview { .. } => "review.fix.preview",
             Self::ReviewFix { .. } => "review.fix",
@@ -303,7 +329,17 @@ impl Request {
                 }
             }
             Self::ReviewStart { params, .. } => params.target.validate()?,
-            Self::ReviewFix { params, .. } => {
+            Self::ReviewCommitPreview { params, .. } => {
+                params.target.validate()?;
+                if params.message.trim().is_empty() || params.message.chars().count() > 4096 {
+                    return Err(invalid_request(
+                        "a nonempty commit message up to 4096 characters is required",
+                    ));
+                }
+            }
+            Self::ReviewCommit { params, .. }
+            | Self::ReviewPush { params, .. }
+            | Self::ReviewFix { params, .. } => {
                 params.target.validate()?;
                 if params.approval_token.len() != 64
                     || !params.approval_token.bytes().all(|b| b.is_ascii_hexdigit())
@@ -317,7 +353,8 @@ impl Request {
                     return Err(invalid_request("`review.reply` message must not be empty"));
                 }
             }
-            Self::ReviewFixState { params, .. }
+            Self::ReviewPushPreview { params, .. }
+            | Self::ReviewFixState { params, .. }
             | Self::ReviewFixPreview { params, .. }
             | Self::ReviewFiles { params, .. }
             | Self::ReviewFindings { params, .. }

@@ -16,6 +16,7 @@ export interface FakeTransportOptions {
   diffText?: string;
   /** Artificial latency in milliseconds for every request. */
   delayMs?: number;
+  fixPhase?: "readyToCommit" | "readyToPush" | "completed";
 }
 
 interface FakeOperation {
@@ -33,10 +34,16 @@ export class FakeBackendTransport implements BackendTransport {
   private readonly exitListeners = new Set<(exit: BackendExit) => void>();
   private nextOperation = 1;
   private closed = false;
-  private readonly approvals = new Map<string, string>();
+  private nextApproval = 1;
+  private fixPhase: "readyToCommit" | "readyToPush" | "completed";
+  private readonly approvals = new Map<
+    string,
+    { target: string; action: string; message?: string }
+  >();
 
   constructor(options: FakeTransportOptions = {}) {
     this.options = options;
+    this.fixPhase = options.fixPhase ?? "readyToCommit";
   }
 
   async start(): Promise<ReadyInfo> {
@@ -82,11 +89,34 @@ export class FakeBackendTransport implements BackendTransport {
           diff: this.options.diffText ?? "@@ -1 +1 @@\n-old\n+new\n",
           truncated: false,
         };
+      case "review.commit.preview":
+      case "review.push.preview":
       case "review.fix.preview": {
-        const token = String(this.approvals.size + 1).padStart(64, "0");
-        this.approvals.set(token, JSON.stringify(params.target));
+        const action =
+          method === "review.commit.preview"
+            ? "commit"
+            : method === "review.push.preview"
+              ? "push"
+              : "fix";
+        if (
+          action === "commit" &&
+          (this.fixPhase !== "readyToCommit" || !(params.message as string)?.trim())
+        )
+          throw new Error("Complete a fix and provide a commit message.");
+        if (action === "push" && this.fixPhase !== "readyToPush")
+          throw new Error("Create a commit before pushing.");
+        const token = String(this.nextApproval++).padStart(64, "0");
+        this.approvals.set(token, {
+          target: JSON.stringify(params.target),
+          action,
+          message: params.message as string | undefined,
+        });
         return {
           target: params.target,
+          action,
+          commitMessage: params.message ?? null,
+          filesToCommit: action === "commit" ? ["src/app.ts"] : [],
+          commitSha: action === "push" ? "c".repeat(40) : null,
           approvalToken: token,
           repoPath: "/tmp/example-clone",
           currentBranch: "main",
@@ -95,12 +125,23 @@ export class FakeBackendTransport implements BackendTransport {
           dirtyFiles: [" M src/app.ts"],
           snapshotSha256: "a".repeat(64),
           expiresInSeconds: 300,
-          effects: [
-            "Stash and restore local changes.",
-            "Check out feature; fetch/pull origin.",
-            "Run Claude with edit permissions.",
-            "Leave edits for inspection. No automatic commit or push.",
-          ],
+          effects:
+            action === "commit"
+              ? [
+                  `Commit only src/app.ts with message: ${params.message}`,
+                  "Exclude unrelated staged files. No push or publication.",
+                ]
+              : action === "push"
+                ? [
+                    "Push the approved commit to origin/feature without force.",
+                    "Inspect the remote on interruption. No automatic retry.",
+                  ]
+                : [
+                    "Stash and restore local changes.",
+                    "Check out feature; fetch/pull origin.",
+                    "Run Claude with edit permissions.",
+                    "Leave edits for inspection. No automatic commit or push.",
+                  ],
         };
       }
       case "review.fix.state":
@@ -108,20 +149,30 @@ export class FakeBackendTransport implements BackendTransport {
           target: params.target,
           state: {
             status: "succeeded",
-            phase: "readyToCommit",
+            phase: this.fixPhase,
+            commitSha: this.fixPhase === "readyToCommit" ? null : "c".repeat(40),
             summary: "Fixed null handling.",
             suggestedCommitMessage: "fix: guard null",
             filesTouched: ["src/app.ts"],
             tests: ["unit checks passed"],
           },
         };
+      case "review.commit":
+      case "review.push":
       case "review.fix": {
         const token = params.approvalToken as string;
         const approvedTarget = this.approvals.get(token);
         this.approvals.delete(token);
-        if (approvedTarget !== JSON.stringify(params.target))
+        const action =
+          method === "review.commit" ? "commit" : method === "review.push" ? "push" : "fix";
+        if (
+          approvedTarget?.target !== JSON.stringify(params.target) ||
+          approvedTarget.action !== action
+        )
           throw new Error("Approval missing or target changed.");
-        const operationId = `fake-fix-${this.nextOperation++}`;
+        const operationId = `fake-${action}-${this.nextOperation++}`;
+        if (action === "commit") this.fixPhase = "readyToPush";
+        if (action === "push") this.fixPhase = "completed";
         const target = params.target as TargetIdentity;
         this.operations.set(operationId, { target, state: "accepted", sequence: 0 });
         return { target, operationId, state: "accepted" };

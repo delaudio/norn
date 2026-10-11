@@ -9,7 +9,9 @@
 Port explicit commit and push controls for native fix sessions. Reuse the
 snapshot-bound preview/approval flow and native Rust fix state. Commit previews
 bind the exact message and selected files; unrelated staged files remain staged
-and are excluded from the commit. Push previews bind the source branch, origin
+and are excluded from the commit. The full gate exposed inherited nonblocking
+HTTP streams on macOS; normalize accepted viewer streams and prove delayed
+headers with a regression test. Push previews bind the source branch, origin
 and committed HEAD. Both operations remain explicit and cancellable.
 
 ## Exit Criteria
@@ -33,5 +35,5 @@ and committed HEAD. Both operations remain explicit and cancellable.
 ## Status
 
 - Claimed by: default-agent, 2026-10-11, `issue-303-approved-commit-push`.
-- Blockers: PR #335 must pass CI and merge before this delivery is opened.
+- Blockers: None; PR #335 merged at `6367fa0`.
 - Stopped:

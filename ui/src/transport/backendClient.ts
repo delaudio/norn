@@ -78,6 +78,10 @@ export interface OperationStatus {
 }
 
 export interface FixPreview {
+  action?: "fix" | "commit" | "push";
+  commitMessage?: string | null;
+  filesToCommit?: string[];
+  commitSha?: string | null;
   target: TargetIdentity;
   approvalToken: string;
   repoPath: string;
@@ -85,12 +89,15 @@ export interface FixPreview {
   sourceBranch: string;
   destinationBranch: string;
   dirtyFiles: string[];
+  dirtyFileCount?: number;
+  dirtyFilesTruncated?: boolean;
   effects: string[];
   snapshotSha256: string;
   expiresInSeconds: number;
 }
 
 export interface FixState {
+  commitSha?: string | null;
   status: string;
   phase: string;
   summary: string | null;
@@ -181,6 +188,33 @@ export class BackendClient {
 
   async reviewFix(target: TargetIdentity, approvalToken: string): Promise<OperationStatus> {
     return (await this.transport.request("review.fix", {
+      target,
+      approvalToken,
+    })) as unknown as OperationStatus;
+  }
+
+  async commitPreview(target: TargetIdentity, message: string): Promise<FixPreview> {
+    return (await this.transport.request("review.commit.preview", {
+      target,
+      message,
+    })) as unknown as FixPreview;
+  }
+
+  async pushPreview(target: TargetIdentity): Promise<FixPreview> {
+    return (await this.transport.request("review.push.preview", {
+      target,
+    })) as unknown as FixPreview;
+  }
+
+  async reviewCommit(target: TargetIdentity, approvalToken: string): Promise<OperationStatus> {
+    return (await this.transport.request("review.commit", {
+      target,
+      approvalToken,
+    })) as unknown as OperationStatus;
+  }
+
+  async reviewPush(target: TargetIdentity, approvalToken: string): Promise<OperationStatus> {
+    return (await this.transport.request("review.push", {
       target,
       approvalToken,
     })) as unknown as OperationStatus;
