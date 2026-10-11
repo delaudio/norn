@@ -20,14 +20,18 @@ test("connect loads repositories and move wraps the selection", async () => {
   expect(store.current?.repo).toBe("payments");
 });
 
-test("a late review start for a previous target is ignored", async () => {
+test("a late review start preserves its original target and remains cancellable", async () => {
   const store = new ShellStore();
   const client = new BackendClient(new FakeBackendTransport({ repositories, delayMs: 20 }));
   await store.connect(client);
   const pending = store.startReview(client);
   store.move(1);
   await pending;
-  expect(store.getSnapshot().operation).toBeNull();
+  expect(store.current?.repo).toBe("billing");
+  expect(store.getSnapshot().operation?.targetLabel).toContain("payments");
+  const id = store.getSnapshot().operation!.id;
+  await store.cancel(client);
+  expect((await client.operationStatus(id)).state).toBe("cancelled");
 });
 
 test("operation events are applied only for the active operation", async () => {
@@ -742,4 +746,239 @@ test("sync and conflict resolution preview distinct effects and require explicit
   });
   await Bun.sleep(5);
   expect(store.getSnapshot().fixState?.phase).toBe("readyToCommit");
+});
+
+class ControlledOperationsTransport extends FakeBackendTransport {
+  requests: { method: string; params: Record<string, unknown> }[] = [];
+  state = "running";
+  sequence = 0;
+  nextRun = "run-old";
+  requestDelay = 0;
+  statusDelay = 0;
+  error: { code: string; message: string } | null = null;
+  private next = 1;
+  private id = "";
+  async request(method: string, params: Record<string, unknown>) {
+    this.requests.push({ method, params });
+    if (["review.start", "review.reply", "review.fix"].includes(method)) {
+      this.id = `controlled-${this.next++}`;
+      if (this.requestDelay) await Bun.sleep(this.requestDelay);
+      return { operationId: this.id, state: "accepted", sequence: 0 };
+    }
+    if (method === "operation.status" || method === "operation.cancel") {
+      if (this.statusDelay) await Bun.sleep(this.statusDelay);
+      if (method === "operation.cancel") this.state = "cancelled";
+      return {
+        operationId: params.operationId,
+        state: this.state,
+        sequence: this.sequence,
+        error: this.error,
+      };
+    }
+    if (method === "review.targets")
+      return {
+        targets: [
+          {
+            provider: "github",
+            workspace: "acme",
+            repo: "payments",
+            prId: 9,
+            runId: this.nextRun,
+            title: "Review",
+            status: "succeeded",
+          },
+        ],
+      };
+    return super.request(method, params);
+  }
+}
+
+async function controlledReview() {
+  const transport = new ControlledOperationsTransport({ repositories, files, findings });
+  const client = new BackendClient(transport);
+  const store = new ShellStore();
+  await store.connect(client);
+  await store.selectPicker(2);
+  const target: TargetIdentity = {
+    kind: "provider",
+    provider: "github",
+    workspace: "acme",
+    repo: "payments",
+    prId: 9,
+    runId: "run-old",
+  };
+  return { transport, client, store, target };
+}
+
+test("late reply ownership survives navigation without reopening another target's composer", async () => {
+  const { transport, client, store } = await controlledReview();
+  transport.requestDelay = 20;
+  store.beginReply();
+  store.appendReplyText("Please explain");
+  const pending = store.submitReply(client);
+  await store.selectPicker(1);
+  await pending;
+  expect(store.getSnapshot().operation?.targetLabel).toContain("payments");
+  expect(store.getSnapshot().picker[store.getSnapshot().selectedPicker]?.repo).toBe("billing");
+  expect(store.getSnapshot().composing).toBe(false);
+  const id = store.getSnapshot().operation!.id;
+  await store.cancel(client);
+  expect(
+    transport.requests
+      .slice()
+      .reverse()
+      .find((r) => r.method === "operation.cancel")?.params.operationId,
+  ).toBe(id);
+});
+
+test("late approved fix stays cancellable without attaching its result to another picker target", async () => {
+  const { transport, client, store, target } = await controlledReview();
+  await store.previewFix(client);
+  transport.requestDelay = 20;
+  const pending = store.confirmFix(client);
+  await store.selectPicker(1);
+  await pending;
+  const operation = store.getSnapshot().operation!;
+  expect(operation.targetLabel).toContain("payments");
+  store.applyEvent({
+    operationId: operation.id,
+    target,
+    sequence: 1,
+    event: { kind: "state", state: "failed" },
+  });
+  await Bun.sleep(5);
+  expect(store.getSnapshot().fixState).toBeNull();
+  await store.cancel(client);
+  expect(
+    transport.requests
+      .slice()
+      .reverse()
+      .find((r) => r.method === "operation.cancel")?.params.operationId,
+  ).toBe(operation.id);
+});
+
+test("wrong-target, duplicate and old events cannot change the tracked operation", async () => {
+  const { transport, client, store, target } = await controlledReview();
+  await store.startReview(client);
+  await Bun.sleep(5);
+  const id = store.getSnapshot().operation!.id;
+  store.applyEvent({
+    operationId: id,
+    sequence: 1,
+    target: { ...target, repo: "billing" },
+    event: { kind: "state", state: "failed" },
+  });
+  expect(store.getSnapshot().operation?.state).toBe("running");
+  store.applyEvent({
+    operationId: id,
+    sequence: 1,
+    target,
+    event: { kind: "progress", message: "correct" },
+  });
+  const count = store.getSnapshot().operation!.logs.length;
+  store.applyEvent({
+    operationId: id,
+    sequence: 1,
+    target,
+    event: { kind: "state", state: "failed" },
+  });
+  store.applyEvent({
+    operationId: id,
+    sequence: 0,
+    target,
+    event: { kind: "state", state: "failed" },
+  });
+  expect(store.getSnapshot().operation?.logs).toHaveLength(count);
+  expect(store.getSnapshot().operation?.state).toBe("running");
+  expect(transport.requests.filter((r) => r.method === "operation.status")).toHaveLength(1);
+});
+
+test("burst gaps coalesce status reads and preserve bounded logs", async () => {
+  const { transport, client, store, target } = await controlledReview();
+  await store.startReview(client);
+  await Bun.sleep(5);
+  transport.statusDelay = 20;
+  transport.sequence = 120;
+  const id = store.getSnapshot().operation!.id;
+  for (let sequence = 3; sequence <= 120; sequence++)
+    store.applyEvent({
+      operationId: id,
+      sequence,
+      target,
+      event: { kind: "progress", message: `chunk ${sequence}` },
+    });
+  await Bun.sleep(70);
+  expect(store.getSnapshot().operation?.sequence).toBe(120);
+  expect(store.getSnapshot().operation!.logs.length).toBeLessThanOrEqual(100);
+  expect(
+    transport.requests.filter((r) => r.method === "operation.status").length,
+  ).toBeLessThanOrEqual(3);
+});
+
+test("completion adopts the new saved run and preserves finding identity", async () => {
+  const { transport, client, store, target } = await controlledReview();
+  store.cycleFocus();
+  store.cycleFocus();
+  store.move(1);
+  const selectedId = visibleFindings(store.getSnapshot())[store.getSnapshot().selectedFinding]?.id;
+  await store.startReview(client);
+  await Bun.sleep(5);
+  const id = store.getSnapshot().operation!.id;
+  transport.nextRun = "run-new";
+  transport.state = "succeeded";
+  transport.sequence = 1;
+  store.applyEvent({
+    operationId: id,
+    target,
+    sequence: 1,
+    event: { kind: "state", state: "succeeded" },
+  });
+  await Bun.sleep(15);
+  expect(store.getSnapshot().picker[store.getSnapshot().selectedPicker]?.runId).toBe("run-new");
+  expect(
+    transport.requests
+      .slice()
+      .reverse()
+      .find((r) => r.method === "review.findings")?.params.target,
+  ).toMatchObject({ runId: "run-new" });
+  expect(visibleFindings(store.getSnapshot())[store.getSnapshot().selectedFinding]?.id).toBe(
+    selectedId,
+  );
+});
+
+test("an unresolved start blocks another review and fix after navigation", async () => {
+  const { transport, client, store } = await controlledReview();
+  transport.requestDelay = 30;
+  const pending = store.startReview(client);
+  await store.selectPicker(1);
+  await store.startReview(client);
+  await store.previewFix(client);
+  await pending;
+  expect(transport.requests.filter((r) => r.method === "review.start")).toHaveLength(1);
+  expect(transport.requests.filter((r) => r.method === "review.fix.preview")).toHaveLength(0);
+});
+
+test("authoritative polling recovers a missing terminal reply event and preserves the draft", async () => {
+  const { transport, client, store } = await controlledReview();
+  store.beginReply();
+  store.appendReplyText("Keep this draft");
+  await store.submitReply(client);
+  await Bun.sleep(5);
+  transport.state = "failed";
+  transport.sequence = 3;
+  transport.error = { code: "cancelled", message: "native interruption" };
+  await store.pollOperation();
+  expect(store.getSnapshot().operation?.state).toBe("failed");
+  expect(store.getSnapshot().operation?.logs.at(-1)?.text).toContain("native interruption");
+  expect(store.getSnapshot().composing).toBe(true);
+  expect(store.getSnapshot().composerText).toBe("Keep this draft");
+  const starts = transport.requests.filter((r) =>
+    ["review.start", "review.reply", "review.fix"].includes(r.method),
+  ).length;
+  await store.refreshOperation();
+  expect(
+    transport.requests.filter((r) =>
+      ["review.start", "review.reply", "review.fix"].includes(r.method),
+    ),
+  ).toHaveLength(starts);
 });

@@ -115,6 +115,8 @@ function useShellInput(
       store.beginReply();
     } else if (key.name === "b") {
       void store.openBrowser(client);
+    } else if (key.name === "z") {
+      void store.refreshOperation();
     } else if (key.name === "x") {
       void store.cancel(client);
     }
@@ -564,6 +566,11 @@ function findingOptions(state: ShellSnapshot): ListOption[] {
 
 export function Shell({ store, client, quit }: ShellProps) {
   const state = useSyncExternalStore(store.subscribe, store.getSnapshot);
+  useEffect(() => {
+    if (!["accepted", "running"].includes(state.operation?.state ?? "")) return;
+    const timer = setInterval(() => void store.pollOperation(), 1000);
+    return () => clearInterval(timer);
+  }, [store, state.operation?.state]);
   const scroll = useRef<ScrollBoxRenderable | null>(null);
   const { width } = useTerminalDimensions();
   const fixScroll = useRef<ScrollBoxRenderable | null>(null);
@@ -697,7 +704,7 @@ export function Shell({ store, client, quit }: ShellProps) {
       {state.operation ? (
         <box flexDirection="column" flexShrink={0} paddingX={1} backgroundColor={theme.panel}>
           <text fg={theme.secondary} height={1} wrapMode="none" truncate>
-            {`review ${state.operation.state} · ${state.operation.targetLabel}`}
+            {`review ${state.operation.state} · ${state.operation.targetLabel} · x cancel · z refresh`}
           </text>
           {state.operation.logs.slice(-5).map((log) => (
             <text key={log.id} fg={theme.muted} height={1} wrapMode="none" truncate>

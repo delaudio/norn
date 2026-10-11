@@ -300,3 +300,36 @@ test("branch shortcut previews cannot execute or switch action without approval"
     renderer.renderer.destroy();
   }
 });
+
+test("mounted operation polling stops after unmount", async () => {
+  class PollTransport extends FakeBackendTransport {
+    statusReads = 0;
+    async request(method: string, params: Record<string, unknown>) {
+      if (method === "review.start")
+        return { operationId: "poll-owned", state: "accepted", sequence: 0 };
+      if (method === "operation.status") {
+        this.statusReads++;
+        return { operationId: "poll-owned", state: "running", sequence: 0, error: null };
+      }
+      return super.request(method, params);
+    }
+  }
+  const renderer = await createTestRenderer({ width: 100, height: 30 });
+  const transport = new PollTransport({ repositories });
+  const client = new BackendClient(transport);
+  const store = new ShellStore();
+  await store.connect(client);
+  const ui = mountApp(renderer.renderer, store, client, () => {});
+  try {
+    await store.startReview(client);
+    await Bun.sleep(1100);
+    expect(transport.statusReads).toBeGreaterThanOrEqual(2);
+    ui.unmount();
+    const reads = transport.statusReads;
+    await Bun.sleep(1100);
+    expect(transport.statusReads).toBe(reads);
+  } finally {
+    ui.unmount();
+    renderer.renderer.destroy();
+  }
+});
