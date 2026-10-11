@@ -1,0 +1,155 @@
+{
+  "arch": "aarch64",
+  "height": 30,
+  "inputSha256": "e659bededa7563f29ad14d290ae0166ead0d5ef4bfd5bd02c2868f4f0ca537ac",
+  "platform": "macos",
+  "profile": "release",
+  "renderer": "ratatui",
+  "results": [
+    {
+      "case": "files-10",
+      "files": 10,
+      "measurements": [
+        {
+          "contentRows": 26,
+          "firstFrameMs": 2.941959,
+          "mode": "unified",
+          "samples": 100,
+          "scrollP95Ms": 0.091
+        },
+        {
+          "contentRows": 16,
+          "firstFrameMs": 0.232083,
+          "mode": "split",
+          "samples": 100,
+          "scrollP95Ms": 0.10225000000000001
+        }
+      ],
+      "processPeakRssMiB": 11.234375,
+      "selectedPatchBytes": 551,
+      "selectedPath": "src/generated/file-9.ts",
+      "totalReviewBytes": 5510
+    },
+    {
+      "case": "files-100",
+      "files": 100,
+      "measurements": [
+        {
+          "contentRows": 26,
+          "firstFrameMs": 0.179083,
+          "mode": "unified",
+          "samples": 100,
+          "scrollP95Ms": 0.14125
+        },
+        {
+          "contentRows": 16,
+          "firstFrameMs": 0.153792,
+          "mode": "split",
+          "samples": 100,
+          "scrollP95Ms": 0.149
+        }
+      ],
+      "processPeakRssMiB": 11.65625,
+      "selectedPatchBytes": 555,
+      "selectedPath": "src/generated/file-99.ts",
+      "totalReviewBytes": 55460
+    },
+    {
+      "case": "files-1000",
+      "files": 1000,
+      "measurements": [
+        {
+          "contentRows": 26,
+          "firstFrameMs": 0.5533750000000001,
+          "mode": "unified",
+          "samples": 100,
+          "scrollP95Ms": 0.533625
+        },
+        {
+          "contentRows": 16,
+          "firstFrameMs": 0.544,
+          "mode": "split",
+          "samples": 100,
+          "scrollP95Ms": 0.532292
+        }
+      ],
+      "processPeakRssMiB": 13.21875,
+      "selectedPatchBytes": 559,
+      "selectedPath": "src/generated/file-999.ts",
+      "totalReviewBytes": 558560
+    },
+    {
+      "case": "lines-1000",
+      "files": 1,
+      "measurements": [
+        {
+          "contentRows": 1006,
+          "firstFrameMs": 0.177084,
+          "mode": "unified",
+          "samples": 100,
+          "scrollP95Ms": 0.43425
+        },
+        {
+          "contentRows": 506,
+          "firstFrameMs": 0.296958,
+          "mode": "split",
+          "samples": 100,
+          "scrollP95Ms": 0.824292
+        }
+      ],
+      "processPeakRssMiB": 13.75,
+      "selectedPatchBytes": 22029,
+      "selectedPath": "src/generated/large.ts",
+      "totalReviewBytes": 22029
+    },
+    {
+      "case": "lines-10000",
+      "files": 1,
+      "measurements": [
+        {
+          "contentRows": 10006,
+          "firstFrameMs": 0.925416,
+          "mode": "unified",
+          "samples": 100,
+          "scrollP95Ms": 3.813834
+        },
+        {
+          "contentRows": 5006,
+          "firstFrameMs": 1.957833,
+          "mode": "split",
+          "samples": 100,
+          "scrollP95Ms": 7.617
+        }
+      ],
+      "processPeakRssMiB": 18.40625,
+      "selectedPatchBytes": 229031,
+      "selectedPath": "src/generated/large.ts",
+      "totalReviewBytes": 229031
+    },
+    {
+      "case": "real-norn-backend",
+      "files": 1,
+      "measurements": [
+        {
+          "contentRows": 1403,
+          "firstFrameMs": 0.349917,
+          "mode": "unified",
+          "samples": 100,
+          "scrollP95Ms": 0.918125
+        },
+        {
+          "contentRows": 1218,
+          "firstFrameMs": 0.556625,
+          "mode": "split",
+          "samples": 100,
+          "scrollP95Ms": 1.893708
+        }
+      ],
+      "processPeakRssMiB": 18.71875,
+      "selectedPatchBytes": 52500,
+      "selectedPath": "src-tauri/src/backend.rs",
+      "totalReviewBytes": 52500
+    }
+  ],
+  "width": 120
+}

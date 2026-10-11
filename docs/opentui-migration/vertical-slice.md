@@ -64,14 +64,15 @@ renders, averaged over up to 20 files. Numbers are JIT-warmed after the first
 fixture. Absolute values are machine dependent; the script is the stable
 artifact.
 
-## Ratatui baseline (pending)
+## Matched native rendering baseline
 
-The comparison baseline is the shipping Ratatui TUI on the same fixtures. It
-requires a separate harness run on the same host and has not been produced here,
-so no comparative threshold in the migration contract has been satisfied yet.
-This is the remaining gate for the "deliver and measure" work item; the
-functional slice above is delivered and independently tested, but the measured
-comparison is not.
+The same-host comparison now exists in [rendering-baseline.md](./rendering-baseline.md):
+six shared inputs, unified/split modes, three independent runs and explicit
+budgets with raw artifacts. Inputs include a pinned real tracked-source patch.
+Both renderers assert actual native diff body presence. The report distinguishes
+native rendering from fake connect timing, real read-only IPC and OS startup.
+Streaming-agent and installed-artifact performance remain final #303/#307/#308
+gates; this comparison does not claim they passed.
 
 ## Exit criteria
 
@@ -96,3 +97,7 @@ Reference run (Apple silicon, Bun 1.3.8, 120x30 terminal):
 Viewport culling stops rendering off-screen rows but React still mounts one
 element per diff line, so mount cost still grows with line count. Full windowed
 virtualization remains a follow-up within the scalable-diff work item.
+
+The original large-diff table above is historical. The current renderer windows
+React mounts as well as native drawing; see [windowed-diff.md](./windowed-diff.md)
+and the matched rendering report for expanded workloads and exact anchor tests.

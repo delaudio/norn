@@ -1,0 +1,17 @@
+{
+  "backendVersion": "0.3.4",
+  "runtime": "1.3.8",
+  "platform": "darwin",
+  "arch": "arm64",
+  "request": "repository.status",
+  "samples": 100,
+  "processHandshakeMs": 6.658917,
+  "roundTripMedianMs": 25.93229199999996,
+  "roundTripP95Ms": 30.006624999999985,
+  "providerCalls": 0,
+  "agentRuns": 0,
+  "config": "isolated empty",
+  "shutdownAcknowledged": true,
+  "observedExitCode": null,
+  "shutdown": "ACK then EOF; transport did not report exit code"
+}

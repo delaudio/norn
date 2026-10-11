@@ -71,11 +71,12 @@ export class ProcessBackendTransport implements BackendTransport {
   private readyResolve: ((info: ReadyInfo) => void) | null = null;
   private readyReject: ((error: Error) => void) | null = null;
 
-  constructor(binary = resolveBackendBinary()) {
+  constructor(binary = resolveBackendBinary(), environment?: Record<string, string | undefined>) {
     this.proc = Bun.spawn([binary], {
       stdin: "pipe",
       stdout: "pipe",
       stderr: "pipe",
+      env: environment,
     });
     void this.readLoop();
     void this.drainStderr();

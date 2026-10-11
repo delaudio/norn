@@ -29,7 +29,12 @@ function handle(message: {
       type: "ready",
       protocolVersion: 1,
       serverVersion: "fixture-0.1.0",
-      capabilities: ["repository", "diff", "review"],
+      capabilities: [
+        "repository",
+        "diff",
+        "review",
+        ...(process.env.NORN_TRANSPORT_FIXTURE_ENV === "isolated" ? ["isolated-fixture-env"] : []),
+      ],
     });
     return;
   }
