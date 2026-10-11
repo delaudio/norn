@@ -37,3 +37,10 @@ and committed HEAD. Both operations remain explicit and cancellable.
 - Claimed by: default-agent, 2026-10-11, `issue-303-approved-commit-push`.
 - Blockers: None; PR #335 merged at `6367fa0`.
 - Stopped:
+
+## Delivery prepared for merge
+
+- PR: https://github.com/delaudio/norn/pull/336
+- Effective on merge to main; ADR 0020 remains Accepted until the complete cutover.
+- Validation: 30 real-backend tests, 46 UI tests, 21 native frames, 603 core
+  tests (2 ignored), protocol tests, root gates, Archgate and strict Clippy.
