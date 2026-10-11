@@ -797,7 +797,7 @@ export class ShellStore {
       this.update({ notice: "Replies are available for pull-request reviews." });
       return;
     }
-    this.update({ composing: true, composerText: "" });
+    this.update({ composing: true });
   }
 
   cancelReply(): void {

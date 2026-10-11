@@ -8,20 +8,22 @@ If status files and git disagree, git is authoritative; correct this file.
 
 ## Active state
 
-- **Branch:** `issue-302-opentui-scalable-diff`.
-- **Active item:** epic #294 step 08/15, issue #302 - scalable diff rendering.
-- **Change:** split/unified diff modes with a toggle, viewport culling on the
-  diff scrollbox, old/new line mapping preserved in both modes, and a large-diff
-  benchmark fixture.
-- **Pending gate:** windowed virtualization, image previews and browser-server
-  extraction, so #302 stays open (PR uses `Refs`).
-- **Plan items:** `.docflow/plan/todo/0023-opentui-scalable-diff.md`; moved
-  `00{20,21}` to `plan/done/`.
-- **Merged:** #301 in `cbc2808` (PR #316, `Refs #301`, benchmark gate pending).
+- **Branch:** `issue-303-review-reply-ipc` (PR #333).
+- **Active item:** complete epic #294 through verified PRs and squash merges.
+- **Current change:** complete review.reply and the reply composer, including
+  bracketed paste and failed-draft preservation; prepare plan 0031 completion.
+- **Review instruction:** the maintainer explicitly requested no Norn reviews
+  for this migration session; use code inspection and deterministic checks.
+- **Merged baseline:** main at `5b82ac6`, including PRs #316–#332.
+- **Remaining:** review.fix approval/IPC, finding filters/grouping and thread
+  selection (#303); remaining image/split/performance parity (#302); settings
+  and data migration (#305); staged publication (#304); parity/hardening/
+  packaging/cutover (#306–#309), then close the epic with merge evidence.
 
 ## Next item
 
-- Finish the #302 PR; remaining #302 work continues after.
+- Merge #333 after the updated checks pass, then implement the remaining #303
+  operations and UI navigation. Preserve `.norn.yaml` as unrelated user data.
 
 ## Epic queue
 

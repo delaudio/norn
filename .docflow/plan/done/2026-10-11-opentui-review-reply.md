@@ -31,3 +31,8 @@ Pending (tracked): `review.fix`, finding grouping/filtering.
 ## Dependencies
 
 - `../../adr/0020-opentui-rust-stdio-workspace.md`
+
+---
+
+Shipped through PR #333 (issue #303). Effective on merge to main. The owning
+decision remains Accepted until the remaining migration criteria are complete.

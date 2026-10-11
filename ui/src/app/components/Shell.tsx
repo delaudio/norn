@@ -80,7 +80,12 @@ function useShellInput(
       void store.cancel(client);
     }
   });
-  usePaste(() => {});
+  usePaste((event) => {
+    if (store.getSnapshot().composing) {
+      event.preventDefault();
+      store.appendReplyText(new TextDecoder().decode(event.bytes));
+    }
+  });
 }
 
 export type DiffLineKind = "hunk" | "context" | "add" | "del" | "meta";
