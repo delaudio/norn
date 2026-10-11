@@ -75,7 +75,7 @@ in the two existing native HTTP test fixtures. No retries or test weakening.
 ## Status
 
 - Claimed by: default-agent, 2026-10-12, `issue-357-provider-snapshots`.
-- Blockers: implementation, local gates and exact-head PR integration.
+- Blockers: exact-head PR CI and verified squash merge; local gates passed.
 - Stopped:
 
 ## Follow-on review-start design constraints
@@ -125,3 +125,29 @@ in the two existing native HTTP test fixtures. No retries or test weakening.
   Synthetic origins/auth stay private cfg(test) injections. Existing real
   stdio tests can exercise malformed/cache/stale/control paths without secrets;
   in-process owned native HTTP tests cover successful provider acquisition.
+
+
+## Prepared completion receipt
+
+- Feature commit: `09443bf43b43f95c6958ac6e55c4b7fca9145bac`.
+- Root typecheck/123 tests plus tooling/lint/protocol; UI typecheck/164 tests/
+  994 assertions/105 unchanged native frames; Rust 686 core with two existing
+  ignored/53 stdio/six isolated CLI/five onboarding/three binary tests; strict
+  all-feature/all-target Clippy, fmt, no-GUI dependency guard and Archgate 12/12
+  pass on final uninstrumented code.
+- Docflow audit on synchronized main: ADR 1–20 numbering/metadata/INDEX/required
+  section order/relative links and plan 0056 collisions pass. Existing Accepted
+  ADR 0011/0013 pending coverage advisories remain unchanged.
+- Evidence: `docs/opentui-migration/provider-snapshots.md`, including actual
+  macOS O_NONBLOCK race diagnosis and a failing-before/passing-after regression.
+- No React component changed; generated contracts/native/client code and tests
+  changed. No private profile, actual credential or live provider mutation used.
+- #357 remains open for native preview/review-start and explicit approve/browser;
+  ADR 0020 remains Accepted until the verified full cutover.
+
+## Shipped
+
+This prepared receipt becomes effective only when its pull request is squash
+merged to `main` after exact-head UI/verify CI succeeds. The feature commit above
+is the reviewable implementation base; the squash merge is the shipping event.
+Before that event this item is prepared, not shipped, regardless of its done path.

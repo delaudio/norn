@@ -20,7 +20,8 @@ Git is authoritative. Durable history lives in WORKLOG and plan/done.
   idle regressions pass, diagnostics removed. Final root/protocol/UI 164 tests/
   994 assertions/105 frames, Rust 686 core plus two existing ignored/53 stdio/
   six CLI/five onboarding/three bin tests, strict Clippy/fmt/no-GUI and Archgate
-  12/12 pass. Preparing exact-head CI and squash merge; #357 remains open.
+  12/12 pass. Feature commit `09443bf`; receipt prepared, exact-head CI/squash merge pending.
+  #357 remains open.
 - **Local baseline:** root/protocol/UI 160 tests/970 assertions/105 native frames,
   Rust 672 core/52 stdio/six isolated CLI/five onboarding/three bin tests,
   strict all-feature Clippy/fmt/no-GUI and Archgate 12/12 passed.

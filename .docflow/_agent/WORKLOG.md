@@ -333,3 +333,6 @@ Plan 0053 completion prepared after implementation `e4264db`, effective only on 
 - Native terminal preview/review-start and approve/browser integration remain
   #357 follow-ons; no private credentials/data/live provider mutation used.
 - Preparing PR and exact-head CI/squash merge; this entry is not a shipping claim.
+
+- Prepared plan/done receipt for feature `09443bf`; effective only after exact-head
+  CI and squash merge. No issue/ADR completion claimed by the prepared path.
