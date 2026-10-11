@@ -17,6 +17,7 @@ import type { BackendClient } from "../../transport/backendClient";
 import { DataStore } from "../dataStore";
 import { DiffScrollPositions } from "../diffScrollPositions";
 import { imageProtocol } from "../imageProtocol";
+import { ReferenceStore } from "../referenceStore";
 import { SettingsStore } from "../settingsStore";
 import {
   type FilePreviewView,
@@ -31,6 +32,7 @@ import { WorkspaceStore } from "../workspaceStore";
 import { ConversationPanel } from "./ConversationPanel";
 import { DataPanel } from "./DataPanel";
 import { FixPanel } from "./FixPanel";
+import { ReferencePanel } from "./ReferencePanel";
 import { SettingsPanel } from "./SettingsPanel";
 import { VirtualDiff } from "./VirtualDiff";
 import { WorkspacePanel } from "./WorkspacePanel";
@@ -54,7 +56,8 @@ function useShellInput(
       key.defaultPrevented ||
       store.getSnapshot().settingsOpen ||
       store.getSnapshot().dataOpen ||
-      store.getSnapshot().workspaceOpen
+      store.getSnapshot().workspaceOpen ||
+      store.getSnapshot().referencesOpen
     )
       return;
     if (store.getSnapshot().searchOpen) {
@@ -160,6 +163,8 @@ function useShellInput(
       store.toggleSettings();
     } else if (key.name === "n") {
       store.toggleWorkspace();
+    } else if (key.name === "w") {
+      store.toggleReferences();
     } else if (key.name === "z") {
       void store.refreshOperation();
     } else if (key.name === "x") {
@@ -893,7 +898,35 @@ export function Shell({ store, client, quit }: ShellProps) {
   useEffect(() => () => positions.clear(), [positions]);
   useEffect(() => () => store.cancelSyntax(), [store]);
   const workspace = useMemo(() => new WorkspaceStore(), []);
+  const references = useMemo(() => new ReferenceStore(), []);
   const workspaceEntry = state.picker[state.selectedPicker];
+  const referenceProvider = workspaceEntry?.provider;
+  const referenceWorkspace = workspaceEntry?.workspace;
+  const referenceRepo = workspaceEntry?.repo;
+  const referencePrId = workspaceEntry?.prId;
+  useEffect(() => {
+    if (!state.referencesOpen) return;
+    void references.load(
+      client,
+      referenceProvider && referenceWorkspace && referenceRepo && referencePrId !== undefined
+        ? {
+            provider: referenceProvider,
+            workspace: referenceWorkspace,
+            repo: referenceRepo,
+            prId: referencePrId,
+          }
+        : undefined,
+    );
+    return () => references.dispose();
+  }, [
+    references,
+    client,
+    state.referencesOpen,
+    referenceProvider,
+    referenceWorkspace,
+    referenceRepo,
+    referencePrId,
+  ]);
   useEffect(() => {
     if (!state.workspaceOpen) void store.refreshViewed(client, state.generation);
   }, [store, client, state.generation, state.workspaceOpen]);
@@ -1000,6 +1033,14 @@ export function Shell({ store, client, quit }: ShellProps) {
               selectedIndex: state.selectedFinding,
             };
 
+  if (state.referencesOpen)
+    return (
+      <ReferencePanel
+        references={references}
+        client={client}
+        onClose={() => store.toggleReferences()}
+      />
+    );
   if (state.workspaceOpen)
     return (
       <WorkspacePanel
@@ -1170,8 +1211,8 @@ export function Shell({ store, client, quit }: ShellProps) {
           {state.fixPreview
             ? "y approve · Esc/n dismiss · ↑/↓ scroll effects"
             : wide
-              ? "j/k move  s split  e expand  Tab pane  a fix  u sync · o conflicts · c commit  p push  r reply  t threads  v chat  f filter  g group  x cancel  m settings  n prompt/viewed  q quit"
-              : "j/k  ←/→  s  e  Tab  m settings  n prompt  q"}
+              ? "q quit · Tab pane · j/k move · w refs · m settings · n prompt/viewed · s split · e expand · a fix · r reply · t threads · v chat · f filter · g group · x cancel · u sync · o conflicts · c commit · p push"
+              : "j/k  ←/→  s  e  Tab  m settings  n prompt  w refs  q"}
         </text>
       </box>
     </box>

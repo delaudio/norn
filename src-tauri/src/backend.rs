@@ -3528,7 +3528,7 @@ fn resolve_inline_prompt(
         let user = crate::services::workspace_data::prompt_for_scope(provider, &workspace, &repo)
             .map_err(|message| ProtocolError::new(ProtocolErrorCode::Conflict, message))?;
         if let Some(prompt) = user.filter(|prompt| !prompt.trim().is_empty()) {
-            return Ok(prompt.trim().to_string());
+            return prompt_with_references(target, prompt.trim().to_string());
         }
     }
     let loaded=crate::repo_config::load_from_repo_path(repo_path).map_err(|_|ProtocolError::new(ProtocolErrorCode::InvalidParams,"Cannot read this repository's review policy; preserve it and inspect it before starting."))?;
@@ -3538,7 +3538,32 @@ fn resolve_inline_prompt(
             "This repository's review policy is invalid; correct it before starting.",
         ));
     }
-    Ok(resolve_review_prompt(loaded.config.as_ref()))
+    prompt_with_references(target, resolve_review_prompt(loaded.config.as_ref()))
+}
+
+fn prompt_with_references(
+    target: &TargetIdentity,
+    prompt: String,
+) -> Result<String, ProtocolError> {
+    let TargetIdentity::Provider {
+        provider,
+        workspace,
+        repo,
+        pr_id: Some(pr_id),
+        ..
+    } = target
+    else {
+        return Ok(prompt);
+    };
+    let references = crate::services::workspace_data::references_for_scope(
+        provider_matches(*provider),
+        workspace,
+        repo,
+        *pr_id,
+    )
+    .map_err(|message| ProtocolError::new(ProtocolErrorCode::Conflict, message))?;
+    crate::services::review_prompt::append_reference_context(prompt, &references)
+        .map_err(|message| ProtocolError::new(ProtocolErrorCode::InvalidParams, message))
 }
 
 fn start_inline_session(target: &TargetIdentity) -> Result<InlineSession, ProtocolError> {

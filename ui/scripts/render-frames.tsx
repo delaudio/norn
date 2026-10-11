@@ -1,7 +1,9 @@
 import { DataPanel } from "../src/app/components/DataPanel";
+import { ReferencePanel } from "../src/app/components/ReferencePanel";
 import { SettingsPanel } from "../src/app/components/SettingsPanel";
 import { WorkspacePanel } from "../src/app/components/WorkspacePanel";
 import { DataStore } from "../src/app/dataStore";
+import { ReferenceStore } from "../src/app/referenceStore";
 import { SettingsStore } from "../src/app/settingsStore";
 import { WorkspaceStore } from "../src/app/workspaceStore";
 // Renders every terminal component/scene with the real OpenTUI renderer and
@@ -524,6 +526,82 @@ async function workspaceScene(mode: "saved" | "dirty" | "conflict" | "disposed")
   };
 }
 
+async function referencesScene(mode: "saved" | "editing" | "conflict" | "remove" | "local") {
+  class ReferenceTransport extends FakeBackendTransport {
+    async request(method: string, params: Record<string, unknown>) {
+      if (mode === "conflict" && method === "workspace.mutate")
+        throw new Error("User data changed. Edits retained; refresh before saving.");
+      return super.request(method, params);
+    }
+  }
+  const transport = new ReferenceTransport({
+    repositories,
+    targets,
+    workspaceRecords: {
+      "references.github:acme/payments/7": {
+        kind: "references",
+        value: [
+          {
+            id: "saved-note",
+            type: "note",
+            source: "manual",
+            title: "Architecture context",
+            body: "Imported reviewer guidance 世界.\nKeep compatibility with the related interface.",
+            createdAt: 1,
+            updatedAt: 2,
+          },
+          {
+            id: "saved-jira",
+            type: "jira",
+            source: "detected",
+            title: "Related issue",
+            key: "DEMO-42",
+            url: "https://example.invalid/DEMO-42",
+            createdAt: 1,
+            updatedAt: 2,
+          },
+          {
+            id: "saved-repo",
+            type: "repository",
+            source: "manual",
+            workspace: "synthetic",
+            repo: "contracts",
+            localPath: "/synthetic/read-only",
+            createdAt: 1,
+            updatedAt: 2,
+          },
+        ],
+      },
+    },
+  });
+  const { client, store, ready } = readyStore(transport);
+  await ready;
+  const references = new ReferenceStore(
+    () => 123,
+    () => "synthetic-new-reference",
+  );
+  await references.load(client, {
+    provider: "github",
+    workspace: "acme",
+    repo: "payments",
+    prId: mode === "local" ? null : 7,
+  });
+  if (mode === "editing" || mode === "conflict") {
+    references.edit();
+    for (let i = 0; i < 8; i++) references.move(1);
+    references.beginField();
+    references.append("\nUnsaved reviewer note.");
+    references.finishField();
+    if (mode === "conflict") await references.save(client);
+  }
+  if (mode === "remove") references.requestRemoval();
+  return {
+    client,
+    store,
+    view: <ReferencePanel references={references} client={client} onClose={() => {}} />,
+  };
+}
+
 async function searchScene(mode: "editing" | "none" | "split") {
   const transport = new FakeBackendTransport({
     repositories,
@@ -580,6 +658,32 @@ const scenes: Scene[] = [
   { id: "shell-search-none-80x24", cols: 80, rows: 24, build: () => searchScene("none") },
   { id: "shell-search-split-80x24", cols: 80, rows: 24, build: () => searchScene("split") },
   { id: "shell-search-split-50x15", cols: 50, rows: 15, build: () => searchScene("split") },
+  {
+    id: "shell-references-saved-120x40",
+    cols: 120,
+    rows: 40,
+    build: () => referencesScene("saved"),
+  },
+  { id: "shell-references-saved-50x20", cols: 50, rows: 20, build: () => referencesScene("saved") },
+  {
+    id: "shell-references-editing-120x40",
+    cols: 120,
+    rows: 40,
+    build: () => referencesScene("editing"),
+  },
+  {
+    id: "shell-references-conflict-80x30",
+    cols: 80,
+    rows: 30,
+    build: () => referencesScene("conflict"),
+  },
+  {
+    id: "shell-references-remove-80x30",
+    cols: 80,
+    rows: 30,
+    build: () => referencesScene("remove"),
+  },
+  { id: "shell-references-local-50x15", cols: 50, rows: 15, build: () => referencesScene("local") },
   { id: "shell-workspace-saved-120x30", cols: 120, rows: 30, build: () => workspaceScene("saved") },
   { id: "shell-workspace-dirty-80x24", cols: 80, rows: 24, build: () => workspaceScene("dirty") },
   {

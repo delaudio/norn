@@ -142,6 +142,7 @@ export interface ShellSnapshot {
   searchRow: number | null;
   viewedFiles: string[];
   workspaceOpen: boolean;
+  referencesOpen: boolean;
   settingsOpen: boolean;
   dataOpen: boolean;
   status: ShellStatus;
@@ -196,6 +197,7 @@ const INITIAL: ShellSnapshot = {
   searchRow: null,
   viewedFiles: [],
   workspaceOpen: false,
+  referencesOpen: false,
   settingsOpen: false,
   dataOpen: false,
   status: "idle",
@@ -503,6 +505,16 @@ export class ShellStore {
   toggleWorkspace(): void {
     this.update({
       workspaceOpen: !this.state.workspaceOpen,
+      referencesOpen: false,
+      settingsOpen: false,
+      dataOpen: false,
+      fixPreview: null,
+    });
+  }
+  toggleReferences(): void {
+    this.update({
+      referencesOpen: !this.state.referencesOpen,
+      workspaceOpen: false,
       settingsOpen: false,
       dataOpen: false,
       fixPreview: null,

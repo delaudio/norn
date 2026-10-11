@@ -2034,11 +2034,22 @@ fn reply_receives_saved_prompt_and_invalid_policy_stops_before_agent() {
                 [stored.to_string()],
             )
             .unwrap();
+        let root = fixture.backend._isolated.path().join("workspace");
+        std::fs::create_dir_all(&root).unwrap();
+        let selected_reference = json!({"id":"selected-ref","type":"note","source":"manual","body":"REPLY_REFERENCE_CONTEXT 世界 ````", "createdAt":1,"updatedAt":2});
+        let wrong_reference = json!({"id":"other-ref","type":"note","source":"manual","body":"WRONG_PROVIDER_REFERENCE", "createdAt":1,"updatedAt":2});
+        let mut records = vec![
+            json!({"key":"references.github:fixture/demo/9","payload":{"kind":"references","value":[selected_reference]}}),
+            json!({"key":"references.bitbucket:fixture/demo/9","payload":{"kind":"references","value":[wrong_reference]}}),
+        ];
         if let Some(prompt) = override_prompt {
-            let root = fixture.backend._isolated.path().join("workspace");
-            std::fs::create_dir_all(&root).unwrap();
-            std::fs::write(root.join("workspace-data-v1.json"),json!({"schemaVersion":1,"records":[{"key":"prompt.github:fixture/demo","payload":{"kind":"prompt","value":prompt}}]}).to_string()).unwrap();
+            records.push(json!({"key":"prompt.github:fixture/demo","payload":{"kind":"prompt","value":prompt}}));
         }
+        std::fs::write(
+            root.join("workspace-data-v1.json"),
+            json!({"schemaVersion":1,"records":records}).to_string(),
+        )
+        .unwrap();
         fixture.backend.send(json!({"type":"request","id":"reply-prompt","method":"review.reply","params":{"target":fixture.target,"message":"Please explain this finding."}}));
         let started = fixture
             .backend
@@ -2048,6 +2059,9 @@ fn reply_receives_saved_prompt_and_invalid_policy_stops_before_agent() {
         assert_eq!(fixture.terminal(operation)["event"]["state"], "succeeded");
         let payload = std::fs::read_to_string(capture).unwrap();
         assert!(payload.contains(override_prompt.unwrap_or("REPLY_POLICY")));
+        assert!(payload.contains("REPLY_REFERENCE_CONTEXT 世界"));
+        assert!(payload.contains("`````json"));
+        assert!(!payload.contains("WRONG_PROVIDER_REFERENCE"));
         if override_prompt.is_some() {
             assert!(!payload.contains("REPLY_POLICY"));
         }
@@ -2073,4 +2087,92 @@ fn reply_receives_saved_prompt_and_invalid_policy_stops_before_agent() {
     assert_eq!(terminal["event"]["state"], "failed");
     assert_eq!(terminal["event"]["error"]["code"], "invalidParams");
     assert!(!unexpected.exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn new_inline_review_consumes_scoped_references_and_refuses_oversize_before_agent() {
+    for oversized in [false, true] {
+        let fixture = FixFixture::new("#!/bin/sh\ncat > /dev/null\nexit 99\n");
+        let capture = fixture._agent.path().join("reference-payload");
+        let binary = fixture._agent.path().join("fake-agent");
+        std::fs::write(&binary, format!("#!/bin/sh\ncat > '{}'\nprintf '%s\\n' '{{\"result\":\"Reference fixture complete.\",\"session_id\":\"reference-session\"}}'\n", capture.display())).unwrap();
+        let mut backend = Backend::spawn_env(
+            fixture.repo.path(),
+            &[
+                ("NORN_REVIEW_ENGINE", "real"),
+                ("NORN_CONFIG_DIR", fixture._config.path().to_str().unwrap()),
+                (
+                    "NORN_REVIEW_DATA_DIR",
+                    fixture._data.path().to_str().unwrap(),
+                ),
+                ("NORN_REVIEW_AGENT_BIN", binary.to_str().unwrap()),
+            ],
+        );
+        backend.handshake();
+        let root = backend._isolated.path().join("workspace");
+        std::fs::create_dir_all(&root).unwrap();
+        let body = if oversized {
+            "x".repeat(65536)
+        } else {
+            "START_REFERENCE_CONTEXT 世界 ````".into()
+        };
+        let references = (0..if oversized {5} else {1}).map(|index| json!({"id":format!("ref-{index}"),"type":"note","source":"manual","body":body,"createdAt":1,"updatedAt":2})).collect::<Vec<_>>();
+        std::fs::write(root.join("workspace-data-v1.json"), json!({"schemaVersion":1,"records":[
+            {"key":"references.github:fixture/demo/9","payload":{"kind":"references","value":references}},
+            {"key":"references.bitbucket:fixture/demo/9","payload":{"kind":"references","value":[{"id":"wrong","type":"note","source":"manual","body":"WRONG_SCOPE_REFERENCE","createdAt":1,"updatedAt":2}]}},
+            {"key":"references.github:fixture/demo/10","payload":{"kind":"references","value":[{"id":"other-pr","type":"note","source":"manual","body":"OTHER_PR_REFERENCE","createdAt":1,"updatedAt":2}]}}
+        ]}).to_string()).unwrap();
+        backend.send(json!({"type":"request","id":"reference-start","method":"review.start","params":{"target":fixture.target}}));
+        let started = backend.wait_for(|v| v["id"] == "reference-start", Duration::from_secs(5));
+        assert_eq!(started["ok"], true, "{started}");
+        let operation = started["result"]["operationId"].as_str().unwrap();
+        let terminal = backend.wait_for(
+            |v| {
+                v["operationId"] == operation
+                    && v["event"]["kind"] == "state"
+                    && ["succeeded", "failed"].contains(&v["event"]["state"].as_str().unwrap_or(""))
+            },
+            Duration::from_secs(15),
+        );
+        if oversized {
+            assert_eq!(terminal["event"]["state"], "failed", "{terminal}");
+            assert_eq!(terminal["event"]["error"]["code"], "invalidParams");
+            assert!(terminal["event"]["error"]["message"]
+                .as_str()
+                .unwrap()
+                .contains("256 KiB"));
+            assert!(!capture.exists());
+        } else {
+            assert_eq!(terminal["event"]["state"], "succeeded", "{terminal}");
+            let payload = std::fs::read_to_string(&capture).unwrap();
+            assert!(payload.contains("START_REFERENCE_CONTEXT 世界"));
+            assert!(payload.contains("`````json"));
+            assert!(
+                !payload.contains("WRONG_SCOPE_REFERENCE")
+                    && !payload.contains("OTHER_PR_REFERENCE")
+            );
+        }
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn resumed_reply_keeps_prior_conversation_instead_of_resending_new_reference_context() {
+    let mut fixture = FixFixture::new("#!/bin/sh\ncat > /dev/null\nexit 99\n");
+    let capture = fixture._agent.path().join("resumed-reference-payload");
+    std::fs::write(fixture._agent.path().join("fake-agent"), format!("#!/bin/sh\ncat > '{}'\nprintf '%s\\n' '{{\"result\":\"Resumed fixture complete.\",\"session_id\":\"session-fix\"}}'\n", capture.display())).unwrap();
+    let root = fixture.backend._isolated.path().join("workspace");
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::write(root.join("workspace-data-v1.json"), json!({"schemaVersion":1,"records":[{"key":"references.github:fixture/demo/9","payload":{"kind":"references","value":[{"id":"new-context","type":"note","source":"manual","body":"NEW_REFERENCE_CONTEXT_NOT_RESENT","createdAt":1,"updatedAt":2}]}}]}).to_string()).unwrap();
+    fixture.backend.send(json!({"type":"request","id":"resumed-ref-reply","method":"review.reply","params":{"target":fixture.target,"message":"Please clarify the prior finding."}}));
+    let started = fixture
+        .backend
+        .wait_for(|v| v["id"] == "resumed-ref-reply", Duration::from_secs(5));
+    assert_eq!(started["ok"], true, "{started}");
+    let operation = started["result"]["operationId"].as_str().unwrap();
+    assert_eq!(fixture.terminal(operation)["event"]["state"], "succeeded");
+    let payload = std::fs::read_to_string(capture).unwrap();
+    assert!(payload.contains("Please clarify the prior finding."));
+    assert!(!payload.contains("NEW_REFERENCE_CONTEXT_NOT_RESENT"));
 }
