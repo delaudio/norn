@@ -155,6 +155,10 @@ pub struct ReviewFixParams {
 pub struct FilePreviewParams {
     pub target: TargetIdentity,
     pub path: String,
+    pub side: Option<String>,
+    pub offset: Option<u32>,
+    pub max_bytes: Option<u32>,
+    pub content_sha256: Option<String>,
 }
 
 /// Parameters for `diff.file`.
@@ -455,8 +459,23 @@ impl Request {
             }
             Self::FilePreview { params, .. } => {
                 params.target.validate()?;
-                if params.path.is_empty() {
-                    return Err(invalid_request("`file.preview` path must not be empty"));
+                validate_data_path(&params.path)?;
+                if params
+                    .side
+                    .as_deref()
+                    .is_some_and(|side| !matches!(side, "old" | "new"))
+                    || params.offset.is_some_and(|offset| offset > 2 * 1024 * 1024)
+                    || params
+                        .max_bytes
+                        .is_some_and(|size| size == 0 || size > 192 * 1024)
+                    || params.content_sha256.as_ref().is_some_and(|value| {
+                        value.len() != 64 || !value.bytes().all(|b| b.is_ascii_hexdigit())
+                    })
+                    || (params.offset.unwrap_or(0) > 0 && params.content_sha256.is_none())
+                {
+                    return Err(invalid_request(
+                        "Invalid image side, chunk range or content version.",
+                    ));
                 }
             }
             Self::ReviewStart { params, .. } => params.target.validate()?,

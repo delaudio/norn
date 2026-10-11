@@ -849,124 +849,209 @@ fn review_history_response(target: &TargetIdentity) -> Result<serde_json::Value,
     Ok(json!({ "runs": runs }))
 }
 
-/// Start (or update) the authenticated browser diff session for a target and
-/// return its URL. The OS browser is opened unless `NORN_BROWSER_OPEN=0`.
-/// Return the bounded new-side image bytes for the selected file, or an error
-/// so the shell can show an explicit fallback instead of an empty panel.
+/// Return one image chunk pinned to a changed-file side and content hash.
 fn file_preview_response(
     control: &Sender<ServerMessage>,
     id: &str,
     params: protocol::FilePreviewParams,
 ) {
-    let respond = |value: serde_json::Value| {
-        let _ = control.send(ServerMessage::Response(Response {
-            id: id.to_string(),
+    let result = image_preview_result(&params);
+    let response = match result {
+        Ok(value) => Response {
+            id: id.into(),
             ok: true,
             result: Some(value),
             error: None,
-        }));
-    };
-    let fail = |error: ProtocolError| {
-        let _ = control.send(ServerMessage::Response(Response {
-            id: id.to_string(),
+        },
+        Err(error) => Response {
+            id: id.into(),
             ok: false,
             result: None,
             error: Some(error),
-        }));
+        },
     };
-    let Some(mime) = image_mime_for_path(&params.path) else {
-        fail(ProtocolError::new(
-            ProtocolErrorCode::NotFound,
-            "unsupported image preview type",
-        ));
-        return;
-    };
-    let Some(repo_path) = resolve_repo_path(&params.target) else {
-        fail(ProtocolError::new(
-            ProtocolErrorCode::NotFound,
-            "no local repository for this target",
-        ));
-        return;
-    };
-    let bytes = match preview_bytes(&params.target, &repo_path, &params.path) {
-        Ok(bytes) => bytes,
-        Err(error) => {
-            fail(error);
-            return;
-        }
-    };
-    respond(json!({
-        "path": params.path,
-        "mimeType": mime,
-        "size": bytes.len(),
-        "dataBase64": STANDARD.encode(&bytes),
-    }));
+    let _ = control.send(ServerMessage::Response(response));
 }
-
-/// The bounded new-side bytes for `path`, resolved from the target revision
-/// (reviewed head for stored PR targets; the checkout otherwise).
-fn preview_bytes(
-    target: &TargetIdentity,
-    repo_path: &Path,
-    path: &str,
-) -> Result<Vec<u8>, ProtocolError> {
-    if let TargetIdentity::Provider { pr_id: Some(_), .. } = target {
-        let Some((_base, head)) = reviewed_range(target)? else {
-            return Err(ProtocolError::new(
-                ProtocolErrorCode::TargetStale,
-                "no stored reviewed range for this pull request",
-            ));
-        };
-        if !revisions_available(repo_path, &head, &head) {
-            return Err(ProtocolError::new(
-                ProtocolErrorCode::TargetStale,
-                "reviewed revisions are not available in the local checkout",
-            ));
-        }
-        let spec = format!("{head}:{path}");
-        let bytes = git_bytes(repo_path, &["show", spec.as_str()], MAX_PREVIEW_BYTES + 1)
-            .ok_or_else(|| {
-                ProtocolError::new(
-                    ProtocolErrorCode::NotFound,
-                    format!("no preview for `{path}`"),
-                )
-            })?;
-        if bytes.len() as u64 > MAX_PREVIEW_BYTES {
-            return Err(ProtocolError::new(
-                ProtocolErrorCode::TargetStale,
-                "image preview is unavailable or too large",
-            ));
-        }
-        return Ok(bytes);
-    }
-
-    let absolute = safe_canonical_path(repo_path, path).ok_or_else(|| {
+fn image_preview_result(
+    params: &protocol::FilePreviewParams,
+) -> Result<serde_json::Value, ProtocolError> {
+    use sha2::{Digest, Sha256};
+    let side = params.side.as_deref().unwrap_or("new");
+    let repo_path = resolve_repo_path(&params.target).ok_or_else(|| {
         ProtocolError::new(
             ProtocolErrorCode::NotFound,
-            format!("no preview for `{path}`"),
+            "No local repository for image comparison.",
         )
     })?;
-    let file = std::fs::File::open(&absolute).map_err(|_| {
-        ProtocolError::new(
-            ProtocolErrorCode::NotFound,
-            format!("no preview for `{path}`"),
-        )
-    })?;
-    let mut buffer = Vec::new();
-    let mut reader = Read::take(file, MAX_PREVIEW_BYTES + 1);
-    reader.read_to_end(&mut buffer).map_err(|_| {
-        ProtocolError::new(
-            ProtocolErrorCode::Internal,
-            format!("failed to read the preview for `{path}`"),
-        )
-    })?;
-    if buffer.len() as u64 > MAX_PREVIEW_BYTES {
+    let range = reviewed_range(&params.target)?;
+    if target_pr_id(&params.target).is_some() && range.is_none() {
         return Err(ProtocolError::new(
             ProtocolErrorCode::TargetStale,
-            "image preview is unavailable or too large",
+            "No stored reviewed range for image comparison.",
         ));
     }
-    Ok(buffer)
+    let files = changed_file_entries(
+        &repo_path,
+        range
+            .as_ref()
+            .map(|(base, head)| (base.as_str(), head.as_str())),
+    )?;
+    let file = files
+        .iter()
+        .find(|file| file["path"].as_str() == Some(&params.path))
+        .ok_or_else(|| {
+            ProtocolError::new(
+                ProtocolErrorCode::NotFound,
+                "Image path is outside this target's changed files.",
+            )
+        })?;
+    let status = file["status"].as_str().unwrap_or("");
+    if (side == "old" && matches!(status, "added" | "untracked"))
+        || (side == "new" && status == "deleted")
+    {
+        return Ok(
+            json!({"path":params.path,"side":side,"available":false,"mimeType":"","size":0,"dataBase64":"","offset":0,"nextOffset":null,"contentSha256":null,"width":null,"height":null}),
+        );
+    }
+    let source_path = if side == "old" {
+        file["oldPath"].as_str().unwrap_or(&params.path)
+    } else {
+        &params.path
+    };
+    let mime = image_mime_for_path(source_path).ok_or_else(|| {
+        ProtocolError::new(
+            ProtocolErrorCode::NotFound,
+            "Unsupported image preview format; use the browser viewer.",
+        )
+    })?;
+    if mime == "image/svg+xml" {
+        return Err(ProtocolError::new(
+            ProtocolErrorCode::NotFound,
+            "SVG terminal previews are unavailable; use the browser viewer.",
+        ));
+    }
+    let revision = range
+        .as_ref()
+        .map(|(base, head)| {
+            if side == "old" {
+                base.as_str()
+            } else {
+                head.as_str()
+            }
+        })
+        .or_else(|| if side == "old" { Some("HEAD") } else { None });
+    let bytes = if let Some(revision) = revision {
+        let spec = format!("{revision}:{source_path}");
+        git_bytes(&repo_path, &["show", &spec], MAX_PREVIEW_BYTES + 1).ok_or_else(|| {
+            ProtocolError::new(
+                ProtocolErrorCode::NotFound,
+                "Reviewed image revision is unavailable in the local checkout.",
+            )
+        })?
+    } else {
+        let absolute = safe_canonical_path(&repo_path, source_path).ok_or_else(|| {
+            ProtocolError::new(
+                ProtocolErrorCode::NotFound,
+                "Image path is unavailable or outside the checkout.",
+            )
+        })?;
+        if std::fs::symlink_metadata(repo_path.join(source_path))
+            .is_ok_and(|metadata| metadata.file_type().is_symlink())
+        {
+            return Err(ProtocolError::new(
+                ProtocolErrorCode::NotFound,
+                "Symlink image previews are unavailable; use the browser viewer.",
+            ));
+        }
+        let file = std::fs::File::open(absolute).map_err(|_| {
+            ProtocolError::new(ProtocolErrorCode::NotFound, "Cannot open image preview.")
+        })?;
+        let mut bytes = Vec::new();
+        file.take(MAX_PREVIEW_BYTES + 1)
+            .read_to_end(&mut bytes)
+            .map_err(|_| {
+                ProtocolError::new(ProtocolErrorCode::Internal, "Cannot read image preview.")
+            })?;
+        bytes
+    };
+    if bytes.len() as u64 > MAX_PREVIEW_BYTES {
+        return Err(ProtocolError::new(
+            ProtocolErrorCode::TargetStale,
+            "Image preview exceeds the 2 MiB limit; use the browser viewer.",
+        ));
+    }
+    let hash = hex::encode(Sha256::digest(&bytes));
+    if params
+        .content_sha256
+        .as_ref()
+        .is_some_and(|expected| !expected.eq_ignore_ascii_case(&hash))
+    {
+        return Err(ProtocolError::new(
+            ProtocolErrorCode::TargetStale,
+            "Image changed during loading; select the file again.",
+        ));
+    }
+    let mut reader = image::ImageReader::new(std::io::Cursor::new(&bytes))
+        .with_guessed_format()
+        .map_err(|_| ProtocolError::new(ProtocolErrorCode::NotFound, "Invalid image header."))?;
+    let expected = match mime {
+        "image/png" => image::ImageFormat::Png,
+        "image/jpeg" => image::ImageFormat::Jpeg,
+        "image/gif" => image::ImageFormat::Gif,
+        "image/webp" => image::ImageFormat::WebP,
+        "image/bmp" => image::ImageFormat::Bmp,
+        _ => {
+            return Err(ProtocolError::new(
+                ProtocolErrorCode::NotFound,
+                "Unsupported terminal image format.",
+            ))
+        }
+    };
+    if reader.format() != Some(expected) {
+        return Err(ProtocolError::new(
+            ProtocolErrorCode::NotFound,
+            "Image content does not match its file format; use the browser viewer.",
+        ));
+    }
+    let mut limits = image::Limits::default();
+    limits.max_image_width = Some(8192);
+    limits.max_image_height = Some(8192);
+    limits.max_alloc = Some(40_000_000 * 4 + 16 * 1024 * 1024);
+    reader.limits(limits);
+    let (width, height) = reader.into_dimensions().map_err(|_| {
+        ProtocolError::new(
+            ProtocolErrorCode::NotFound,
+            "Invalid or unsupported image data; use the browser viewer.",
+        )
+    })?;
+    if width == 0
+        || height == 0
+        || width > 8192
+        || height > 8192
+        || u64::from(width) * u64::from(height) > 40_000_000
+    {
+        return Err(ProtocolError::new(
+            ProtocolErrorCode::TargetStale,
+            "Image dimensions exceed terminal preview limits; use the browser viewer.",
+        ));
+    }
+    let offset = params.offset.unwrap_or(0) as usize;
+    if offset > bytes.len() {
+        return Err(ProtocolError::new(
+            ProtocolErrorCode::InvalidRequest,
+            "Image chunk offset exceeds its content.",
+        ));
+    }
+    if params.max_bytes.is_none() && bytes.len() > 192 * 1024 {
+        return Err(ProtocolError::new(
+            ProtocolErrorCode::InvalidRequest,
+            "This image requires bounded chunk requests.",
+        ));
+    }
+    let end = (offset + params.max_bytes.unwrap_or(192 * 1024) as usize).min(bytes.len());
+    Ok(
+        json!({"path":params.path,"side":side,"available":true,"mimeType":mime,"size":bytes.len(),"dataBase64":STANDARD.encode(&bytes[offset..end]),"offset":offset,"nextOffset":if end<bytes.len(){Some(end)}else{None},"contentSha256":hash,"width":width,"height":height}),
+    )
 }
 
 fn image_mime_for_path(path: &str) -> Option<&'static str> {
@@ -1699,6 +1784,7 @@ fn review_files_response(control: &Sender<ServerMessage>, id: &str, target: Targ
 /// without a recorded range.
 fn reviewed_range(target: &TargetIdentity) -> Result<Option<(String, String)>, ProtocolError> {
     let TargetIdentity::Provider {
+        provider,
         workspace,
         repo,
         pr_id: Some(pr_id),
@@ -1715,6 +1801,20 @@ fn reviewed_range(target: &TargetIdentity) -> Result<Option<(String, String)>, P
     let Some(run) = select_review_run(store, run_id.as_deref()) else {
         return Ok(None);
     };
+    if run.provider
+        != match provider {
+            ProviderKind::Github => crate::services::review::ReviewProvider::Github,
+            ProviderKind::Bitbucket => crate::services::review::ReviewProvider::Bitbucket,
+        }
+        || run.workspace != *workspace
+        || run.repo != *repo
+        || run.pr_id != *pr_id
+    {
+        return Err(ProtocolError::new(
+            ProtocolErrorCode::TargetStale,
+            "Stored review does not match this provider and repository target.",
+        ));
+    }
     match (run.reviewed_base_sha, run.reviewed_head_sha) {
         (Some(base), Some(head)) => Ok(Some((base, head))),
         _ => Ok(None),

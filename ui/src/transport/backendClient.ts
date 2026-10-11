@@ -120,6 +120,17 @@ export interface CredentialStatus {
   source: "keychain" | "environment" | "none";
 }
 
+export interface FilePreview {
+  path: string;
+  side: "old" | "new";
+  available: boolean;
+  mimeType: string;
+  size: number;
+  dataBase64: string;
+  width: number | null;
+  height: number | null;
+  contentSha256: string | null;
+}
 export interface DataImportPreview {
   inputVersion: string;
   destinationVersion: string;
@@ -249,14 +260,80 @@ export class BackendClient {
   async filePreview(
     target: TargetIdentity,
     path: string,
-  ): Promise<{ path: string; mimeType: string; size: number; dataBase64: string }> {
-    const result = await this.transport.request("file.preview", { target, path });
-    return result as unknown as {
-      path: string;
-      mimeType: string;
-      size: number;
-      dataBase64: string;
-    };
+    side: "old" | "new" = "new",
+    current: () => boolean = () => true,
+  ): Promise<FilePreview> {
+    const chunks: Uint8Array[] = [];
+    let offset = 0;
+    let contentSha256: string | null = null;
+    let first: FilePreview | null = null;
+    for (let index = 0; index < 12; index++) {
+      if (!current()) throw new Error("Image selection changed.");
+      const result = await this.transport.request("file.preview", {
+        target,
+        path,
+        side,
+        offset,
+        maxBytes: 192 * 1024,
+        ...(contentSha256 ? { contentSha256 } : {}),
+      });
+      if (result.path !== path || result.side !== side || typeof result.available !== "boolean")
+        throw new Error("Image response does not match its requested side.");
+      if (!result.available) return result as unknown as FilePreview;
+      if (
+        typeof result.size !== "number" ||
+        !Number.isInteger(result.size) ||
+        result.size <= 0 ||
+        result.size > 2 * 1024 * 1024 ||
+        result.offset !== offset ||
+        typeof result.dataBase64 !== "string" ||
+        result.dataBase64.length > 256 * 1024 ||
+        typeof result.contentSha256 !== "string" ||
+        !/^[a-f0-9]{64}$/.test(result.contentSha256) ||
+        typeof result.width !== "number" ||
+        !Number.isInteger(result.width) ||
+        typeof result.height !== "number" ||
+        !Number.isInteger(result.height) ||
+        result.width <= 0 ||
+        result.height <= 0 ||
+        result.width > 8192 ||
+        result.height > 8192 ||
+        result.width * result.height > 40_000_000
+      )
+        throw new Error("Invalid or oversized image chunk.");
+      if (contentSha256 && contentSha256 !== result.contentSha256)
+        throw new Error("Image changed during loading.");
+      contentSha256 = result.contentSha256;
+      if (!first) first = result as unknown as FilePreview;
+      if (
+        result.size !== first.size ||
+        result.mimeType !== first.mimeType ||
+        result.width !== first.width ||
+        result.height !== first.height
+      )
+        throw new Error("Image metadata changed during loading.");
+      const bytes = Uint8Array.from(Buffer.from(result.dataBase64, "base64"));
+      if (bytes.length === 0 || bytes.length > 192 * 1024 || offset + bytes.length > first.size)
+        throw new Error("Invalid image chunk length.");
+      chunks.push(bytes);
+      offset += bytes.length;
+      if (result.nextOffset === null) {
+        if (offset !== first.size)
+          throw new Error("Image transfer ended before all bytes arrived.");
+        const combined = new Uint8Array(first.size);
+        let write = 0;
+        for (const chunk of chunks) {
+          combined.set(chunk, write);
+          write += chunk.length;
+        }
+        if (new Bun.CryptoHasher("sha256").update(combined).digest("hex") !== contentSha256)
+          throw new Error("Image content did not match its approved version.");
+        return { ...first, dataBase64: Buffer.from(combined).toString("base64") };
+      }
+      if (result.nextOffset !== offset)
+        throw new Error("Image transfer did not advance to the expected chunk.");
+    }
+    throw new Error("Image requires too many chunks.");
   }
 
   async reviewFindings(target: TargetIdentity): Promise<FindingSummary[]> {

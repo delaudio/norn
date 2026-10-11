@@ -143,14 +143,44 @@ export class FakeBackendTransport implements BackendTransport {
         return { threads: this.options.threads ?? [] };
       case "browser.open":
         return { url: `http://127.0.0.1:0/session/${"0".repeat(64)}/` };
-      case "file.preview":
+      case "file.preview": {
+        const file = this.options.files?.find((file) => file.path === params.path);
+        if (
+          (params.side === "old" && ["added", "untracked"].includes(String(file?.status ?? ""))) ||
+          (params.side === "new" && file?.status === "deleted")
+        )
+          return {
+            path: params.path,
+            side: params.side,
+            available: false,
+            mimeType: "",
+            size: 0,
+            dataBase64: "",
+            offset: 0,
+            nextOffset: null,
+            contentSha256: null,
+            width: null,
+            height: null,
+          };
+        const data =
+          params.side === "old"
+            ? "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAEUlEQVR4nGOoCLD5D8IMMAYARXwIDRVgxqcAAAAASUVORK5CYII="
+            : "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAEUlEQVR4nGPQyOv5D8IMMAYAR3AIhdwoG5cAAAAASUVORK5CYII=";
+        const bytes = Buffer.from(data, "base64");
         return {
           path: params.path,
+          side: params.side ?? "new",
+          available: true,
           mimeType: "image/png",
-          size: 68,
-          dataBase64:
-            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
+          size: bytes.length,
+          dataBase64: data,
+          offset: 0,
+          nextOffset: null,
+          width: 2,
+          height: 2,
+          contentSha256: new Bun.CryptoHasher("sha256").update(bytes).digest("hex"),
         };
+      }
       case "review.files":
         return { target: params.target, files: this.options.files ?? [] };
       case "review.findings":

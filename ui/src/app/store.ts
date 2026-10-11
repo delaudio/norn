@@ -90,11 +90,14 @@ function targetLabel(target: TargetIdentity): string {
   return provider.prId === undefined ? base : `${base} #${provider.prId}`;
 }
 
-export interface FilePreviewView {
+export type FilePreviewView = import("../transport/backendClient").FilePreview;
+export interface ImageComparisonView {
   path: string;
-  mimeType: string;
-  size: number;
-  dataBase64: string;
+  requestId: number;
+  before: FilePreviewView | null;
+  after: FilePreviewView | null;
+  beforeError: string | null;
+  afterError: string | null;
 }
 
 const IMAGE_EXTENSIONS = [".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".svg"];
@@ -160,7 +163,7 @@ export interface ShellSnapshot {
   composerText: string;
   diffExpanded: boolean;
   diffLineCount: number;
-  preview: FilePreviewView | null;
+  preview: ImageComparisonView | null;
   previewError: string | null;
   focus: ShellFocus;
   operation: OperationView | null;
@@ -1101,20 +1104,38 @@ export class ShellStore {
       request === this.previewRequest &&
       generation === this.state.generation &&
       this.state.files[this.state.selectedFile]?.path === file.path;
-    try {
-      const result = await client.filePreview(target, file.path);
-      if (current()) {
-        this.update({ preview: result, previewError: null });
+    const comparison: ImageComparisonView = {
+      path: file.path,
+      requestId: request,
+      before: null,
+      after: null,
+      beforeError: null,
+      afterError: null,
+    };
+    this.update({ preview: comparison });
+    const load = async (side: "old" | "new") => {
+      const field = side === "old" ? "before" : "after";
+      const errorField = side === "old" ? "beforeError" : "afterError";
+      try {
+        const result = await client.filePreview(target, file.path, side, current);
+        if (current()) {
+          this.update({ preview: { ...this.state.preview!, [field]: result, [errorField]: null } });
+        }
+      } catch (error) {
+        if (current()) {
+          this.update({ preview: { ...this.state.preview!, [errorField]: message(error) } });
+        }
       }
-    } catch (error) {
-      if (current()) {
-        this.update({ preview: null, previewError: message(error) });
-      }
-    }
+    };
+    await Promise.all([load("old"), load("new")]);
   }
 
-  setPreviewError(error: string): void {
-    this.update({ preview: null, previewError: error });
+  setPreviewError(side: "old" | "new", error: string, requestId: number): void {
+    const preview = this.state.preview;
+    if (!preview || preview.requestId !== requestId) return;
+    const field = side === "old" ? "before" : "after";
+    const errorField = side === "old" ? "beforeError" : "afterError";
+    this.update({ preview: { ...preview, [field]: null, [errorField]: error } });
   }
 
   beginReply(): void {

@@ -1,0 +1,13 @@
+{
+  "type": "request",
+  "id": "request-image-chunk-without-version",
+  "method": "file.preview",
+  "params": {
+    "target": {
+      "kind": "local",
+      "localSnapshotSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "path": "pic.png",
+    "offset": 1
+  }
+}

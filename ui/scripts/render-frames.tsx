@@ -413,7 +413,43 @@ async function dataScene(mode: "preview" | "error" | "done") {
   return { client, store, view: <DataPanel data={data} client={client} onClose={() => {}} /> };
 }
 
+async function imageScene(status: "modified" | "added" | "deleted" | "renamed" | "unsupported") {
+  class ImageTransport extends FakeBackendTransport {
+    async request(method: string, params: Record<string, unknown>) {
+      if (status === "unsupported" && method === "file.preview")
+        throw new Error("Unsupported terminal image format; use the browser viewer.");
+      return super.request(method, params);
+    }
+  }
+  const imageFiles = [
+    {
+      path: "assets/diagram.png",
+      status: status === "unsupported" ? "modified" : status,
+      additions: 0,
+      deletions: 0,
+      oldPath: status === "renamed" ? "assets/previous.png" : null,
+    },
+  ];
+  const { client, store, ready } = readyStore(
+    new ImageTransport({ repositories, files: imageFiles, findings: [] }),
+  );
+  await ready;
+  await Bun.sleep(5);
+  return { client, store };
+}
+
 const scenes: Scene[] = [
+  { id: "shell-images-modified-120x30", cols: 120, rows: 30, build: () => imageScene("modified") },
+  { id: "shell-images-modified-50x20", cols: 50, rows: 20, build: () => imageScene("modified") },
+  { id: "shell-images-added-80x24", cols: 80, rows: 24, build: () => imageScene("added") },
+  { id: "shell-images-deleted-80x24", cols: 80, rows: 24, build: () => imageScene("deleted") },
+  { id: "shell-images-renamed-100x24", cols: 100, rows: 24, build: () => imageScene("renamed") },
+  {
+    id: "shell-images-unsupported-80x24",
+    cols: 80,
+    rows: 24,
+    build: () => imageScene("unsupported"),
+  },
   { id: "shell-data-preview-120x30", cols: 120, rows: 30, build: () => dataScene("preview") },
   { id: "shell-data-preview-50x15", cols: 50, rows: 15, build: () => dataScene("preview") },
   { id: "shell-data-error-80x24", cols: 80, rows: 24, build: () => dataScene("error") },

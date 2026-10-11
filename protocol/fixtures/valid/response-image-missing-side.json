@@ -1,0 +1,18 @@
+{
+  "type": "response",
+  "id": "missing-side",
+  "ok": true,
+  "result": {
+    "path": "new.png",
+    "side": "old",
+    "available": false,
+    "mimeType": "",
+    "size": 0,
+    "dataBase64": "",
+    "offset": 0,
+    "nextOffset": null,
+    "contentSha256": null,
+    "width": null,
+    "height": null
+  }
+}
