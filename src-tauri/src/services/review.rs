@@ -3391,6 +3391,14 @@ enum ProviderExecutionContext {
 }
 
 fn user_installed_cli_command(program: &str) -> Command {
+    // Tests and fixtures can substitute a deterministic review agent. A caller
+    // that sets this is responsible for the program accepting the provider's
+    // CLI arguments.
+    if let Some(override_bin) = std::env::var_os("NORN_REVIEW_AGENT_BIN") {
+        if !override_bin.is_empty() {
+            return Command::new(override_bin);
+        }
+    }
     #[cfg(target_os = "macos")]
     {
         let mut command = Command::new("/bin/zsh");
@@ -6482,8 +6490,18 @@ pub fn cancel_inline_review(
     repo: String,
     id: u32,
 ) -> Result<AiReviewRunState, String> {
-    let key = pr_key(&workspace, &repo, id);
-    let (state, run_id, pid) = with_review_run_store(store.inner(), |inner| {
+    cancel_inline_review_native(store.inner(), &workspace, &repo, id)
+}
+
+/// Request cancellation of a running inline review and terminate its process.
+pub fn cancel_inline_review_native(
+    store: &AiReviewRunStore,
+    workspace: &str,
+    repo: &str,
+    id: u32,
+) -> Result<AiReviewRunState, String> {
+    let key = pr_key(workspace, repo, id);
+    let (state, run_id, pid) = with_review_run_store(store, |inner| {
         let session = inner
             .sessions
             .get_mut(&key)
@@ -6507,7 +6525,7 @@ pub fn cancel_inline_review(
 
     if let Some(pid) = pid {
         if let Err(error) = kill_process(pid) {
-            set_inline_review_failed(store.inner(), &key, run_id, error.clone());
+            set_inline_review_failed(store, &key, run_id, error.clone());
             return Err(error);
         }
     }
@@ -6933,22 +6951,29 @@ mod tests {
         active_local_snapshot_sha256s, ai_provider_timeout_from, analyzer_specs_from_config,
         append_execution_policy_to_payloads, apply_review_finding_publication_event,
         begin_inline_review_run, build_claude_text_command, build_codex_text_command,
-        build_opencode_text_command, extract_review_findings, format_claude_stream_log_line,
-        get_ai_review_run_state_native, human_duration, materialize_review_run,
-        normalize_codex_effort, normalize_codex_model, normalize_opencode_effort,
-        normalize_opencode_model, opencode_response_is_retryable, parse_claude_fix_result,
-        parse_claude_structured_json, parse_claude_text_result, parse_opencode_text_result,
-        parse_review_resources, resolve_gui_skip_analyzers, review_analyzer_specs,
-        review_findings_from_output, review_profile_for_thread, should_execute_analyzers,
-        trim_evidence_output, user_installed_cli_command, validate_isolated_provider_cli,
-        validate_organization_policy_repo_path, wait_for_ai_provider, AiReviewDraftCommentResult,
-        AiReviewRunStatus, AiReviewRunStore, AiReviewStoreData, AiReviewTurnKind,
-        ProviderExecutionContext, ReviewEvidenceArtifact, ReviewEvidenceKind, ReviewEvidenceSource,
-        ReviewFindingCategory, ReviewFindingConfidence, ReviewFindingPublication,
-        ReviewFindingPublicationEvent, ReviewFindingPublicationEventKind, ReviewFindingSeverity,
-        ReviewProvider, ReviewPublicationMode, ReviewStoreTarget, STRUCTURED_REVIEW_SCHEMA_VERSION,
+        build_opencode_text_command, cancel_inline_review_native, extract_review_findings,
+        format_claude_stream_log_line, get_ai_review_run_state_native, human_duration,
+        materialize_review_run, normalize_codex_effort, normalize_codex_model,
+        normalize_opencode_effort, normalize_opencode_model, opencode_response_is_retryable,
+        parse_claude_fix_result, parse_claude_structured_json, parse_claude_text_result,
+        parse_opencode_text_result, parse_review_resources, resolve_gui_skip_analyzers,
+        review_analyzer_specs, review_findings_from_output, review_profile_for_thread,
+        should_execute_analyzers, trim_evidence_output, user_installed_cli_command,
+        validate_isolated_provider_cli, validate_organization_policy_repo_path,
+        wait_for_ai_provider, AiReviewDraftCommentResult, AiReviewRunStatus, AiReviewRunStore,
+        AiReviewStoreData, AiReviewTurnKind, ProviderExecutionContext, ReviewEvidenceArtifact,
+        ReviewEvidenceKind, ReviewEvidenceSource, ReviewFindingCategory, ReviewFindingConfidence,
+        ReviewFindingPublication, ReviewFindingPublicationEvent, ReviewFindingPublicationEventKind,
+        ReviewFindingSeverity, ReviewProvider, ReviewPublicationMode, ReviewStoreTarget,
+        STRUCTURED_REVIEW_SCHEMA_VERSION,
     };
     use serde_json::json;
+
+    #[test]
+    fn cancel_inline_review_without_a_session_is_an_error() {
+        let store = AiReviewRunStore::default();
+        assert!(cancel_inline_review_native(&store, "workspace", "repo", 1).is_err());
+    }
 
     #[test]
     fn provider_timeout_defaults_and_stays_within_safe_bounds() {
