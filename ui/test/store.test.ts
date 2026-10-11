@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { ShellStore } from "../src/app/store";
+import { ShellStore, visibleFindings } from "../src/app/store";
 import { BackendClient } from "../src/transport/backendClient";
 import { FakeBackendTransport } from "../src/transport/fakeTransport";
 import type { TargetIdentity } from "../src/transport/protocol";
@@ -461,4 +461,84 @@ test("composing a reply submits it as an operation", async () => {
   await store.submitReply(client);
   expect(store.getSnapshot().composing).toBe(false);
   expect(store.getSnapshot().operation?.state).toBe("accepted");
+});
+
+test("finding grouping preserves identity and filters navigate only visible rows", async () => {
+  const store = new ShellStore();
+  const client = new BackendClient(new FakeBackendTransport({ repositories, files, findings }));
+  await store.connect(client);
+  store.cycleFocus();
+  store.cycleFocus();
+  store.move(1);
+  expect(visibleFindings(store.getSnapshot())[store.getSnapshot().selectedFinding]?.id).toBe("f2");
+  store.cycleFindingGroup();
+  store.cycleFindingGroup();
+  expect(visibleFindings(store.getSnapshot())[store.getSnapshot().selectedFinding]?.id).toBe("f2");
+  store.cycleFindingFilter(); // critical: no matches
+  expect(visibleFindings(store.getSnapshot())).toHaveLength(0);
+  expect(store.getSnapshot().highlightLine).toBeNull();
+  expect(store.move(1)).toBe(false);
+  store.cycleFindingFilter(); // high
+  expect(visibleFindings(store.getSnapshot()).map((finding) => finding.id)).toEqual(["f1"]);
+  store.move(1);
+  expect(store.getSnapshot().selectedFinding).toBe(0);
+});
+
+test("selecting a thread pins diff findings and reply to that thread's latest run", async () => {
+  const requests: Array<{ method: string; params: Record<string, unknown> }> = [];
+  class RecordingTransport extends FakeBackendTransport {
+    override async request(method: string, params: Record<string, unknown>) {
+      requests.push({ method, params });
+      return super.request(method, params);
+    }
+  }
+  const transport = new RecordingTransport({
+    repositories,
+    files,
+    findings,
+    targets: [
+      {
+        provider: "github",
+        workspace: "acme",
+        repo: "payments",
+        prId: 7,
+        runId: "run-1",
+        title: "PR",
+        status: "succeeded",
+      },
+    ],
+    threads: [
+      { id: "t1", title: "First", latestRunId: "run-1", messages: [], truncated: false },
+      {
+        id: "t2",
+        title: "Second",
+        latestRunId: "run-2",
+        messages: [{ id: "m1", role: "assistant", content: "Unicode ✓", truncated: false }],
+        truncated: false,
+      },
+    ],
+  });
+  const client = new BackendClient(transport);
+  const store = new ShellStore();
+  await store.connect(client);
+  await store.selectPicker(2);
+  store.beginReply();
+  store.appendReplyText("old draft");
+  store.cancelReply();
+  store.toggleThreads();
+  store.move(1);
+  store.beginReply();
+  expect(store.getSnapshot().composing).toBe(false);
+  expect(store.getSnapshot().notice).toContain("load the selected thread");
+  await store.selectThread();
+  expect(store.getSnapshot().composerText).toBe("");
+  expect(store.getSnapshot().selectedThread).toBe(1);
+  expect(store.getSnapshot().threads[1]?.messages[0]?.content).toBe("Unicode ✓");
+  store.beginReply();
+  store.appendReplyText("Continue second thread");
+  await store.submitReply(client);
+  const reply = [...requests].reverse().find((request) => request.method === "review.reply");
+  expect(reply?.params.target).toMatchObject({ runId: "run-2", prId: 7 });
+  const load = [...requests].reverse().find((request) => request.method === "review.findings");
+  expect(load?.params.target).toMatchObject({ runId: "run-2" });
 });

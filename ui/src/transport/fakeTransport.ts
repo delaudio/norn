@@ -9,6 +9,7 @@ export interface FakeTransportOptions {
   repositories?: Array<Record<string, unknown>>;
   targets?: Array<Record<string, unknown>>;
   history?: Array<Record<string, unknown>>;
+  threads?: Array<Record<string, unknown>>;
   files?: Array<Record<string, unknown>>;
   findings?: Array<Record<string, unknown>>;
   /** Overrides the synthetic diff returned by `diff.file`. */
@@ -57,6 +58,8 @@ export class FakeBackendTransport implements BackendTransport {
         return { targets: this.options.targets ?? [] };
       case "review.history":
         return { runs: this.options.history ?? [] };
+      case "review.threads":
+        return { threads: this.options.threads ?? [] };
       case "browser.open":
         return { url: `http://127.0.0.1:0/session/${"0".repeat(64)}/` };
       case "file.preview":

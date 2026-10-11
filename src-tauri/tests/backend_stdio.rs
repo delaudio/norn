@@ -798,3 +798,20 @@ fn incompatible_handshake_fails_without_protocol_output() {
     assert_eq!(status.code(), Some(3));
     assert!(backend.next(Duration::from_millis(200)).is_none());
 }
+
+#[test]
+fn thread_request_is_typed_and_local_targets_have_no_pr_threads() {
+    let repo = temp_repo();
+    let mut backend = Backend::spawn(repo.path());
+    backend.handshake();
+    backend.send(json!({
+        "type": "request", "id": "threads", "method": "review.threads",
+        "params": { "target": { "kind": "local", "localSnapshotSha256": LOCAL_SHA } }
+    }));
+    let response = backend.wait_for(|v| v["id"] == "threads", Duration::from_secs(5));
+    assert_eq!(response["ok"], true);
+    assert_eq!(response["result"]["threads"], json!([]));
+    backend
+        .send(json!({ "type": "request", "id": "shutdown", "method": "shutdown", "params": {} }));
+    assert!(backend.child.wait().expect("backend exits").success());
+}

@@ -1,0 +1,15 @@
+{
+  "type": "request",
+  "id": "threads-1",
+  "method": "review.threads",
+  "params": {
+    "target": {
+      "kind": "provider",
+      "provider": "github",
+      "workspace": "acme",
+      "repo": "payments",
+      "prId": 7,
+      "runId": "run-1"
+    }
+  }
+}

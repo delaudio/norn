@@ -70,6 +70,12 @@ export type Request =
       id: RequestId;
       method: "review.reply";
       params: ReviewReplyParams;
+    }
+  | {
+      type: "request";
+      id: RequestId;
+      method: "review.threads";
+      params: TargetParams;
     };
 export type RequestId = string;
 /**

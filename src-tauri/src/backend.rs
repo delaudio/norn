@@ -445,6 +445,13 @@ fn dispatch(request: Request, backend: &Backend) -> bool {
             };
             false
         }
+        Request::ReviewThreads { params, .. } => {
+            match review_threads_response(&params.target) {
+                Ok(value) => backend.respond(&id, value),
+                Err(error) => backend.fail(&id, error),
+            };
+            false
+        }
         Request::FilePreview { params, .. } => {
             if backend
                 .active_previews
@@ -564,6 +571,78 @@ fn review_targets_response() -> serde_json::Value {
         }
     }
     json!({ "targets": targets })
+}
+
+fn review_threads_response(target: &TargetIdentity) -> Result<serde_json::Value, ProtocolError> {
+    let TargetIdentity::Provider {
+        workspace,
+        repo,
+        pr_id: Some(pr_id),
+        ..
+    } = target
+    else {
+        return Ok(json!({ "threads": [] }));
+    };
+    let store = crate::services::review::load_ai_review_store_native(workspace, repo, *pr_id)
+        .map_err(|error| ProtocolError::new(ProtocolErrorCode::Internal, error))?
+        .unwrap_or_default();
+    let selected_thread = match target {
+        TargetIdentity::Provider {
+            run_id: Some(run_id),
+            ..
+        } => store
+            .review_runs
+            .iter()
+            .find(|run| &run.id == run_id)
+            .and_then(|run| run.thread_id.as_deref()),
+        _ => store.active_thread_id.as_deref(),
+    };
+    Ok(thread_summaries(&store, selected_thread))
+}
+
+fn thread_summaries(
+    store: &crate::services::review::AiReviewStoreData,
+    selected_thread: Option<&str>,
+) -> serde_json::Value {
+    // Preview data stays well below the 1 MiB frame bound even with escaped
+    // Unicode. Session resume identifiers and credentials never leave Rust.
+    let threads = store
+        .threads
+        .iter()
+        .rev()
+        .take(12)
+        .map(|thread| {
+            let latest_run = store
+                .review_runs
+                .iter()
+                .rev()
+                .find(|run| run.thread_id.as_deref() == Some(thread.id.as_str()));
+            let messages = thread
+                .messages
+                .iter()
+                .rev()
+                .take(8)
+                .rev()
+                .map(|message| {
+                    json!({
+                        "id": message.id,
+                        "role": message.role,
+                        "content": message.content.chars().take(1000).collect::<String>(),
+                        "truncated": message.content.chars().count() > 1000,
+                    })
+                })
+                .collect::<Vec<_>>();
+            json!({
+                "id": thread.id,
+                "title": thread.title.chars().take(128).collect::<String>(),
+                "latestRunId": latest_run.map(|run| &run.id),
+            "selected": selected_thread == Some(thread.id.as_str()),
+                "messages": messages,
+                "truncated": thread.messages.len() > 8,
+            })
+        })
+        .collect::<Vec<_>>();
+    json!({ "threads": threads, "truncated": store.threads.len() > 12 })
 }
 
 fn provider_matches(kind: ProviderKind) -> config::ReviewProvider {
@@ -2883,6 +2962,50 @@ fn write_frame(stdout: &mut impl Write, message: ServerMessage) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn conversation_preview_is_bounded_and_excludes_resume_secrets() {
+        use crate::services::review::{
+            AiReviewMessage, AiReviewMessageRole, AiReviewStoreData, AiReviewThread,
+        };
+        let store = AiReviewStoreData {
+            threads: vec![AiReviewThread {
+                id: "thread-1".into(),
+                title: "Saved conversation".into(),
+                created_at: "1".into(),
+                updated_at: "2".into(),
+                claude_session_id: Some("private-resume-id".into()),
+                ai_provider: None,
+                messages: (0..10)
+                    .map(|i| AiReviewMessage {
+                        id: format!("message-{i}"),
+                        role: AiReviewMessageRole::Assistant,
+                        content: "✓".repeat(1500),
+                        created_at: "1".into(),
+                    })
+                    .collect(),
+            }],
+            ..Default::default()
+        };
+        let result = thread_summaries(&store, Some("thread-1"));
+        assert_eq!(result["threads"][0]["selected"], true);
+        assert_eq!(
+            result["threads"][0]["messages"].as_array().unwrap().len(),
+            8
+        );
+        assert_eq!(result["threads"][0]["messages"][0]["id"], "message-2");
+        assert_eq!(
+            result["threads"][0]["messages"][0]["content"]
+                .as_str()
+                .unwrap()
+                .chars()
+                .count(),
+            1000
+        );
+        assert_eq!(result["threads"][0]["messages"][0]["truncated"], true);
+        assert_eq!(result["threads"][0]["truncated"], true);
+        assert!(!result.to_string().contains("private-resume-id"));
+    }
 
     fn init_repo() -> tempfile::TempDir {
         let dir = tempfile::tempdir().expect("temp repo");

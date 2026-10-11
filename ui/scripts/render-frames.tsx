@@ -213,7 +213,53 @@ async function largeDiffScene() {
   return { store, client };
 }
 
+async function groupedFindingsScene() {
+  const scene = await readyScene();
+  scene.store.cycleFindingGroup();
+  return scene;
+}
+
+async function conversationScene() {
+  const { client, store, ready } = readyStore(
+    new FakeBackendTransport({
+      repositories,
+      targets,
+      files,
+      findings,
+      threads: [
+        {
+          id: "thread-128",
+          title: "Idempotency review",
+          latestRunId: "run-128",
+          truncated: false,
+          messages: [
+            {
+              id: "user-1",
+              role: "user",
+              content: "Explain the missing null check.",
+              truncated: false,
+            },
+            {
+              id: "assistant-1",
+              role: "assistant",
+              content: "The optional key must be checked before lookup. ✓",
+              truncated: false,
+            },
+          ],
+        },
+      ],
+    }),
+  );
+  await ready;
+  await store.selectPicker(2);
+  store.toggleThreads();
+  return { client, store };
+}
+
 const scenes: Scene[] = [
+  { id: "shell-grouped-findings-120x30", cols: 120, rows: 30, build: groupedFindingsScene },
+  { id: "shell-conversation-120x30", cols: 120, rows: 30, build: conversationScene },
+  { id: "shell-conversation-50x15", cols: 50, rows: 15, build: conversationScene },
   { id: "shell-ready-80x24", cols: 80, rows: 24, build: readyScene },
   { id: "shell-ready-50x15", cols: 50, rows: 15, build: readyScene },
   { id: "shell-ready-120x30", cols: 120, rows: 30, build: readyScene },

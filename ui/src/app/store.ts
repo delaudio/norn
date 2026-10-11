@@ -10,12 +10,31 @@ import type {
   RepositorySummary,
   ReviewRunSummary,
   ReviewTarget,
+  ReviewThreadSummary,
 } from "../transport/backendClient";
 import type { TargetIdentity } from "../transport/protocol";
 import type { BackendOperationEvent } from "../transport/types";
 
 export type ShellStatus = "idle" | "connecting" | "ready" | "error" | "closed";
-export type ShellFocus = "repositories" | "files" | "findings" | "diff";
+export type ShellFocus = "repositories" | "files" | "findings" | "diff" | "threads";
+export type FindingGroup = "none" | "file" | "severity";
+export type FindingFilter = "all" | FindingSummary["severity"];
+
+const SEVERITIES: FindingFilter[] = ["all", "critical", "high", "medium", "low", "info"];
+
+export function visibleFindings(state: ShellSnapshot): FindingSummary[] {
+  const filtered = state.findings.filter(
+    (finding) => state.findingFilter === "all" || finding.severity === state.findingFilter,
+  );
+  if (state.findingGroup === "file") {
+    filtered.sort((a, b) =>
+      (a.anchor?.path ?? "~unanchored").localeCompare(b.anchor?.path ?? "~unanchored"),
+    );
+  } else if (state.findingGroup === "severity") {
+    filtered.sort((a, b) => SEVERITIES.indexOf(a.severity) - SEVERITIES.indexOf(b.severity));
+  }
+  return filtered;
+}
 
 export interface OperationLog {
   id: number;
@@ -99,8 +118,13 @@ export interface ShellSnapshot {
   files: ChangedFile[];
   selectedFile: number;
   findings: FindingSummary[];
+  findingFilter: FindingFilter;
+  findingGroup: FindingGroup;
   selectedFinding: number;
   history: ReviewRunSummary[];
+  threads: ReviewThreadSummary[];
+  selectedThread: number;
+  conversationOpen: boolean;
   diff: DiffView | null;
   diffLoading: boolean;
   diffError: string | null;
@@ -131,8 +155,13 @@ const INITIAL: ShellSnapshot = {
   files: [],
   selectedFile: 0,
   findings: [],
+  findingFilter: "all",
+  findingGroup: "none",
   selectedFinding: 0,
   history: [],
+  threads: [],
+  selectedThread: 0,
+  conversationOpen: false,
   diff: null,
   diffLoading: false,
   diffError: null,
@@ -296,6 +325,7 @@ export class ShellStore {
   private diffRequest = 0;
   private previewRequest = 0;
   private replying = false;
+  private replyGeneration = -1;
   private diffInFlight = false;
   private diffPending = false;
   private snapshotInFlight = false;
@@ -391,19 +421,30 @@ export class ShellStore {
     const findings = await findingsOutcome;
     if (generation === this.state.generation) {
       if (findings.ok) {
-        this.update({ findings: findings.value, selectedFinding: 0 });
+        const previousId = visibleFindings(this.state)[this.state.selectedFinding]?.id;
+        this.update({ findings: findings.value });
+        const index = visibleFindings(this.state).findIndex((finding) => finding.id === previousId);
+        this.update({ selectedFinding: Math.max(0, index) });
       } else {
         this.update({ error: message(findings.error) });
       }
     }
     try {
-      const history = await client.reviewHistory(target);
+      const [history, threads] = await Promise.all([
+        client.reviewHistory(target),
+        client.reviewThreads(target),
+      ]);
       if (generation === this.state.generation) {
-        this.update({ history });
+        const thread = threads.findIndex(
+          (item) =>
+            item.selected ||
+            item.latestRunId === (target.kind === "provider" ? target.runId : null),
+        );
+        this.update({ history, threads, selectedThread: Math.max(0, thread) });
       }
     } catch {
       if (generation === this.state.generation) {
-        this.update({ history: [] });
+        this.update({ history: [], threads: [] });
       }
     }
     if (generation !== this.state.generation) {
@@ -437,6 +478,10 @@ export class ShellStore {
       selectedFile: 0,
       selectedFinding: 0,
       history: [],
+      threads: [],
+      selectedThread: 0,
+      composing: false,
+      composerText: "",
       diff: null,
       diffLoading: false,
       diffError: null,
@@ -538,6 +583,12 @@ export class ShellStore {
   }
 
   move(delta: number): boolean {
+    if (this.state.focus === "threads") {
+      const length = this.state.threads.length;
+      if (!length) return false;
+      this.update({ selectedThread: (this.state.selectedThread + delta + length) % length });
+      return true;
+    }
     if (this.state.focus === "repositories") {
       const length = this.state.picker.length;
       if (length === 0) {
@@ -570,7 +621,7 @@ export class ShellStore {
       }
       return true;
     }
-    const length = this.state.findings.length;
+    const length = visibleFindings(this.state).length;
     if (length === 0) {
       return false;
     }
@@ -584,7 +635,7 @@ export class ShellStore {
   /// guessing: a missing target file or a null/outdated anchor surfaces a notice.
   /// Returns true when it started a diff load for the anchor file.
   private jumpToFinding(): boolean {
-    const finding = this.state.findings[this.state.selectedFinding];
+    const finding = visibleFindings(this.state)[this.state.selectedFinding];
     if (!finding) {
       return false;
     }
@@ -640,6 +691,68 @@ export class ShellStore {
 
   toggleDiffExpanded(): void {
     this.update({ diffExpanded: !this.state.diffExpanded });
+  }
+
+  private preserveFindingSelection(patch: Partial<ShellSnapshot>): void {
+    const id = visibleFindings(this.state)[this.state.selectedFinding]?.id;
+    this.update(patch);
+    const next = visibleFindings(this.state);
+    this.update({
+      selectedFinding: Math.max(
+        0,
+        next.findIndex((finding) => finding.id === id),
+      ),
+    });
+    if (!next.length) {
+      this.update({ highlightLine: null, notice: "No findings match the severity filter." });
+    } else if (this.state.focus === "findings") {
+      this.jumpToFinding();
+    }
+  }
+
+  cycleFindingFilter(): void {
+    this.preserveFindingSelection({
+      findingFilter:
+        SEVERITIES[(SEVERITIES.indexOf(this.state.findingFilter) + 1) % SEVERITIES.length] ?? "all",
+    });
+  }
+
+  cycleFindingGroup(): void {
+    const order: FindingGroup[] = ["none", "file", "severity"];
+    this.preserveFindingSelection({
+      findingGroup: order[(order.indexOf(this.state.findingGroup) + 1) % order.length] ?? "none",
+    });
+  }
+
+  toggleThreads(): void {
+    if (!this.state.threads.length) {
+      this.update({ notice: "No saved conversation threads for this target." });
+      return;
+    }
+    this.update({
+      focus: this.state.focus === "threads" ? "diff" : "threads",
+      conversationOpen: true,
+    });
+  }
+
+  toggleConversation(): void {
+    this.update({ conversationOpen: !this.state.conversationOpen });
+  }
+
+  async selectThread(): Promise<void> {
+    const thread = this.state.threads[this.state.selectedThread];
+    if (!thread?.latestRunId || !this.client) {
+      this.update({ notice: "This thread has no stored review run to inspect or reply to." });
+      return;
+    }
+    const entry = this.state.picker[this.state.selectedPicker];
+    if (entry?.kind !== "review") return;
+    const picker = this.state.picker.map((row, index) =>
+      index === this.state.selectedPicker ? { ...row, runId: thread.latestRunId } : row,
+    );
+    this.update({ picker });
+    await this.selectPicker(this.state.selectedPicker);
+    this.update({ conversationOpen: true });
   }
 
   cycleFocus(): void {
@@ -717,7 +830,7 @@ export class ShellStore {
         reply: operation.reply,
       },
     });
-    if (operation.reply) {
+    if (operation.reply && this.replyGeneration === this.state.generation) {
       if (state === "succeeded") {
         this.update({ composerText: "" });
       } else if (state === "failed" || state === "cancelled") {
@@ -797,6 +910,13 @@ export class ShellStore {
       this.update({ notice: "Replies are available for pull-request reviews." });
       return;
     }
+    if (
+      this.state.focus === "threads" &&
+      this.state.threads[this.state.selectedThread]?.latestRunId !== entry.runId
+    ) {
+      this.update({ notice: "Press Enter to load the selected thread before replying." });
+      return;
+    }
     this.update({ composing: true });
   }
 
@@ -837,6 +957,7 @@ export class ShellStore {
     }
     const generation = this.state.generation;
     this.replying = true;
+    this.replyGeneration = generation;
     // Close the composer while the request is in flight; restore the draft on failure.
     this.update({ composing: false });
     try {

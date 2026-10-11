@@ -207,7 +207,8 @@
         "browser.open",
         "file.preview",
         "review.history",
-        "review.reply"
+        "review.reply",
+        "review.threads"
       ]
     },
     "DiffFileParams": {
@@ -1029,6 +1030,30 @@
             },
             "params": {
               "$ref": "#/definitions/ReviewReplyParams"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "type": {
+              "const": "request"
+            },
+            "id": {
+              "$ref": "#/definitions/RequestId"
+            },
+            "method": {
+              "const": "review.threads"
+            },
+            "params": {
+              "$ref": "#/definitions/TargetParams"
             }
           }
         }
