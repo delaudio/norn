@@ -63,6 +63,9 @@ dimensions and the observed result. Browser opening is deliberately unavailable
 in this isolated demo. `--help` works without a terminal.
 
 Native frame/color tests and image decoder/protocol tests remain automated
-evidence; they do not establish physical display. **No physical Kitty/Sixel
-result has been observed in this agent session yet.** That check remains a
-cutover gate pending an actual run, not an inferred success.
+evidence; they do not establish physical display. An actual iTerm2 3.6.11/Sixel run is recorded in
+[the physical smoke evidence](physical-images/2026-10-11/README.md), including
+wide/narrow resize and terminal restoration. Automatic iTerm selection now uses
+the observed working Sixel route; Kitty produced blank placements in that
+combination. A remaining Retina scaling limitation is recorded explicitly for
+hardening; other physical terminal/platform combinations remain unobserved.

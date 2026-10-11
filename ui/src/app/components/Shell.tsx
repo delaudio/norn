@@ -1,6 +1,6 @@
 import {
   CliRenderEvents,
-  resolveImageRenderProtocol,
+  type ImageRenderProtocol,
   type ScrollBoxRenderable,
   TextAttributes,
 } from "@opentui/core";
@@ -16,6 +16,7 @@ import {
 import type { BackendClient } from "../../transport/backendClient";
 import { DataStore } from "../dataStore";
 import { DiffScrollPositions } from "../diffScrollPositions";
+import { imageProtocol } from "../imageProtocol";
 import { SettingsStore } from "../settingsStore";
 import {
   type FilePreviewView,
@@ -505,15 +506,20 @@ function decodeBase64(value: string): Uint8Array {
 function DiffImage({
   preview,
   onError,
+  protocol,
 }: {
   preview: FilePreviewView;
   onError: (message: string) => void;
+  protocol: ImageRenderProtocol;
 }) {
   const bytes = useMemo(() => decodeBase64(preview.dataBase64), [preview.dataBase64]);
   return (
     <image
       source={bytes}
       fit="fit"
+      protocol={protocol}
+      width="100%"
+      height="100%"
       onError={() => onError("this terminal does not support inline images")}
     />
   );
@@ -533,7 +539,7 @@ function useImageProtocol() {
     [renderer],
   );
   return useSyncExternalStore(subscribe, () =>
-    resolveImageRenderProtocol("auto", renderer.capabilities, renderer.resolution !== null),
+    imageProtocol(renderer.capabilities, renderer.resolution !== null),
   );
 }
 
@@ -581,6 +587,7 @@ function ImageComparison({
                 pane.value.available ? (
                   <DiffImage
                     preview={pane.value}
+                    protocol={protocol}
                     onError={(message) => onError(pane.side, message, preview!.requestId)}
                   />
                 ) : (
@@ -599,7 +606,7 @@ function ImageComparison({
       </box>
       <text fg={theme.muted} height={1} truncate>
         {protocol === "blocks"
-          ? "No native graphics protocol detected: showing block previews; b opens the browser comparison."
+          ? "Native image preview unavailable: showing block previews; b opens the browser comparison."
           : `${protocol} image previews · b opens the authenticated browser comparison.`}
       </text>
     </box>
