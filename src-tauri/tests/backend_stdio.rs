@@ -11,6 +11,63 @@ use serde_json::{json, Value};
 
 const LOCAL_SHA: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 
+#[test]
+fn provider_reads_advertise_capability_and_reject_invalid_targets_before_credentials() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut backend = Backend::spawn(dir.path());
+    backend.send(
+        json!({"type":"hello","protocolVersion":1,"client":{"name":"owned-test","version":"0"}}),
+    );
+    let ready = backend.wait_for(|v| v["type"] == "ready", Duration::from_secs(5));
+    assert!(ready["capabilities"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|v| v == "provider-pr-reads"));
+    for (id, method, params) in [
+        (
+            "bad-owner",
+            "provider.prs",
+            json!({"repository":{"provider":"github","workspace":"..","repo":"owned"},"filter":"OPEN","page":1,"limit":30}),
+        ),
+        (
+            "bad-page",
+            "provider.prs",
+            json!({"repository":{"provider":"bitbucket","workspace":"owned","repo":"owned"},"filter":"DRAFT","page":101,"limit":30}),
+        ),
+        (
+            "local-id",
+            "provider.pr.detail",
+            json!({"repository":{"provider":"github","workspace":"owned","repo":"owned"},"prId":2147483648_u32}),
+        ),
+    ] {
+        backend.send(json!({"type":"request","id":id,"method":method,"params":params}));
+        // Invalid frames are dropped before dispatch by the existing protocol.
+        // The valid control frame below proves processing continues.
+    }
+    backend.send(
+        json!({"type":"request","id":"still-responsive","method":"repository.status","params":{}}),
+    );
+    let response = backend.wait_for(
+        |v| v["type"] == "response" && v["id"] == "still-responsive",
+        Duration::from_secs(5),
+    );
+    assert_eq!(response["ok"], true);
+    backend
+        .send(json!({"type":"request","id":"finish-owned-test","method":"shutdown","params":{}}));
+    assert!(backend.child.wait().unwrap().success());
+    let mut stderr = String::new();
+    std::io::Read::read_to_string(&mut backend.child.stderr.take().unwrap(), &mut stderr).unwrap();
+    assert_eq!(
+        stderr
+            .lines()
+            .filter(|line| line.contains("dropped malformed frame"))
+            .count(),
+        3
+    );
+    assert!(!stderr.contains("credentials"));
+}
+
 struct Backend {
     _isolated: tempfile::TempDir,
     child: Child,

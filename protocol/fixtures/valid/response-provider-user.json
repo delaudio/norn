@@ -1,0 +1,14 @@
+{
+  "type": "response",
+  "id": "user",
+  "ok": true,
+  "result": {
+    "repository": {
+      "provider": "github",
+      "workspace": "Owner",
+      "repo": "Repo"
+    },
+    "accountId": "owned-author",
+    "displayName": "Owned Author"
+  }
+}

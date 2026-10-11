@@ -1,0 +1,13 @@
+{
+  "type": "request",
+  "id": "uuid",
+  "method": "provider.pr.detail",
+  "params": {
+    "repository": {
+      "provider": "bitbucket",
+      "workspace": "{01234567-89ab-cdef-0123-456789abcdef}",
+      "repo": "Repo"
+    },
+    "prId": 7
+  }
+}

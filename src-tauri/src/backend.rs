@@ -96,6 +96,7 @@ struct Backend {
     active_previews: Arc<AtomicUsize>,
     active_settings: Arc<AtomicUsize>,
     active_workspace: Arc<AtomicUsize>,
+    active_provider_reads: Arc<AtomicUsize>,
     active_publication: Arc<AtomicUsize>,
     active_publication_reads: Arc<AtomicUsize>,
     publication: Arc<crate::services::draft_publication::Manager>,
@@ -166,6 +167,7 @@ pub fn run() -> Result<(), i32> {
         active_previews: Arc::new(AtomicUsize::new(0)),
         active_settings: Arc::new(AtomicUsize::new(0)),
         active_workspace: Arc::new(AtomicUsize::new(0)),
+        active_provider_reads: Arc::new(AtomicUsize::new(0)),
         active_publication: Arc::new(AtomicUsize::new(0)),
         active_publication_reads: Arc::new(AtomicUsize::new(0)),
         publication: Arc::new(crate::services::draft_publication::Manager::new(
@@ -183,6 +185,7 @@ pub fn run() -> Result<(), i32> {
             "workspace-data".to_string(),
             "workspace-records".to_string(),
             "workspace-scopes".to_string(),
+            "provider-pr-reads".to_string(),
             "draft-staging".to_string(),
             "draft-publication".to_string(),
             "remote-comments".to_string(),
@@ -386,6 +389,68 @@ fn dispatch(request: Request, backend: &Backend) -> bool {
                         manager.comments(params).map(|value| json!(value))
                     }
                     _ => unreachable!(),
+                };
+                active.fetch_sub(1, Ordering::SeqCst);
+                let response = match result {
+                    Ok(value) => Response {
+                        id,
+                        ok: true,
+                        result: Some(value),
+                        error: None,
+                    },
+                    Err(message) => Response {
+                        id,
+                        ok: false,
+                        result: None,
+                        error: Some(ProtocolError::new(ProtocolErrorCode::Conflict, message)),
+                    },
+                };
+                let _ = control.send(ServerMessage::Response(response));
+            });
+            false
+        }
+        Request::ProviderPrs { .. }
+        | Request::ProviderPrDetail { .. }
+        | Request::ProviderUser { .. } => {
+            let active = backend.active_provider_reads.clone();
+            if active
+                .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| {
+                    (n < 2).then_some(n + 1)
+                })
+                .is_err()
+            {
+                backend.fail(
+                    &id,
+                    ProtocolError::new(
+                        ProtocolErrorCode::Conflict,
+                        "Two provider reads are already in progress; wait before refreshing.",
+                    ),
+                );
+                return false;
+            }
+            let control = backend.control.clone();
+            let shutdown = backend.shutdown.clone();
+            thread::spawn(move || {
+                use crate::services::bitbucket::workspace_prs::Api;
+                let result = if shutdown.load(Ordering::SeqCst) {
+                    Err("Provider read canceled during shutdown.".into())
+                } else {
+                    match request {
+                        Request::ProviderPrs { params, .. } => {
+                            Api::from_stored(params.repository.clone())
+                                .and_then(|api| api.list(params))
+                                .map(|value| json!(value))
+                        }
+                        Request::ProviderPrDetail { params, .. } => {
+                            Api::from_stored(params.repository.clone())
+                                .and_then(|api| api.detail(params))
+                                .map(|value| json!(value))
+                        }
+                        Request::ProviderUser { params, .. } => Api::from_stored(params.repository)
+                            .and_then(|api| api.user())
+                            .map(|value| json!(value)),
+                        _ => unreachable!(),
+                    }
                 };
                 active.fetch_sub(1, Ordering::SeqCst);
                 let response = match result {
