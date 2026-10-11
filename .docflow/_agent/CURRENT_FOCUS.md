@@ -8,9 +8,9 @@ If status files and git disagree, git is authoritative; correct this file.
 
 ## Active state
 
-- **Branch:** `issue-303-approved-branch-sync` (stacked after PR #336).
+- **Branch:** `issue-303-operation-resync` (stacked after plan 0035).
 - **Active item:** complete epic #294 through verified PRs and squash merges.
-- **Current change:** plan 0035, approved branch sync/conflict resolution, prepared in PR #337; PR #337 awaits CI. Previous delivery: approved commit and push controls for native fix sessions;
+- **Current change:** plan 0036, operation identity and saved review resync; PR #337 (plan 0035) awaits CI. Previous delivery: approved commit and push controls for native fix sessions;
   plan 0034, prepared for merge in PR #336. PR #335 merged at `6367fa0` after both CI gates passed.
 - **Review instruction:** the maintainer explicitly requested no Norn reviews
   for this migration session; use code inspection and deterministic checks.
@@ -21,8 +21,7 @@ If status files and git disagree, git is authoritative; correct this file.
 
 ## Next item
 
-- Merge the commit/push delivery after all checks pass, then complete
-  conflict/sync operations for #303. Preserve `.norn.yaml` as unrelated user data.
+- Merge PR #337 after all checks pass, then integrate operation identity/resync for #303. Preserve `.norn.yaml` as unrelated user data.
 
 ## Epic queue
 
