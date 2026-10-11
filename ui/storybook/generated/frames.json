@@ -1822,8 +1822,8 @@
             "underline": false
           },
           {
-            "text": "q quit · Tab pane · j/k move · w refs · m settings · n prompt/viewed · s split · e expand · a fix · r reply · t ",
-            "width": 112,
+            "text": "q quit · Tab pane · j/k move · d drafts · w refs · m settings · n prompt/viewed · s split · e expand · a fix · r reply",
+            "width": 118,
             "fg": "rgba(128,128,128,1)",
             "bg": "rgba(20,20,20,1)",
             "attributes": 0,
@@ -1832,8 +1832,8 @@
             "underline": false
           },
           {
-            "text": "       ",
-            "width": 7,
+            "text": " ",
+            "width": 1,
             "fg": "rgba(255,255,255,1)",
             "bg": "rgba(20,20,20,1)",
             "attributes": 0,
@@ -2708,7 +2708,7 @@
             "underline": false
           },
           {
-            "text": "j/k  ←/→  s  e  Tab  m settings  n prompt  w ",
+            "text": "j/k  ←/→  s  e  Tab  m settings  n prompt  d ",
             "width": 45,
             "fg": "rgba(128,128,128,1)",
             "bg": "rgba(20,20,20,1)",
@@ -3830,8 +3830,8 @@
             "underline": false
           },
           {
-            "text": "j/k  ←/→  s  e  Tab  m settings  n prompt  w refs  q",
-            "width": 52,
+            "text": "j/k  ←/→  s  e  Tab  m settings  n prompt  d drafts  w refs  q",
+            "width": 62,
             "fg": "rgba(128,128,128,1)",
             "bg": "rgba(20,20,20,1)",
             "attributes": 0,
@@ -3840,8 +3840,8 @@
             "underline": false
           },
           {
-            "text": "                           ",
-            "width": 27,
+            "text": "                 ",
+            "width": 17,
             "fg": "rgba(255,255,255,1)",
             "bg": "rgba(20,20,20,1)",
             "attributes": 0,
@@ -6076,8 +6076,8 @@
             "underline": false
           },
           {
-            "text": "q quit · Tab pane · j/k move · w refs · m settings · n prompt/viewed · s split · e expand · a fix · r reply · t ",
-            "width": 112,
+            "text": "q quit · Tab pane · j/k move · d drafts · w refs · m settings · n prompt/viewed · s split · e expand · a fix · r reply",
+            "width": 118,
             "fg": "rgba(128,128,128,1)",
             "bg": "rgba(20,20,20,1)",
             "attributes": 0,
@@ -6086,8 +6086,8 @@
             "underline": false
           },
           {
-            "text": "       ",
-            "width": 7,
+            "text": " ",
+            "width": 1,
             "fg": "rgba(255,255,255,1)",
             "bg": "rgba(20,20,20,1)",
             "attributes": 0,
@@ -8512,8 +8512,8 @@
             "underline": false
           },
           {
-            "text": "q quit · Tab pane · j/k move · w refs · m settings · n prompt/viewed · s split · e expand · a fix · r reply · t ",
-            "width": 112,
+            "text": "q quit · Tab pane · j/k move · d drafts · w refs · m settings · n prompt/viewed · s split · e expand · a fix · r reply",
+            "width": 118,
             "fg": "rgba(128,128,128,1)",
             "bg": "rgba(20,20,20,1)",
             "attributes": 0,
@@ -8522,8 +8522,8 @@
             "underline": false
           },
           {
-            "text": "       ",
-            "width": 7,
+            "text": " ",
+            "width": 1,
             "fg": "rgba(255,255,255,1)",
             "bg": "rgba(20,20,20,1)",
             "attributes": 0,
@@ -9598,7 +9598,7 @@
             "underline": false
           },
           {
-            "text": "j/k  ←/→  s  e  Tab  m settings  n prompt  w ",
+            "text": "j/k  ←/→  s  e  Tab  m settings  n prompt  d ",
             "width": 45,
             "fg": "rgba(128,128,128,1)",
             "bg": "rgba(20,20,20,1)",
@@ -10680,8 +10680,8 @@
             "underline": false
           },
           {
-            "text": "j/k  ←/→  s  e  Tab  m settings  n prompt  w refs  q",
-            "width": 52,
+            "text": "j/k  ←/→  s  e  Tab  m settings  n prompt  d drafts  w refs  q",
+            "width": 62,
             "fg": "rgba(128,128,128,1)",
             "bg": "rgba(20,20,20,1)",
             "attributes": 0,
@@ -10690,8 +10690,8 @@
             "underline": false
           },
           {
-            "text": "                           ",
-            "width": 27,
+            "text": "                 ",
+            "width": 17,
             "fg": "rgba(255,255,255,1)",
             "bg": "rgba(20,20,20,1)",
             "attributes": 0,
@@ -13726,8 +13726,8 @@
             "underline": false
           },
           {
-            "text": "q quit · Tab pane · j/k move · w refs · m settings · n prompt/viewed · s split · e expand · a fix · r reply · t ",
-            "width": 112,
+            "text": "q quit · Tab pane · j/k move · d drafts · w refs · m settings · n prompt/viewed · s split · e expand · a fix · r reply",
+            "width": 118,
             "fg": "rgba(128,128,128,1)",
             "bg": "rgba(20,20,20,1)",
             "attributes": 0,
@@ -13736,8 +13736,8 @@
             "underline": false
           },
           {
-            "text": "       ",
-            "width": 7,
+            "text": " ",
+            "width": 1,
             "fg": "rgba(255,255,255,1)",
             "bg": "rgba(20,20,20,1)",
             "attributes": 0,
@@ -15458,8 +15458,8 @@
             "underline": false
           },
           {
-            "text": "j/k  ←/→  s  e  Tab  m settings  n prompt  w refs  q",
-            "width": 52,
+            "text": "j/k  ←/→  s  e  Tab  m settings  n prompt  d drafts  w refs  q",
+            "width": 62,
             "fg": "rgba(128,128,128,1)",
             "bg": "rgba(20,20,20,1)",
             "attributes": 0,
@@ -15468,8 +15468,8 @@
             "underline": false
           },
           {
-            "text": "                           ",
-            "width": 27,
+            "text": "                 ",
+            "width": 17,
             "fg": "rgba(255,255,255,1)",
             "bg": "rgba(20,20,20,1)",
             "attributes": 0,
@@ -17730,8 +17730,8 @@
             "underline": false
           },
           {
-            "text": "j/k  ←/→  s  e  Tab  m settings  n prompt  w refs  q",
-            "width": 52,
+            "text": "j/k  ←/→  s  e  Tab  m settings  n prompt  d drafts  w refs  q",
+            "width": 62,
             "fg": "rgba(128,128,128,1)",
             "bg": "rgba(20,20,20,1)",
             "attributes": 0,
@@ -17740,8 +17740,8 @@
             "underline": false
           },
           {
-            "text": "                           ",
-            "width": 27,
+            "text": "                 ",
+            "width": 17,
             "fg": "rgba(255,255,255,1)",
             "bg": "rgba(20,20,20,1)",
             "attributes": 0,
@@ -18706,7 +18706,7 @@
             "underline": false
           },
           {
-            "text": "j/k  ←/→  s  e  Tab  m settings  n prompt  w ",
+            "text": "j/k  ←/→  s  e  Tab  m settings  n prompt  d ",
             "width": 45,
             "fg": "rgba(128,128,128,1)",
             "bg": "rgba(20,20,20,1)",
@@ -19544,6 +19544,4612 @@
           {
             "text": "                                                                                                                        ",
             "width": 120,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      }
+    ]
+  },
+  "shell-drafts-saved-120x40": {
+    "cols": 120,
+    "rows": 40,
+    "lines": [
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "Staged comments · github:acme/payments PR #7",
+            "width": 44,
+            "fg": "rgba(122,162,247,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "                                                                           ",
+            "width": 75,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "j/k select · n add · e edit · d remove · Esc close",
+            "width": 50,
+            "fg": "rgba(128,128,128,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "                                                                     ",
+            "width": 69,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": "                                                                                                                        ",
+            "width": 120,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "Save stages a local draft. Publication requires a separate preview and approval.",
+            "width": 80,
+            "fg": "rgba(128,128,128,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "                                       ",
+            "width": 39,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": "                                                                                                                        ",
+            "width": 120,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "3 staged comments",
+            "width": 17,
+            "fg": "rgba(128,128,128,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "                                                                                                      ",
+            "width": 102,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "› inline: src/payment.ts ",
+            "width": 25,
+            "fg": "rgba(122,162,247,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "                                                                                              ",
+            "width": 94,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "  general: general comment (reply)",
+            "width": 34,
+            "fg": "rgba(238,238,238,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "                                                                                     ",
+            "width": 85,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "  localOnly: src/legacy.ts ",
+            "width": 27,
+            "fg": "rgba(238,238,238,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "                                                                                            ",
+            "width": 92,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "inline · aiFinding",
+            "width": 18,
+            "fg": "rgba(158,206,106,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "                                                                                                     ",
+            "width": 101,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "Path: src/payment.ts",
+            "width": 20,
+            "fg": "rgba(238,238,238,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "                                                                                                   ",
+            "width": 99,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "New-side line: 12",
+            "width": 17,
+            "fg": "rgba(238,238,238,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "                                                                                                      ",
+            "width": 102,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "Body: Imported finding comment 世界.",
+            "width": 36,
+            "fg": "rgba(238,238,238,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "                                                                                   ",
+            "width": 83,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "Handle the missing key before processing.",
+            "width": 41,
+            "fg": "rgba(238,238,238,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "                                                                              ",
+            "width": 78,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "Finding: finding-1 · run run-7 · fingerprint synthetic-fingerprint",
+            "width": 66,
+            "fg": "rgba(128,128,128,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "                                                     ",
+            "width": 53,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "Reviewed: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa → bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "width": 93,
+            "fg": "rgba(128,128,128,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "                          ",
+            "width": 26,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": "                                                                                                                        ",
+            "width": 120,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": "                                                                                                                        ",
+            "width": 120,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": "                                                                                                                        ",
+            "width": 120,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": "                                                                                                                        ",
+            "width": 120,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": "                                                                                                                        ",
+            "width": 120,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": "                                                                                                                        ",
+            "width": 120,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": "                                                                                                                        ",
+            "width": 120,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": "                                                                                                                        ",
+            "width": 120,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": "                                                                                                                        ",
+            "width": 120,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": "                                                                                                                        ",
+            "width": 120,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": "                                                                                                                        ",
+            "width": 120,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": "                                                                                                                        ",
+            "width": 120,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": "                                                                                                                        ",
+            "width": 120,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": "                                                                                                                        ",
+            "width": 120,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": "                                                                                                                        ",
+            "width": 120,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": "                                                                                                                        ",
+            "width": 120,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": "                                                                                                                        ",
+            "width": 120,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": "                                                                                                                        ",
+            "width": 120,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": "                                                                                                                        ",
+            "width": 120,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": "                                                                                                                        ",
+            "width": 120,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": "                                                                                                                        ",
+            "width": 120,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": "                                                                                                                        ",
+            "width": 120,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "Changes remain local. Imported identity, finding references and reviewed revisions are retained.",
+            "width": 96,
+            "fg": "rgba(128,128,128,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "                       ",
+            "width": 23,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": "                                                                                                                        ",
+            "width": 120,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      }
+    ]
+  },
+  "shell-drafts-saved-50x20": {
+    "cols": 50,
+    "rows": 20,
+    "lines": [
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "Staged comments · github:acme/payments PR #7",
+            "width": 44,
+            "fg": "rgba(122,162,247,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "     ",
+            "width": 5,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "j/k select · n add · e edit · d remove · Esc ",
+            "width": 45,
+            "fg": "rgba(128,128,128,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "    ",
+            "width": 4,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "close",
+            "width": 5,
+            "fg": "rgba(128,128,128,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "                                            ",
+            "width": 44,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "Save stages a local draft. Publication requires ",
+            "width": 48,
+            "fg": "rgba(128,128,128,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "a separate preview and approval.",
+            "width": 32,
+            "fg": "rgba(128,128,128,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "                 ",
+            "width": 17,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "3 staged comments",
+            "width": 17,
+            "fg": "rgba(128,128,128,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "                              ",
+            "width": 30,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "█",
+            "width": 1,
+            "fg": "rgba(154,158,163,1)",
+            "bg": "rgba(37,37,39,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "› inline: src/payment.ts ",
+            "width": 25,
+            "fg": "rgba(122,162,247,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "                      ",
+            "width": 22,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "█",
+            "width": 1,
+            "fg": "rgba(154,158,163,1)",
+            "bg": "rgba(37,37,39,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "  general: general comment (reply)",
+            "width": 34,
+            "fg": "rgba(238,238,238,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "             ",
+            "width": 13,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "█",
+            "width": 1,
+            "fg": "rgba(154,158,163,1)",
+            "bg": "rgba(37,37,39,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "  localOnly: src/legacy.ts ",
+            "width": 27,
+            "fg": "rgba(238,238,238,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "                    ",
+            "width": 20,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "█",
+            "width": 1,
+            "fg": "rgba(154,158,163,1)",
+            "bg": "rgba(37,37,39,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "inline · aiFinding",
+            "width": 18,
+            "fg": "rgba(158,206,106,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "                             ",
+            "width": 29,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "█",
+            "width": 1,
+            "fg": "rgba(154,158,163,1)",
+            "bg": "rgba(37,37,39,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "Path: src/payment.ts",
+            "width": 20,
+            "fg": "rgba(238,238,238,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "                           ",
+            "width": 27,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "█",
+            "width": 1,
+            "fg": "rgba(154,158,163,1)",
+            "bg": "rgba(37,37,39,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "New-side line: 12",
+            "width": 17,
+            "fg": "rgba(238,238,238,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "                              ",
+            "width": 30,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "█",
+            "width": 1,
+            "fg": "rgba(154,158,163,1)",
+            "bg": "rgba(37,37,39,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "Body: Imported finding comment 世界.",
+            "width": 36,
+            "fg": "rgba(238,238,238,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "           ",
+            "width": 11,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "█",
+            "width": 1,
+            "fg": "rgba(154,158,163,1)",
+            "bg": "rgba(37,37,39,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "Handle the missing key before processing.",
+            "width": 41,
+            "fg": "rgba(238,238,238,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "      ",
+            "width": 6,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "▀",
+            "width": 1,
+            "fg": "rgba(154,158,163,1)",
+            "bg": "rgba(37,37,39,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "Finding: finding-1 · run run-7 · fingerprint ",
+            "width": 45,
+            "fg": "rgba(128,128,128,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "  ",
+            "width": 2,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(37,37,39,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "synthetic-fingerprint",
+            "width": 21,
+            "fg": "rgba(128,128,128,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "                          ",
+            "width": 26,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(37,37,39,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "Reviewed: ",
+            "width": 10,
+            "fg": "rgba(128,128,128,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "                                     ",
+            "width": 37,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(37,37,39,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa → ",
+            "width": 43,
+            "fg": "rgba(128,128,128,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "    ",
+            "width": 4,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(37,37,39,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "Changes remain local. Imported identity, finding",
+            "width": 48,
+            "fg": "rgba(128,128,128,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "references and reviewed revisions are retained.",
+            "width": 47,
+            "fg": "rgba(128,128,128,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "  ",
+            "width": 2,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      }
+    ]
+  },
+  "shell-drafts-editing-120x40": {
+    "cols": 120,
+    "rows": 40,
+    "lines": [
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "Staged comments · github:acme/payments PR #7",
+            "width": 44,
+            "fg": "rgba(122,162,247,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "                                                                           ",
+            "width": 75,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "Tab/j/k field · Enter edit/cycle · Ctrl+S save · Esc discard",
+            "width": 60,
+            "fg": "rgba(128,128,128,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "                                                           ",
+            "width": 59,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": "                                                                                                                        ",
+            "width": 120,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "Save stages a local draft. Publication requires a separate preview and approval.",
+            "width": 80,
+            "fg": "rgba(128,128,128,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "                                       ",
+            "width": 39,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": "                                                                                                                        ",
+            "width": 120,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "Source: aiFinding · edits are not saved yet",
+            "width": 43,
+            "fg": "rgba(158,206,106,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "                                                                            ",
+            "width": 76,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "  Mode: inline",
+            "width": 14,
+            "fg": "rgba(238,238,238,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "                                                                                                         ",
+            "width": 105,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "  Path: src/payment.ts",
+            "width": 22,
+            "fg": "rgba(238,238,238,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "                                                                                                 ",
+            "width": 97,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "  New-side line: 12",
+            "width": 19,
+            "fg": "rgba(238,238,238,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "                                                                                                    ",
+            "width": 100,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "  Old-side line: (empty)",
+            "width": 24,
+            "fg": "rgba(238,238,238,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "                                                                                               ",
+            "width": 95,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "  Reply to comment: (empty)",
+            "width": 27,
+            "fg": "rgba(238,238,238,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "                                                                                            ",
+            "width": 92,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "› Body: Imported finding comment 世界.",
+            "width": 38,
+            "fg": "rgba(122,162,247,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "                                                                                 ",
+            "width": 81,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "Handle the missing key before processing.",
+            "width": 41,
+            "fg": "rgba(122,162,247,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "                                                                              ",
+            "width": 78,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "Unsaved reviewer edit.",
+            "width": 22,
+            "fg": "rgba(122,162,247,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "                                                                                                 ",
+            "width": 97,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": "                                                                                                                        ",
+            "width": 120,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": "                                                                                                                        ",
+            "width": 120,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": "                                                                                                                        ",
+            "width": 120,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": "                                                                                                                        ",
+            "width": 120,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": "                                                                                                                        ",
+            "width": 120,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": "                                                                                                                        ",
+            "width": 120,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": "                                                                                                                        ",
+            "width": 120,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": "                                                                                                                        ",
+            "width": 120,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": "                                                                                                                        ",
+            "width": 120,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": "                                                                                                                        ",
+            "width": 120,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": "                                                                                                                        ",
+            "width": 120,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": "                                                                                                                        ",
+            "width": 120,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": "                                                                                                                        ",
+            "width": 120,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": "                                                                                                                        ",
+            "width": 120,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": "                                                                                                                        ",
+            "width": 120,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": "                                                                                                                        ",
+            "width": 120,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": "                                                                                                                        ",
+            "width": 120,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": "                                                                                                                        ",
+            "width": 120,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": "                                                                                                                        ",
+            "width": 120,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": "                                                                                                                        ",
+            "width": 120,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": "                                                                                                                        ",
+            "width": 120,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": "                                                                                                                        ",
+            "width": 120,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": "                                                                                                                        ",
+            "width": 120,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": "                                                                                                                        ",
+            "width": 120,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "Changes remain local. Imported identity, finding references and reviewed revisions are retained.",
+            "width": 96,
+            "fg": "rgba(128,128,128,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "                       ",
+            "width": 23,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": "                                                                                                                        ",
+            "width": 120,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      }
+    ]
+  },
+  "shell-drafts-conflict-80x30": {
+    "cols": 80,
+    "rows": 30,
+    "lines": [
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "Staged comments · github:acme/payments PR #7",
+            "width": 44,
+            "fg": "rgba(122,162,247,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "                                   ",
+            "width": 35,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "Tab/j/k field · Enter edit/cycle · Ctrl+S save · Esc discard",
+            "width": 60,
+            "fg": "rgba(128,128,128,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "                   ",
+            "width": 19,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": "                                                                                ",
+            "width": 80,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "Save stages a local draft. Publication requires a separate preview and ",
+            "width": 71,
+            "fg": "rgba(128,128,128,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "        ",
+            "width": 8,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "approval.",
+            "width": 9,
+            "fg": "rgba(128,128,128,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "                                                                      ",
+            "width": 70,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "User data changed. Edits retained; refresh before saving.",
+            "width": 57,
+            "fg": "rgba(247,118,142,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "                      ",
+            "width": 22,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": "                                                                                ",
+            "width": 80,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": "                                                                                ",
+            "width": 80,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "Source: aiFinding · edits are not saved yet",
+            "width": 43,
+            "fg": "rgba(158,206,106,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "                                    ",
+            "width": 36,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "  Mode: inline",
+            "width": 14,
+            "fg": "rgba(238,238,238,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "                                                                 ",
+            "width": 65,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "  Path: src/payment.ts",
+            "width": 22,
+            "fg": "rgba(238,238,238,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "                                                         ",
+            "width": 57,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "  New-side line: 12",
+            "width": 19,
+            "fg": "rgba(238,238,238,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "                                                            ",
+            "width": 60,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "  Old-side line: (empty)",
+            "width": 24,
+            "fg": "rgba(238,238,238,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "                                                       ",
+            "width": 55,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "  Reply to comment: (empty)",
+            "width": 27,
+            "fg": "rgba(238,238,238,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "                                                    ",
+            "width": 52,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "› Body: Imported finding comment 世界.",
+            "width": 38,
+            "fg": "rgba(122,162,247,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "                                         ",
+            "width": 41,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "Handle the missing key before processing.",
+            "width": 41,
+            "fg": "rgba(122,162,247,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "                                      ",
+            "width": 38,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "Unsaved reviewer edit.",
+            "width": 22,
+            "fg": "rgba(122,162,247,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "                                                         ",
+            "width": 57,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": "                                                                                ",
+            "width": 80,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": "                                                                                ",
+            "width": 80,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": "                                                                                ",
+            "width": 80,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": "                                                                                ",
+            "width": 80,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": "                                                                                ",
+            "width": 80,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": "                                                                                ",
+            "width": 80,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": "                                                                                ",
+            "width": 80,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": "                                                                                ",
+            "width": 80,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": "                                                                                ",
+            "width": 80,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": "                                                                                ",
+            "width": 80,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": "                                                                                ",
+            "width": 80,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "Changes remain local. Imported identity, finding references and reviewed ",
+            "width": 73,
+            "fg": "rgba(128,128,128,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "      ",
+            "width": 6,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "revisions are retained.",
+            "width": 23,
+            "fg": "rgba(128,128,128,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "                                                        ",
+            "width": 56,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      }
+    ]
+  },
+  "shell-drafts-remove-80x30": {
+    "cols": 80,
+    "rows": 30,
+    "lines": [
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "Staged comments · github:acme/payments PR #7",
+            "width": 44,
+            "fg": "rgba(122,162,247,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "                                   ",
+            "width": 35,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "j/k select · n add · e edit · d remove · Esc close",
+            "width": 50,
+            "fg": "rgba(128,128,128,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "                             ",
+            "width": 29,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": "                                                                                ",
+            "width": 80,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "Save stages a local draft. Publication requires a separate preview and ",
+            "width": 71,
+            "fg": "rgba(128,128,128,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "        ",
+            "width": 8,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "approval.",
+            "width": 9,
+            "fg": "rgba(128,128,128,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "                                                                      ",
+            "width": 70,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "Remove src/payment.ts from this PR? y confirm · n/Esc cancel",
+            "width": 60,
+            "fg": "rgba(224,175,104,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "                   ",
+            "width": 19,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": "                                                                                ",
+            "width": 80,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "3 staged comments",
+            "width": 17,
+            "fg": "rgba(128,128,128,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "                                                              ",
+            "width": 62,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "› inline: src/payment.ts ",
+            "width": 25,
+            "fg": "rgba(122,162,247,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "                                                      ",
+            "width": 54,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "  general: general comment (reply)",
+            "width": 34,
+            "fg": "rgba(238,238,238,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "                                             ",
+            "width": 45,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "  localOnly: src/legacy.ts ",
+            "width": 27,
+            "fg": "rgba(238,238,238,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "                                                    ",
+            "width": 52,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "inline · aiFinding",
+            "width": 18,
+            "fg": "rgba(158,206,106,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "                                                             ",
+            "width": 61,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "Path: src/payment.ts",
+            "width": 20,
+            "fg": "rgba(238,238,238,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "                                                           ",
+            "width": 59,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "New-side line: 12",
+            "width": 17,
+            "fg": "rgba(238,238,238,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "                                                              ",
+            "width": 62,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "Body: Imported finding comment 世界.",
+            "width": 36,
+            "fg": "rgba(238,238,238,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "                                           ",
+            "width": 43,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "Handle the missing key before processing.",
+            "width": 41,
+            "fg": "rgba(238,238,238,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "                                      ",
+            "width": 38,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "Finding: finding-1 · run run-7 · fingerprint synthetic-fingerprint",
+            "width": 66,
+            "fg": "rgba(128,128,128,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "             ",
+            "width": 13,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "Reviewed: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa → ",
+            "width": 53,
+            "fg": "rgba(128,128,128,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "                          ",
+            "width": 26,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "width": 40,
+            "fg": "rgba(128,128,128,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "                                       ",
+            "width": 39,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": "                                                                                ",
+            "width": 80,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": "                                                                                ",
+            "width": 80,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": "                                                                                ",
+            "width": 80,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": "                                                                                ",
+            "width": 80,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": "                                                                                ",
+            "width": 80,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": "                                                                                ",
+            "width": 80,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": "                                                                                ",
+            "width": 80,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": "                                                                                ",
+            "width": 80,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": "                                                                                ",
+            "width": 80,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "Changes remain local. Imported identity, finding references and reviewed ",
+            "width": 73,
+            "fg": "rgba(128,128,128,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "      ",
+            "width": 6,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "revisions are retained.",
+            "width": 23,
+            "fg": "rgba(128,128,128,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "                                                        ",
+            "width": 56,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      }
+    ]
+  },
+  "shell-drafts-local-50x15": {
+    "cols": 50,
+    "rows": 15,
+    "lines": [
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "Staged comments · no PR selected",
+            "width": 32,
+            "fg": "rgba(122,162,247,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "                 ",
+            "width": 17,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "j/k select · n add · e edit · d remove · Esc ",
+            "width": 45,
+            "fg": "rgba(128,128,128,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "    ",
+            "width": 4,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "close",
+            "width": 5,
+            "fg": "rgba(128,128,128,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "                                            ",
+            "width": 44,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "Save stages a local draft. Publication requires ",
+            "width": 48,
+            "fg": "rgba(128,128,128,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "a separate preview and approval.",
+            "width": 32,
+            "fg": "rgba(128,128,128,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "                 ",
+            "width": 17,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "Select a pull request. Drafts are scoped to a ",
+            "width": 46,
+            "fg": "rgba(247,118,142,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "   ",
+            "width": 3,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "provider and PR.",
+            "width": 16,
+            "fg": "rgba(247,118,142,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "                                 ",
+            "width": 33,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": "                                                  ",
+            "width": 50,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "0 staged comments",
+            "width": 17,
+            "fg": "rgba(128,128,128,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "                                ",
+            "width": 32,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": "                                                  ",
+            "width": 50,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": "                                                  ",
+            "width": 50,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": "                                                  ",
+            "width": 50,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": "                                                  ",
+            "width": 50,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "Changes remain local. Imported identity, finding",
+            "width": 48,
+            "fg": "rgba(128,128,128,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "references and reviewed revisions are retained.",
+            "width": 47,
+            "fg": "rgba(128,128,128,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "  ",
+            "width": 2,
             "fg": "rgba(255,255,255,1)",
             "bg": "rgba(10,10,10,1)",
             "attributes": 0,
@@ -28744,8 +33350,8 @@
             "underline": false
           },
           {
-            "text": "q quit · Tab pane · j/k move · w refs · m settings · n prompt/viewed · s split · e expand · a fix · r reply · t ",
-            "width": 112,
+            "text": "q quit · Tab pane · j/k move · d drafts · w refs · m settings · n prompt/viewed · s split · e expand · a fix · r reply",
+            "width": 118,
             "fg": "rgba(128,128,128,1)",
             "bg": "rgba(20,20,20,1)",
             "attributes": 0,
@@ -28754,8 +33360,8 @@
             "underline": false
           },
           {
-            "text": "       ",
-            "width": 7,
+            "text": " ",
+            "width": 1,
             "fg": "rgba(255,255,255,1)",
             "bg": "rgba(20,20,20,1)",
             "attributes": 0,
@@ -30546,8 +35152,8 @@
             "underline": false
           },
           {
-            "text": "j/k  ←/→  s  e  Tab  m settings  n prompt  w refs  q",
-            "width": 52,
+            "text": "j/k  ←/→  s  e  Tab  m settings  n prompt  d drafts  w refs  q",
+            "width": 62,
             "fg": "rgba(128,128,128,1)",
             "bg": "rgba(20,20,20,1)",
             "attributes": 0,
@@ -30556,8 +35162,8 @@
             "underline": false
           },
           {
-            "text": "                           ",
-            "width": 27,
+            "text": "                 ",
+            "width": 17,
             "fg": "rgba(255,255,255,1)",
             "bg": "rgba(20,20,20,1)",
             "attributes": 0,
@@ -32872,8 +37478,8 @@
             "underline": false
           },
           {
-            "text": "q quit · Tab pane · j/k move · w refs · m settings · n prompt/viewed · s split · e expand · a fix · r reply · t ",
-            "width": 112,
+            "text": "q quit · Tab pane · j/k move · d drafts · w refs · m settings · n prompt/viewed · s split · e expand · a fix · r reply",
+            "width": 118,
             "fg": "rgba(128,128,128,1)",
             "bg": "rgba(20,20,20,1)",
             "attributes": 0,
@@ -32882,8 +37488,8 @@
             "underline": false
           },
           {
-            "text": "       ",
-            "width": 7,
+            "text": " ",
+            "width": 1,
             "fg": "rgba(255,255,255,1)",
             "bg": "rgba(20,20,20,1)",
             "attributes": 0,
@@ -33978,7 +38584,7 @@
             "underline": false
           },
           {
-            "text": "j/k  ←/→  s  e  Tab  m settings  n prompt  w ",
+            "text": "j/k  ←/→  s  e  Tab  m settings  n prompt  d ",
             "width": 45,
             "fg": "rgba(128,128,128,1)",
             "bg": "rgba(20,20,20,1)",
@@ -35240,8 +39846,8 @@
             "underline": false
           },
           {
-            "text": "j/k  ←/→  s  e  Tab  m settings  n prompt  w refs  q",
-            "width": 52,
+            "text": "j/k  ←/→  s  e  Tab  m settings  n prompt  d drafts  w refs  q",
+            "width": 62,
             "fg": "rgba(128,128,128,1)",
             "bg": "rgba(20,20,20,1)",
             "attributes": 0,
@@ -35250,8 +39856,8 @@
             "underline": false
           },
           {
-            "text": "                           ",
-            "width": 27,
+            "text": "                 ",
+            "width": 17,
             "fg": "rgba(255,255,255,1)",
             "bg": "rgba(20,20,20,1)",
             "attributes": 0,
@@ -36502,8 +41108,8 @@
             "underline": false
           },
           {
-            "text": "j/k  ←/→  s  e  Tab  m settings  n prompt  w refs  q",
-            "width": 52,
+            "text": "j/k  ←/→  s  e  Tab  m settings  n prompt  d drafts  w refs  q",
+            "width": 62,
             "fg": "rgba(128,128,128,1)",
             "bg": "rgba(20,20,20,1)",
             "attributes": 0,
@@ -36512,8 +41118,8 @@
             "underline": false
           },
           {
-            "text": "                           ",
-            "width": 27,
+            "text": "                 ",
+            "width": 17,
             "fg": "rgba(255,255,255,1)",
             "bg": "rgba(20,20,20,1)",
             "attributes": 0,
@@ -38404,8 +43010,8 @@
             "underline": false
           },
           {
-            "text": "q quit · Tab pane · j/k move · w refs · m settings · n prompt/viewed · s split · e expand · a fix ",
-            "width": 98,
+            "text": "q quit · Tab pane · j/k move · d drafts · w refs · m settings · n prompt/viewed · s split · e ",
+            "width": 94,
             "fg": "rgba(128,128,128,1)",
             "bg": "rgba(20,20,20,1)",
             "attributes": 0,
@@ -38414,8 +43020,8 @@
             "underline": false
           },
           {
-            "text": " ",
-            "width": 1,
+            "text": "     ",
+            "width": 5,
             "fg": "rgba(255,255,255,1)",
             "bg": "rgba(20,20,20,1)",
             "attributes": 0,
@@ -39666,8 +44272,8 @@
             "underline": false
           },
           {
-            "text": "j/k  ←/→  s  e  Tab  m settings  n prompt  w refs  q",
-            "width": 52,
+            "text": "j/k  ←/→  s  e  Tab  m settings  n prompt  d drafts  w refs  q",
+            "width": 62,
             "fg": "rgba(128,128,128,1)",
             "bg": "rgba(20,20,20,1)",
             "attributes": 0,
@@ -39676,8 +44282,8 @@
             "underline": false
           },
           {
-            "text": "                           ",
-            "width": 27,
+            "text": "                 ",
+            "width": 17,
             "fg": "rgba(255,255,255,1)",
             "bg": "rgba(20,20,20,1)",
             "attributes": 0,
@@ -51492,8 +56098,8 @@
             "underline": false
           },
           {
-            "text": "q quit · Tab pane · j/k move · w refs · m settings · n prompt/viewed · s split · e expand · a fix · r reply · t ",
-            "width": 112,
+            "text": "q quit · Tab pane · j/k move · d drafts · w refs · m settings · n prompt/viewed · s split · e expand · a fix · r reply",
+            "width": 118,
             "fg": "rgba(128,128,128,1)",
             "bg": "rgba(20,20,20,1)",
             "attributes": 0,
@@ -51502,8 +56108,8 @@
             "underline": false
           },
           {
-            "text": "       ",
-            "width": 7,
+            "text": " ",
+            "width": 1,
             "fg": "rgba(255,255,255,1)",
             "bg": "rgba(20,20,20,1)",
             "attributes": 0,
@@ -52268,7 +56874,7 @@
             "underline": false
           },
           {
-            "text": "j/k  ←/→  s  e  Tab  m settings  n prompt  w ",
+            "text": "j/k  ←/→  s  e  Tab  m settings  n prompt  d ",
             "width": 45,
             "fg": "rgba(128,128,128,1)",
             "bg": "rgba(20,20,20,1)",
@@ -58302,8 +62908,8 @@
             "underline": false
           },
           {
-            "text": "q quit · Tab pane · j/k move · w refs · m settings · n prompt/viewed · s split · e expand · a fix · r reply · t ",
-            "width": 112,
+            "text": "q quit · Tab pane · j/k move · d drafts · w refs · m settings · n prompt/viewed · s split · e expand · a fix · r reply",
+            "width": 118,
             "fg": "rgba(128,128,128,1)",
             "bg": "rgba(20,20,20,1)",
             "attributes": 0,
@@ -58312,8 +62918,8 @@
             "underline": false
           },
           {
-            "text": "       ",
-            "width": 7,
+            "text": " ",
+            "width": 1,
             "fg": "rgba(255,255,255,1)",
             "bg": "rgba(20,20,20,1)",
             "attributes": 0,
@@ -66398,8 +71004,8 @@
             "underline": false
           },
           {
-            "text": "q quit · Tab pane · j/k move · w refs · m settings · n prompt/viewed · s split · e expand · a fix · r reply · t ",
-            "width": 112,
+            "text": "q quit · Tab pane · j/k move · d drafts · w refs · m settings · n prompt/viewed · s split · e expand · a fix · r reply",
+            "width": 118,
             "fg": "rgba(128,128,128,1)",
             "bg": "rgba(20,20,20,1)",
             "attributes": 0,
@@ -66408,8 +71014,8 @@
             "underline": false
           },
           {
-            "text": "       ",
-            "width": 7,
+            "text": " ",
+            "width": 1,
             "fg": "rgba(255,255,255,1)",
             "bg": "rgba(20,20,20,1)",
             "attributes": 0,
@@ -68184,8 +72790,8 @@
             "underline": false
           },
           {
-            "text": "q quit · Tab pane · j/k move · w refs · m settings · n prompt/viewed · s split · e expand · a fix · r reply · t ",
-            "width": 112,
+            "text": "q quit · Tab pane · j/k move · d drafts · w refs · m settings · n prompt/viewed · s split · e expand · a fix · r reply",
+            "width": 118,
             "fg": "rgba(128,128,128,1)",
             "bg": "rgba(20,20,20,1)",
             "attributes": 0,
@@ -68194,8 +72800,8 @@
             "underline": false
           },
           {
-            "text": "       ",
-            "width": 7,
+            "text": " ",
+            "width": 1,
             "fg": "rgba(255,255,255,1)",
             "bg": "rgba(20,20,20,1)",
             "attributes": 0,
@@ -68880,7 +73486,7 @@
             "underline": false
           },
           {
-            "text": "j/k  ←/→  s  e  Tab  m settings  n prompt  w ",
+            "text": "j/k  ←/→  s  e  Tab  m settings  n prompt  d ",
             "width": 45,
             "fg": "rgba(128,128,128,1)",
             "bg": "rgba(20,20,20,1)",
@@ -69902,8 +74508,8 @@
             "underline": false
           },
           {
-            "text": "j/k  ←/→  s  e  Tab  m settings  n prompt  w refs  q",
-            "width": 52,
+            "text": "j/k  ←/→  s  e  Tab  m settings  n prompt  d drafts  w refs  q",
+            "width": 62,
             "fg": "rgba(128,128,128,1)",
             "bg": "rgba(20,20,20,1)",
             "attributes": 0,
@@ -69912,8 +74518,8 @@
             "underline": false
           },
           {
-            "text": "                           ",
-            "width": 27,
+            "text": "                 ",
+            "width": 17,
             "fg": "rgba(255,255,255,1)",
             "bg": "rgba(20,20,20,1)",
             "attributes": 0,
@@ -70638,7 +75244,7 @@
             "underline": false
           },
           {
-            "text": "j/k  ←/→  s  e  Tab  m settings  n prompt  w ",
+            "text": "j/k  ←/→  s  e  Tab  m settings  n prompt  d ",
             "width": 45,
             "fg": "rgba(128,128,128,1)",
             "bg": "rgba(20,20,20,1)",
@@ -72524,8 +77130,8 @@
             "underline": false
           },
           {
-            "text": "q quit · Tab pane · j/k move · w refs · m settings · n prompt/viewed · s split · e expand · a fix · r reply · t ",
-            "width": 112,
+            "text": "q quit · Tab pane · j/k move · d drafts · w refs · m settings · n prompt/viewed · s split · e expand · a fix · r reply",
+            "width": 118,
             "fg": "rgba(128,128,128,1)",
             "bg": "rgba(20,20,20,1)",
             "attributes": 0,
@@ -72534,8 +77140,8 @@
             "underline": false
           },
           {
-            "text": "       ",
-            "width": 7,
+            "text": " ",
+            "width": 1,
             "fg": "rgba(255,255,255,1)",
             "bg": "rgba(20,20,20,1)",
             "attributes": 0,
@@ -73586,8 +78192,8 @@
             "underline": false
           },
           {
-            "text": "j/k  ←/→  s  e  Tab  m settings  n prompt  w refs  q",
-            "width": 52,
+            "text": "j/k  ←/→  s  e  Tab  m settings  n prompt  d drafts  w refs  q",
+            "width": 62,
             "fg": "rgba(128,128,128,1)",
             "bg": "rgba(20,20,20,1)",
             "attributes": 0,
@@ -73596,8 +78202,8 @@
             "underline": false
           },
           {
-            "text": "                           ",
-            "width": 27,
+            "text": "                 ",
+            "width": 17,
             "fg": "rgba(255,255,255,1)",
             "bg": "rgba(20,20,20,1)",
             "attributes": 0,
@@ -74428,8 +79034,8 @@
             "underline": false
           },
           {
-            "text": "j/k  ←/→  s  e  Tab  m settings  n prompt  w refs  q",
-            "width": 52,
+            "text": "j/k  ←/→  s  e  Tab  m settings  n prompt  d drafts  w refs  q",
+            "width": 62,
             "fg": "rgba(128,128,128,1)",
             "bg": "rgba(20,20,20,1)",
             "attributes": 0,
@@ -74438,8 +79044,8 @@
             "underline": false
           },
           {
-            "text": "                           ",
-            "width": 27,
+            "text": "                 ",
+            "width": 17,
             "fg": "rgba(255,255,255,1)",
             "bg": "rgba(20,20,20,1)",
             "attributes": 0,
@@ -75280,8 +79886,8 @@
             "underline": false
           },
           {
-            "text": "j/k  ←/→  s  e  Tab  m settings  n prompt  w refs  q",
-            "width": 52,
+            "text": "j/k  ←/→  s  e  Tab  m settings  n prompt  d drafts  w refs  q",
+            "width": 62,
             "fg": "rgba(128,128,128,1)",
             "bg": "rgba(20,20,20,1)",
             "attributes": 0,
@@ -75290,8 +79896,8 @@
             "underline": false
           },
           {
-            "text": "                           ",
-            "width": 27,
+            "text": "                 ",
+            "width": 17,
             "fg": "rgba(255,255,255,1)",
             "bg": "rgba(20,20,20,1)",
             "attributes": 0,
@@ -76232,8 +80838,8 @@
             "underline": false
           },
           {
-            "text": "j/k  ←/→  s  e  Tab  m settings  n prompt  w refs  q",
-            "width": 52,
+            "text": "j/k  ←/→  s  e  Tab  m settings  n prompt  d drafts  w refs  q",
+            "width": 62,
             "fg": "rgba(128,128,128,1)",
             "bg": "rgba(20,20,20,1)",
             "attributes": 0,
@@ -76242,8 +80848,8 @@
             "underline": false
           },
           {
-            "text": "                           ",
-            "width": 27,
+            "text": "                 ",
+            "width": 17,
             "fg": "rgba(255,255,255,1)",
             "bg": "rgba(20,20,20,1)",
             "attributes": 0,
@@ -77254,8 +81860,8 @@
             "underline": false
           },
           {
-            "text": "j/k  ←/→  s  e  Tab  m settings  n prompt  w refs  q",
-            "width": 52,
+            "text": "j/k  ←/→  s  e  Tab  m settings  n prompt  d drafts  w refs  q",
+            "width": 62,
             "fg": "rgba(128,128,128,1)",
             "bg": "rgba(20,20,20,1)",
             "attributes": 0,
@@ -77264,8 +81870,8 @@
             "underline": false
           },
           {
-            "text": "                           ",
-            "width": 27,
+            "text": "                 ",
+            "width": 17,
             "fg": "rgba(255,255,255,1)",
             "bg": "rgba(20,20,20,1)",
             "attributes": 0,
@@ -78206,8 +82812,8 @@
             "underline": false
           },
           {
-            "text": "j/k  ←/→  s  e  Tab  m settings  n prompt  w refs  q",
-            "width": 52,
+            "text": "j/k  ←/→  s  e  Tab  m settings  n prompt  d drafts  w refs  q",
+            "width": 62,
             "fg": "rgba(128,128,128,1)",
             "bg": "rgba(20,20,20,1)",
             "attributes": 0,
@@ -78216,8 +82822,8 @@
             "underline": false
           },
           {
-            "text": "                           ",
-            "width": 27,
+            "text": "                 ",
+            "width": 17,
             "fg": "rgba(255,255,255,1)",
             "bg": "rgba(20,20,20,1)",
             "attributes": 0,
@@ -80172,8 +84778,8 @@
             "underline": false
           },
           {
-            "text": "q quit · Tab pane · j/k move · w refs · m settings · n prompt/viewed · s split · e expand · a fix · r reply · t ",
-            "width": 112,
+            "text": "q quit · Tab pane · j/k move · d drafts · w refs · m settings · n prompt/viewed · s split · e expand · a fix · r reply",
+            "width": 118,
             "fg": "rgba(128,128,128,1)",
             "bg": "rgba(20,20,20,1)",
             "attributes": 0,
@@ -80182,8 +84788,8 @@
             "underline": false
           },
           {
-            "text": "       ",
-            "width": 7,
+            "text": " ",
+            "width": 1,
             "fg": "rgba(255,255,255,1)",
             "bg": "rgba(20,20,20,1)",
             "attributes": 0,
@@ -82098,8 +86704,8 @@
             "underline": false
           },
           {
-            "text": "q quit · Tab pane · j/k move · w refs · m settings · n prompt/viewed · s split · e expand · a fix · r reply · t ",
-            "width": 112,
+            "text": "q quit · Tab pane · j/k move · d drafts · w refs · m settings · n prompt/viewed · s split · e expand · a fix · r reply",
+            "width": 118,
             "fg": "rgba(128,128,128,1)",
             "bg": "rgba(20,20,20,1)",
             "attributes": 0,
@@ -82108,8 +86714,8 @@
             "underline": false
           },
           {
-            "text": "       ",
-            "width": 7,
+            "text": " ",
+            "width": 1,
             "fg": "rgba(255,255,255,1)",
             "bg": "rgba(20,20,20,1)",
             "attributes": 0,
@@ -84954,7 +89560,7 @@
             "underline": false
           },
           {
-            "text": "large diff · e expand  q quit · Tab pane · j/k move · w refs · m settings · n prompt/viewed · s split · e expand · a ",
+            "text": "large diff · e expand  q quit · Tab pane · j/k move · d drafts · w refs · m settings · n prompt/viewed · s split · e ",
             "width": 117,
             "fg": "rgba(128,128,128,1)",
             "bg": "rgba(20,20,20,1)",

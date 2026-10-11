@@ -16,6 +16,7 @@ import {
 import type { BackendClient } from "../../transport/backendClient";
 import { DataStore } from "../dataStore";
 import { DiffScrollPositions } from "../diffScrollPositions";
+import { DraftStore } from "../draftStore";
 import { imageProtocol } from "../imageProtocol";
 import { ReferenceStore } from "../referenceStore";
 import { SettingsStore } from "../settingsStore";
@@ -31,6 +32,7 @@ import { theme } from "../theme";
 import { WorkspaceStore } from "../workspaceStore";
 import { ConversationPanel } from "./ConversationPanel";
 import { DataPanel } from "./DataPanel";
+import { DraftPanel } from "./DraftPanel";
 import { FixPanel } from "./FixPanel";
 import { ReferencePanel } from "./ReferencePanel";
 import { SettingsPanel } from "./SettingsPanel";
@@ -57,7 +59,8 @@ function useShellInput(
       store.getSnapshot().settingsOpen ||
       store.getSnapshot().dataOpen ||
       store.getSnapshot().workspaceOpen ||
-      store.getSnapshot().referencesOpen
+      store.getSnapshot().referencesOpen ||
+      store.getSnapshot().draftsOpen
     )
       return;
     if (store.getSnapshot().searchOpen) {
@@ -163,6 +166,8 @@ function useShellInput(
       store.toggleSettings();
     } else if (key.name === "n") {
       store.toggleWorkspace();
+    } else if (key.name === "d") {
+      store.toggleDrafts();
     } else if (key.name === "w") {
       store.toggleReferences();
     } else if (key.name === "z") {
@@ -175,7 +180,9 @@ function useShellInput(
     if (
       store.getSnapshot().settingsOpen ||
       store.getSnapshot().dataOpen ||
-      store.getSnapshot().workspaceOpen
+      store.getSnapshot().workspaceOpen ||
+      store.getSnapshot().referencesOpen ||
+      store.getSnapshot().draftsOpen
     )
       return;
     if (store.getSnapshot().searchOpen) {
@@ -898,6 +905,7 @@ export function Shell({ store, client, quit }: ShellProps) {
   useEffect(() => () => positions.clear(), [positions]);
   useEffect(() => () => store.cancelSyntax(), [store]);
   const workspace = useMemo(() => new WorkspaceStore(), []);
+  const drafts = useMemo(() => new DraftStore(), []);
   const references = useMemo(() => new ReferenceStore(), []);
   const workspaceEntry = state.picker[state.selectedPicker];
   const referenceProvider = workspaceEntry?.provider;
@@ -922,6 +930,29 @@ export function Shell({ store, client, quit }: ShellProps) {
     references,
     client,
     state.referencesOpen,
+    referenceProvider,
+    referenceWorkspace,
+    referenceRepo,
+    referencePrId,
+  ]);
+  useEffect(() => {
+    if (!state.draftsOpen) return;
+    void drafts.load(
+      client,
+      referenceProvider && referenceWorkspace && referenceRepo && referencePrId !== undefined
+        ? {
+            provider: referenceProvider,
+            workspace: referenceWorkspace,
+            repo: referenceRepo,
+            prId: referencePrId,
+          }
+        : undefined,
+    );
+    return () => drafts.dispose();
+  }, [
+    drafts,
+    client,
+    state.draftsOpen,
     referenceProvider,
     referenceWorkspace,
     referenceRepo,
@@ -1033,6 +1064,8 @@ export function Shell({ store, client, quit }: ShellProps) {
               selectedIndex: state.selectedFinding,
             };
 
+  if (state.draftsOpen)
+    return <DraftPanel drafts={drafts} client={client} onClose={() => store.toggleDrafts()} />;
   if (state.referencesOpen)
     return (
       <ReferencePanel
@@ -1211,8 +1244,8 @@ export function Shell({ store, client, quit }: ShellProps) {
           {state.fixPreview
             ? "y approve · Esc/n dismiss · ↑/↓ scroll effects"
             : wide
-              ? "q quit · Tab pane · j/k move · w refs · m settings · n prompt/viewed · s split · e expand · a fix · r reply · t threads · v chat · f filter · g group · x cancel · u sync · o conflicts · c commit · p push"
-              : "j/k  ←/→  s  e  Tab  m settings  n prompt  w refs  q"}
+              ? "q quit · Tab pane · j/k move · d drafts · w refs · m settings · n prompt/viewed · s split · e expand · a fix · r reply · t threads · v chat · f filter · g group · x cancel · u sync · o conflicts · c commit · p push"
+              : "j/k  ←/→  s  e  Tab  m settings  n prompt  d drafts  w refs  q"}
         </text>
       </box>
     </box>

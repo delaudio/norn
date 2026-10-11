@@ -1905,6 +1905,98 @@ fn canonical_records_stdio_preserve_scopes_and_reject_stale_mutations() {
     );
 }
 
+#[test]
+fn staged_drafts_survive_backend_restart_preserve_finding_metadata_and_fence_cas() {
+    let repo = temp_repo();
+    let data = tempfile::tempdir().unwrap();
+    let data_path = data.path().to_str().unwrap();
+    let key = "drafts.github:owner/repo/7";
+    let request = |backend: &mut Backend, id: &str, method: &str, params: Value| {
+        backend.send(json!({"type":"request","id":id,"method":method,"params":params}));
+        backend.wait_for(|v| v["id"] == id, Duration::from_secs(5))
+    };
+    let mut backend = Backend::spawn_env(repo.path(), &[("NORN_DATA_DIR", data_path)]);
+    backend.handshake();
+    let before = request(
+        &mut backend,
+        "initial",
+        "workspace.read",
+        json!({"key":key}),
+    );
+    assert_eq!(before["ok"], true, "{before}");
+    let imported = json!({"localId":"imported", "prId":7,"path":"src/test.ts","to":12,"from":null,
+        "raw":"Imported comment 世界\nSecond line.","parentId":"19","createdAt":1,
+        "source":"aiFinding","publicationMode":"inline","findingRef":{"reviewRunId":"run-1","findingId":"finding-1","findingFingerprint":"fingerprint-1"},
+        "reviewBaseSha":"a".repeat(40),"reviewHeadSha":"b".repeat(40)});
+    let saved = request(
+        &mut backend,
+        "seed",
+        "workspace.mutate",
+        json!({"key":key,"expectedVersion":before["result"]["recordVersion"],"mutation":{"kind":"putDraft","draft":imported}}),
+    );
+    assert_eq!(saved["ok"], true, "{saved}");
+    drop(backend);
+    let mut backend = Backend::spawn_env(repo.path(), &[("NORN_DATA_DIR", data_path)]);
+    backend.handshake();
+    let restored = request(
+        &mut backend,
+        "restored",
+        "workspace.read",
+        json!({"key":key}),
+    );
+    assert_eq!(
+        restored["result"]["payload"]["value"],
+        json!([imported]),
+        "{restored}"
+    );
+    let mut edited = imported.clone();
+    edited["raw"] = json!("Explicit reviewer edit 世界");
+    let changed = request(
+        &mut backend,
+        "edit",
+        "workspace.mutate",
+        json!({"key":key,"expectedVersion":restored["result"]["recordVersion"],"mutation":{"kind":"putDraft","draft":edited}}),
+    );
+    assert_eq!(changed["ok"], true, "{changed}");
+    let stale = request(
+        &mut backend,
+        "stale",
+        "workspace.mutate",
+        json!({"key":key,"expectedVersion":restored["result"]["recordVersion"],"mutation":{"kind":"putDraft","draft":imported}}),
+    );
+    assert_eq!(stale["ok"], false, "{stale}");
+    let after = request(&mut backend, "after", "workspace.read", json!({"key":key}));
+    assert_eq!(after["result"]["payload"]["value"], json!([edited]));
+    let other = request(
+        &mut backend,
+        "other",
+        "workspace.read",
+        json!({"key":"drafts.bitbucket:owner/repo/7"}),
+    );
+    assert_eq!(other["result"]["available"], false);
+    let mut wrong_pr = edited.clone();
+    wrong_pr["prId"] = json!(8);
+    let rejected = request(
+        &mut backend,
+        "wrong-pr",
+        "workspace.mutate",
+        json!({"key":key,"expectedVersion":after["result"]["recordVersion"],"mutation":{"kind":"putDraft","draft":wrong_pr}}),
+    );
+    assert_eq!(rejected["ok"], false);
+    let removed = request(
+        &mut backend,
+        "remove",
+        "workspace.mutate",
+        json!({"key":key,"expectedVersion":after["result"]["recordVersion"],"mutation":{"kind":"removeDraft","localId":"imported"}}),
+    );
+    assert_eq!(removed["ok"], true, "{removed}");
+    drop(backend);
+    let mut backend = Backend::spawn_env(repo.path(), &[("NORN_DATA_DIR", data_path)]);
+    backend.handshake();
+    let empty = request(&mut backend, "empty", "workspace.read", json!({"key":key}));
+    assert_eq!(empty["result"]["payload"]["value"], json!([]));
+}
+
 #[cfg(unix)]
 #[test]
 fn inline_prompt_uses_selected_policy_and_canonical_override_precedence() {
