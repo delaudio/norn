@@ -51,6 +51,15 @@ export interface ReviewRunSummary {
   findingsCount: number;
 }
 
+export interface ReviewThreadSummary {
+  id: string;
+  title: string;
+  latestRunId: string | null;
+  selected?: boolean;
+  messages: Array<{ id: string; role: "user" | "assistant"; content: string; truncated: boolean }>;
+  truncated: boolean;
+}
+
 export interface ReviewTarget {
   provider: "github" | "bitbucket";
   workspace: string;
@@ -107,6 +116,11 @@ export class BackendClient {
   async reviewHistory(target: TargetIdentity): Promise<ReviewRunSummary[]> {
     const result = await this.transport.request("review.history", { target });
     return (result.runs as ReviewRunSummary[]) ?? [];
+  }
+
+  async reviewThreads(target: TargetIdentity): Promise<ReviewThreadSummary[]> {
+    const result = await this.transport.request("review.threads", { target });
+    return (result.threads as ReviewThreadSummary[]) ?? [];
   }
 
   async browserOpen(target: TargetIdentity): Promise<{ url: string }> {

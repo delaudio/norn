@@ -30,6 +30,9 @@ export const ReviewTargets: Story = { args: { frameId: "shell-review-targets-120
 export const Split: Story = { args: { frameId: "shell-split-120x30" } };
 export const LargeDiff: Story = { args: { frameId: "shell-large-diff-120x30" } };
 export const StaleAnchor: Story = { args: { frameId: "shell-stale-anchor-80x24" } };
+export const GroupedFindings: Story = { args: { frameId: "shell-grouped-findings-120x30" } };
+export const Conversation: Story = { args: { frameId: "shell-conversation-120x30" } };
+export const CompactConversation: Story = { args: { frameId: "shell-conversation-50x15" } };
 
 export const Gallery: Story = {
   args: { frameId: first },

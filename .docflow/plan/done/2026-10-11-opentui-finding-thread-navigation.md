@@ -30,8 +30,7 @@ Fix operations remain a separate delivery under #303.
 
 - PR #333, merged to main at `cdf6bdf`.
 
-## Status
+---
 
-- Claimed by: Codex, 2026-10-11, `issue-303-finding-thread-navigation`.
-- Blockers:
-- Stopped:
+Shipped through PR #334 (issue #303). Effective on merge to main. ADR 0020
+remains Accepted until the entire migration is complete.

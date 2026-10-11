@@ -9,8 +9,15 @@ import {
   useSyncExternalStore,
 } from "react";
 import type { BackendClient } from "../../transport/backendClient";
-import { type FilePreviewView, isImagePath, type ShellSnapshot, type ShellStore } from "../store";
+import {
+  type FilePreviewView,
+  isImagePath,
+  type ShellSnapshot,
+  type ShellStore,
+  visibleFindings,
+} from "../store";
 import { theme } from "../theme";
+import { ConversationPanel } from "./ConversationPanel";
 
 interface ShellProps {
   store: ShellStore;
@@ -67,7 +74,16 @@ function useShellInput(
         view.scrollBy((key.name === "pagedown" ? 1 : -1) * Math.max(1, view.height - 2));
       }
     } else if (key.name === "return") {
-      void store.startReview(client);
+      if (store.getSnapshot().focus === "threads") void store.selectThread();
+      else void store.startReview(client);
+    } else if (key.name === "f") {
+      store.cycleFindingFilter();
+    } else if (key.name === "g") {
+      store.cycleFindingGroup();
+    } else if (key.name === "t") {
+      store.toggleThreads();
+    } else if (key.name === "v") {
+      store.toggleConversation();
     } else if (key.name === "s") {
       store.toggleDiffMode();
     } else if (key.name === "e") {
@@ -510,10 +526,11 @@ function fileOptions(state: ShellSnapshot): ListOption[] {
 }
 
 function findingOptions(state: ShellSnapshot): ListOption[] {
-  return state.findings.length === 0
+  const findings = visibleFindings(state);
+  return findings.length === 0
     ? [{ name: "No findings", description: "" }]
-    : state.findings.map((finding) => ({
-        name: `[${finding.severity}] ${finding.title}`,
+    : findings.map((finding) => ({
+        name: `${state.findingGroup === "file" ? `${finding.anchor?.path ?? "Unanchored"} · ` : ""}[${finding.severity}] ${finding.title}`,
         description: finding.anchor?.path ?? "",
       }));
 }
@@ -580,7 +597,7 @@ export function Shell({ store, client, quit }: ShellProps) {
   ]);
 
   const repo = state.repositories[state.selected];
-  const selectedFinding = state.findings[state.selectedFinding];
+  const selectedFinding = visibleFindings(state)[state.selectedFinding];
   const entry = state.picker[state.selectedPicker];
   const detailTitle = entry
     ? entry.kind === "review"
@@ -597,19 +614,29 @@ export function Shell({ store, client, quit }: ShellProps) {
           options: pickerOptions(state),
           selectedIndex: state.selectedPicker,
         }
-      : state.focus === "files"
+      : state.focus === "threads"
         ? {
-            id: "files-list",
-            title: "FILES",
-            options: fileOptions(state),
-            selectedIndex: state.selectedFile,
+            id: "threads-list",
+            title: "THREADS",
+            options: state.threads.map((thread) => ({
+              name: thread.title,
+              description: thread.latestRunId ?? "No stored run",
+            })),
+            selectedIndex: state.selectedThread,
           }
-        : {
-            id: "findings-list",
-            title: "FINDINGS",
-            options: findingOptions(state),
-            selectedIndex: state.selectedFinding,
-          };
+        : state.focus === "files"
+          ? {
+              id: "files-list",
+              title: "FILES",
+              options: fileOptions(state),
+              selectedIndex: state.selectedFile,
+            }
+          : {
+              id: "findings-list",
+              title: "FINDINGS",
+              options: findingOptions(state),
+              selectedIndex: state.selectedFinding,
+            };
 
   return (
     <box width="100%" height="100%" flexDirection="column" backgroundColor={theme.background}>
@@ -656,6 +683,12 @@ export function Shell({ store, client, quit }: ShellProps) {
           {`[${selectedFinding.severity}] ${selectedFinding.title} — ${selectedFinding.summary}`}
         </text>
       ) : null}
+      {state.findingFilter !== "all" || state.findingGroup !== "none" ? (
+        <text fg={theme.muted} height={1} wrapMode="none" truncate>
+          {`Findings: ${visibleFindings(state).length}/${state.findings.length} · severity ${state.findingFilter} · group ${state.findingGroup}`}
+        </text>
+      ) : null}
+      <ConversationPanel state={state} wide={wide} />
       <box flexGrow={1} minHeight={0} flexDirection="row">
         {wide ? (
           <>
@@ -771,7 +804,7 @@ export function Shell({ store, client, quit }: ShellProps) {
         <text fg={theme.muted}>
           {diffCollapsed ? "large diff · e expand  " : ""}
           {wide
-            ? "j/k move  ←/→ scroll  s split  e expand  Tab pane  Enter review  x cancel  q quit"
+            ? "j/k move  s split  e expand  Tab pane  r reply  t threads  v chat  f filter  g group  x cancel  q quit"
             : "j/k  ←/→  s  e  Tab  q"}
         </text>
       </box>
