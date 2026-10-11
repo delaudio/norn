@@ -1,0 +1,8 @@
+{
+  "type": "request",
+  "id": "request-data-export",
+  "method": "data.export",
+  "params": {
+    "path": "/tmp/synthetic-new-export.json"
+  }
+}

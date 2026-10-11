@@ -1562,3 +1562,74 @@ fn settings_stdio_roundtrip_uses_isolated_config_and_rejects_stale_versions() {
     assert!(diagnostics.contains("malformed protocol frame"));
     assert!(!diagnostics.contains("fixture_sensitive_value"));
 }
+
+#[test]
+fn user_data_preview_import_and_repeat_are_bound_to_isolated_storage() {
+    let repo = temp_repo();
+    let data = tempfile::tempdir().unwrap();
+    let config = tempfile::tempdir().unwrap();
+    let source = data.path().join("desktop-export.json");
+    std::fs::write(&source,serde_json::to_vec(&json!({"schemaVersion":1,"source":"desktopLocalStorage","entries":[{"key":"norn.reviewPrompt.v1.owner/repo","value":"custom review instructions"},{"key":"lachesi.viewedFiles.owner/repo#7","value":"[\"a.rs\"]"}]})).unwrap()).unwrap();
+    let source_original = std::fs::read(&source).unwrap();
+    let mut backend = Backend::spawn_env(
+        repo.path(),
+        &[
+            ("NORN_DATA_DIR", data.path().to_str().unwrap()),
+            ("NORN_CONFIG_DIR", config.path().to_str().unwrap()),
+        ],
+    );
+    backend.handshake();
+    backend.send(json!({"type":"request","id":"preview","method":"data.preview","params":{"path":source,"provider":"github"}}));
+    let response = backend.wait_for(|v| v["id"] == "preview", Duration::from_secs(5));
+    assert_eq!(response["ok"], true);
+    let preview = &response["result"];
+    assert_eq!(preview["additionsCount"], 2);
+    assert!(!data.path().join("workspace-data-v1.json").exists());
+    assert!(!response.to_string().contains("custom review instructions"));
+    backend.send(json!({"type":"request","id":"import","method":"data.import","params":{"path":source,"provider":"github","inputVersion":preview["inputVersion"],"destinationVersion":preview["destinationVersion"],"confirm":true}}));
+    let result = backend.wait_for(|v| v["id"] == "import", Duration::from_secs(5));
+    assert_eq!(result["ok"], true);
+    assert_eq!(result["result"]["imported"], 2);
+    let destination = std::fs::read(data.path().join("workspace-data-v1.json")).unwrap();
+    backend.send(json!({"type":"request","id":"stale","method":"data.import","params":{"path":source,"provider":"github","inputVersion":preview["inputVersion"],"destinationVersion":preview["destinationVersion"],"confirm":true}}));
+    let stale = backend.wait_for(|v| v["id"] == "stale", Duration::from_secs(5));
+    assert_eq!(stale["ok"], false);
+    assert_eq!(
+        std::fs::read(data.path().join("workspace-data-v1.json")).unwrap(),
+        destination
+    );
+    assert_eq!(std::fs::read(&source).unwrap(), source_original);
+    backend.send(json!({"type":"request","id":"stop","method":"shutdown","params":{}}));
+    let _ = backend.wait_for(|v| v["id"] == "stop", Duration::from_secs(5));
+    assert!(backend.child.wait().unwrap().success());
+    let preview_cli = Command::new(env!("CARGO_BIN_EXE_norn"))
+        .env("NORN_DATA_DIR", data.path())
+        .env("NORN_CONFIG_DIR", config.path())
+        .args([
+            "data",
+            "preview",
+            source.to_str().unwrap(),
+            "--provider",
+            "github",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        preview_cli.status.success(),
+        "{}",
+        String::from_utf8_lossy(&preview_cli.stderr)
+    );
+    let value: Value = serde_json::from_slice(&preview_cli.stdout).unwrap();
+    assert_eq!(value["unchangedCount"], 2);
+    let unconfirmed = Command::new(env!("CARGO_BIN_EXE_norn"))
+        .env("NORN_DATA_DIR", data.path())
+        .env("NORN_CONFIG_DIR", config.path())
+        .args(["data", "import", source.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert_eq!(unconfirmed.status.code(), Some(2));
+    assert_eq!(
+        std::fs::read(data.path().join("workspace-data-v1.json")).unwrap(),
+        destination
+    );
+}

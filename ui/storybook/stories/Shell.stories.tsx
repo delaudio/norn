@@ -75,3 +75,8 @@ export const MaskedCredential: Story = { args: { frameId: "shell-settings-secret
 export const CompactMaskedCredential: Story = { args: { frameId: "shell-settings-secret-50x15" } };
 export const SettingsError: Story = { args: { frameId: "shell-settings-error-80x24" } };
 export const LightSettings: Story = { args: { frameId: "shell-settings-light-120x40" } };
+
+export const DataPreview: Story = { args: { frameId: "shell-data-preview-120x30" } };
+export const CompactDataPreview: Story = { args: { frameId: "shell-data-preview-50x15" } };
+export const DataReadError: Story = { args: { frameId: "shell-data-error-80x24" } };
+export const DataImported: Story = { args: { frameId: "shell-data-imported-80x24" } };

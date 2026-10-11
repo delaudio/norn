@@ -39,5 +39,5 @@ app to have been opened before upgrade. Coordinate draft schema with #304.
 ## Status
 
 - Claimed by: default-agent, 2026-10-11, `issue-305-desktop-data-recovery`.
-- Blockers: PR #339 pending CI; read-only inventory and preparation proceed.
+- Blockers: None for this partial delivery; PR #339 merged at `76ba213`. Platform archive validation and consumption remain final parity gates.
 - Stopped:

@@ -9,6 +9,7 @@ import {
   useSyncExternalStore,
 } from "react";
 import type { BackendClient } from "../../transport/backendClient";
+import { DataStore } from "../dataStore";
 import { SettingsStore } from "../settingsStore";
 import {
   type FilePreviewView,
@@ -19,6 +20,7 @@ import {
 } from "../store";
 import { theme } from "../theme";
 import { ConversationPanel } from "./ConversationPanel";
+import { DataPanel } from "./DataPanel";
 import { FixPanel } from "./FixPanel";
 import { SettingsPanel } from "./SettingsPanel";
 
@@ -36,7 +38,8 @@ function useShellInput(
   fixScroll: RefObject<ScrollBoxRenderable | null>,
 ) {
   useKeyboard((key) => {
-    if (key.defaultPrevented || store.getSnapshot().settingsOpen) return;
+    if (key.defaultPrevented || store.getSnapshot().settingsOpen || store.getSnapshot().dataOpen)
+      return;
     if (key.ctrl && key.name === "c") {
       quit();
       return;
@@ -127,7 +130,7 @@ function useShellInput(
     }
   });
   usePaste((event) => {
-    if (store.getSnapshot().settingsOpen) return;
+    if (store.getSnapshot().settingsOpen || store.getSnapshot().dataOpen) return;
     if (store.getSnapshot().fixPreview) {
       event.preventDefault();
       return;
@@ -574,8 +577,58 @@ function findingOptions(state: ShellSnapshot): ListOption[] {
       }));
 }
 
+function WorkspaceStatus({ state }: { state: ShellSnapshot }) {
+  const selectedFinding = visibleFindings(state)[state.selectedFinding];
+  return (
+    <>
+      {state.error ? (
+        <text fg={theme.error} height={1} wrapMode="none">
+          Error: {state.error}
+        </text>
+      ) : null}
+      {state.diffError ? (
+        <text fg={theme.error} height={1} wrapMode="none">
+          Diff error: {state.diffError}
+        </text>
+      ) : null}
+      {state.notice ? (
+        <text fg={theme.warning} height={1} wrapMode="none">
+          {state.notice}
+        </text>
+      ) : null}
+      {state.operation ? (
+        <box flexDirection="column" flexShrink={0} paddingX={1} backgroundColor={theme.panel}>
+          <text fg={theme.secondary} height={1} wrapMode="none" truncate>
+            {`review ${state.operation.state} · ${state.operation.targetLabel} · x cancel · z refresh`}
+          </text>
+          {state.operation.logs.slice(-5).map((log) => (
+            <text key={log.id} fg={theme.muted} height={1} wrapMode="none" truncate>
+              {log.text}
+            </text>
+          ))}
+        </box>
+      ) : null}
+      {selectedFinding ? (
+        <text fg={theme.text} height={1} wrapMode="none" truncate>
+          {`[${selectedFinding.severity}] ${selectedFinding.title} — ${selectedFinding.summary}`}
+        </text>
+      ) : null}
+      {state.findingFilter !== "all" || state.findingGroup !== "none" ? (
+        <text fg={theme.muted} height={1} wrapMode="none" truncate>
+          {`Findings: ${visibleFindings(state).length}/${state.findings.length} · severity ${state.findingFilter} · group ${state.findingGroup}`}
+        </text>
+      ) : null}
+    </>
+  );
+}
+
 export function Shell({ store, client, quit }: ShellProps) {
   const state = useSyncExternalStore(store.subscribe, store.getSnapshot);
+  const data = useMemo(() => new DataStore(), []);
+  useEffect(() => {
+    if (!state.dataOpen) return;
+    return () => data.dispose();
+  }, [data, state.dataOpen]);
   const settings = useMemo(() => new SettingsStore(), []);
   useEffect(() => {
     if (!state.settingsOpen) return;
@@ -648,7 +701,6 @@ export function Shell({ store, client, quit }: ShellProps) {
   ]);
 
   const repo = state.repositories[state.selected];
-  const selectedFinding = visibleFindings(state)[state.selectedFinding];
   const entry = state.picker[state.selectedPicker];
   const detailTitle = entry
     ? entry.kind === "review"
@@ -689,6 +741,8 @@ export function Shell({ store, client, quit }: ShellProps) {
               selectedIndex: state.selectedFinding,
             };
 
+  if (state.dataOpen)
+    return <DataPanel data={data} client={client} onClose={() => store.toggleData()} />;
   if (state.settingsOpen)
     return <SettingsPanel settings={settings} shell={store} client={client} />;
 
@@ -705,43 +759,7 @@ export function Shell({ store, client, quit }: ShellProps) {
           Norn / OpenTUI workspace{state.serverVersion ? `  ·  backend ${state.serverVersion}` : ""}
         </text>
       </box>
-      {state.error ? (
-        <text fg={theme.error} height={1} wrapMode="none">
-          Error: {state.error}
-        </text>
-      ) : null}
-      {state.diffError ? (
-        <text fg={theme.error} height={1} wrapMode="none">
-          Diff error: {state.diffError}
-        </text>
-      ) : null}
-      {state.notice ? (
-        <text fg={theme.warning} height={1} wrapMode="none">
-          {state.notice}
-        </text>
-      ) : null}
-      {state.operation ? (
-        <box flexDirection="column" flexShrink={0} paddingX={1} backgroundColor={theme.panel}>
-          <text fg={theme.secondary} height={1} wrapMode="none" truncate>
-            {`review ${state.operation.state} · ${state.operation.targetLabel} · x cancel · z refresh`}
-          </text>
-          {state.operation.logs.slice(-5).map((log) => (
-            <text key={log.id} fg={theme.muted} height={1} wrapMode="none" truncate>
-              {log.text}
-            </text>
-          ))}
-        </box>
-      ) : null}
-      {selectedFinding ? (
-        <text fg={theme.text} height={1} wrapMode="none" truncate>
-          {`[${selectedFinding.severity}] ${selectedFinding.title} — ${selectedFinding.summary}`}
-        </text>
-      ) : null}
-      {state.findingFilter !== "all" || state.findingGroup !== "none" ? (
-        <text fg={theme.muted} height={1} wrapMode="none" truncate>
-          {`Findings: ${visibleFindings(state).length}/${state.findings.length} · severity ${state.findingFilter} · group ${state.findingGroup}`}
-        </text>
-      ) : null}
+      <WorkspaceStatus state={state} />
       <ConversationPanel state={state} wide={wide} />
       <box flexGrow={1} minHeight={0} flexDirection="row">
         {wide ? (
