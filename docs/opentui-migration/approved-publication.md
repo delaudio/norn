@@ -56,7 +56,7 @@ and threads, bringing the frame catalogue to 89.
 
 Verification: root typecheck, 123 tests plus tooling checks, lint and Archgate
 12/12; UI typecheck, 136 tests / 830 assertions and 89 native frame baselines;
-Rust core 660 tests (2 ignored), 49 actual backend subprocess tests, five CLI
+Rust core 661 tests (2 ignored), 49 actual backend subprocess tests, five CLI
 and five onboarding integration tests, no-GUI dependency guard and strict
 all-feature/all-target Clippy. Fake-provider cases include explicit batch
 approval, scope/CAS/source fencing, durable reservation, ambiguous responses,

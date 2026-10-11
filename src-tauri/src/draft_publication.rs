@@ -36,7 +36,7 @@ pub enum CommentMode {
     File,
     General,
 }
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct FindingAssociation {
     pub review_run_id: String,

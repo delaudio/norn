@@ -137,7 +137,7 @@ struct Approval {
     items: HashMap<String, ApprovedComment>,
     signatures: HashMap<String, String>,
     consumed: HashSet<String>,
-    completed_findings: HashSet<String>,
+    completed_findings: HashSet<FindingAssociation>,
     stopped: Arc<AtomicBool>,
     api: Arc<dyn PublicationApi>,
 }
@@ -336,7 +336,7 @@ impl Manager {
             let allow = comment
                 .finding_ref
                 .as_ref()
-                .is_some_and(|r| approval.completed_findings.contains(&association_key(r)));
+                .is_some_and(|r| approval.completed_findings.contains(r));
             (
                 comment,
                 approval.key.clone(),
@@ -386,7 +386,7 @@ impl Manager {
                 }
                 if result.local_saved {
                     if let Some(r) = &comment.finding_ref {
-                        approval.completed_findings.insert(association_key(r));
+                        approval.completed_findings.insert(r.clone());
                     }
                 }
             }
@@ -583,12 +583,6 @@ fn check_draft(comment: &ApprovedComment, drafts: &[data::DraftComment]) -> Resu
         return Err("Approved draft changed; prepare again.".into());
     }
     Ok(())
-}
-fn association_key(reference: &FindingAssociation) -> String {
-    format!(
-        "{}:{}:{}",
-        reference.review_run_id, reference.finding_id, reference.finding_fingerprint
-    )
 }
 fn source_signature(comment: &ApprovedComment, allow_published: bool) -> Result<String, String> {
     let Some(reference) = &comment.finding_ref else {
@@ -1164,5 +1158,66 @@ mod tests {
                 .local_saved
         );
         assert_eq!(api.posts.load(Ordering::SeqCst), 1);
+    }
+    #[test]
+    fn batch_finding_identity_does_not_alias_colon_delimited_run_and_finding_ids() {
+        let _environment = Environment::new();
+        let api = Arc::new(FakeApi::default());
+        let manager = manager(api.clone());
+        let mut saved = associated_draft();
+        saved["reviewRuns"][0]["id"] = serde_json::json!("run:a");
+        saved["reviewRuns"][0]["findings"][0]["id"] = serde_json::json!("b");
+        saved["reviewRuns"][0]["findings"][0]["fingerprint"] = serde_json::json!("c");
+        let mut second_run = saved["reviewRuns"][0].clone();
+        second_run["id"] = serde_json::json!("run");
+        second_run["findings"][0]["id"] = serde_json::json!("a:b");
+        saved["reviewRuns"].as_array_mut().unwrap().push(second_run);
+        crate::review_storage::save_review_json("synthetic", "test", 7, &saved.to_string())
+            .unwrap();
+        stage("second", "Separate finding comment");
+        for (id, run, finding) in [("associated", "run:a", "b"), ("second", "run", "a:b")] {
+            let key = scope_key(&scope());
+            let (version, drafts) = data::draft_snapshot(&key).unwrap();
+            let mut draft = drafts
+                .iter()
+                .find(|draft| draft.local_id == id)
+                .unwrap()
+                .clone();
+            draft.finding_ref = Some(data::FindingReference {
+                review_run_id: run.into(),
+                finding_id: finding.into(),
+                finding_fingerprint: "c".into(),
+            });
+            draft.review_head_sha = Some("b".repeat(40));
+            draft.review_base_sha = Some("a".repeat(40));
+            data::record_mutate(data::RecordMutateParams {
+                key,
+                expected_version: version,
+                mutation: data::RecordMutation::PutDraft {
+                    draft: Box::new(draft),
+                },
+            })
+            .unwrap();
+        }
+        let preview = prepare(&manager, &["associated", "second"]);
+        // Another reviewer publishes the second finding while this preview is open.
+        saved["reviewRuns"][1]["findings"][0]["status"] = serde_json::json!("published");
+        saved["reviewRuns"][1]["findings"][0]["publication"] = serde_json::json!({"mode":"general","draftIds":[],"remoteCommentIds":["outside-batch"],"publishedAt":"9"});
+        crate::review_storage::save_review_json("synthetic", "test", 7, &saved.to_string())
+            .unwrap();
+        assert!(
+            apply(&manager, &preview, "associated")
+                .unwrap()
+                .draft_removed
+        );
+        assert!(
+            apply(&manager, &preview, "second").is_err(),
+            "a different finding cannot borrow another item's batch acknowledgment"
+        );
+        assert_eq!(api.posts.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            data::draft_snapshot(&scope_key(&scope())).unwrap().1[0].local_id,
+            "second"
+        );
     }
 }

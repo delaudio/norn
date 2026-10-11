@@ -67,7 +67,7 @@ original identity/content and outstanding or uncertain drafts without blind
 POST retries. Evidence: `docs/opentui-migration/approved-publication.md`.
 
 Root typecheck/123 tests+tooling/lint/Archgate 12/12, UI typecheck/136 tests/830
-assertions/89 native frames, full core 660+2 ignored, 49 stdio, five CLI/five
+assertions/89 native frames, full core 661+2 ignored, 49 stdio, five CLI/five
 onboarding, no-GUI dependency guard and strict all-feature/all-target Clippy
 pass. Native input and fake-provider tests cover explicit action, partial
 batches, source/scope/CAS fencing, timeout/restart, cancellation, stale anchors,
