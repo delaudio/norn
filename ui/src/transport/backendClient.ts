@@ -1,16 +1,33 @@
 import type {
   AuthProviderParams,
+  DraftPreparation,
+  DraftPrepareParams,
+  DraftStageParams,
+  DraftStageResult,
+  DraftTarget,
   RecordMutation,
   RecordMutationResult,
   RecordPage,
   WorkspaceReadiness,
   WorkspaceSettings,
 } from "../../../src/protocol/generated/protocol";
+
 // Typed facade over a BackendTransport. Domain methods are added as later
 // migration steps land; the first slice exposes repository listing and diffs.
 
 import type { TargetIdentity } from "./protocol";
 import type { BackendExit, BackendOperationEvent, BackendTransport } from "./types";
+import { validDraft } from "./workspaceValidation";
+
+function sameDraftTarget(value: unknown, expected: DraftTarget): value is DraftTarget {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const actual = value as DraftTarget;
+  const fields = ["kind", "provider", "workspace", "repo", "prId", "runId"] as const;
+  return (
+    Object.keys(value).length === fields.length &&
+    fields.every((field) => actual[field] === expected[field])
+  );
+}
 
 export interface RepositorySummary {
   provider: "github" | "bitbucket";
@@ -237,6 +254,63 @@ export class BackendClient {
         throw new Error("Workspace page did not advance.");
     }
     throw new Error("Workspace record requires too many pages.");
+  }
+
+  async prepareFindingDraft(params: DraftPrepareParams): Promise<DraftPreparation> {
+    const result = await this.transport.request(
+      "draft.prepare",
+      params as unknown as Record<string, unknown>,
+    );
+    const expectedKey = `drafts.${params.target.provider}:${params.target.workspace}/${params.target.repo}/${params.target.prId}`;
+    if (
+      !result ||
+      typeof result !== "object" ||
+      Array.isArray(result) ||
+      Object.keys(result).length !== 6 ||
+      !sameDraftTarget(result.target, params.target) ||
+      result.key !== expectedKey ||
+      typeof result.recordVersion !== "string" ||
+      !/^[a-f0-9]{64}$/.test(result.recordVersion) ||
+      typeof result.previewHash !== "string" ||
+      !/^[a-f0-9]{64}$/.test(result.previewHash) ||
+      typeof result.alreadyStaged !== "boolean" ||
+      !validDraft(result.draft) ||
+      result.draft.prId !== params.target.prId ||
+      result.draft.findingRef?.reviewRunId !== params.target.runId ||
+      result.draft.findingRef.findingId !== params.findingId ||
+      !result.draft.findingRef.findingFingerprint ||
+      (!result.alreadyStaged && result.draft.publicationMode !== params.publicationMode)
+    )
+      throw new Error("Invalid finding draft preview. No staging was requested.");
+    return result as unknown as DraftPreparation;
+  }
+  async stageFindingDraft(params: DraftStageParams): Promise<DraftStageResult> {
+    const result = await this.transport.request(
+      "draft.stage",
+      params as unknown as Record<string, unknown>,
+    );
+    const expectedKey = `drafts.${params.target.provider}:${params.target.workspace}/${params.target.repo}/${params.target.prId}`;
+    if (
+      !result ||
+      typeof result !== "object" ||
+      Array.isArray(result) ||
+      Object.keys(result).length !== 6 ||
+      !sameDraftTarget(result.target, params.target) ||
+      result.key !== expectedKey ||
+      typeof result.recordVersion !== "string" ||
+      !/^[a-f0-9]{64}$/.test(result.recordVersion) ||
+      typeof result.localId !== "string" ||
+      !result.localId ||
+      Buffer.byteLength(result.localId) > 256 ||
+      /\p{Cc}/u.test(result.localId) ||
+      typeof result.changed !== "boolean" ||
+      typeof result.alreadyStaged !== "boolean" ||
+      result.changed === result.alreadyStaged
+    )
+      throw new Error(
+        "Draft staging acknowledgement is invalid. Inspect saved drafts before retrying.",
+      );
+    return result as unknown as DraftStageResult;
   }
 
   async mutateWorkspace(

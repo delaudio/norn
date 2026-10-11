@@ -360,6 +360,19 @@ pub(crate) fn record_read(params: RecordReadParams) -> Result<RecordPage, String
 pub(crate) fn record_mutate(params: RecordMutateParams) -> Result<RecordMutationResult, String> {
     mutate_at(&canonical_path()?, params)
 }
+pub(crate) fn draft_snapshot(key: &str) -> Result<(String, Vec<DraftComment>), String> {
+    let empty = empty_record(key)?;
+    let _guard = data_lock()
+        .lock()
+        .map_err(|_| "User data is unavailable.")?;
+    let (document, _, _) = read_destination(&canonical_path()?)?;
+    let record = document.records.iter().find(|record| record.key == key);
+    let record_version = version(record)?;
+    match &record.unwrap_or(&empty).payload {
+        WorkspaceValue::Drafts(items) => Ok((record_version, items.clone())),
+        _ => Err("Expected a pull-request draft scope.".into()),
+    }
+}
 pub(crate) fn prompt_for_scope(
     provider: ReviewProvider,
     workspace: &str,

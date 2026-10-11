@@ -1,66 +1,12 @@
 import type { WorkspaceDraft } from "../../../src/protocol/generated/protocol";
 import type { BackendClient } from "../transport/backendClient";
+import { draftModes, validDraft } from "../transport/workspaceValidation";
 import type { PickerEntry } from "./store";
 
-export const draftModes = ["general", "inline", "file", "localOnly"] as const;
+export { draftModes, validDraft } from "../transport/workspaceValidation";
 export const draftFields = ["publicationMode", "path", "to", "from", "parentId", "raw"] as const;
 export type DraftField = (typeof draftFields)[number];
 const textLimit = (field: DraftField) => (field === "raw" ? 65536 : field === "path" ? 4096 : 256);
-const keys = new Set([
-  "localId",
-  "prId",
-  "path",
-  "to",
-  "from",
-  "raw",
-  "parentId",
-  "createdAt",
-  "source",
-  "findingRef",
-  "publicationMode",
-  "reviewBaseSha",
-  "reviewHeadSha",
-]);
-const text = (value: unknown, max: number, multiline = false): value is string =>
-  typeof value === "string" &&
-  Buffer.byteLength(value) <= max &&
-  !(multiline ? /[^\P{Cc}\n\t]/u : /\p{Cc}/u).test(value);
-const positive = (value: unknown) =>
-  Number.isInteger(value) && Number(value) > 0 && Number(value) <= 4294967295;
-export function validDraft(value: unknown): value is WorkspaceDraft {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
-  const item = value as WorkspaceDraft;
-  if (
-    Object.keys(value).some((key) => !keys.has(key)) ||
-    !text(item.localId, 256) ||
-    !item.localId ||
-    !positive(item.prId) ||
-    !text(item.path, 4096) ||
-    !text(item.raw, 65536, true) ||
-    !Number.isSafeInteger(item.createdAt) ||
-    item.createdAt < 0 ||
-    (item.source != null && !["manual", "aiFinding"].includes(item.source)) ||
-    (item.publicationMode != null && !draftModes.includes(item.publicationMode))
-  )
-    return false;
-  if ([item.to, item.from].some((value) => value != null && !positive(value))) return false;
-  if (
-    [item.parentId, item.reviewBaseSha, item.reviewHeadSha].some(
-      (value) => value != null && !text(value, 256),
-    )
-  )
-    return false;
-  const ref = item.findingRef;
-  return (
-    ref == null ||
-    (typeof ref === "object" &&
-      !Array.isArray(ref) &&
-      Object.keys(ref).every((key) =>
-        ["reviewRunId", "findingId", "findingFingerprint"].includes(key),
-      ) &&
-      [ref.reviewRunId, ref.findingId, ref.findingFingerprint].every((value) => text(value, 256)))
-  );
-}
 interface DraftState {
   key: string | null;
   version: string | null;
@@ -217,7 +163,7 @@ export class DraftStore {
     const text = this.state.text + value;
     if (
       Buffer.byteLength(text) > textLimit(field) ||
-      (field === "raw" ? /[^\P{Cc}\n\t]/u : /\p{Cc}/u).test(text)
+      (field === "raw" ? /[^\P{Cc}\n\r\t]/u : /\p{Cc}/u).test(text)
     ) {
       this.update({
         error: "Input exceeds its limit or contains unsupported controls. Paste was not applied.",

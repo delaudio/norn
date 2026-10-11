@@ -13,6 +13,10 @@ const fieldLabel = {
   parentId: "Reply to comment",
   raw: "Body",
 };
+function displayField(field: keyof typeof fieldLabel, value: unknown) {
+  const text = String(value ?? "(empty)");
+  return field === "raw" ? text.replace(/\r\n?/g, "\n") : text;
+}
 function useDraftInput(
   drafts: DraftStore,
   client: BackendClient,
@@ -182,7 +186,7 @@ function DraftForm({ state }: { state: ReturnType<DraftStore["getSnapshot"]> }) 
           id={`draft-field-${index}`}
           key={field}
           fg={index === state.field ? theme.primary : theme.text}
-        >{`${index === state.field ? "›" : " "} ${fieldLabel[field]}: ${index === state.field && state.editing ? state.text : String(state.draft![field] ?? "(empty)")}`}</text>
+        >{`${index === state.field ? "›" : " "} ${fieldLabel[field]}: ${displayField(field, index === state.field && state.editing ? state.text : state.draft![field])}`}</text>
       ))}
     </>
   );
@@ -216,7 +220,7 @@ function DraftList({ state }: { state: ReturnType<DraftStore["getSnapshot"]> }) 
                 <text
                   key={`detail-${field}`}
                   fg={theme.text}
-                >{`${fieldLabel[field]}: ${selected[field]}`}</text>
+                >{`${fieldLabel[field]}: ${displayField(field, selected[field])}`}</text>
               ) : null,
             )}
           {selected.findingRef ? (

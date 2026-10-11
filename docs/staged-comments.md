@@ -32,3 +32,28 @@ reopen the panel to inspect persisted content before retrying.
 This editor performs local saves/removals. Provider publication requires a
 separate preview, approval and result reconciliation; a locally saved draft is
 never an acknowledgment that a remote comment exists.
+
+## Stage a saved finding
+
+Select a finding in a pinned PR review and press `i`. Use `j`/`k` to choose
+inline, file, general or local-only, then Enter to prepare the actual comment
+from the saved review. Inspect its body, path/side/line and reviewed revisions.
+Press `y` to stage that preview locally, `n` to dismiss it, or Escape to close.
+Paste cannot trigger these actions. Enter refreshes a preview after an error.
+
+Inline/file positions need a supported relative path and recorded full base/head
+revisions. Unsupported positions produce an error; choose general/local-only
+explicitly or rerun the review. Staging does not establish that the remote PR
+still has the same revision; publication must check that separately.
+
+If a draft is already linked to this finding, its saved edits and mode are
+retained. The preview tells you this and displays the existing comment. `d`
+opens the scoped draft list to edit it. A saved publication acknowledgment
+prevents creating another finding draft; a manual follow-up remains an explicit
+separate action.
+
+Changes to the previewed content or draft record block staging. A refresh of
+metadata for the same pinned review keeps the preview, while selecting another
+target clears it. Closing an in-flight save does not undo a durable write;
+inspect the draft list before retrying after an interruption. CRLF bodies keep
+their original saved text and display as ordinary terminal lines.

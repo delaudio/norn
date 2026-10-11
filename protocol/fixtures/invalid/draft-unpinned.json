@@ -1,0 +1,16 @@
+{
+  "type": "request",
+  "id": "draft-preview",
+  "method": "draft.prepare",
+  "params": {
+    "target": {
+      "kind": "provider",
+      "provider": "github",
+      "workspace": "owner",
+      "repo": "repo",
+      "prId": 7
+    },
+    "findingId": "finding-1",
+    "publicationMode": "inline"
+  }
+}

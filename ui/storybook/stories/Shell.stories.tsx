@@ -118,3 +118,18 @@ export const DraftEditor: Story = { args: { frameId: "shell-drafts-editing-120x4
 export const DraftConflict: Story = { args: { frameId: "shell-drafts-conflict-80x30" } };
 export const DraftRemoval: Story = { args: { frameId: "shell-drafts-remove-80x30" } };
 export const NoPullRequestDrafts: Story = { args: { frameId: "shell-drafts-local-50x15" } };
+
+export const ChooseFindingDraftMode: Story = { args: { frameId: "shell-staging-choose-120x30" } };
+export const FindingDraftPreview: Story = { args: { frameId: "shell-staging-preview-120x40" } };
+export const CompactFindingDraftPreview: Story = {
+  args: { frameId: "shell-staging-preview-50x20" },
+};
+export const GeneralFindingDraft: Story = { args: { frameId: "shell-staging-general-80x24" } };
+export const UnanchoredFindingDraft: Story = {
+  args: { frameId: "shell-staging-unanchored-50x20" },
+};
+export const StagedFindingDraft: Story = { args: { frameId: "shell-staging-staged-80x30" } };
+export const AlreadyStagedFindingDraft: Story = {
+  args: { frameId: "shell-staging-duplicate-80x30" },
+};
+export const FindingDraftConflict: Story = { args: { frameId: "shell-staging-conflict-80x30" } };

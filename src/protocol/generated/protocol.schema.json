@@ -231,7 +231,9 @@
         "workspace.read",
         "workspace.mutate",
         "review.output",
-        "workspace.readiness"
+        "workspace.readiness",
+        "draft.prepare",
+        "draft.stage"
       ]
     },
     "DiffFileParams": {
@@ -2103,6 +2105,188 @@
           ]
         }
       }
+    },
+    "DraftTarget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "provider",
+        "workspace",
+        "repo",
+        "prId",
+        "runId"
+      ],
+      "properties": {
+        "kind": {
+          "const": "provider"
+        },
+        "provider": {
+          "enum": [
+            "github",
+            "bitbucket"
+          ]
+        },
+        "workspace": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]+$"
+        },
+        "repo": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]+$"
+        },
+        "prId": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4294967295
+        },
+        "runId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]+$"
+        }
+      }
+    },
+    "DraftPrepareParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "target",
+        "findingId",
+        "publicationMode"
+      ],
+      "properties": {
+        "target": {
+          "$ref": "#/definitions/DraftTarget"
+        },
+        "findingId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]+$"
+        },
+        "publicationMode": {
+          "enum": [
+            "inline",
+            "file",
+            "general",
+            "localOnly"
+          ]
+        }
+      }
+    },
+    "DraftStageParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "target",
+        "findingId",
+        "publicationMode",
+        "expectedVersion",
+        "previewHash"
+      ],
+      "properties": {
+        "target": {
+          "$ref": "#/definitions/DraftTarget"
+        },
+        "findingId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]+$"
+        },
+        "publicationMode": {
+          "enum": [
+            "inline",
+            "file",
+            "general",
+            "localOnly"
+          ]
+        },
+        "expectedVersion": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "previewHash": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        }
+      }
+    },
+    "DraftPreparation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "target",
+        "key",
+        "recordVersion",
+        "previewHash",
+        "draft",
+        "alreadyStaged"
+      ],
+      "properties": {
+        "target": {
+          "$ref": "#/definitions/DraftTarget"
+        },
+        "key": {
+          "type": "string"
+        },
+        "recordVersion": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "previewHash": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "draft": {
+          "$ref": "#/definitions/WorkspaceDraft"
+        },
+        "alreadyStaged": {
+          "type": "boolean"
+        }
+      }
+    },
+    "DraftStageResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "target",
+        "key",
+        "recordVersion",
+        "localId",
+        "changed",
+        "alreadyStaged"
+      ],
+      "properties": {
+        "target": {
+          "$ref": "#/definitions/DraftTarget"
+        },
+        "key": {
+          "type": "string"
+        },
+        "recordVersion": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "localId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]+$"
+        },
+        "changed": {
+          "type": "boolean"
+        },
+        "alreadyStaged": {
+          "type": "boolean"
+        }
+      }
     }
   },
   "oneOf": [
@@ -3077,6 +3261,54 @@
               "$ref": "#/definitions/EmptyParams"
             }
           }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "type": {
+              "const": "request"
+            },
+            "id": {
+              "$ref": "#/definitions/RequestId"
+            },
+            "method": {
+              "const": "draft.prepare"
+            },
+            "params": {
+              "$ref": "#/definitions/DraftPrepareParams"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "type": {
+              "const": "request"
+            },
+            "id": {
+              "$ref": "#/definitions/RequestId"
+            },
+            "method": {
+              "const": "draft.stage"
+            },
+            "params": {
+              "$ref": "#/definitions/DraftStageParams"
+            }
+          }
         }
       ]
     },
@@ -3146,6 +3378,12 @@
             },
             {
               "$ref": "#/definitions/WorkspaceReadiness"
+            },
+            {
+              "$ref": "#/definitions/DraftPreparation"
+            },
+            {
+              "$ref": "#/definitions/DraftStageResult"
             }
           ]
         }

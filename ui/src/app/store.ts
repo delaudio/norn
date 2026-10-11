@@ -1,4 +1,4 @@
-import type { WorkspaceSettings } from "../../../src/protocol/generated/protocol";
+import type { DraftTarget, WorkspaceSettings } from "../../../src/protocol/generated/protocol";
 import type { WorkspaceReadiness } from "../transport/backendClient";
 import { SyntaxHighlighter } from "./syntaxHighlighter";
 import type { DiffSyntax, SyntaxReader } from "./syntaxTypes";
@@ -144,6 +144,7 @@ export interface ShellSnapshot {
   workspaceOpen: boolean;
   referencesOpen: boolean;
   draftsOpen: boolean;
+  findingStage: { target: DraftTarget; findingId: string } | null;
   settingsOpen: boolean;
   dataOpen: boolean;
   status: ShellStatus;
@@ -200,6 +201,7 @@ const INITIAL: ShellSnapshot = {
   workspaceOpen: false,
   referencesOpen: false,
   draftsOpen: false,
+  findingStage: null,
   settingsOpen: false,
   dataOpen: false,
   status: "idle",
@@ -512,6 +514,7 @@ export class ShellStore {
       settingsOpen: false,
       dataOpen: false,
       fixPreview: null,
+      findingStage: null,
     });
   }
   toggleDrafts(): void {
@@ -522,6 +525,7 @@ export class ShellStore {
       settingsOpen: false,
       dataOpen: false,
       fixPreview: null,
+      findingStage: null,
     });
   }
   toggleReferences(): void {
@@ -532,7 +536,29 @@ export class ShellStore {
       settingsOpen: false,
       dataOpen: false,
       fixPreview: null,
+      findingStage: null,
     });
+  }
+  beginFindingDraft(): void {
+    const target = this.activeTarget();
+    const finding = visibleFindings(this.state)[this.state.selectedFinding];
+    if (!finding || target?.kind !== "provider" || !target.prId || !target.runId) {
+      this.update({ error: "Select a finding in a pinned pull-request review before staging." });
+      return;
+    }
+    this.update({
+      findingStage: { target: target as DraftTarget, findingId: finding.id },
+      draftsOpen: false,
+      referencesOpen: false,
+      workspaceOpen: false,
+      settingsOpen: false,
+      dataOpen: false,
+      fixPreview: null,
+      error: null,
+    });
+  }
+  closeFindingDraft(): void {
+    this.update({ findingStage: null });
   }
   private clearSearch(): void {
     this.update({
@@ -791,7 +817,15 @@ export class ShellStore {
     this.cancelSyntax();
     this.clearSearch();
     const generation = this.state.generation + 1;
+    const nextEntry = this.state.picker[selectedPicker];
+    const findingStage =
+      this.state.findingStage &&
+      nextEntry &&
+      sameTarget(pickerTargetIdentity(nextEntry), this.state.findingStage.target)
+        ? this.state.findingStage
+        : null;
     this.update({
+      findingStage,
       selectedPicker,
       selected: selected ?? this.state.selected,
       generation,

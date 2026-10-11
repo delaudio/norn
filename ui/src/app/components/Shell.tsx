@@ -16,6 +16,7 @@ import {
 import type { BackendClient } from "../../transport/backendClient";
 import { DataStore } from "../dataStore";
 import { DiffScrollPositions } from "../diffScrollPositions";
+import { DraftStagingStore } from "../draftStagingStore";
 import { DraftStore } from "../draftStore";
 import { imageProtocol } from "../imageProtocol";
 import { ReferenceStore } from "../referenceStore";
@@ -33,6 +34,7 @@ import { WorkspaceStore } from "../workspaceStore";
 import { ConversationPanel } from "./ConversationPanel";
 import { DataPanel } from "./DataPanel";
 import { DraftPanel } from "./DraftPanel";
+import { DraftStagingPanel } from "./DraftStagingPanel";
 import { FixPanel } from "./FixPanel";
 import { ReferencePanel } from "./ReferencePanel";
 import { SettingsPanel } from "./SettingsPanel";
@@ -60,7 +62,8 @@ function useShellInput(
       store.getSnapshot().dataOpen ||
       store.getSnapshot().workspaceOpen ||
       store.getSnapshot().referencesOpen ||
-      store.getSnapshot().draftsOpen
+      store.getSnapshot().draftsOpen ||
+      store.getSnapshot().findingStage !== null
     )
       return;
     if (store.getSnapshot().searchOpen) {
@@ -166,6 +169,8 @@ function useShellInput(
       store.toggleSettings();
     } else if (key.name === "n") {
       store.toggleWorkspace();
+    } else if (key.name === "i") {
+      store.beginFindingDraft();
     } else if (key.name === "d") {
       store.toggleDrafts();
     } else if (key.name === "w") {
@@ -182,7 +187,8 @@ function useShellInput(
       store.getSnapshot().dataOpen ||
       store.getSnapshot().workspaceOpen ||
       store.getSnapshot().referencesOpen ||
-      store.getSnapshot().draftsOpen
+      store.getSnapshot().draftsOpen ||
+      store.getSnapshot().findingStage !== null
     )
       return;
     if (store.getSnapshot().searchOpen) {
@@ -905,6 +911,7 @@ export function Shell({ store, client, quit }: ShellProps) {
   useEffect(() => () => positions.clear(), [positions]);
   useEffect(() => () => store.cancelSyntax(), [store]);
   const workspace = useMemo(() => new WorkspaceStore(), []);
+  const staging = useMemo(() => new DraftStagingStore(), []);
   const drafts = useMemo(() => new DraftStore(), []);
   const references = useMemo(() => new ReferenceStore(), []);
   const workspaceEntry = state.picker[state.selectedPicker];
@@ -953,6 +960,29 @@ export function Shell({ store, client, quit }: ShellProps) {
     drafts,
     client,
     state.draftsOpen,
+    referenceProvider,
+    referenceWorkspace,
+    referenceRepo,
+    referencePrId,
+  ]);
+  useEffect(() => {
+    const selection = state.findingStage;
+    if (!selection) return;
+    if (
+      selection.target.provider !== referenceProvider ||
+      selection.target.workspace !== referenceWorkspace ||
+      selection.target.repo !== referenceRepo ||
+      selection.target.prId !== referencePrId
+    ) {
+      store.closeFindingDraft();
+      return;
+    }
+    staging.open(selection.target, selection.findingId);
+    return () => staging.dispose();
+  }, [
+    staging,
+    store,
+    state.findingStage,
     referenceProvider,
     referenceWorkspace,
     referenceRepo,
@@ -1064,6 +1094,15 @@ export function Shell({ store, client, quit }: ShellProps) {
               selectedIndex: state.selectedFinding,
             };
 
+  if (state.findingStage)
+    return (
+      <DraftStagingPanel
+        staging={staging}
+        client={client}
+        onClose={() => store.closeFindingDraft()}
+        onDrafts={() => store.toggleDrafts()}
+      />
+    );
   if (state.draftsOpen)
     return <DraftPanel drafts={drafts} client={client} onClose={() => store.toggleDrafts()} />;
   if (state.referencesOpen)
@@ -1244,8 +1283,8 @@ export function Shell({ store, client, quit }: ShellProps) {
           {state.fixPreview
             ? "y approve · Esc/n dismiss · ↑/↓ scroll effects"
             : wide
-              ? "q quit · Tab pane · j/k move · d drafts · w refs · m settings · n prompt/viewed · s split · e expand · a fix · r reply · t threads · v chat · f filter · g group · x cancel · u sync · o conflicts · c commit · p push"
-              : "j/k  ←/→  s  e  Tab  m settings  n prompt  d drafts  w refs  q"}
+              ? "q quit · Tab pane · j/k move · i stage finding · d drafts · w refs · m settings · n prompt/viewed · s split · e expand · a fix · r reply · t threads · v chat · f filter · g group · x cancel · u sync · o conflicts · c commit · p push"
+              : "j/k  ←/→  s  e  Tab  m settings  n prompt  i stage  d drafts  w refs  q"}
         </text>
       </box>
     </box>

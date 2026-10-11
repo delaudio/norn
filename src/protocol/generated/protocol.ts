@@ -232,6 +232,18 @@ export type Request =
       id: RequestId;
       method: "workspace.readiness";
       params: EmptyParams;
+    }
+  | {
+      type: "request";
+      id: RequestId;
+      method: "draft.prepare";
+      params: DraftPrepareParams;
+    }
+  | {
+      type: "request";
+      id: RequestId;
+      method: "draft.stage";
+      params: DraftStageParams;
     };
 export type RequestId = string;
 /**
@@ -481,6 +493,26 @@ export interface WorkspaceFindingReference {
   findingId: string;
   findingFingerprint: string;
 }
+export interface DraftPrepareParams {
+  target: DraftTarget;
+  findingId: string;
+  publicationMode: "inline" | "file" | "general" | "localOnly";
+}
+export interface DraftTarget {
+  kind: "provider";
+  provider: "github" | "bitbucket";
+  workspace: string;
+  repo: string;
+  prId: number;
+  runId: string;
+}
+export interface DraftStageParams {
+  target: DraftTarget;
+  findingId: string;
+  publicationMode: "inline" | "file" | "general" | "localOnly";
+  expectedVersion: string;
+  previewHash: string;
+}
 export interface ResponseOk {
   type: "response";
   id: RequestId;
@@ -500,7 +532,9 @@ export interface ResponseOk {
     | RecordPage
     | RecordMutationResult
     | ReviewOutputResult
-    | WorkspaceReadiness;
+    | WorkspaceReadiness
+    | DraftPreparation
+    | DraftStageResult;
 }
 export interface DiffFileResult {
   target: TargetIdentity;
@@ -646,6 +680,22 @@ export interface WorkspaceReadiness {
   configRootAvailable: boolean;
   dataRootAvailable: boolean;
   credentialStore: "native" | "unsupported";
+}
+export interface DraftPreparation {
+  target: DraftTarget;
+  key: string;
+  recordVersion: string;
+  previewHash: string;
+  draft: WorkspaceDraft;
+  alreadyStaged: boolean;
+}
+export interface DraftStageResult {
+  target: DraftTarget;
+  key: string;
+  recordVersion: string;
+  localId: string;
+  changed: boolean;
+  alreadyStaged: boolean;
 }
 export interface ResponseError {
   type: "response";

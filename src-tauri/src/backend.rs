@@ -174,6 +174,7 @@ pub fn run() -> Result<(), i32> {
         capabilities: vec![
             "workspace-data".to_string(),
             "workspace-records".to_string(),
+            "draft-staging".to_string(),
             "workspace-readiness".to_string(),
             "settings".to_string(),
             "auth".to_string(),
@@ -316,7 +317,10 @@ fn dispatch(request: Request, backend: &Backend) -> bool {
     let id = request.id().to_string();
     let method = request.method();
     match request {
-        Request::WorkspaceRead { .. } | Request::WorkspaceMutate { .. } => {
+        Request::WorkspaceRead { .. }
+        | Request::WorkspaceMutate { .. }
+        | Request::DraftPrepare { .. }
+        | Request::DraftStage { .. } => {
             if backend
                 .active_workspace
                 .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |current| {
@@ -340,10 +344,22 @@ fn dispatch(request: Request, backend: &Backend) -> bool {
                     Request::WorkspaceRead { params, .. } => {
                         crate::services::workspace_data::record_read(params)
                             .map(|value| json!(value))
+                            .map_err(|message| {
+                                ProtocolError::new(ProtocolErrorCode::Conflict, message)
+                            })
                     }
                     Request::WorkspaceMutate { params, .. } => {
                         crate::services::workspace_data::record_mutate(params)
                             .map(|value| json!(value))
+                            .map_err(|message| {
+                                ProtocolError::new(ProtocolErrorCode::Conflict, message)
+                            })
+                    }
+                    Request::DraftPrepare { params, .. } => {
+                        crate::services::draft_staging::prepare(params).map(|value| json!(value))
+                    }
+                    Request::DraftStage { params, .. } => {
+                        crate::services::draft_staging::stage(params).map(|value| json!(value))
                     }
                     _ => unreachable!(),
                 };
@@ -354,11 +370,11 @@ fn dispatch(request: Request, backend: &Backend) -> bool {
                         result: Some(value),
                         error: None,
                     },
-                    Err(message) => Response {
+                    Err(error) => Response {
                         id,
                         ok: false,
                         result: None,
-                        error: Some(ProtocolError::new(ProtocolErrorCode::Conflict, message)),
+                        error: Some(error),
                     },
                 };
                 active.fetch_sub(1, Ordering::SeqCst);
