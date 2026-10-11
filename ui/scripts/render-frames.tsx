@@ -1,9 +1,11 @@
 import { DataPanel } from "../src/app/components/DataPanel";
 import { DraftPanel } from "../src/app/components/DraftPanel";
+import { DraftStagingPanel } from "../src/app/components/DraftStagingPanel";
 import { ReferencePanel } from "../src/app/components/ReferencePanel";
 import { SettingsPanel } from "../src/app/components/SettingsPanel";
 import { WorkspacePanel } from "../src/app/components/WorkspacePanel";
 import { DataStore } from "../src/app/dataStore";
+import { DraftStagingStore } from "../src/app/draftStagingStore";
 import { DraftStore } from "../src/app/draftStore";
 import { ReferenceStore } from "../src/app/referenceStore";
 import { SettingsStore } from "../src/app/settingsStore";
@@ -682,6 +684,75 @@ async function draftsScene(mode: "saved" | "editing" | "conflict" | "remove" | "
   return { client, store, view: <DraftPanel drafts={drafts} client={client} onClose={() => {}} /> };
 }
 
+async function stagingScene(
+  mode: "choose" | "preview" | "general" | "unanchored" | "staged" | "duplicate" | "conflict",
+) {
+  class Transport extends FakeBackendTransport {
+    conflict = false;
+    async request(method: string, params: Record<string, unknown>) {
+      if (this.conflict && method === "draft.stage")
+        throw new Error(
+          "Drafts changed. Inspect saved drafts and refresh this preview before retrying.",
+        );
+      return super.request(method, params);
+    }
+  }
+  const transport = new Transport({
+    findings: [
+      {
+        id: "finding-1",
+        title: "Validate payment key",
+        severity: "high",
+        summary: "Saved finding 世界.\nCheck the missing key before sending a payment.",
+        anchor:
+          mode === "unanchored" ? null : { path: "src/payment.ts", startLine: 12, side: "new" },
+      },
+    ],
+  });
+  const { client, store, ready } = readyStore(transport);
+  await ready;
+  const staging = new DraftStagingStore();
+  const target = {
+    kind: "provider" as const,
+    provider: "github" as const,
+    workspace: "acme",
+    repo: "payments",
+    prId: 7,
+    runId: "run-7",
+  };
+  staging.open(target, "finding-1");
+  if (mode === "general") {
+    staging.moveMode(1);
+    staging.moveMode(1);
+  }
+  if (mode !== "choose") await staging.preview(client);
+  if (mode === "conflict") {
+    transport.conflict = true;
+    await staging.stage(client);
+  }
+  if (mode === "staged" || mode === "duplicate") await staging.stage(client);
+  if (mode === "duplicate") {
+    const prepared = staging.getSnapshot().prepared!;
+    const record = await client.readWorkspace(prepared.key);
+    await client.mutateWorkspace(prepared.key, record.recordVersion, {
+      kind: "putDraft",
+      draft: {
+        ...prepared.draft,
+        raw: "Existing reviewer edit. Preserve it during repeated staging.",
+      },
+    });
+    staging.open(target, "finding-1");
+    await staging.preview(client);
+  }
+  return {
+    client,
+    store,
+    view: (
+      <DraftStagingPanel staging={staging} client={client} onClose={() => {}} onDrafts={() => {}} />
+    ),
+  };
+}
+
 async function searchScene(mode: "editing" | "none" | "split") {
   const transport = new FakeBackendTransport({
     repositories,
@@ -738,6 +809,24 @@ const scenes: Scene[] = [
   { id: "shell-search-none-80x24", cols: 80, rows: 24, build: () => searchScene("none") },
   { id: "shell-search-split-80x24", cols: 80, rows: 24, build: () => searchScene("split") },
   { id: "shell-search-split-50x15", cols: 50, rows: 15, build: () => searchScene("split") },
+  { id: "shell-staging-choose-120x30", cols: 120, rows: 30, build: () => stagingScene("choose") },
+  { id: "shell-staging-preview-120x40", cols: 120, rows: 40, build: () => stagingScene("preview") },
+  { id: "shell-staging-preview-50x20", cols: 50, rows: 20, build: () => stagingScene("preview") },
+  { id: "shell-staging-general-80x24", cols: 80, rows: 24, build: () => stagingScene("general") },
+  {
+    id: "shell-staging-unanchored-50x20",
+    cols: 50,
+    rows: 20,
+    build: () => stagingScene("unanchored"),
+  },
+  { id: "shell-staging-staged-80x30", cols: 80, rows: 30, build: () => stagingScene("staged") },
+  {
+    id: "shell-staging-duplicate-80x30",
+    cols: 80,
+    rows: 30,
+    build: () => stagingScene("duplicate"),
+  },
+  { id: "shell-staging-conflict-80x30", cols: 80, rows: 30, build: () => stagingScene("conflict") },
   {
     id: "shell-references-saved-120x40",
     cols: 120,

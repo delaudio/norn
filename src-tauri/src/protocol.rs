@@ -209,6 +209,16 @@ pub struct TargetParams {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "method", rename_all = "camelCase")]
 pub enum Request {
+    #[serde(rename = "draft.prepare")]
+    DraftPrepare {
+        id: String,
+        params: crate::services::draft_staging::PrepareParams,
+    },
+    #[serde(rename = "draft.stage")]
+    DraftStage {
+        id: String,
+        params: crate::services::draft_staging::StageParams,
+    },
     #[serde(rename = "workspace.read")]
     WorkspaceRead {
         id: String,
@@ -356,7 +366,9 @@ pub enum Request {
 impl Request {
     pub fn id(&self) -> &str {
         match self {
-            Self::WorkspaceRead { id, .. }
+            Self::DraftPrepare { id, .. }
+            | Self::DraftStage { id, .. }
+            | Self::WorkspaceRead { id, .. }
             | Self::WorkspaceMutate { id, .. }
             | Self::DataPreview { id, .. }
             | Self::DataImport { id, .. }
@@ -398,6 +410,8 @@ impl Request {
 
     pub fn method(&self) -> &'static str {
         match self {
+            Self::DraftPrepare { .. } => "draft.prepare",
+            Self::DraftStage { .. } => "draft.stage",
             Self::WorkspaceRead { .. } => "workspace.read",
             Self::WorkspaceMutate { .. } => "workspace.mutate",
             Self::DataPreview { .. } => "data.preview",
@@ -445,6 +459,27 @@ impl Request {
             return Err(invalid_request("request id must not be empty"));
         }
         match self {
+            Self::DraftPrepare { params, .. } => crate::services::draft_staging::validate(params)?,
+            Self::DraftStage { params, .. } => {
+                crate::services::draft_staging::validate(
+                    &crate::services::draft_staging::PrepareParams {
+                        target: params.target.clone(),
+                        finding_id: params.finding_id.clone(),
+                        publication_mode: params.publication_mode,
+                    },
+                )?;
+                if [&params.expected_version, &params.preview_hash]
+                    .iter()
+                    .any(|value| {
+                        value.len() != 64
+                            || !value
+                                .bytes()
+                                .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+                    })
+                {
+                    return Err(invalid_request("Invalid draft preview or record version."));
+                }
+            }
             Self::WorkspaceRead { params, .. } => {
                 if params.key.is_empty()
                     || params.key.len() > 1024

@@ -1,4 +1,6 @@
 import type {
+  DraftPreparation,
+  DraftPrepareParams,
   WorkspaceDraft,
   WorkspaceReference,
   WorkspaceSettings,
@@ -108,13 +110,88 @@ export class FakeBackendTransport implements BackendTransport {
         "settings",
         "auth",
         "workspace-records",
+        "draft-staging",
         "workspace-readiness",
       ],
     };
   }
 
+  private prepareDraft(params: DraftPrepareParams): DraftPreparation {
+    const { target, findingId, publicationMode } = params;
+    if (target.kind !== "provider" || !target.runId || !target.prId)
+      throw new Error("Select a pinned PR review.");
+    const finding = this.options.findings?.find((item) => item.id === findingId);
+    if (!finding) throw new Error("The selected finding is unavailable.");
+    const anchor = finding.anchor as {
+      path: string;
+      startLine: number;
+      side: "new" | "old";
+    } | null;
+    if (["inline", "file"].includes(publicationMode) && (!anchor?.path || !anchor.startLine))
+      throw new Error(
+        "This finding has no supported file position. Choose general/local-only explicitly.",
+      );
+    const key = `drafts.${target.provider}:${target.workspace}/${target.repo}/${target.prId}`;
+    const stored = this.records[key];
+    const recordVersion = new Bun.CryptoHasher("sha256")
+      .update(stored ? JSON.stringify(stored) : "")
+      .digest("hex");
+    const drafts = stored?.kind === "drafts" ? stored.value : [];
+    const fingerprint = String(finding.fingerprint ?? `fixture:${findingId}`);
+    const old = drafts.find(
+      (draft) =>
+        draft.findingRef?.reviewRunId === target.runId &&
+        draft.findingRef.findingId === findingId &&
+        draft.findingRef.findingFingerprint === fingerprint,
+    );
+    const draft: WorkspaceDraft = old
+      ? structuredClone(old)
+      : {
+          localId: `finding.${new Bun.CryptoHasher("sha256").update(JSON.stringify([target.runId, fingerprint])).digest("hex")}`,
+          prId: target.prId,
+          path: ["inline", "file"].includes(publicationMode) ? anchor!.path : "",
+          to: publicationMode === "inline" && anchor?.side === "new" ? anchor.startLine : null,
+          from: publicationMode === "inline" && anchor?.side === "old" ? anchor.startLine : null,
+          raw: `### ${finding.title}\n\n${finding.summary}`,
+          parentId: null,
+          createdAt: 123,
+          source: "aiFinding",
+          findingRef: { reviewRunId: target.runId, findingId, findingFingerprint: fingerprint },
+          publicationMode,
+          reviewBaseSha: "a".repeat(40),
+          reviewHeadSha: "b".repeat(40),
+        };
+    const previewHash = new Bun.CryptoHasher("sha256")
+      .update(JSON.stringify({ ...draft, createdAt: 0 }))
+      .digest("hex");
+    return { target, key, recordVersion, previewHash, draft, alreadyStaged: !!old };
+  }
+
   async request(method: string, params: Record<string, unknown>): Promise<Record<string, unknown>> {
     if (this.closed) throw new Error("backend transport is closed");
+    if (method === "draft.prepare" || method === "draft.stage") {
+      await this.delay();
+      const prepared = this.prepareDraft(params as unknown as DraftPrepareParams);
+      if (method === "draft.prepare") return prepared as unknown as Record<string, unknown>;
+      if (
+        params.expectedVersion !== prepared.recordVersion ||
+        params.previewHash !== prepared.previewHash
+      )
+        throw new Error("The preview or saved drafts changed. Refresh the preview before staging.");
+      const mutation = await this.request("workspace.mutate", {
+        key: prepared.key,
+        expectedVersion: params.expectedVersion,
+        mutation: { kind: "putDraft", draft: prepared.draft },
+      });
+      return {
+        target: prepared.target,
+        key: prepared.key,
+        recordVersion: mutation.recordVersion,
+        localId: prepared.draft.localId,
+        changed: mutation.changed,
+        alreadyStaged: prepared.alreadyStaged,
+      };
+    }
     if (method.startsWith("workspace.")) await this.delay();
     if (method === "workspace.read" || method === "workspace.mutate") {
       const key = String(params.key);

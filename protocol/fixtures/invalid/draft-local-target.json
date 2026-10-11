@@ -1,0 +1,13 @@
+{
+  "type": "request",
+  "id": "draft-preview",
+  "method": "draft.prepare",
+  "params": {
+    "target": {
+      "kind": "local",
+      "localSnapshotSha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+    },
+    "findingId": "finding-1",
+    "publicationMode": "inline"
+  }
+}

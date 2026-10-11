@@ -906,6 +906,199 @@ fn review_output_is_exact_bounded_and_pinned_to_provider_and_run() {
 
 #[cfg(unix)]
 #[test]
+fn finding_drafts_bind_previews_persist_across_restart_and_preserve_edited_duplicates() {
+    let mut fixture = FixFixture::new("#!/bin/sh\nprintf unexpected > \"$0.executed\"\nexit 99\n");
+    fixture.backend = Backend::spawn_env(
+        fixture.repo.path(),
+        &[
+            ("NORN_CONFIG_DIR", fixture._config.path().to_str().unwrap()),
+            (
+                "NORN_REVIEW_DATA_DIR",
+                fixture._data.path().to_str().unwrap(),
+            ),
+            ("NORN_DATA_DIR", fixture._data.path().to_str().unwrap()),
+        ],
+    );
+    fixture.backend.handshake();
+    let connection = rusqlite::Connection::open(fixture._data.path().join("norn.sqlite3")).unwrap();
+    let saved: String = connection
+        .query_row(
+            "SELECT store_json FROM ai_review_stores WHERE review_key='fixture_demo_9'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let mut saved: Value = serde_json::from_str(&saved).unwrap();
+    saved["reviewRuns"][0]["findings"] = json!([{"id":"f1","fingerprint":"fp1","title":"Validate input","severity":"high","confidence":"high","category":"bug","status":"new",
+        "summary":"Saved finding 世界\r\nSecond line.","rationale":"Caller may send null.","ruleId":null,"source":"llm","anchor":{"path":"tracked.txt","startLine":1,"endLine":1,"side":"new"},"suggestedFix":"Return early.","evidenceIds":[],"publication":null}]);
+    let save = |value: &Value| {
+        connection
+            .execute(
+                "UPDATE ai_review_stores SET store_json=?1 WHERE review_key='fixture_demo_9'",
+                [value.to_string()],
+            )
+            .unwrap();
+    };
+    save(&saved);
+    let request = |backend: &mut Backend, id: &str, method: &str, params: Value| {
+        backend.send(json!({"type":"request","id":id,"method":method,"params":params}));
+        backend.wait_for(|value| value["id"] == id, Duration::from_secs(5))
+    };
+    let key = "drafts.github:fixture/demo/9";
+    let params = json!({"target":fixture.target,"findingId":"f1","publicationMode":"inline"});
+    let preview = request(
+        &mut fixture.backend,
+        "preview",
+        "draft.prepare",
+        params.clone(),
+    );
+    assert_eq!(preview["ok"], true, "{preview}");
+    let prepared = &preview["result"];
+    assert_eq!(prepared["draft"]["to"], 1);
+    assert_eq!(prepared["draft"]["from"], Value::Null);
+    assert_eq!(
+        prepared["draft"]["findingRef"],
+        json!({"reviewRunId":"run-fix","findingId":"f1","findingFingerprint":"fp1"})
+    );
+    assert!(prepared["draft"]["raw"]
+        .as_str()
+        .unwrap()
+        .contains("世界\r\nSecond line."));
+    let before = request(
+        &mut fixture.backend,
+        "before",
+        "workspace.read",
+        json!({"key":key}),
+    );
+    assert_eq!(before["result"]["available"], false, "{before}");
+    let mut stage = params.clone();
+    stage["expectedVersion"] = prepared["recordVersion"].clone();
+    stage["previewHash"] = json!("0".repeat(64));
+    let refused = request(
+        &mut fixture.backend,
+        "bad-hash",
+        "draft.stage",
+        stage.clone(),
+    );
+    assert_eq!(refused["error"]["code"], "conflict", "{refused}");
+    stage["previewHash"] = prepared["previewHash"].clone();
+    let original_summary = saved["reviewRuns"][0]["findings"][0]["summary"].clone();
+    saved["reviewRuns"][0]["findings"][0]["summary"] = json!("Changed after preview");
+    save(&saved);
+    let changed_review = request(
+        &mut fixture.backend,
+        "changed-review",
+        "draft.stage",
+        stage.clone(),
+    );
+    assert_eq!(changed_review["error"]["code"], "conflict");
+    saved["reviewRuns"][0]["findings"][0]["summary"] = original_summary;
+    save(&saved);
+    let staged = request(&mut fixture.backend, "stage", "draft.stage", stage.clone());
+    assert_eq!(staged["ok"], true, "{staged}");
+    assert_eq!(staged["result"]["changed"], true);
+    let duplicate_stale = request(
+        &mut fixture.backend,
+        "duplicate-stale",
+        "draft.stage",
+        stage,
+    );
+    assert_eq!(duplicate_stale["error"]["code"], "conflict");
+    fixture.backend = Backend::spawn_env(
+        fixture.repo.path(),
+        &[
+            ("NORN_CONFIG_DIR", fixture._config.path().to_str().unwrap()),
+            (
+                "NORN_REVIEW_DATA_DIR",
+                fixture._data.path().to_str().unwrap(),
+            ),
+            ("NORN_DATA_DIR", fixture._data.path().to_str().unwrap()),
+        ],
+    );
+    fixture.backend.handshake();
+    let restored = request(
+        &mut fixture.backend,
+        "restored",
+        "workspace.read",
+        json!({"key":key}),
+    );
+    let mut edited = restored["result"]["payload"]["value"][0].clone();
+    assert_eq!(edited["localId"], staged["result"]["localId"]);
+    assert_eq!(edited["raw"], prepared["draft"]["raw"]);
+    edited["raw"] = json!("Reviewer edit 世界");
+    edited["publicationMode"] = json!("general");
+    let updated = request(
+        &mut fixture.backend,
+        "edit",
+        "workspace.mutate",
+        json!({"key":key,"expectedVersion":restored["result"]["recordVersion"],"mutation":{"kind":"putDraft","draft":edited}}),
+    );
+    assert_eq!(updated["ok"], true, "{updated}");
+    let again = request(
+        &mut fixture.backend,
+        "again",
+        "draft.prepare",
+        params.clone(),
+    );
+    assert_eq!(again["result"]["alreadyStaged"], true);
+    assert_eq!(again["result"]["draft"], edited);
+    let mut duplicate = params.clone();
+    duplicate["expectedVersion"] = again["result"]["recordVersion"].clone();
+    duplicate["previewHash"] = again["result"]["previewHash"].clone();
+    let acknowledged = request(&mut fixture.backend, "duplicate", "draft.stage", duplicate);
+    assert_eq!(acknowledged["ok"], true, "{acknowledged}");
+    assert_eq!(acknowledged["result"]["changed"], false);
+    let after = request(
+        &mut fixture.backend,
+        "after",
+        "workspace.read",
+        json!({"key":key}),
+    );
+    assert_eq!(after["result"]["payload"]["value"], json!([edited]));
+    let mut wrong = params.clone();
+    wrong["target"]["provider"] = json!("bitbucket");
+    assert_eq!(
+        request(
+            &mut fixture.backend,
+            "wrong-provider",
+            "draft.prepare",
+            wrong
+        )["error"]["code"],
+        "targetStale"
+    );
+    let mut missing = params.clone();
+    missing["target"]["runId"] = json!("missing");
+    assert_eq!(
+        request(
+            &mut fixture.backend,
+            "missing-run",
+            "draft.prepare",
+            missing
+        )["error"]["code"],
+        "notFound"
+    );
+    saved["reviewRuns"][0]["findings"][0]["anchor"] = Value::Null;
+    save(&saved);
+    assert_eq!(
+        request(
+            &mut fixture.backend,
+            "unanchored",
+            "draft.prepare",
+            params.clone()
+        )["error"]["code"],
+        "invalidParams"
+    );
+    saved["reviewRuns"][0]["findings"][0]["status"] = json!("published");
+    save(&saved);
+    assert_eq!(
+        request(&mut fixture.backend, "published", "draft.prepare", params)["error"]["code"],
+        "conflict"
+    );
+    assert!(!fixture._agent.path().join("fake-agent.executed").exists());
+}
+
+#[cfg(unix)]
+#[test]
 fn workspace_readiness_never_executes_found_tools_or_reads_credentials() {
     use std::os::unix::fs::PermissionsExt;
     let repo = tempfile::tempdir().unwrap();
