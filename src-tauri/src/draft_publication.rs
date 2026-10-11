@@ -15,12 +15,33 @@ pub struct PublicationScope {
     pub repo: String,
     pub pr_id: u32,
 }
+impl PublicationScope {
+    pub fn identity_key(&self, local_id: &str) -> String {
+        digest(
+            &serde_json::to_vec(&(
+                self.provider,
+                self.workspace.to_ascii_lowercase(),
+                self.repo.to_ascii_lowercase(),
+                self.pr_id,
+                local_id,
+            ))
+            .expect("serializable identity"),
+        )
+    }
+}
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum CommentMode {
     Inline,
     File,
     General,
+}
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct FindingAssociation {
+    pub review_run_id: String,
+    pub finding_id: String,
+    pub finding_fingerprint: String,
 }
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -36,6 +57,10 @@ pub struct ApprovedComment {
     pub parent_id: Option<String>,
     /// Exact user-visible body. The deterministic hidden marker is appended once.
     pub raw: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub finding_ref: Option<FindingAssociation>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub original_draft_hash: Option<String>,
 }
 fn identifier(value: &str) -> bool {
     !value.trim().is_empty() && value.len() <= 256 && !value.chars().any(char::is_control)
@@ -52,7 +77,7 @@ impl ApprovedComment {
             || !identifier(&self.scope.repo)
             || [self.scope.workspace.as_str(), self.scope.repo.as_str()]
                 .iter()
-                .any(|value| value.contains(['/', '\\', ':']))
+                .any(|value| matches!(*value, "." | "..") || value.contains(['/', '\\', ':']))
             || self.scope.pr_id == 0
             || crate::local_review::is_local_review_id(u64::from(self.scope.pr_id))
             || !identifier(&self.local_id)
@@ -71,6 +96,19 @@ impl ApprovedComment {
             || self.markdown().len() > MAX_BODY
         {
             return Err("Invalid approved comment identity, revision or body.".into());
+        }
+        if self.finding_ref.as_ref().is_some_and(|finding| {
+            [
+                &finding.review_run_id,
+                &finding.finding_id,
+                &finding.finding_fingerprint,
+            ]
+            .iter()
+            .any(|value| !identifier(value))
+        }) || self.original_draft_hash.as_deref().is_some_and(|value| {
+            value.len() != 64 || !value.bytes().all(|byte| byte.is_ascii_hexdigit())
+        }) {
+            return Err("Invalid original draft or finding association.".into());
         }
         let drive = self
             .path
@@ -106,24 +144,16 @@ impl ApprovedComment {
     }
     pub fn identity_key(&self) -> String {
         // Scope aliases cannot bypass the durable duplicate fence.
-        digest(
-            &serde_json::to_vec(&(
-                self.scope.provider,
-                self.scope.workspace.to_ascii_lowercase(),
-                self.scope.repo.to_ascii_lowercase(),
-                self.scope.pr_id,
-                &self.local_id,
-            ))
-            .expect("serializable identity"),
-        )
+        self.scope.identity_key(&self.local_id)
     }
+
     pub fn marker(&self) -> String {
         format!("<!-- norn-draft:{} -->", self.identity_key())
     }
     pub fn markdown(&self) -> String {
         format!("{}\n\n{}", self.raw, self.marker())
     }
-    fn payload_hash(&self) -> Result<String, String> {
+    pub(crate) fn payload_hash(&self) -> Result<String, String> {
         serde_json::to_vec(self)
             .map(|bytes| digest(&bytes))
             .map_err(|_| "Cannot encode approved comment.".into())
@@ -147,6 +177,10 @@ pub struct JournalEntry {
     pub attempt: String,
     pub state: PublicationState,
     pub remote_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub confirmed_at: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub started_at: Option<u64>,
 }
 #[derive(Debug, Clone)]
 pub enum BeginPublication {
@@ -174,30 +208,76 @@ fn lookup_at(connection: &Connection, key: &str) -> Result<Option<JournalEntry>,
         )
         .optional()
         .map_err(|_| "Cannot read the publication journal.".to_string())?;
-    raw.map(|raw| {
-        if raw.len() > 48 * 1024 {
-            return Err("Publication journal entry exceeds its limit.".into());
-        }
-        let entry: JournalEntry = serde_json::from_str(&raw)
-            .map_err(|_| "Publication journal entry is invalid.".to_string())?;
-        entry.comment.validate()?;
-        if entry.comment.identity_key() != key
-            || entry.comment.payload_hash()? != entry.payload_hash
-            || !identifier(&entry.attempt)
-            || entry.remote_id.as_deref().is_some_and(|id| !identifier(id))
-            || matches!(
-                entry.state,
-                PublicationState::Published
-                    | PublicationState::PublishedSnapshotChanged
-                    | PublicationState::PublishedUnverified
-            ) != entry.remote_id.is_some()
-        {
-            return Err("Publication journal entry does not match its identity.".into());
-        }
-        Ok(entry)
-    })
-    .transpose()
+    raw.map(|raw| decode_entry(key, &raw)).transpose()
 }
+fn decode_entry(key: &str, raw: &str) -> Result<JournalEntry, String> {
+    if raw.len() > 96 * 1024 {
+        return Err("Publication journal entry exceeds its limit.".into());
+    }
+    let entry: JournalEntry = serde_json::from_str(raw)
+        .map_err(|_| "Publication journal entry is invalid.".to_string())?;
+    entry.comment.validate()?;
+    if entry.comment.identity_key() != key
+        || entry.comment.payload_hash()? != entry.payload_hash
+        || !identifier(&entry.attempt)
+        || entry.remote_id.as_deref().is_some_and(|id| !identifier(id))
+        || matches!(
+            entry.state,
+            PublicationState::Published
+                | PublicationState::PublishedSnapshotChanged
+                | PublicationState::PublishedUnverified
+        ) != entry.remote_id.is_some()
+    {
+        return Err("Publication journal entry does not match its identity.".into());
+    }
+    Ok(entry)
+}
+
+pub fn journal_scope_page(
+    scope: &PublicationScope,
+    after: Option<&str>,
+    limit: usize,
+) -> Result<Vec<JournalEntry>, String> {
+    if limit == 0
+        || limit > 50
+        || after.is_some_and(|cursor| {
+            cursor.len() != 64 || !cursor.bytes().all(|byte| byte.is_ascii_hexdigit())
+        })
+    {
+        return Err("Invalid publication journal page.".into());
+    }
+    let connection = review_storage::publication_database()?;
+    let provider = match scope.provider {
+        ReviewProvider::Github => "github",
+        ReviewProvider::Bitbucket => "bitbucket",
+    };
+    let mut statement = connection.prepare("SELECT identity_key, entry_json FROM local_draft_publications WHERE json_extract(entry_json, '$.comment.scope.provider') = ?1 AND lower(json_extract(entry_json, '$.comment.scope.workspace')) = ?2 AND lower(json_extract(entry_json, '$.comment.scope.repo')) = ?3 AND json_extract(entry_json, '$.comment.scope.prId') = ?4 AND identity_key > ?5 ORDER BY identity_key LIMIT ?6").map_err(|_| "Cannot read scoped publication history.".to_string())?;
+    let rows = statement
+        .query_map(
+            params![
+                provider,
+                scope.workspace.to_ascii_lowercase(),
+                scope.repo.to_ascii_lowercase(),
+                scope.pr_id,
+                after.unwrap_or(""),
+                limit as i64
+            ],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+        )
+        .map_err(|_| "Cannot read scoped publication history.".to_string())?;
+    let mut entries = Vec::new();
+    let mut bytes = 0;
+    for row in rows {
+        let (key, raw) = row.map_err(|_| "Cannot read scoped publication history.".to_string())?;
+        if bytes + raw.len() > 512 * 1024 {
+            break;
+        }
+        bytes += raw.len();
+        entries.push(decode_entry(&key, &raw)?);
+    }
+    Ok(entries)
+}
+
 fn attempt_id() -> String {
     static COUNTER: AtomicU64 = AtomicU64::new(0);
     digest(
@@ -236,6 +316,16 @@ fn begin_at(
         attempt: attempt_id(),
         state: PublicationState::Writing,
         remote_id: None,
+        confirmed_at: None,
+        started_at: Some(
+            u64::try_from(
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map_err(|_| "Cannot timestamp publication reservation.")?
+                    .as_millis(),
+            )
+            .map_err(|_| "Cannot timestamp publication reservation.")?,
+        ),
     };
     let json = serde_json::to_string(&entry)
         .map_err(|_| "Cannot encode publication reservation.".to_string())?;
@@ -297,9 +387,24 @@ fn transition_at(
     if current.state == PublicationState::Uncertain && state == PublicationState::Rejected {
         return Err("Uncertain publication requires reconciliation, not a retry.".into());
     }
+    let confirmed_at = if remote_id.is_some() {
+        Some(match current.confirmed_at {
+            Some(time) => time,
+            None => u64::try_from(
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map_err(|_| "Cannot timestamp publication acknowledgment.")?
+                    .as_millis(),
+            )
+            .map_err(|_| "Cannot timestamp publication acknowledgment.")?,
+        })
+    } else {
+        None
+    };
     let updated = JournalEntry {
         state,
         remote_id: remote_id.map(str::to_owned),
+        confirmed_at,
         ..current
     };
     let json = serde_json::to_string(&updated)
@@ -509,6 +614,8 @@ mod tests {
             from: Some(7),
             parent_id: None,
             raw: "Unicode è 界\r\noriginal body".into(),
+            finding_ref: None,
+            original_draft_hash: None,
         }
     }
     #[derive(Clone, Copy)]
@@ -962,5 +1069,54 @@ mod tests {
             .is_err());
         assert_eq!(publisher.api.writes.get(), 0);
         assert_eq!(publisher.api.reads.get(), 0);
+    }
+    #[test]
+    fn legacy_journal_hashes_survive_widened_storage_and_quoted_markdown() {
+        let (_directory, journal) = FileJournal::new();
+        let original = comment("legacy");
+        let entry = JournalEntry {
+            payload_hash: original.payload_hash().unwrap(),
+            comment: original,
+            attempt: "old-attempt".into(),
+            state: PublicationState::Uncertain,
+            remote_id: None,
+            started_at: None,
+            confirmed_at: None,
+        };
+        let raw = serde_json::to_string(&entry).unwrap();
+        assert!(!raw.contains("findingRef"));
+        assert!(!raw.contains("originalDraftHash"));
+        assert!(!raw.contains("startedAt"));
+        let mut connection = journal.connection();
+        connection.execute_batch("DROP TABLE local_draft_publications; CREATE TABLE local_draft_publications(identity_key TEXT PRIMARY KEY CHECK(length(identity_key)=64), entry_json TEXT NOT NULL CHECK(length(entry_json)<=49152)); DELETE FROM schema_migrations WHERE version=17;").unwrap();
+        connection
+            .execute(
+                "INSERT INTO local_draft_publications(identity_key,entry_json) VALUES (?1,?2)",
+                params![entry.comment.identity_key(), raw],
+            )
+            .unwrap();
+        review_storage::initialize_publication_test_database(&mut connection).unwrap();
+        assert_eq!(
+            journal
+                .lookup(&entry.comment.identity_key())
+                .unwrap()
+                .unwrap(),
+            entry
+        );
+        let mut quoted = comment("quoted");
+        quoted.raw = "\"".repeat(30_000);
+        assert!(matches!(
+            journal.begin(&quoted).unwrap(),
+            BeginPublication::Acquired(_)
+        ));
+        assert_eq!(
+            journal
+                .lookup(&quoted.identity_key())
+                .unwrap()
+                .unwrap()
+                .comment
+                .raw,
+            quoted.raw
+        );
     }
 }

@@ -23,6 +23,7 @@ function useDraftInput(
   onClose: () => void,
   state: ReturnType<DraftStore["getSnapshot"]>,
   scroll: RefObject<ScrollBoxRenderable | null>,
+  onPublish?: () => void,
 ) {
   useKeyboard((key) => {
     key.preventDefault();
@@ -59,6 +60,7 @@ function useDraftInput(
     }
     if (key.ctrl || key.meta || key.super || key.option) return;
     if (key.name === "escape" || key.name === "q") onClose();
+    else if (key.name === "p") onPublish?.();
     else if (key.name === "n") drafts.add();
     else if (key.name === "e" || key.name === "return") drafts.edit();
     else if (key.name === "d") drafts.requestRemoval();
@@ -113,15 +115,17 @@ export function DraftPanel({
   drafts,
   client,
   onClose,
+  onPublish,
 }: {
   drafts: DraftStore;
   client: BackendClient;
   onClose: () => void;
+  onPublish?: () => void;
 }) {
   const state = useSyncExternalStore(drafts.subscribe, drafts.getSnapshot);
   const scroll = useRef<ScrollBoxRenderable | null>(null);
   useDraftFieldFollow(state, scroll);
-  useDraftInput(drafts, client, onClose, state, scroll);
+  useDraftInput(drafts, client, onClose, state, scroll, onPublish);
   const selected = state.items[state.selected];
   return (
     <box flexDirection="column" flexGrow={1} paddingX={1} backgroundColor={theme.background}>
@@ -134,7 +138,7 @@ export function DraftPanel({
       <text fg={theme.muted} height={2} flexShrink={0}>
         {state.draft
           ? "Tab/j/k field · Enter edit/cycle · Ctrl+S save · Esc discard"
-          : "j/k select · n add · e edit · d remove · Esc close"}
+          : "j/k select · n add · e edit · d remove · p publish/threads · Esc close"}
       </text>
       <text fg={theme.muted} height={2} flexShrink={0}>
         Save stages a local draft. Publication requires a separate preview and approval.

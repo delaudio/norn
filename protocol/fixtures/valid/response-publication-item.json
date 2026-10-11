@@ -1,0 +1,40 @@
+{
+  "type": "response",
+  "id": "publication-fixture",
+  "ok": true,
+  "result": {
+    "scope": {
+      "provider": "github",
+      "workspace": "fixture",
+      "repo": "demo",
+      "prId": 9
+    },
+    "entry": {
+      "comment": {
+        "scope": {
+          "provider": "github",
+          "workspace": "fixture",
+          "repo": "demo",
+          "prId": 9
+        },
+        "localId": "draft-1",
+        "headSha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "baseSha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "mode": "general",
+        "path": "",
+        "to": null,
+        "from": null,
+        "parentId": null,
+        "raw": "Original body",
+        "originalDraftHash": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+      },
+      "payloadHash": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "attempt": "owned-attempt",
+      "state": "uncertain",
+      "remoteId": null,
+      "startedAt": 1
+    },
+    "localSaved": false,
+    "draftRemoved": false
+  }
+}

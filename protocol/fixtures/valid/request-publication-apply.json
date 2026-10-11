@@ -1,0 +1,15 @@
+{
+  "type": "request",
+  "id": "publication-fixture",
+  "method": "publication.apply",
+  "params": {
+    "scope": {
+      "provider": "github",
+      "workspace": "fixture",
+      "repo": "demo",
+      "prId": 9
+    },
+    "approvalId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "localId": "draft-1"
+  }
+}

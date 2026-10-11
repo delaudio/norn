@@ -1,0 +1,15 @@
+{
+  "type": "request",
+  "id": "bad",
+  "method": "publication.apply",
+  "params": {
+    "scope": {
+      "provider": "github",
+      "workspace": "fixture",
+      "repo": "demo",
+      "prId": 9
+    },
+    "approvalId": "not-a-token",
+    "localId": "draft-1"
+  }
+}

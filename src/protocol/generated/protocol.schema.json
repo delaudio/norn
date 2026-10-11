@@ -233,7 +233,13 @@
         "review.output",
         "workspace.readiness",
         "draft.prepare",
-        "draft.stage"
+        "draft.stage",
+        "publication.prepare",
+        "publication.apply",
+        "publication.cancel",
+        "publication.status",
+        "publication.reconcile",
+        "comments.list"
       ]
     },
     "DiffFileParams": {
@@ -2287,6 +2293,656 @@
           "type": "boolean"
         }
       }
+    },
+    "PublicationScope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "provider",
+        "workspace",
+        "repo",
+        "prId"
+      ],
+      "properties": {
+        "provider": {
+          "enum": [
+            "github",
+            "bitbucket"
+          ]
+        },
+        "workspace": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "repo": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "prId": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4294967295
+        }
+      }
+    },
+    "PublicationMode": {
+      "enum": [
+        "inline",
+        "file",
+        "general"
+      ]
+    },
+    "PublicationFindingAssociation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "reviewRunId",
+        "findingId",
+        "findingFingerprint"
+      ],
+      "properties": {
+        "reviewRunId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "findingId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "findingFingerprint": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        }
+      }
+    },
+    "ApprovedComment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "scope",
+        "localId",
+        "headSha",
+        "baseSha",
+        "mode",
+        "path",
+        "to",
+        "from",
+        "parentId",
+        "raw"
+      ],
+      "properties": {
+        "scope": {
+          "$ref": "#/definitions/PublicationScope"
+        },
+        "localId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "headSha": {
+          "type": "string",
+          "pattern": "^(?:[a-fA-F0-9]{40}|[a-fA-F0-9]{64})$"
+        },
+        "baseSha": {
+          "type": "string",
+          "pattern": "^(?:[a-fA-F0-9]{40}|[a-fA-F0-9]{64})$"
+        },
+        "mode": {
+          "$ref": "#/definitions/PublicationMode"
+        },
+        "path": {
+          "type": "string",
+          "maxLength": 4096
+        },
+        "to": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 4294967295
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "from": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 4294967295
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "parentId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "raw": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 32768
+        },
+        "findingRef": {
+          "$ref": "#/definitions/PublicationFindingAssociation"
+        },
+        "originalDraftHash": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        }
+      }
+    },
+    "PublicationState": {
+      "enum": [
+        "writing",
+        "uncertain",
+        "rejected",
+        "published",
+        "publishedSnapshotChanged",
+        "publishedUnverified"
+      ]
+    },
+    "PublicationJournalEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "comment",
+        "payloadHash",
+        "attempt",
+        "state",
+        "remoteId"
+      ],
+      "properties": {
+        "comment": {
+          "$ref": "#/definitions/ApprovedComment"
+        },
+        "payloadHash": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "attempt": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "state": {
+          "$ref": "#/definitions/PublicationState"
+        },
+        "remoteId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "confirmedAt": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "startedAt": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "PublicationPreviewItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "comment",
+        "markdown"
+      ],
+      "properties": {
+        "comment": {
+          "$ref": "#/definitions/ApprovedComment"
+        },
+        "markdown": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 32768
+        }
+      }
+    },
+    "PublicationPrepareParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "scope",
+        "localIds"
+      ],
+      "properties": {
+        "scope": {
+          "$ref": "#/definitions/PublicationScope"
+        },
+        "localIds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "maxItems": 20,
+          "minItems": 1,
+          "uniqueItems": true
+        }
+      }
+    },
+    "PublicationApplyParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "scope",
+        "approvalId",
+        "localId"
+      ],
+      "properties": {
+        "scope": {
+          "$ref": "#/definitions/PublicationScope"
+        },
+        "approvalId": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "localId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        }
+      }
+    },
+    "PublicationCancelParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "scope",
+        "approvalId"
+      ],
+      "properties": {
+        "scope": {
+          "$ref": "#/definitions/PublicationScope"
+        },
+        "approvalId": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        }
+      }
+    },
+    "PublicationStatusParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "scope",
+        "after",
+        "limit"
+      ],
+      "properties": {
+        "scope": {
+          "$ref": "#/definitions/PublicationScope"
+        },
+        "after": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 50
+        }
+      }
+    },
+    "PublicationReconcileParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "scope",
+        "localId"
+      ],
+      "properties": {
+        "scope": {
+          "$ref": "#/definitions/PublicationScope"
+        },
+        "localId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        }
+      }
+    },
+    "CommentsListParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "scope",
+        "offset",
+        "limit",
+        "version"
+      ],
+      "properties": {
+        "scope": {
+          "$ref": "#/definitions/PublicationScope"
+        },
+        "offset": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100
+        },
+        "version": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "PublicationPrepareResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "scope",
+        "approvalId",
+        "expiresAt",
+        "key",
+        "recordVersion",
+        "items"
+      ],
+      "properties": {
+        "scope": {
+          "$ref": "#/definitions/PublicationScope"
+        },
+        "approvalId": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "expiresAt": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "key": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "recordVersion": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/PublicationPreviewItem"
+          },
+          "maxItems": 20,
+          "minItems": 1
+        }
+      }
+    },
+    "PublicationItemResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "scope",
+        "entry",
+        "localSaved",
+        "draftRemoved"
+      ],
+      "properties": {
+        "scope": {
+          "$ref": "#/definitions/PublicationScope"
+        },
+        "entry": {
+          "$ref": "#/definitions/PublicationJournalEntry"
+        },
+        "localSaved": {
+          "type": "boolean"
+        },
+        "draftRemoved": {
+          "type": "boolean"
+        }
+      }
+    },
+    "PublicationCancelResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "canceled"
+      ],
+      "properties": {
+        "canceled": {
+          "type": "boolean"
+        }
+      }
+    },
+    "PublicationStatusResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "scope",
+        "entries",
+        "nextAfter"
+      ],
+      "properties": {
+        "scope": {
+          "$ref": "#/definitions/PublicationScope"
+        },
+        "entries": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/PublicationJournalEntry"
+          },
+          "maxItems": 50
+        },
+        "nextAfter": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "RemoteComment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "parentId",
+        "authorId",
+        "authorName",
+        "raw",
+        "createdAt",
+        "deleted",
+        "mode",
+        "path",
+        "to",
+        "from",
+        "commitId",
+        "rangeStart"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "parentId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "authorId": {
+          "type": "string",
+          "maxLength": 256
+        },
+        "authorName": {
+          "type": "string",
+          "maxLength": 256
+        },
+        "raw": {
+          "type": "string",
+          "maxLength": 65536
+        },
+        "createdAt": {
+          "type": "string",
+          "maxLength": 256
+        },
+        "deleted": {
+          "type": "boolean"
+        },
+        "mode": {
+          "$ref": "#/definitions/PublicationMode"
+        },
+        "path": {
+          "type": "string",
+          "maxLength": 4096
+        },
+        "to": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 4294967295
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "from": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 4294967295
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "commitId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^(?:[a-fA-F0-9]{40}|[a-fA-F0-9]{64})$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "rangeStart": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 4294967295
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "CommentsListResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "scope",
+        "comments",
+        "version",
+        "offset",
+        "totalItems",
+        "nextOffset"
+      ],
+      "properties": {
+        "scope": {
+          "$ref": "#/definitions/PublicationScope"
+        },
+        "comments": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/RemoteComment"
+          },
+          "maxItems": 100
+        },
+        "version": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "offset": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000
+        },
+        "totalItems": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000
+        },
+        "nextOffset": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 1000
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
     }
   },
   "oneOf": [
@@ -3309,6 +3965,150 @@
               "$ref": "#/definitions/DraftStageParams"
             }
           }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "type": {
+              "const": "request"
+            },
+            "id": {
+              "$ref": "#/definitions/RequestId"
+            },
+            "method": {
+              "const": "publication.prepare"
+            },
+            "params": {
+              "$ref": "#/definitions/PublicationPrepareParams"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "type": {
+              "const": "request"
+            },
+            "id": {
+              "$ref": "#/definitions/RequestId"
+            },
+            "method": {
+              "const": "publication.apply"
+            },
+            "params": {
+              "$ref": "#/definitions/PublicationApplyParams"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "type": {
+              "const": "request"
+            },
+            "id": {
+              "$ref": "#/definitions/RequestId"
+            },
+            "method": {
+              "const": "publication.cancel"
+            },
+            "params": {
+              "$ref": "#/definitions/PublicationCancelParams"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "type": {
+              "const": "request"
+            },
+            "id": {
+              "$ref": "#/definitions/RequestId"
+            },
+            "method": {
+              "const": "publication.status"
+            },
+            "params": {
+              "$ref": "#/definitions/PublicationStatusParams"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "type": {
+              "const": "request"
+            },
+            "id": {
+              "$ref": "#/definitions/RequestId"
+            },
+            "method": {
+              "const": "publication.reconcile"
+            },
+            "params": {
+              "$ref": "#/definitions/PublicationReconcileParams"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "type": {
+              "const": "request"
+            },
+            "id": {
+              "$ref": "#/definitions/RequestId"
+            },
+            "method": {
+              "const": "comments.list"
+            },
+            "params": {
+              "$ref": "#/definitions/CommentsListParams"
+            }
+          }
         }
       ]
     },
@@ -3384,6 +4184,21 @@
             },
             {
               "$ref": "#/definitions/DraftStageResult"
+            },
+            {
+              "$ref": "#/definitions/PublicationPrepareResult"
+            },
+            {
+              "$ref": "#/definitions/PublicationItemResult"
+            },
+            {
+              "$ref": "#/definitions/PublicationCancelResult"
+            },
+            {
+              "$ref": "#/definitions/PublicationStatusResult"
+            },
+            {
+              "$ref": "#/definitions/CommentsListResult"
             }
           ]
         }

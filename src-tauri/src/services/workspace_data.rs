@@ -1048,5 +1048,6 @@ mod tests {
 mod records;
 pub(crate) use records::{
     draft_snapshot, prompt_for_scope, record_mutate, record_read, references_for_scope,
+    remove_acknowledged_draft, with_locked_drafts,
 };
 pub use records::{RecordMutateParams, RecordMutation, RecordReadParams};

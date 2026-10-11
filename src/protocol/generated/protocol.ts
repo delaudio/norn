@@ -244,6 +244,42 @@ export type Request =
       id: RequestId;
       method: "draft.stage";
       params: DraftStageParams;
+    }
+  | {
+      type: "request";
+      id: RequestId;
+      method: "publication.prepare";
+      params: PublicationPrepareParams;
+    }
+  | {
+      type: "request";
+      id: RequestId;
+      method: "publication.apply";
+      params: PublicationApplyParams;
+    }
+  | {
+      type: "request";
+      id: RequestId;
+      method: "publication.cancel";
+      params: PublicationCancelParams;
+    }
+  | {
+      type: "request";
+      id: RequestId;
+      method: "publication.status";
+      params: PublicationStatusParams;
+    }
+  | {
+      type: "request";
+      id: RequestId;
+      method: "publication.reconcile";
+      params: PublicationReconcileParams;
+    }
+  | {
+      type: "request";
+      id: RequestId;
+      method: "comments.list";
+      params: CommentsListParams;
     };
 export type RequestId = string;
 /**
@@ -343,6 +379,9 @@ export type WorkspaceValue =
       kind: "theme";
       value: "dark" | "light";
     };
+export type PublicationMode = "inline" | "file" | "general";
+export type PublicationState =
+  "writing" | "uncertain" | "rejected" | "published" | "publishedSnapshotChanged" | "publishedUnverified";
 export type OperationEvent =
   | {
       kind: "progress";
@@ -513,6 +552,175 @@ export interface DraftStageParams {
   expectedVersion: string;
   previewHash: string;
 }
+export interface PublicationPrepareParams {
+  scope: PublicationScope;
+  /**
+   * @minItems 1
+   * @maxItems 20
+   */
+  localIds:
+    | [string]
+    | [string, string]
+    | [string, string, string]
+    | [string, string, string, string]
+    | [string, string, string, string, string]
+    | [string, string, string, string, string, string]
+    | [string, string, string, string, string, string, string]
+    | [string, string, string, string, string, string, string, string]
+    | [string, string, string, string, string, string, string, string, string]
+    | [string, string, string, string, string, string, string, string, string, string]
+    | [string, string, string, string, string, string, string, string, string, string, string]
+    | [string, string, string, string, string, string, string, string, string, string, string, string]
+    | [string, string, string, string, string, string, string, string, string, string, string, string, string]
+    | [string, string, string, string, string, string, string, string, string, string, string, string, string, string]
+    | [
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string
+      ]
+    | [
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string
+      ]
+    | [
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string
+      ]
+    | [
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string
+      ]
+    | [
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string
+      ]
+    | [
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string
+      ];
+}
+export interface PublicationScope {
+  provider: "github" | "bitbucket";
+  workspace: string;
+  repo: string;
+  prId: number;
+}
+export interface PublicationApplyParams {
+  scope: PublicationScope;
+  approvalId: string;
+  localId: string;
+}
+export interface PublicationCancelParams {
+  scope: PublicationScope;
+  approvalId: string;
+}
+export interface PublicationStatusParams {
+  scope: PublicationScope;
+  after: string | null;
+  limit: number;
+}
+export interface PublicationReconcileParams {
+  scope: PublicationScope;
+  localId: string;
+}
+export interface CommentsListParams {
+  scope: PublicationScope;
+  offset: number;
+  limit: number;
+  version: string | null;
+}
 export interface ResponseOk {
   type: "response";
   id: RequestId;
@@ -534,7 +742,12 @@ export interface ResponseOk {
     | ReviewOutputResult
     | WorkspaceReadiness
     | DraftPreparation
-    | DraftStageResult;
+    | DraftStageResult
+    | PublicationPrepareResult
+    | PublicationItemResult
+    | PublicationCancelResult
+    | PublicationStatusResult
+    | CommentsListResult;
 }
 export interface DiffFileResult {
   target: TargetIdentity;
@@ -696,6 +909,329 @@ export interface DraftStageResult {
   localId: string;
   changed: boolean;
   alreadyStaged: boolean;
+}
+export interface PublicationPrepareResult {
+  scope: PublicationScope;
+  approvalId: string;
+  expiresAt: number;
+  key: string;
+  recordVersion: string;
+  /**
+   * @minItems 1
+   * @maxItems 20
+   */
+  items:
+    | [PublicationPreviewItem]
+    | [PublicationPreviewItem, PublicationPreviewItem]
+    | [PublicationPreviewItem, PublicationPreviewItem, PublicationPreviewItem]
+    | [PublicationPreviewItem, PublicationPreviewItem, PublicationPreviewItem, PublicationPreviewItem]
+    | [
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem
+      ]
+    | [
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem
+      ]
+    | [
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem
+      ]
+    | [
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem
+      ]
+    | [
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem
+      ]
+    | [
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem
+      ]
+    | [
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem
+      ]
+    | [
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem
+      ]
+    | [
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem
+      ]
+    | [
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem
+      ]
+    | [
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem
+      ]
+    | [
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem
+      ]
+    | [
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem
+      ]
+    | [
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem
+      ]
+    | [
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem
+      ]
+    | [
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem,
+        PublicationPreviewItem
+      ];
+}
+export interface PublicationPreviewItem {
+  comment: ApprovedComment;
+  markdown: string;
+}
+export interface ApprovedComment {
+  scope: PublicationScope;
+  localId: string;
+  headSha: string;
+  baseSha: string;
+  mode: PublicationMode;
+  path: string;
+  to: number | null;
+  from: number | null;
+  parentId: string | null;
+  raw: string;
+  findingRef?: PublicationFindingAssociation;
+  originalDraftHash?: string;
+}
+export interface PublicationFindingAssociation {
+  reviewRunId: string;
+  findingId: string;
+  findingFingerprint: string;
+}
+export interface PublicationItemResult {
+  scope: PublicationScope;
+  entry: PublicationJournalEntry;
+  localSaved: boolean;
+  draftRemoved: boolean;
+}
+export interface PublicationJournalEntry {
+  comment: ApprovedComment;
+  payloadHash: string;
+  attempt: string;
+  state: PublicationState;
+  remoteId: string | null;
+  confirmedAt?: number;
+  startedAt?: number;
+}
+export interface PublicationCancelResult {
+  canceled: boolean;
+}
+export interface PublicationStatusResult {
+  scope: PublicationScope;
+  /**
+   * @maxItems 50
+   */
+  entries: PublicationJournalEntry[];
+  nextAfter: string | null;
+}
+export interface CommentsListResult {
+  scope: PublicationScope;
+  /**
+   * @maxItems 100
+   */
+  comments: RemoteComment[];
+  version: string;
+  offset: number;
+  totalItems: number;
+  nextOffset: number | null;
+}
+export interface RemoteComment {
+  id: string;
+  parentId: string | null;
+  authorId: string;
+  authorName: string;
+  raw: string;
+  createdAt: string;
+  deleted: boolean;
+  mode: PublicationMode;
+  path: string;
+  to: number | null;
+  from: number | null;
+  commitId: string | null;
+  rangeStart: number | null;
 }
 export interface ResponseError {
   type: "response";

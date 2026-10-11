@@ -209,6 +209,36 @@ pub struct TargetParams {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "method", rename_all = "camelCase")]
 pub enum Request {
+    #[serde(rename = "publication.prepare")]
+    PublicationPrepare {
+        id: String,
+        params: crate::services::draft_publication::PrepareParams,
+    },
+    #[serde(rename = "publication.apply")]
+    PublicationApply {
+        id: String,
+        params: crate::services::draft_publication::ApplyParams,
+    },
+    #[serde(rename = "publication.cancel")]
+    PublicationCancel {
+        id: String,
+        params: crate::services::draft_publication::CancelParams,
+    },
+    #[serde(rename = "publication.status")]
+    PublicationStatus {
+        id: String,
+        params: crate::services::draft_publication::StatusParams,
+    },
+    #[serde(rename = "publication.reconcile")]
+    PublicationReconcile {
+        id: String,
+        params: crate::services::draft_publication::ReconcileParams,
+    },
+    #[serde(rename = "comments.list")]
+    CommentsList {
+        id: String,
+        params: crate::services::draft_publication::CommentsParams,
+    },
     #[serde(rename = "draft.prepare")]
     DraftPrepare {
         id: String,
@@ -366,7 +396,13 @@ pub enum Request {
 impl Request {
     pub fn id(&self) -> &str {
         match self {
-            Self::DraftPrepare { id, .. }
+            Self::PublicationPrepare { id, .. }
+            | Self::PublicationApply { id, .. }
+            | Self::PublicationCancel { id, .. }
+            | Self::PublicationStatus { id, .. }
+            | Self::PublicationReconcile { id, .. }
+            | Self::CommentsList { id, .. }
+            | Self::DraftPrepare { id, .. }
             | Self::DraftStage { id, .. }
             | Self::WorkspaceRead { id, .. }
             | Self::WorkspaceMutate { id, .. }
@@ -410,6 +446,12 @@ impl Request {
 
     pub fn method(&self) -> &'static str {
         match self {
+            Self::PublicationPrepare { .. } => "publication.prepare",
+            Self::PublicationApply { .. } => "publication.apply",
+            Self::PublicationCancel { .. } => "publication.cancel",
+            Self::PublicationStatus { .. } => "publication.status",
+            Self::PublicationReconcile { .. } => "publication.reconcile",
+            Self::CommentsList { .. } => "comments.list",
             Self::DraftPrepare { .. } => "draft.prepare",
             Self::DraftStage { .. } => "draft.stage",
             Self::WorkspaceRead { .. } => "workspace.read",
@@ -459,6 +501,30 @@ impl Request {
             return Err(invalid_request("request id must not be empty"));
         }
         match self {
+            Self::PublicationPrepare { params, .. } => {
+                crate::services::draft_publication::validate_scope(&params.scope)
+                    .map_err(|message| invalid_request(&message))?
+            }
+            Self::PublicationApply { params, .. } => {
+                crate::services::draft_publication::validate_scope(&params.scope)
+                    .map_err(|message| invalid_request(&message))?
+            }
+            Self::PublicationCancel { params, .. } => {
+                crate::services::draft_publication::validate_scope(&params.scope)
+                    .map_err(|message| invalid_request(&message))?
+            }
+            Self::PublicationStatus { params, .. } => {
+                crate::services::draft_publication::validate_scope(&params.scope)
+                    .map_err(|message| invalid_request(&message))?
+            }
+            Self::PublicationReconcile { params, .. } => {
+                crate::services::draft_publication::validate_scope(&params.scope)
+                    .map_err(|message| invalid_request(&message))?
+            }
+            Self::CommentsList { params, .. } => {
+                crate::services::draft_publication::validate_scope(&params.scope)
+                    .map_err(|message| invalid_request(&message))?
+            }
             Self::DraftPrepare { params, .. } => crate::services::draft_staging::validate(params)?,
             Self::DraftStage { params, .. } => {
                 crate::services::draft_staging::validate(

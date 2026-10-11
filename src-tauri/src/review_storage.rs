@@ -48,7 +48,7 @@ const APP_DIR: &str = "norn";
 const LEGACY_APP_DIR: &str = "lachesi";
 pub(crate) const DB_FILE: &str = "norn.sqlite3";
 pub(crate) const LEGACY_DB_FILE: &str = "lachesi.sqlite3";
-const LATEST_SCHEMA_VERSION: i64 = 16;
+const LATEST_SCHEMA_VERSION: i64 = 17;
 const LEGACY_REVIEWS_DIR: &str = "reviews";
 const LEGACY_REVIEWS_MIGRATION_MARKER: &str = ".legacy-reviews-imported-v1";
 const MAX_ADMINISTRATIVE_AUDIT_TIMESTAMP_MS: i64 = 4_102_444_800_000;
@@ -1243,6 +1243,31 @@ fn migrate(conn: &mut Connection) -> Result<(), String> {
         .map_err(|error| error.to_string())?;
     migration.commit().map_err(|error| error.to_string())?;
 
+    if conn
+        .query_row(
+            "SELECT COUNT(*) FROM schema_migrations WHERE version = 17",
+            [],
+            |row| row.get::<_, i64>(0),
+        )
+        .map_err(|error| error.to_string())?
+        == 0
+    {
+        let migration = conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(|error| error.to_string())?;
+        migration.execute_batch(
+            "CREATE TABLE local_draft_publications_v17 (
+              identity_key TEXT PRIMARY KEY CHECK(length(identity_key) = 64),
+              entry_json TEXT NOT NULL CHECK(length(entry_json) <= 98304)
+            );
+            INSERT INTO local_draft_publications_v17 SELECT identity_key, entry_json FROM local_draft_publications;
+            DROP TABLE local_draft_publications;
+            ALTER TABLE local_draft_publications_v17 RENAME TO local_draft_publications;
+            INSERT INTO schema_migrations(version) VALUES (17);"
+        ).map_err(|error| error.to_string())?;
+        migration.commit().map_err(|error| error.to_string())?;
+    }
+
     Ok(())
 }
 
@@ -1995,13 +2020,23 @@ pub fn record_finding_feedback(
     event: &ReviewFindingFeedbackEvent,
 ) -> Result<ReviewFindingFeedbackState, String> {
     event.validate().map_err(|error| error.to_string())?;
-    let target = event.target();
-    let pr_id = feedback_pr_id(&event.identity)?;
     let mut conn = open()?;
     let transaction = conn
         .transaction_with_behavior(TransactionBehavior::Immediate)
         .map_err(|error| error.to_string())?;
-    let existing = transaction
+    let state = record_finding_feedback_in(&transaction, event)?;
+    transaction.commit().map_err(|error| error.to_string())?;
+    Ok(state)
+}
+
+fn record_finding_feedback_in(
+    connection: &Connection,
+    event: &ReviewFindingFeedbackEvent,
+) -> Result<ReviewFindingFeedbackState, String> {
+    event.validate().map_err(|error| error.to_string())?;
+    let target = event.target();
+    let pr_id = feedback_pr_id(&event.identity)?;
+    let existing = connection
         .query_row(
             r#"
             SELECT event_id, tenant_id, provider, workspace, repo, pr_id,
@@ -2021,7 +2056,7 @@ pub fn record_finding_feedback(
             );
         }
     } else {
-        transaction
+        connection
             .execute(
                 r#"
                 INSERT INTO review_finding_feedback_events (
@@ -2047,9 +2082,7 @@ pub fn record_finding_feedback(
             )
             .map_err(|error| error.to_string())?;
     }
-    let state = get_finding_feedback_state_from(&transaction, &target)?;
-    transaction.commit().map_err(|error| error.to_string())?;
-    Ok(state)
+    get_finding_feedback_state_from(connection, &target)
 }
 
 pub fn get_finding_feedback_state(
@@ -2268,7 +2301,7 @@ fn stored_review_run_to_metrics(
     }))
 }
 
-fn get_finding_feedback_state_from(
+pub(crate) fn get_finding_feedback_state_from(
     conn: &Connection,
     target: &ReviewFindingFeedbackTarget,
 ) -> Result<ReviewFindingFeedbackState, String> {
@@ -4063,6 +4096,50 @@ pub fn load_review_json(workspace: &str, repo: &str, id: u32) -> Result<Option<S
 
 pub fn save_review_json(workspace: &str, repo: &str, id: u32, json: &str) -> Result<(), String> {
     save_review_json_for_tenant("local", workspace, repo, id, json, false)
+}
+
+/// Apply a narrow local review update to the latest SQLite row inside one
+/// immediate transaction. This prevents publication metadata from overwriting
+/// chat/run updates that committed before this operation.
+pub(crate) fn update_local_review_json(
+    workspace: &str,
+    repo: &str,
+    id: u32,
+    update: impl FnOnce(
+        &str,
+        &Connection,
+    ) -> Result<(String, Option<ReviewFindingFeedbackEvent>), String>,
+) -> Result<(), String> {
+    let mut connection = publication_database()?;
+    let transaction = connection
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .map_err(|_| "Cannot lock saved review metadata.".to_string())?;
+    let key = review_key(workspace, repo, id);
+    let original: String = transaction.query_row(
+        "SELECT store_json FROM ai_review_stores WHERE tenant_id = 'local' AND review_key = ?1 AND target_kind = 'pull_request' AND length(CAST(store_json AS BLOB)) <= 16777216", [&key], |row| row.get(0)
+    ).optional().map_err(|_| "Cannot read saved review metadata.".to_string())?.ok_or("Saved review metadata is unavailable or exceeds its update limit.")?;
+    let (updated, feedback) = update(&original, &transaction)?;
+    if updated.len() > 16 * 1024 * 1024
+        || serde_json::from_str::<serde_json::Value>(&updated).is_err()
+    {
+        return Err("Invalid saved review metadata update.".into());
+    }
+    if updated != original {
+        transaction.execute("UPDATE ai_review_stores SET store_json = ?2, updated_at = strftime('%s','now') || '000' WHERE tenant_id = 'local' AND review_key = ?1", params![key, updated]).map_err(|_| "Cannot persist saved review metadata.".to_string())?;
+    }
+    if let Some(event) = feedback {
+        if event.identity.tenant_id != "local"
+            || event.identity.workspace != workspace
+            || event.identity.repo != repo
+            || event.identity.pr_id != u64::from(id)
+        {
+            return Err("Reviewer feedback does not match this saved review.".into());
+        }
+        record_finding_feedback_in(&transaction, &event)?;
+    }
+    transaction
+        .commit()
+        .map_err(|_| "Cannot commit saved review metadata.".to_string())
 }
 
 pub fn load_local_review_json(
@@ -6495,7 +6572,7 @@ mod tests {
                 .expect("read migration versions");
             assert_eq!(
                 versions,
-                vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
+                vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17]
             );
             let store_columns: Vec<String> = conn
                 .prepare("PRAGMA table_info(ai_review_stores)")

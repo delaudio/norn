@@ -133,3 +133,22 @@ export const AlreadyStagedFindingDraft: Story = {
   args: { frameId: "shell-staging-duplicate-80x30" },
 };
 export const FindingDraftConflict: Story = { args: { frameId: "shell-staging-conflict-80x30" } };
+
+export const PublicationSelection: Story = { args: { frameId: "shell-publication-drafts-120x40" } };
+export const CompactPublicationSelection: Story = {
+  args: { frameId: "shell-publication-drafts-50x20" },
+};
+export const ExactPublicationPreview: Story = {
+  args: { frameId: "shell-publication-preview-120x40" },
+};
+export const CompactPublicationPreview: Story = {
+  args: { frameId: "shell-publication-preview-50x20" },
+};
+export const PartialPublication: Story = { args: { frameId: "shell-publication-partial-120x40" } };
+export const PublicationJournal: Story = { args: { frameId: "shell-publication-status-80x30" } };
+export const RemoteCommentThreads: Story = {
+  args: { frameId: "shell-publication-threads-120x30" },
+};
+export const CompactRemoteCommentThreads: Story = {
+  args: { frameId: "shell-publication-threads-50x20" },
+};
