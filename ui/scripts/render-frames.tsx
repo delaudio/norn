@@ -290,7 +290,30 @@ async function pushPreviewScene() {
   return { client, store };
 }
 
+async function branchScene(action: "sync" | "conflicts") {
+  const { client, store, ready } = readyStore(
+    new FakeBackendTransport({ repositories, targets, files, findings }),
+  );
+  await ready;
+  await store.selectPicker(2);
+  await store.previewBranch(client, action);
+  return { client, store };
+}
+
 const scenes: Scene[] = [
+  { id: "shell-sync-preview-120x30", cols: 120, rows: 30, build: () => branchScene("sync") },
+  {
+    id: "shell-conflicts-preview-120x30",
+    cols: 120,
+    rows: 30,
+    build: () => branchScene("conflicts"),
+  },
+  {
+    id: "shell-conflicts-preview-50x15",
+    cols: 50,
+    rows: 15,
+    build: () => branchScene("conflicts"),
+  },
   { id: "shell-commit-composer-120x30", cols: 120, rows: 30, build: commitComposerScene },
   { id: "shell-commit-preview-120x30", cols: 120, rows: 30, build: commitPreviewScene },
   { id: "shell-push-preview-120x30", cols: 120, rows: 30, build: pushPreviewScene },

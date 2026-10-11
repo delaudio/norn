@@ -256,3 +256,47 @@ test("commit composer opens a preview and requires y before executing", async ()
     renderer.renderer.destroy();
   }
 });
+
+test("branch shortcut previews cannot execute or switch action without approval", async () => {
+  const renderer = await createTestRenderer({ width: 100, height: 30 });
+  const client = new BackendClient(
+    new FakeBackendTransport({
+      repositories,
+      targets: [
+        {
+          provider: "github",
+          workspace: "acme",
+          repo: "payments",
+          prId: 9,
+          runId: "run-fix",
+          title: "Fix",
+          status: "succeeded",
+        },
+      ],
+    }),
+  );
+  const store = new ShellStore();
+  await store.connect(client);
+  await store.selectPicker(2);
+  const ui = mountApp(renderer.renderer, store, client, () => {});
+  try {
+    renderer.mockInput.pressKey("u");
+    await Bun.sleep(5);
+    await renderer.renderOnce();
+    expect(renderer.captureCharFrame()).toContain("Approve branch sync?");
+    renderer.mockInput.pressKey("o");
+    expect(store.getSnapshot().fixPreview?.action).toBe("sync");
+    expect(store.getSnapshot().operation).toBeNull();
+    renderer.mockInput.pressKey("n");
+    renderer.mockInput.pressKey("o");
+    await Bun.sleep(5);
+    await renderer.renderOnce();
+    expect(renderer.captureCharFrame()).toContain("Approve conflict resolution?");
+    renderer.mockInput.pressKey("y");
+    await Bun.sleep(5);
+    expect(store.getSnapshot().operation?.id).toContain("fake-conflicts");
+  } finally {
+    ui.unmount();
+    renderer.renderer.destroy();
+  }
+});

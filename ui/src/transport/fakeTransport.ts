@@ -90,6 +90,8 @@ export class FakeBackendTransport implements BackendTransport {
           truncated: false,
         };
       case "review.commit.preview":
+      case "review.sync.preview":
+      case "review.conflicts.preview":
       case "review.push.preview":
       case "review.fix.preview": {
         const action =
@@ -97,7 +99,11 @@ export class FakeBackendTransport implements BackendTransport {
             ? "commit"
             : method === "review.push.preview"
               ? "push"
-              : "fix";
+              : method === "review.sync.preview"
+                ? "sync"
+                : method === "review.conflicts.preview"
+                  ? "conflicts"
+                  : "fix";
         if (
           action === "commit" &&
           (this.fixPhase !== "readyToCommit" || !(params.message as string)?.trim())
@@ -136,12 +142,20 @@ export class FakeBackendTransport implements BackendTransport {
                     "Push the approved commit to origin/feature without force.",
                     "Inspect the remote on interruption. No automatic retry.",
                   ]
-                : [
-                    "Stash and restore local changes.",
-                    "Check out feature; fetch/pull origin.",
-                    "Run Claude with edit permissions.",
-                    "Leave edits for inspection. No automatic commit or push.",
-                  ],
+                : action === "sync" || action === "conflicts"
+                  ? [
+                      "Requires a clean source checkout; fetch and merge destination without committing.",
+                      "Preserve conflicts and partial changes. No automatic commit or push.",
+                      ...(action === "conflicts"
+                        ? ["Run Claude to resolve conflicts and verify Git index."]
+                        : []),
+                    ]
+                  : [
+                      "Stash and restore local changes.",
+                      "Check out feature; fetch/pull origin.",
+                      "Run Claude with edit permissions.",
+                      "Leave edits for inspection. No automatic commit or push.",
+                    ],
         };
       }
       case "review.fix.state":
@@ -158,19 +172,30 @@ export class FakeBackendTransport implements BackendTransport {
           },
         };
       case "review.commit":
+      case "review.sync":
+      case "review.conflicts":
       case "review.push":
       case "review.fix": {
         const token = params.approvalToken as string;
         const approvedTarget = this.approvals.get(token);
         this.approvals.delete(token);
         const action =
-          method === "review.commit" ? "commit" : method === "review.push" ? "push" : "fix";
+          method === "review.commit"
+            ? "commit"
+            : method === "review.push"
+              ? "push"
+              : method === "review.sync"
+                ? "sync"
+                : method === "review.conflicts"
+                  ? "conflicts"
+                  : "fix";
         if (
           approvedTarget?.target !== JSON.stringify(params.target) ||
           approvedTarget.action !== action
         )
           throw new Error("Approval missing or target changed.");
         const operationId = `fake-${action}-${this.nextOperation++}`;
+        if (action === "sync" || action === "conflicts") this.fixPhase = "readyToCommit";
         if (action === "commit") this.fixPhase = "readyToPush";
         if (action === "push") this.fixPhase = "completed";
         const target = params.target as TargetIdentity;

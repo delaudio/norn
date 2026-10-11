@@ -3,6 +3,14 @@ import type { RefObject } from "react";
 import type { FixPreview, FixState } from "../../transport/backendClient";
 import { theme } from "../theme";
 
+const approvalTitles = {
+  fix: "Approve filesystem changes?",
+  commit: "Approve commit?",
+  push: "Approve push?",
+  sync: "Approve branch sync?",
+  conflicts: "Approve conflict resolution?",
+} satisfies Record<NonNullable<FixPreview["action"]>, string>;
+
 export function FixPanel({
   preview,
   result,
@@ -25,11 +33,7 @@ export function FixPanel({
     >
       <text fg={theme.primary} height={1} wrapMode="none" truncate>
         {preview
-          ? preview.action === "commit"
-            ? "Approve commit? · y approve · Esc/n dismiss"
-            : preview.action === "push"
-              ? "Approve push? · y approve · Esc/n dismiss"
-              : "Approve filesystem changes? · y approve · Esc/n dismiss"
+          ? `${approvalTitles[preview.action ?? "fix"]} · y approve · Esc/n dismiss`
           : loading
             ? "Inspecting fix effects…"
             : `Fix · ${result?.status} · ${result?.phase}`}

@@ -79,6 +79,37 @@ pub(crate) fn checkout_fingerprint(path: &Path) -> Result<String, String> {
     }
     let mut hasher = Sha256::new();
     hasher.update(snapshot.snapshot_sha256.as_bytes());
+    // Pending operation identities must be part of approval, including a merge
+    // of a destination that happens to leave the same working tree contents.
+    for reference in [
+        "MERGE_HEAD",
+        "CHERRY_PICK_HEAD",
+        "REVERT_HEAD",
+        "REBASE_HEAD",
+    ] {
+        let state = run_git_bounded_with_control(
+            path,
+            &["rev-parse", "--verify", reference],
+            None,
+            4096,
+            "Git operation identity",
+            &control,
+        )?;
+        hasher.update(reference.as_bytes());
+        hasher.update(state.stdout);
+    }
+    let refs = run_git_bounded_with_control(
+        path,
+        &["show-ref"],
+        None,
+        4 * 1024 * 1024,
+        "branch identities",
+        &control,
+    )?;
+    if !refs.status.success() {
+        return Err("Cannot inspect branch identities.".to_string());
+    }
+    hasher.update(refs.stdout);
     hasher.update(index.stdout);
     hasher.update((remote.stdout.len() as u64).to_be_bytes());
     hasher.update(remote.stdout);

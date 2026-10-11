@@ -55,3 +55,9 @@ export const Gallery: Story = {
     </div>
   ),
 };
+
+export const SyncPreview: Story = { args: { frameId: "shell-sync-preview-120x30" } };
+export const ConflictsPreview: Story = { args: { frameId: "shell-conflicts-preview-120x30" } };
+export const CompactConflictsPreview: Story = {
+  args: { frameId: "shell-conflicts-preview-50x15" },
+};

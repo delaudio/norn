@@ -130,6 +130,36 @@ export type Request =
         target: TargetIdentity;
         approvalToken: string;
       };
+    }
+  | {
+      type: "request";
+      id: RequestId;
+      method: "review.sync.preview";
+      params: TargetParams;
+    }
+  | {
+      type: "request";
+      id: RequestId;
+      method: "review.sync";
+      params: {
+        target: TargetIdentity;
+        approvalToken: string;
+      };
+    }
+  | {
+      type: "request";
+      id: RequestId;
+      method: "review.conflicts.preview";
+      params: TargetParams;
+    }
+  | {
+      type: "request";
+      id: RequestId;
+      method: "review.conflicts";
+      params: {
+        target: TargetIdentity;
+        approvalToken: string;
+      };
     };
 export type RequestId = string;
 /**

@@ -701,3 +701,45 @@ test("a late commit-state response cannot open the composer on another target", 
   expect(store.getSnapshot().composing).toBe(false);
   expect(store.getSnapshot().fixPreview).toBeNull();
 });
+
+test("sync and conflict resolution preview distinct effects and require explicit approval", async () => {
+  const client = new BackendClient(
+    new FakeBackendTransport({
+      repositories,
+      targets: [
+        {
+          provider: "github",
+          workspace: "acme",
+          repo: "payments",
+          prId: 9,
+          runId: "run-fix",
+          title: "Fix",
+          status: "succeeded",
+        },
+      ],
+    }),
+  );
+  const store = new ShellStore();
+  await store.connect(client);
+  await store.selectPicker(2);
+  await store.previewBranch(client, "sync");
+  expect(store.getSnapshot().fixPreview?.action).toBe("sync");
+  expect(store.getSnapshot().operation).toBeNull();
+  store.dismissFix();
+  expect(store.getSnapshot().operation).toBeNull();
+  await store.previewBranch(client, "conflicts");
+  const preview = store.getSnapshot().fixPreview!;
+  expect(preview.action).toBe("conflicts");
+  expect(preview.effects.join(" ")).toContain("resolve conflicts");
+  await store.confirmFix(client);
+  const operation = store.getSnapshot().operation!;
+  expect(operation.id).toContain("fake-conflicts");
+  store.applyEvent({
+    operationId: operation.id,
+    sequence: 1,
+    target: preview.target,
+    event: { kind: "state", state: "succeeded" },
+  });
+  await Bun.sleep(5);
+  expect(store.getSnapshot().fixState?.phase).toBe("readyToCommit");
+});

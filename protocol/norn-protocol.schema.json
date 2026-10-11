@@ -215,7 +215,11 @@
         "review.commit.preview",
         "review.commit",
         "review.push.preview",
-        "review.push"
+        "review.push",
+        "review.sync.preview",
+        "review.sync",
+        "review.conflicts.preview",
+        "review.conflicts"
       ]
     },
     "DiffFileParams": {
@@ -1269,6 +1273,130 @@
             },
             "method": {
               "const": "review.push"
+            },
+            "params": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "target",
+                "approvalToken"
+              ],
+              "properties": {
+                "target": {
+                  "$ref": "#/definitions/TargetIdentity"
+                },
+                "approvalToken": {
+                  "type": "string",
+                  "pattern": "^[0-9a-fA-F]{64}$"
+                }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "type": {
+              "const": "request"
+            },
+            "id": {
+              "$ref": "#/definitions/RequestId"
+            },
+            "method": {
+              "const": "review.sync.preview"
+            },
+            "params": {
+              "$ref": "#/definitions/TargetParams"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "type": {
+              "const": "request"
+            },
+            "id": {
+              "$ref": "#/definitions/RequestId"
+            },
+            "method": {
+              "const": "review.sync"
+            },
+            "params": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "target",
+                "approvalToken"
+              ],
+              "properties": {
+                "target": {
+                  "$ref": "#/definitions/TargetIdentity"
+                },
+                "approvalToken": {
+                  "type": "string",
+                  "pattern": "^[0-9a-fA-F]{64}$"
+                }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "type": {
+              "const": "request"
+            },
+            "id": {
+              "$ref": "#/definitions/RequestId"
+            },
+            "method": {
+              "const": "review.conflicts.preview"
+            },
+            "params": {
+              "$ref": "#/definitions/TargetParams"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "type": {
+              "const": "request"
+            },
+            "id": {
+              "$ref": "#/definitions/RequestId"
+            },
+            "method": {
+              "const": "review.conflicts"
             },
             "params": {
               "type": "object",

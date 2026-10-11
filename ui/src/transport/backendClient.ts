@@ -78,7 +78,7 @@ export interface OperationStatus {
 }
 
 export interface FixPreview {
-  action?: "fix" | "commit" | "push";
+  action?: "fix" | "commit" | "push" | "sync" | "conflicts";
   commitMessage?: string | null;
   filesToCommit?: string[];
   commitSha?: string | null;
@@ -215,6 +215,24 @@ export class BackendClient {
 
   async reviewPush(target: TargetIdentity, approvalToken: string): Promise<OperationStatus> {
     return (await this.transport.request("review.push", {
+      target,
+      approvalToken,
+    })) as unknown as OperationStatus;
+  }
+
+  async branchPreview(target: TargetIdentity, action: "sync" | "conflicts"): Promise<FixPreview> {
+    return (await this.transport.request(
+      action === "sync" ? "review.sync.preview" : "review.conflicts.preview",
+      { target },
+    )) as unknown as FixPreview;
+  }
+
+  async reviewBranch(
+    target: TargetIdentity,
+    approvalToken: string,
+    action: "sync" | "conflicts",
+  ): Promise<OperationStatus> {
+    return (await this.transport.request(action === "sync" ? "review.sync" : "review.conflicts", {
       target,
       approvalToken,
     })) as unknown as OperationStatus;
