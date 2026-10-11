@@ -1,0 +1,17 @@
+{
+  "type": "response",
+  "id": "workspace-read",
+  "ok": true,
+  "result": {
+    "key": "prompt.github:fixture/demo",
+    "recordVersion": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "available": true,
+    "offset": 0,
+    "nextOffset": null,
+    "totalItems": 1,
+    "payload": {
+      "kind": "prompt",
+      "value": "Saved prompt"
+    }
+  }
+}

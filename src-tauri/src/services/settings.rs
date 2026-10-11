@@ -252,6 +252,7 @@ fn save_at(
     settings: WorkspaceSettings,
 ) -> Result<SettingsSnapshot, String> {
     settings.validate()?;
+    let _file_guard = crate::runtime_identity::acquire_storage_lock(canonical)?;
     let (mut config, version) = read_config(canonical, legacy)?;
     if version != expected_version {
         return Err("Settings changed since they were opened. Reload before saving; your draft was not applied.".to_string());

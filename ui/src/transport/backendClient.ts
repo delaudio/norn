@@ -1,5 +1,8 @@
 import type {
   AuthProviderParams,
+  RecordMutation,
+  RecordMutationResult,
+  RecordPage,
   WorkspaceSettings,
 } from "../../../src/protocol/generated/protocol";
 // Typed facade over a BackendTransport. Domain methods are added as later
@@ -156,6 +159,103 @@ export interface DataImportResult {
 }
 export class BackendClient {
   constructor(private readonly transport: BackendTransport) {}
+
+  async readWorkspace(key: string, current: () => boolean = () => true): Promise<RecordPage> {
+    let first: RecordPage | null = null;
+    let offset = 0;
+    let bytes = 0;
+    const values: unknown[] = [];
+    const kind = key === "theme" ? "theme" : key.split(".")[0];
+    for (let index = 0; index < 10001; index++) {
+      if (!current()) throw new Error("Workspace selection changed.");
+      const result = await this.transport.request("workspace.read", {
+        key,
+        offset,
+        limit: 100,
+        ...(first ? { recordVersion: first.recordVersion } : {}),
+      });
+      if (!current()) throw new Error("Workspace selection changed.");
+      const page = result as unknown as RecordPage;
+      const size = Buffer.byteLength(JSON.stringify(result));
+      bytes += size;
+      if (
+        size > 256 * 1024 ||
+        bytes > 20 * 1024 * 1024 ||
+        page.key !== key ||
+        !/^[a-f0-9]{64}$/.test(page.recordVersion ?? "") ||
+        typeof page.available !== "boolean" ||
+        page.offset !== offset ||
+        !Number.isInteger(page.totalItems) ||
+        page.totalItems < 0 ||
+        page.totalItems > 10000 ||
+        page.payload?.kind !== kind ||
+        (first &&
+          (page.recordVersion !== first.recordVersion ||
+            page.totalItems !== first.totalItems ||
+            page.available !== first.available))
+      )
+        throw new Error("Invalid or inconsistent workspace page.");
+      first ??= page;
+      if (Array.isArray(page.payload.value)) {
+        const items = page.payload.value;
+        if (
+          !["drafts", "references", "viewed"].includes(kind ?? "") ||
+          items.length > 100 ||
+          offset + items.length > page.totalItems ||
+          (kind === "viewed" &&
+            items.some(
+              (item) =>
+                typeof item !== "string" || Buffer.byteLength(item) > 4096 || /\p{Cc}/u.test(item),
+            ))
+        )
+          throw new Error("Invalid workspace page length.");
+        values.push(...items);
+        offset += items.length;
+      } else {
+        if (
+          !["prompt", "theme"].includes(kind ?? "") ||
+          typeof page.payload.value !== "string" ||
+          offset !== 0 ||
+          page.nextOffset !== null ||
+          Buffer.byteLength(page.payload.value) > 65536 ||
+          (kind === "theme" && !["dark", "light"].includes(page.payload.value))
+        )
+          throw new Error("Invalid workspace scalar.");
+        return page;
+      }
+      if (page.nextOffset === null) {
+        if (offset !== page.totalItems) throw new Error("Workspace page ended early.");
+        return {
+          ...first,
+          nextOffset: null,
+          payload: { kind, value: values } as RecordPage["payload"],
+        };
+      }
+      if (page.nextOffset !== offset || page.offset === offset)
+        throw new Error("Workspace page did not advance.");
+    }
+    throw new Error("Workspace record requires too many pages.");
+  }
+
+  async mutateWorkspace(
+    key: string,
+    expectedVersion: string,
+    mutation: RecordMutation,
+  ): Promise<RecordMutationResult> {
+    const result = await this.transport.request("workspace.mutate", {
+      key,
+      expectedVersion,
+      mutation,
+    });
+    if (
+      result.key !== key ||
+      typeof result.changed !== "boolean" ||
+      typeof result.recordVersion !== "string" ||
+      !/^[a-f0-9]{64}$/.test(result.recordVersion)
+    )
+      throw new Error("Invalid workspace mutation acknowledgement; reload before retrying.");
+    return result as unknown as RecordMutationResult;
+  }
 
   start() {
     return this.transport.start();

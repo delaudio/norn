@@ -209,6 +209,16 @@ pub struct TargetParams {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "method", rename_all = "camelCase")]
 pub enum Request {
+    #[serde(rename = "workspace.read")]
+    WorkspaceRead {
+        id: String,
+        params: crate::services::workspace_data::RecordReadParams,
+    },
+    #[serde(rename = "workspace.mutate")]
+    WorkspaceMutate {
+        id: String,
+        params: crate::services::workspace_data::RecordMutateParams,
+    },
     #[serde(rename = "data.preview")]
     DataPreview {
         id: String,
@@ -338,7 +348,9 @@ pub enum Request {
 impl Request {
     pub fn id(&self) -> &str {
         match self {
-            Self::DataPreview { id, .. }
+            Self::WorkspaceRead { id, .. }
+            | Self::WorkspaceMutate { id, .. }
+            | Self::DataPreview { id, .. }
             | Self::DataImport { id, .. }
             | Self::DataExport { id, .. }
             | Self::AuthStatus { id, .. }
@@ -376,6 +388,8 @@ impl Request {
 
     pub fn method(&self) -> &'static str {
         match self {
+            Self::WorkspaceRead { .. } => "workspace.read",
+            Self::WorkspaceMutate { .. } => "workspace.mutate",
             Self::DataPreview { .. } => "data.preview",
             Self::DataImport { .. } => "data.import",
             Self::DataExport { .. } => "data.export",
@@ -419,6 +433,32 @@ impl Request {
             return Err(invalid_request("request id must not be empty"));
         }
         match self {
+            Self::WorkspaceRead { params, .. } => {
+                if params.key.is_empty()
+                    || params.key.len() > 1024
+                    || params.offset > 10_000
+                    || params.limit == 0
+                    || params.limit > 100
+                    || params.record_version.as_deref().is_some_and(|value| {
+                        value.len() != 64 || !value.bytes().all(|byte| byte.is_ascii_hexdigit())
+                    })
+                    || (params.offset > 0 && params.record_version.is_none())
+                {
+                    return Err(invalid_request("Invalid user-data page parameters."));
+                }
+            }
+            Self::WorkspaceMutate { params, .. } => {
+                if params.key.is_empty()
+                    || params.key.len() > 1024
+                    || params.expected_version.len() != 64
+                    || !params
+                        .expected_version
+                        .bytes()
+                        .all(|byte| byte.is_ascii_hexdigit())
+                {
+                    return Err(invalid_request("Invalid user-data mutation parameters."));
+                }
+            }
             Self::DataPreview { params, .. } => validate_data_path(&params.path)?,
             Self::DataExport { params, .. } => validate_data_path(&params.path)?,
             Self::DataImport { params, .. } => {
@@ -857,6 +897,9 @@ mod tests {
             "valid/request-diff-file.json",
             "valid/request-review-start.json",
             "valid/request-operation-cancel.json",
+            "valid/request-workspace-read.json",
+            "valid/request-workspace-mutate.json",
+            "valid/response-workspace-page.json",
             "valid/response-ok.json",
             "valid/response-error.json",
             "valid/event-progress.json",
@@ -881,6 +924,8 @@ mod tests {
             "invalid/unknown-field.json",
             "invalid/version-mismatch.json",
             "invalid/bad-target.json",
+            "invalid/request-workspace-unpinned-page.json",
+            "invalid/request-workspace-empty-version.json",
         ] {
             let bytes = read_fixture(fixture);
             let client = decode_client_line(&bytes);

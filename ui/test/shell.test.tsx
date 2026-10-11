@@ -460,3 +460,66 @@ test("user-data paths isolate review shortcuts and require preview before Ctrl+Y
     renderer.renderer.destroy();
   }
 });
+
+test("prompt panel fences pasted shortcuts, saves explicitly and restores viewed marks", async () => {
+  const renderer = await createTestRenderer({ width: 100, height: 30 });
+  const client = new BackendClient(
+    new FakeBackendTransport({
+      repositories,
+      targets: [
+        {
+          provider: "github",
+          workspace: "acme",
+          repo: "payments",
+          prId: 7,
+          runId: "run",
+          title: "Stored review",
+          status: "succeeded",
+        },
+      ],
+      workspaceRecords: {
+        "prompt.github:acme/payments": { kind: "prompt", value: "Imported policy" },
+        "viewed.github:acme/payments/7": { kind: "viewed", value: ["src/app.ts"] },
+      },
+    }),
+  );
+  const store = new ShellStore();
+  await store.connect(client);
+  await store.selectPicker(2);
+  let quits = 0;
+  const ui = mountApp(renderer.renderer, store, client, () => {
+    quits++;
+  });
+  try {
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    await renderer.renderOnce();
+    expect(store.getSnapshot().viewedFiles).toEqual(["src/app.ts"]);
+    renderer.mockInput.pressKey("n");
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    await renderer.renderOnce();
+    expect(renderer.captureCharFrame()).toContain("Imported policy");
+    renderer.mockInput.pressKey("u", { ctrl: true });
+    await renderer.mockInput.pasteBracketedText("qaprcmy-pasted prompt");
+    renderer.mockInput.pressEnter();
+    await renderer.renderOnce();
+    expect(store.getSnapshot().operation).toBeNull();
+    expect(quits).toBe(0);
+    expect((await client.readWorkspace("prompt.github:acme/payments")).payload.value).toBe(
+      "Imported policy",
+    );
+    renderer.mockInput.pressKey("s", { ctrl: true });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    await renderer.renderOnce();
+    expect((await client.readWorkspace("prompt.github:acme/payments")).payload.value).toBe(
+      "qaprcmy-pasted prompt\n",
+    );
+    renderer.mockInput.pressEscape();
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    await renderer.renderOnce();
+    expect(store.getSnapshot().workspaceOpen).toBe(false);
+    expect(quits).toBe(0);
+  } finally {
+    ui.unmount();
+    renderer.renderer.destroy();
+  }
+});

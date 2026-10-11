@@ -24,11 +24,13 @@ import {
   visibleFindings,
 } from "../store";
 import { theme } from "../theme";
+import { WorkspaceStore } from "../workspaceStore";
 import { ConversationPanel } from "./ConversationPanel";
 import { DataPanel } from "./DataPanel";
 import { FixPanel } from "./FixPanel";
 import { SettingsPanel } from "./SettingsPanel";
 import { VirtualDiff } from "./VirtualDiff";
+import { WorkspacePanel } from "./WorkspacePanel";
 
 interface ShellProps {
   store: ShellStore;
@@ -44,7 +46,12 @@ function useShellInput(
   fixScroll: RefObject<ScrollBoxRenderable | null>,
 ) {
   useKeyboard((key) => {
-    if (key.defaultPrevented || store.getSnapshot().settingsOpen || store.getSnapshot().dataOpen)
+    if (
+      key.defaultPrevented ||
+      store.getSnapshot().settingsOpen ||
+      store.getSnapshot().dataOpen ||
+      store.getSnapshot().workspaceOpen
+    )
       return;
     if (key.ctrl && key.name === "c") {
       quit();
@@ -129,6 +136,8 @@ function useShellInput(
       void store.openBrowser(client);
     } else if (key.name === "m") {
       store.toggleSettings();
+    } else if (key.name === "n") {
+      store.toggleWorkspace();
     } else if (key.name === "z") {
       void store.refreshOperation();
     } else if (key.name === "x") {
@@ -136,7 +145,12 @@ function useShellInput(
     }
   });
   usePaste((event) => {
-    if (store.getSnapshot().settingsOpen || store.getSnapshot().dataOpen) return;
+    if (
+      store.getSnapshot().settingsOpen ||
+      store.getSnapshot().dataOpen ||
+      store.getSnapshot().workspaceOpen
+    )
+      return;
     if (store.getSnapshot().fixPreview) {
       event.preventDefault();
       return;
@@ -653,8 +667,9 @@ function pickerOptions(state: ShellSnapshot): ListOption[] {
 }
 
 function fileOptions(state: ShellSnapshot): ListOption[] {
+  const viewed = new Set(state.viewedFiles);
   return state.files.map((file) => ({
-    name: `${file.status[0]?.toUpperCase() ?? "?"} ${file.path}`,
+    name: `${viewed.has(file.path) ? "✓ " : ""}${file.status[0]?.toUpperCase() ?? "?"} ${file.path}`,
     description: `+${file.additions} -${file.deletions}`,
   }));
 }
@@ -716,6 +731,16 @@ function WorkspaceStatus({ state }: { state: ShellSnapshot }) {
 
 export function Shell({ store, client, quit }: ShellProps) {
   const state = useSyncExternalStore(store.subscribe, store.getSnapshot);
+  const workspace = useMemo(() => new WorkspaceStore(), []);
+  const workspaceEntry = state.picker[state.selectedPicker];
+  useEffect(() => {
+    if (!state.workspaceOpen) void store.refreshViewed(client, state.generation);
+  }, [store, client, state.generation, state.workspaceOpen]);
+  useEffect(() => {
+    if (!state.workspaceOpen) return;
+    void workspace.load(client, workspaceEntry);
+    return () => workspace.dispose();
+  }, [workspace, client, state.workspaceOpen, workspaceEntry]);
   const data = useMemo(() => new DataStore(), []);
   useEffect(() => {
     if (!state.dataOpen) return;
@@ -795,6 +820,15 @@ export function Shell({ store, client, quit }: ShellProps) {
               selectedIndex: state.selectedFinding,
             };
 
+  if (state.workspaceOpen)
+    return (
+      <WorkspacePanel
+        workspace={workspace}
+        client={client}
+        path={state.files[state.selectedFile]?.path}
+        onClose={() => store.toggleWorkspace()}
+      />
+    );
   if (state.dataOpen)
     return <DataPanel data={data} client={client} onClose={() => store.toggleData()} />;
   if (state.settingsOpen)
@@ -941,8 +975,8 @@ export function Shell({ store, client, quit }: ShellProps) {
           {state.fixPreview
             ? "y approve · Esc/n dismiss · ↑/↓ scroll effects"
             : wide
-              ? "j/k move  s split  e expand  Tab pane  a fix  u sync · o conflicts · c commit  p push  r reply  t threads  v chat  f filter  g group  x cancel  m settings  q quit"
-              : "j/k  ←/→  s  e  Tab  m settings  q"}
+              ? "j/k move  s split  e expand  Tab pane  a fix  u sync · o conflicts · c commit  p push  r reply  t threads  v chat  f filter  g group  x cancel  m settings  n prompt/viewed  q quit"
+              : "j/k  ←/→  s  e  Tab  m settings  n prompt  q"}
         </text>
       </box>
     </box>

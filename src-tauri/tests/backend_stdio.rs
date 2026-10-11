@@ -12,9 +12,17 @@ use serde_json::{json, Value};
 const LOCAL_SHA: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 
 struct Backend {
+    _isolated: tempfile::TempDir,
     child: Child,
     stdin: ChildStdin,
     rx: Receiver<String>,
+}
+
+impl Drop for Backend {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
 }
 
 impl Backend {
@@ -23,9 +31,13 @@ impl Backend {
     }
 
     fn spawn_env(cwd: &Path, extra_env: &[(&str, &str)]) -> Self {
+        let isolated = tempfile::tempdir().expect("isolated backend storage");
         let mut command = Command::new(env!("CARGO_BIN_EXE_norn-backend"));
         command
             .current_dir(cwd)
+            .env("NORN_DATA_DIR", isolated.path().join("workspace"))
+            .env("NORN_CONFIG_DIR", isolated.path().join("config"))
+            .env("NORN_REVIEW_DATA_DIR", isolated.path().join("reviews"))
             .env("NORN_BACKEND_OPERATION_DELAY_MS", "200")
             .env("NORN_BROWSER_OPEN", "0")
             // Pin the deterministic engine; individual tests override via extra_env.
@@ -50,7 +62,12 @@ impl Backend {
                 }
             }
         });
-        Self { child, stdin, rx }
+        Self {
+            _isolated: isolated,
+            child,
+            stdin,
+            rx,
+        }
     }
 
     fn send(&mut self, value: Value) {
@@ -1754,4 +1771,209 @@ fn image_comparison_refuses_malformed_oversized_and_symlink_content() {
             .unwrap()
             .contains("outside the checkout"));
     }
+}
+
+#[test]
+fn canonical_records_stdio_preserve_scopes_and_reject_stale_mutations() {
+    let repo = temp_repo();
+    let mut backend = Backend::spawn(repo.path());
+    backend.handshake();
+    let key = "prompt.github:owner/repo";
+    backend
+        .send(json!({"type":"request","id":"read","method":"workspace.read","params":{"key":key}}));
+    let before = backend.wait_for(|v| v["id"] == "read", Duration::from_secs(5));
+    assert_eq!(before["ok"], true, "{before}");
+    assert_eq!(before["result"]["available"], false);
+    let version = before["result"]["recordVersion"].as_str().unwrap();
+    backend.send(json!({"type":"request","id":"save","method":"workspace.mutate","params":{"key":key,"expectedVersion":version,"mutation":{"kind":"setPrompt","value":"Saved ✓"}}}));
+    let saved = backend.wait_for(|v| v["id"] == "save", Duration::from_secs(5));
+    assert_eq!(saved["ok"], true, "{saved}");
+    backend.send(json!({"type":"request","id":"stale","method":"workspace.mutate","params":{"key":key,"expectedVersion":version,"mutation":{"kind":"setPrompt","value":"Overwritten"}}}));
+    assert_eq!(
+        backend.wait_for(|v| v["id"] == "stale", Duration::from_secs(5))["ok"],
+        false
+    );
+    backend.send(
+        json!({"type":"request","id":"after","method":"workspace.read","params":{"key":key}}),
+    );
+    assert_eq!(
+        backend.wait_for(|v| v["id"] == "after", Duration::from_secs(5))["result"]["payload"]
+            ["value"],
+        "Saved ✓"
+    );
+    backend.send(json!({"type":"request","id":"other","method":"workspace.read","params":{"key":"prompt.bitbucket:owner/repo"}}));
+    assert_eq!(
+        backend.wait_for(|v| v["id"] == "other", Duration::from_secs(5))["result"]["available"],
+        false
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn inline_prompt_uses_selected_policy_and_canonical_override_precedence() {
+    use std::os::unix::fs::PermissionsExt;
+    for (policy, user, expected, forbidden) in [
+        (
+            "version: 0.1\nreview:\n  prompt:\n    replace: SELECTED_REPLACE\n",
+            None,
+            "SELECTED_REPLACE",
+            "## Repository review policy",
+        ),
+        (
+            "version: 0.1\nreview:\n  prompt:\n    extend: SELECTED_EXTEND\n",
+            None,
+            "SELECTED_EXTEND",
+            "OTHER_PROVIDER",
+        ),
+        (
+            "version: 0.1\nreview:\n  prompt:\n    replace: SELECTED_REPLACE\n",
+            Some("USER_OVERRIDE"),
+            "USER_OVERRIDE",
+            "SELECTED_REPLACE",
+        ),
+        (
+            "version: 0.1\nreview:\n  prompt:\n    replace: SELECTED_REPLACE\n",
+            Some(""),
+            "SELECTED_REPLACE",
+            "OTHER_PROVIDER",
+        ),
+        (
+            "invalid: [\n",
+            Some("USER_OVERRIDE"),
+            "USER_OVERRIDE",
+            "SELECTED_REPLACE",
+        ),
+    ] {
+        let repo = temp_repo();
+        std::fs::write(repo.path().join("a.txt"), "before\n").unwrap();
+        git(repo.path(), &["add", "a.txt"]);
+        git(repo.path(), &["commit", "-qm", "init"]);
+        std::fs::write(repo.path().join("a.txt"), "after\n").unwrap();
+        std::fs::write(repo.path().join(".norn.yaml"), policy).unwrap();
+        git(repo.path(), &["add", ".norn.yaml"]);
+        git(repo.path(), &["commit", "-qm", "synthetic policy"]);
+        let storage = tempfile::tempdir().unwrap();
+        let settings = json!({"repos":[{"provider":"github","workspace":"fixture","repo":"demo","localPath":repo.path().canonicalize().unwrap()}],"defaultDiffView":"unified","theme":"dark"});
+        std::fs::write(storage.path().join("settings.json"), settings.to_string()).unwrap();
+        let mut records = vec![
+            json!({"key":"prompt.bitbucket:fixture/demo","payload":{"kind":"prompt","value":"OTHER_PROVIDER"}}),
+        ];
+        if let Some(user) = user {
+            records.push(json!({"key":"prompt.github:fixture/demo","payload":{"kind":"prompt","value":user}}));
+        }
+        std::fs::write(
+            storage.path().join("workspace-data-v1.json"),
+            json!({"schemaVersion":1,"records":records}).to_string(),
+        )
+        .unwrap();
+        let binary = storage.path().join("fake-agent");
+        let capture = storage.path().join("captured-prompt");
+        std::fs::write(&binary,"#!/bin/sh\ncat > \"$NORN_FAKE_PROMPT_CAPTURE\"\nprintf '%s\\n' '{\"result\":\"No review findings.\",\"session_id\":\"prompt-fixture\"}'\n").unwrap();
+        std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let mut backend = Backend::spawn_env(
+            repo.path(),
+            &[
+                ("NORN_REVIEW_ENGINE", "real"),
+                ("NORN_CONFIG_DIR", storage.path().to_str().unwrap()),
+                ("NORN_DATA_DIR", storage.path().to_str().unwrap()),
+                ("NORN_REVIEW_AGENT_BIN", binary.to_str().unwrap()),
+                ("NORN_FAKE_PROMPT_CAPTURE", capture.to_str().unwrap()),
+            ],
+        );
+        backend.handshake();
+        backend.send(json!({"type":"request","id":"start","method":"review.start","params":{"target":{"kind":"local","localSnapshotSha256":LOCAL_SHA}}}));
+        let started = backend.wait_for(|v| v["id"] == "start", Duration::from_secs(5));
+        assert_eq!(started["ok"], true, "{started}");
+        let operation = started["result"]["operationId"].as_str().unwrap();
+        let terminal = backend.wait_for(
+            |v| {
+                v["operationId"] == operation
+                    && v["event"]["kind"] == "state"
+                    && ["succeeded", "failed"].contains(&v["event"]["state"].as_str().unwrap_or(""))
+            },
+            Duration::from_secs(15),
+        );
+        assert_eq!(terminal["event"]["state"], "succeeded", "{terminal}");
+        let payload = std::fs::read_to_string(capture).unwrap();
+        assert!(
+            payload.contains(expected),
+            "Expected synthetic marker {expected} absent: {payload}"
+        );
+        assert!(
+            !payload.contains(forbidden),
+            "Unrelated prompt marker leaked"
+        );
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn reply_receives_saved_prompt_and_invalid_policy_stops_before_agent() {
+    for override_prompt in [None, Some("REPLY_USER_OVERRIDE")] {
+        let mut fixture = FixFixture::new("#!/bin/sh\ncat > captured-reply-payload\nprintf '%s\\n' '{\"result\":\"Reply fixture completed.\",\"session_id\":\"reply-session\"}'\n");
+        let capture = fixture._agent.path().join("captured-reply-payload");
+        std::fs::write(fixture._agent.path().join("fake-agent"), format!("#!/bin/sh\ncat > '{}'\nprintf '%s\\n' '{{\"result\":\"Reply fixture completed.\",\"session_id\":\"reply-session\"}}'\n", capture.display())).unwrap();
+        std::fs::write(
+            fixture.repo.path().join(".norn.yaml"),
+            "version: 0.1\nreview:\n  prompt:\n    replace: REPLY_POLICY\n",
+        )
+        .unwrap();
+        // Fallback/fresh-thread replies resend policy; Claude resume sends only
+        // the new message and retains its earlier conversation, matching desktop.
+        let connection =
+            rusqlite::Connection::open(fixture._data.path().join("norn.sqlite3")).unwrap();
+        let stored: String = connection
+            .query_row(
+                "SELECT store_json FROM ai_review_stores WHERE review_key='fixture_demo_9'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let mut stored: Value = serde_json::from_str(&stored).unwrap();
+        stored["threads"][0]["claudeSessionId"] = Value::Null;
+        connection
+            .execute(
+                "UPDATE ai_review_stores SET store_json=?1 WHERE review_key='fixture_demo_9'",
+                [stored.to_string()],
+            )
+            .unwrap();
+        if let Some(prompt) = override_prompt {
+            let root = fixture.backend._isolated.path().join("workspace");
+            std::fs::create_dir_all(&root).unwrap();
+            std::fs::write(root.join("workspace-data-v1.json"),json!({"schemaVersion":1,"records":[{"key":"prompt.github:fixture/demo","payload":{"kind":"prompt","value":prompt}}]}).to_string()).unwrap();
+        }
+        fixture.backend.send(json!({"type":"request","id":"reply-prompt","method":"review.reply","params":{"target":fixture.target,"message":"Please explain this finding."}}));
+        let started = fixture
+            .backend
+            .wait_for(|v| v["id"] == "reply-prompt", Duration::from_secs(5));
+        assert_eq!(started["ok"], true, "{started}");
+        let operation = started["result"]["operationId"].as_str().unwrap();
+        assert_eq!(fixture.terminal(operation)["event"]["state"], "succeeded");
+        let payload = std::fs::read_to_string(capture).unwrap();
+        assert!(payload.contains(override_prompt.unwrap_or("REPLY_POLICY")));
+        if override_prompt.is_some() {
+            assert!(!payload.contains("REPLY_POLICY"));
+        }
+    }
+    let mut invalid = FixFixture::new("#!/bin/sh\nprintf up > unexpected-agent\nexit 99\n");
+    let unexpected = invalid._agent.path().join("unexpected-agent");
+    std::fs::write(
+        invalid._agent.path().join("fake-agent"),
+        format!(
+            "#!/bin/sh\nprintf up > '{}'\nexit 99\n",
+            unexpected.display()
+        ),
+    )
+    .unwrap();
+    std::fs::write(invalid.repo.path().join(".norn.yaml"), "invalid: [\n").unwrap();
+    invalid.backend.send(json!({"type":"request","id":"invalid-policy","method":"review.reply","params":{"target":invalid.target,"message":"Reply"}}));
+    let started = invalid
+        .backend
+        .wait_for(|v| v["id"] == "invalid-policy", Duration::from_secs(5));
+    assert_eq!(started["ok"], true, "{started}");
+    let operation = started["result"]["operationId"].as_str().unwrap();
+    let terminal = invalid.terminal(operation);
+    assert_eq!(terminal["event"]["state"], "failed");
+    assert_eq!(terminal["event"]["error"]["code"], "invalidParams");
+    assert!(!unexpected.exists());
 }

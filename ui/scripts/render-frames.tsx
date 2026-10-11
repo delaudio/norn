@@ -1,7 +1,9 @@
 import { DataPanel } from "../src/app/components/DataPanel";
 import { SettingsPanel } from "../src/app/components/SettingsPanel";
+import { WorkspacePanel } from "../src/app/components/WorkspacePanel";
 import { DataStore } from "../src/app/dataStore";
 import { SettingsStore } from "../src/app/settingsStore";
+import { WorkspaceStore } from "../src/app/workspaceStore";
 // Renders every terminal component/scene with the real OpenTUI renderer and
 // serializes bounded frame fixtures (cell spans, colors, attributes) for the
 // Storybook preview and the golden-frame visual lane.
@@ -462,7 +464,64 @@ async function wrappedAnchorScene() {
   return { store: scene.store, client: scene.client };
 }
 
+async function workspaceScene(mode: "saved" | "dirty" | "conflict" | "disposed") {
+  const transport = new FakeBackendTransport({
+    repositories,
+    workspaceRecords: {
+      "prompt.github:acme/payments": {
+        kind: "prompt",
+        value: "Imported prompt: focus on correctness.\nKeep findings actionable.",
+      },
+      "viewed.github:acme/payments/7": { kind: "viewed", value: ["src/app.ts"] },
+    },
+  });
+  const { client, store, ready } = readyStore(transport);
+  await ready;
+  const workspace = new WorkspaceStore();
+  await workspace.load(client, {
+    kind: "review",
+    provider: "github",
+    workspace: "acme",
+    repo: "payments",
+    prId: 7,
+    runId: "synthetic",
+    title: "PR",
+    status: "completed",
+  });
+  if (mode === "dirty" || mode === "conflict") workspace.append("\nMy unsaved change");
+  if (mode === "conflict") {
+    const page = await client.readWorkspace("prompt.github:acme/payments");
+    await client.mutateWorkspace(page.key, page.recordVersion, {
+      kind: "setPrompt",
+      value: "Another writer",
+    });
+    await workspace.save(client);
+  }
+  if (mode === "disposed") workspace.dispose();
+  return {
+    client,
+    store,
+    view: (
+      <WorkspacePanel workspace={workspace} client={client} path="src/app.ts" onClose={() => {}} />
+    ),
+  };
+}
+
 const scenes: Scene[] = [
+  { id: "shell-workspace-saved-120x30", cols: 120, rows: 30, build: () => workspaceScene("saved") },
+  { id: "shell-workspace-dirty-80x24", cols: 80, rows: 24, build: () => workspaceScene("dirty") },
+  {
+    id: "shell-workspace-conflict-50x15",
+    cols: 50,
+    rows: 15,
+    build: () => workspaceScene("conflict"),
+  },
+  {
+    id: "shell-workspace-disposed-80x24",
+    cols: 80,
+    rows: 24,
+    build: () => workspaceScene("disposed"),
+  },
   { id: "shell-wrapped-anchor-120x30", cols: 120, rows: 30, build: wrappedAnchorScene },
   { id: "shell-wrapped-anchor-80x24", cols: 80, rows: 24, build: wrappedAnchorScene },
   { id: "shell-images-modified-120x30", cols: 120, rows: 30, build: () => imageScene("modified") },

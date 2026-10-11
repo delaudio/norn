@@ -139,7 +139,11 @@ fn bounded_text(value: &str, maximum: usize, multiline: bool) -> Result<(), Stri
 }
 fn identity(value: &str) -> Result<(), String> {
     bounded_text(value, 256, false)?;
-    if value.trim().is_empty() || value.contains('/') || value.contains(':') || value.contains('#')
+    if value.trim().is_empty()
+        || matches!(value, "." | "..")
+        || value.contains('/')
+        || value.contains(':')
+        || value.contains('#')
     {
         return Err("User-data scope has an invalid owner or repository.".into());
     }
@@ -558,7 +562,7 @@ fn preview_at(
 }
 fn atomic_write(path: &Path, bytes: &[u8], no_clobber: bool) -> Result<(), String> {
     if bytes.len() > MAX_BYTES {
-        return Err("Canonical user data would exceed 16 MiB; nothing imported.".into());
+        return Err("Canonical user data would exceed 16 MiB; no data was written.".into());
     }
     let parent = path.parent().ok_or("User-data path has no parent.")?;
     fs::create_dir_all(parent).map_err(|_| "Cannot create user-data directory.")?;
@@ -620,6 +624,7 @@ fn import_at(
     input_version: &str,
     destination_version: &str,
 ) -> Result<ImportResult, String> {
+    let _file_guard = crate::runtime_identity::acquire_storage_lock(destination)?;
     let (preview, records, mut document, original) = preview_at(input, destination, provider)?;
     if preview.input_version != input_version || preview.destination_version != destination_version
     {
@@ -1038,3 +1043,8 @@ mod tests {
             .is_symlink());
     }
 }
+
+#[path = "workspace_records.rs"]
+mod records;
+pub(crate) use records::{prompt_for_scope, record_mutate, record_read};
+pub use records::{RecordMutateParams, RecordReadParams};

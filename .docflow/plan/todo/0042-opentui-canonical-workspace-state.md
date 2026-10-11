@@ -20,8 +20,10 @@ must be reachable through this shared owner for #305/#304 parity, never copied
 back into UI-only persistence. No provider comment publication in this increment.
 
 Resolve the selected repository's review policy through the existing shared
-Rust prompt builder for start/reply, and add its persisted repo user prompt without
-changing headless analyzer/policy semantics. Repository policy parse errors fail
+Rust prompt builder for start/reply, preserving desktop precedence: a nonblank
+persisted repo user prompt overrides repository/default content; an empty override
+falls back to the selected repository policy. Headless semantics remain unchanged.
+Repository policy parse errors (when no user override is active) fail
 clearly; no fallback to the backend launch directory or another target's prompt.
 Use synthetic policy files and fake agents only; do not invoke Norn reviews or
 read the maintainer's real .norn.yaml/credentials.
@@ -37,8 +39,8 @@ read the maintainer's real .norn.yaml/credentials.
 3. Native terminal reads persisted prompts/viewed state, supports explicit mutation
    and fences late reads/writes across target changes. Stories cover saved/dirty/
    failed/stale states and restored imported data.
-4. Fake-agent tests prove selected-repository replace/extend policy plus canonical
-   user prompt reaches start/reply, with no unrelated prompt or silent policy loss.
+4. Fake-agent tests prove selected-repository replace/extend policy and canonical
+   user-prompt precedence reach start/reply, with no unrelated prompt or silent policy loss.
 5. Root/UI/protocol/Rust/Archgate gates pass. Draft publication, reference-provider
    enrichment, physical recovery and broader settings/streaming/platform gates stay
    with their owning issues unless actually delivered and verified here.
@@ -51,5 +53,5 @@ read the maintainer's real .norn.yaml/credentials.
 ## Status
 
 - Claimed by: default-agent, 2026-10-11, `issue-305-canonical-workspace-state`.
-- Blockers: PR #343 CI pending; isolated local preparation only.
+- Blockers: None; PR #343 merged at `ccd133d` with both CI gates green.
 - Stopped:
