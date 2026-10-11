@@ -35,8 +35,27 @@ this increment does not send provider comments or invent remote acknowledgments.
 
 - #351 local persistent draft editor and prior canonical records/run identity.
 
-## Status
+## Delivery
 
-- Claimed by: default-agent, 2026-10-11, `issue-304-finding-drafts`.
-- Blockers: implementation/local gates, #351 merge, PR CI/merge.
-- Stopped:
+Effective on merge to main of this finding-staging PR. Implementation `c6eac6c`,
+based on PR #351 merge `fc9837e` (UI/verify green). Rust prepares original saved
+finding bodies, anchors and revisions with explicit mode selection; stage binds
+the approved preview hash and canonical record version. Existing edited drafts
+retain their body, mode, identity and creation time. Native input prevents paste
+from invoking actions, retains a same-pinned-target preview and fences other
+scopes and late results. Original CRLF persists with normalized display only.
+
+Root typecheck, 123 tests/tooling, lint and Archgate 17/17 pass; UI 129 tests/800
+assertions and 81 native frames; core 629 tests (2 ignored), no-GUI guard; full
+48 backend subprocess tests and strict all-feature/all-target Clippy pass. A
+shared fixture-root regression initially broke an existing reference-context
+test; restoring that fixture and isolating the new restart fixture yields the
+full passing lane. Final native test/frames and Clippy reruns exit 0. Doctor's
+17 native flexShrink DOM-rule warnings are verified against installed types
+and native tests, unsuppressed. Pre-integration contiguous ADR/INDEX membership,
+active relative links and main plan slot pass; historical ADR 0011 coverage gap
+remains, with no global audit-clean claim.
+
+No provider publication, real agent/keychain access or Norn review. #304 remains
+open for publication, threads, partial results, feedback and reconciliation;
+#305 final recovery remains. ADR 0020 stays Accepted until complete cutover.
