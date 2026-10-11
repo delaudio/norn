@@ -160,12 +160,47 @@ export type Request =
         target: TargetIdentity;
         approvalToken: string;
       };
+    }
+  | {
+      type: "request";
+      id: RequestId;
+      method: "settings.get";
+      params: EmptyParams;
+    }
+  | {
+      type: "request";
+      id: RequestId;
+      method: "settings.save";
+      params: SettingsSaveParams;
+    }
+  | {
+      type: "request";
+      id: RequestId;
+      method: "auth.status";
+      params: EmptyParams;
+    }
+  | {
+      type: "request";
+      id: RequestId;
+      method: "auth.set";
+      params: AuthSetParams;
+    }
+  | {
+      type: "request";
+      id: RequestId;
+      method: "auth.clear";
+      params: AuthProviderParams;
     };
 export type RequestId = string;
 /**
  * Identity of the review target a request or event applies to.
  */
 export type TargetIdentity = ProviderTarget | LocalTarget;
+export type AuthSetParams = {
+  provider: "github" | "bitbucket" | "jira" | "notion";
+  username?: string | null;
+  token: string;
+};
 export type OperationState = "accepted" | "running" | "succeeded" | "failed" | "cancelled";
 export type ErrorCode =
   | "invalidRequest"
@@ -245,6 +280,37 @@ export interface FilePreviewParams {
 export interface ReviewReplyParams {
   target: TargetIdentity;
   message: string;
+}
+export interface EmptyParams {}
+export interface SettingsSaveParams {
+  expectedVersion: string;
+  settings: WorkspaceSettings;
+}
+export interface WorkspaceSettings {
+  /**
+   * @maxItems 100
+   */
+  repos: {
+    provider: "github" | "bitbucket";
+    workspace: string;
+    repo: string;
+    localPath?: string | null;
+  }[];
+  reviewProvider: "github" | "bitbucket";
+  aiProvider: "claude" | "codex" | "opencode";
+  defaultDiffView: "unified" | "split";
+  theme: "dark" | "light";
+  jiraBaseUrl?: string | null;
+  automaticSyncIntervalSeconds?: number | null;
+  claudeModel?: string | null;
+  claudeEffort?: string | null;
+  codexModel?: string | null;
+  codexEffort?: string | null;
+  opencodeModel?: string | null;
+  opencodeEffort?: string | null;
+}
+export interface AuthProviderParams {
+  provider: "github" | "bitbucket" | "jira" | "notion";
 }
 export interface ResponseOk {
   type: "response";

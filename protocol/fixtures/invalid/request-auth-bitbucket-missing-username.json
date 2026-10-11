@@ -1,0 +1,9 @@
+{
+  "type": "request",
+  "id": "fixture",
+  "method": "auth.set",
+  "params": {
+    "provider": "bitbucket",
+    "token": "fixture_sensitive_value"
+  }
+}

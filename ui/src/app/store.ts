@@ -1,3 +1,5 @@
+import type { WorkspaceSettings } from "../../../src/protocol/generated/protocol";
+import { setTheme } from "./theme";
 // Shell state for the OpenTUI workspace. UI state owns selection, focus and
 // scroll; the backend owns persistent data and operations. Async results and
 // events are fenced by target generation and request id so a late response for a
@@ -123,6 +125,7 @@ export interface PickerEntry {
 }
 
 export interface ShellSnapshot {
+  settingsOpen: boolean;
   status: ShellStatus;
   error: string | null;
   notice: string | null;
@@ -164,6 +167,7 @@ export interface ShellSnapshot {
 }
 
 const INITIAL: ShellSnapshot = {
+  settingsOpen: false,
   status: "idle",
   error: null,
   notice: null,
@@ -396,11 +400,33 @@ export class ShellStore {
     return entry ? pickerTargetIdentity(entry) : null;
   }
 
+  toggleSettings(): void {
+    this.update({ settingsOpen: !this.state.settingsOpen, fixPreview: null });
+  }
+
+  async applySettings(client: BackendClient, settings: WorkspaceSettings): Promise<void> {
+    setTheme(settings.theme);
+    const target = this.activeTarget();
+    const [repositories, targets] = await Promise.all([
+      client.repositories(),
+      client.reviewTargets(),
+    ]);
+    const picker = buildPicker(repositories, targets);
+    const selected = picker.findIndex((entry) => sameTarget(pickerTargetIdentity(entry), target));
+    this.update({ repositories, picker, diffMode: settings.defaultDiffView });
+    await this.selectPicker(Math.max(0, selected));
+  }
+
   async connect(client: BackendClient): Promise<void> {
     this.client = client;
     this.update({ status: "connecting", error: null });
     try {
       const ready = await client.start();
+      if (ready.capabilities.includes("settings")) {
+        const snapshot = await client.settings();
+        setTheme(snapshot.settings.theme);
+        this.update({ diffMode: snapshot.settings.defaultDiffView });
+      }
       const [repositories, targets] = await Promise.all([
         client.repositories(),
         client.reviewTargets(),

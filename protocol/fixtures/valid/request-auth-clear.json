@@ -1,0 +1,8 @@
+{
+  "type": "request",
+  "id": "fixture",
+  "method": "auth.clear",
+  "params": {
+    "provider": "github"
+  }
+}

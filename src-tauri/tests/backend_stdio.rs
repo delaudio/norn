@@ -1516,3 +1516,49 @@ printf '%s\n' '{"structured_output":{"status":"success","summary":"Claims succes
     assert_eq!(refused["ok"], false, "{refused}");
     assert!(clean.repo.path().join(".git/MERGE_HEAD").exists());
 }
+
+#[test]
+fn settings_stdio_roundtrip_uses_isolated_config_and_rejects_stale_versions() {
+    let repo = temp_repo();
+    let config = tempfile::tempdir().unwrap();
+    let data = tempfile::tempdir().unwrap();
+    let mut backend = Backend::spawn_env(
+        repo.path(),
+        &[
+            ("NORN_CONFIG_DIR", config.path().to_str().unwrap()),
+            ("NORN_REVIEW_DATA_DIR", data.path().to_str().unwrap()),
+        ],
+    );
+    backend.handshake();
+    backend.send(json!({"type":"request","id":"settings","method":"settings.get","params":{}}));
+    let before = backend.wait_for(|v| v["id"] == "settings", Duration::from_secs(10));
+    assert_eq!(before["ok"], true, "{before}");
+    let mut settings = before["result"]["settings"].clone();
+    settings["codexModel"] = json!("custom/org:reasoning ✓");
+    settings["repos"] = json!([{"provider":"github","workspace":"fixture","repo":"demo","localPath":repo.path().to_str().unwrap()}]);
+    let params = json!({"expectedVersion":before["result"]["version"],"settings":settings});
+    backend.send(json!({"type":"request","id":"save","method":"settings.save","params":params}));
+    let saved = backend.wait_for(|v| v["id"] == "save", Duration::from_secs(10));
+    assert_eq!(saved["ok"], true, "{saved}");
+    assert_eq!(
+        saved["result"]["settings"]["codexModel"],
+        "custom/org:reasoning ✓"
+    );
+    backend.send(json!({"type":"request","id":"stale","method":"settings.save","params":params}));
+    let stale = backend.wait_for(|v| v["id"] == "stale", Duration::from_secs(10));
+    assert_eq!(stale["ok"], false);
+    assert_eq!(stale["error"]["code"], "conflict");
+    let persisted: Value =
+        serde_json::from_slice(&std::fs::read(config.path().join("settings.json")).unwrap())
+            .unwrap();
+    assert_eq!(persisted["codexModel"], "custom/org:reasoning ✓");
+    assert!(persisted.get("token").is_none());
+    backend.send(json!({"type":"request","id":"redacted","method":"auth.set","params":{"provider":"fixture_sensitive_value","token":"fixture_sensitive_value"}}));
+    backend.send(json!({"type":"request","id":"stop","method":"shutdown","params":{}}));
+    backend.child.wait().unwrap();
+    let mut diagnostics = String::new();
+    std::io::Read::read_to_string(&mut backend.child.stderr.take().unwrap(), &mut diagnostics)
+        .unwrap();
+    assert!(diagnostics.contains("malformed protocol frame"));
+    assert!(!diagnostics.contains("fixture_sensitive_value"));
+}

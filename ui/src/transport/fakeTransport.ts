@@ -1,3 +1,5 @@
+import type { WorkspaceSettings } from "../../../src/protocol/generated/protocol";
+import type { CredentialStatus } from "./backendClient";
 // Deterministic in-memory transport for tests, browser/dev mode and Storybook.
 // It implements the same contract as the subprocess transport.
 
@@ -16,6 +18,8 @@ export interface FakeTransportOptions {
   diffText?: string;
   /** Artificial latency in milliseconds for every request. */
   delayMs?: number;
+  settings?: WorkspaceSettings;
+  credentials?: CredentialStatus[];
   fixPhase?: "readyToCommit" | "readyToPush" | "completed";
 }
 
@@ -32,6 +36,10 @@ export class FakeBackendTransport implements BackendTransport {
   private readonly operations = new Map<string, FakeOperation>();
   private readonly eventListeners = new Set<(event: BackendOperationEvent) => void>();
   private readonly exitListeners = new Set<(exit: BackendExit) => void>();
+  private settingsValue: WorkspaceSettings;
+  private settingsVersion = 1;
+  private credentials: CredentialStatus[];
+  private readonly environmentCredentials = new Set<CredentialStatus["provider"]>();
   private nextOperation = 1;
   private closed = false;
   private nextApproval = 1;
@@ -44,13 +52,45 @@ export class FakeBackendTransport implements BackendTransport {
   constructor(options: FakeTransportOptions = {}) {
     this.options = options;
     this.fixPhase = options.fixPhase ?? "readyToCommit";
+    this.settingsValue = structuredClone(
+      options.settings ?? {
+        repos: (options.repositories ?? []).map((repo) => ({
+          provider: repo.provider === "bitbucket" ? "bitbucket" : "github",
+          workspace: String(repo.workspace ?? ""),
+          repo: String(repo.repo ?? ""),
+          localPath: typeof repo.localPath === "string" ? repo.localPath : null,
+        })),
+        reviewProvider: "github",
+        aiProvider: "claude",
+        defaultDiffView: "unified",
+        theme: "dark",
+        claudeModel: null,
+        claudeEffort: null,
+        codexModel: null,
+        codexEffort: null,
+        opencodeModel: null,
+        opencodeEffort: null,
+        jiraBaseUrl: null,
+        automaticSyncIntervalSeconds: null,
+      },
+    );
+    this.credentials = structuredClone(
+      options.credentials ??
+        ["github", "bitbucket", "jira", "notion"].map((provider) => ({
+          provider: provider as CredentialStatus["provider"],
+          available: false,
+          source: "none" as const,
+        })),
+    );
+    for (const status of this.credentials)
+      if (status.source === "environment") this.environmentCredentials.add(status.provider);
   }
 
   async start(): Promise<ReadyInfo> {
     await this.delay();
     return {
       serverVersion: this.options.serverVersion ?? "fake-0.0.0",
-      capabilities: ["repository", "diff", "review"],
+      capabilities: ["repository", "diff", "review", "settings", "auth"],
     };
   }
 
@@ -60,8 +100,41 @@ export class FakeBackendTransport implements BackendTransport {
     }
     await this.delay();
     switch (method) {
+      case "settings.get":
+        return {
+          settings: structuredClone(this.settingsValue),
+          version: this.settingsVersion.toString(16).padStart(64, "0"),
+        };
+      case "settings.save":
+        if (params.expectedVersion !== this.settingsVersion.toString(16).padStart(64, "0"))
+          throw new Error("Settings changed; reload before saving.");
+        this.settingsValue = structuredClone(params.settings as WorkspaceSettings);
+        this.settingsVersion++;
+        return {
+          settings: structuredClone(this.settingsValue),
+          version: this.settingsVersion.toString(16).padStart(64, "0"),
+        };
+      case "auth.status":
+        return { credentials: structuredClone(this.credentials) };
+      case "auth.set": {
+        if (typeof params.token !== "string" || !params.token.trim())
+          throw new Error("A credential is required.");
+        const status = this.credentials.find((status) => status.provider === params.provider);
+        if (!status) throw new Error("Unsupported credential provider.");
+        status.available = true;
+        status.source = "keychain";
+        // The fake stores only presence, never the input secret.
+        return { saved: true, provider: params.provider };
+      }
+      case "auth.clear": {
+        const status = this.credentials.find((status) => status.provider === params.provider);
+        if (!status) throw new Error("Unsupported credential provider.");
+        status.available = this.environmentCredentials.has(status.provider);
+        status.source = status.available ? "environment" : "none";
+        return { cleared: true, provider: params.provider };
+      }
       case "repository.status":
-        return { repos: this.options.repositories ?? [] };
+        return { repos: structuredClone(this.settingsValue.repos) };
       case "review.targets":
         return { targets: this.options.targets ?? [] };
       case "review.history":

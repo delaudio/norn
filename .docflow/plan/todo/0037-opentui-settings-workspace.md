@@ -41,5 +41,5 @@ under #305; no legacy data is deleted or old interface retired in this item.
 ## Status
 
 - Claimed by: default-agent, 2026-10-11, `issue-305-settings-workspace`.
-- Blockers: preceding PR #338 CI/merge for integration only.
+- Blockers: None; PR #338 merged at `3168dcd`.
 - Stopped:

@@ -1,0 +1,16 @@
+{
+  "type": "request",
+  "id": "fixture",
+  "method": "settings.save",
+  "params": {
+    "expectedVersion": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "settings": {
+      "repos": [],
+      "reviewProvider": "github",
+      "aiProvider": "codex",
+      "defaultDiffView": "split",
+      "theme": "light",
+      "codexModel": "custom/provider:model-v3"
+    }
+  }
+}

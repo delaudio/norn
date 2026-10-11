@@ -94,6 +94,7 @@ struct Backend {
     active_operations: Arc<AtomicUsize>,
     active_browser: Arc<AtomicUsize>,
     active_previews: Arc<AtomicUsize>,
+    active_settings: Arc<AtomicUsize>,
     browser: Arc<Mutex<Option<WebDiffServer>>>,
     fix_approvals: Arc<Mutex<HashMap<String, FixApproval>>>,
 }
@@ -159,6 +160,7 @@ pub fn run() -> Result<(), i32> {
         active_files: Arc::new(AtomicUsize::new(0)),
         active_browser: Arc::new(AtomicUsize::new(0)),
         active_previews: Arc::new(AtomicUsize::new(0)),
+        active_settings: Arc::new(AtomicUsize::new(0)),
         browser: Arc::new(Mutex::new(None)),
         fix_approvals: Arc::new(Mutex::new(HashMap::new())),
         active_operations: Arc::new(AtomicUsize::new(0)),
@@ -168,6 +170,8 @@ pub fn run() -> Result<(), i32> {
         protocol_version: PROTOCOL_VERSION,
         server_version: env!("CARGO_PKG_VERSION").to_string(),
         capabilities: vec![
+            "settings".to_string(),
+            "auth".to_string(),
             "repository".to_string(),
             "diff".to_string(),
             "review".to_string(),
@@ -307,6 +311,68 @@ fn dispatch(request: Request, backend: &Backend) -> bool {
     let id = request.id().to_string();
     let method = request.method();
     match request {
+        Request::SettingsGet { .. }
+        | Request::SettingsSave { .. }
+        | Request::AuthStatus { .. }
+        | Request::AuthSet { .. }
+        | Request::AuthClear { .. } => {
+            if backend
+                .active_settings
+                .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |current| {
+                    (current < 1).then_some(current + 1)
+                })
+                .is_err()
+            {
+                backend.fail(
+                    &id,
+                    ProtocolError::new(
+                        ProtocolErrorCode::Conflict,
+                        "Another settings request is in progress.",
+                    ),
+                );
+                return false;
+            }
+            let control = backend.control.clone();
+            let active = backend.active_settings.clone();
+            thread::spawn(move || {
+                let result = match request {
+                    Request::SettingsSave { params, .. } => {
+                        crate::services::settings::save(&params.expected_version, params.settings)
+                            .map(|value| json!(value))
+                    }
+                    Request::AuthStatus { .. } => {
+                        Ok(json!({"credentials":crate::services::workspace_auth::statuses()}))
+                    }
+                    Request::AuthSet { params, .. } => {
+                        let provider = params.provider;
+                        crate::services::workspace_auth::set(params)
+                            .map(|()| json!({"saved":true,"provider":provider}))
+                    }
+                    Request::AuthClear { params, .. } => {
+                        crate::services::workspace_auth::clear(params.provider)
+                            .map(|()| json!({"cleared":true,"provider":params.provider}))
+                    }
+                    _ => crate::services::settings::snapshot().map(|value| json!(value)),
+                };
+                let response = match result {
+                    Ok(value) => Response {
+                        id,
+                        ok: true,
+                        result: Some(json!(value)),
+                        error: None,
+                    },
+                    Err(message) => Response {
+                        id,
+                        ok: false,
+                        result: None,
+                        error: Some(ProtocolError::new(ProtocolErrorCode::Conflict, message)),
+                    },
+                };
+                active.fetch_sub(1, Ordering::SeqCst);
+                let _ = control.send(ServerMessage::Response(response));
+            });
+            false
+        }
         Request::RepositoryStatus { .. } => {
             backend.respond(&id, json!({ "repos": repositories() }));
             false

@@ -219,7 +219,12 @@
         "review.sync.preview",
         "review.sync",
         "review.conflicts.preview",
-        "review.conflicts"
+        "review.conflicts",
+        "settings.get",
+        "settings.save",
+        "auth.status",
+        "auth.set",
+        "auth.clear"
       ]
     },
     "DiffFileParams": {
@@ -730,6 +735,370 @@
           "minLength": 1
         }
       }
+    },
+    "WorkspaceSettings": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "repos",
+        "reviewProvider",
+        "aiProvider",
+        "defaultDiffView",
+        "theme"
+      ],
+      "properties": {
+        "repos": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "provider",
+              "workspace",
+              "repo"
+            ],
+            "properties": {
+              "provider": {
+                "enum": [
+                  "github",
+                  "bitbucket"
+                ]
+              },
+              "workspace": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256,
+                "allOf": [
+                  {
+                    "pattern": "\\S"
+                  },
+                  {
+                    "pattern": "^[^\\p{Cc}]+$"
+                  }
+                ]
+              },
+              "repo": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256,
+                "allOf": [
+                  {
+                    "pattern": "\\S"
+                  },
+                  {
+                    "pattern": "^[^\\p{Cc}]+$"
+                  }
+                ]
+              },
+              "localPath": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 4096,
+                    "allOf": [
+                      {
+                        "pattern": "\\S"
+                      },
+                      {
+                        "pattern": "^[^\\p{Cc}]+$"
+                      }
+                    ]
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "reviewProvider": {
+          "enum": [
+            "github",
+            "bitbucket"
+          ]
+        },
+        "aiProvider": {
+          "enum": [
+            "claude",
+            "codex",
+            "opencode"
+          ]
+        },
+        "defaultDiffView": {
+          "enum": [
+            "unified",
+            "split"
+          ]
+        },
+        "theme": {
+          "enum": [
+            "dark",
+            "light"
+          ]
+        },
+        "jiraBaseUrl": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2048,
+              "allOf": [
+                {
+                  "pattern": "\\S"
+                },
+                {
+                  "pattern": "^[^\\p{Cc}]+$"
+                }
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "automaticSyncIntervalSeconds": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 10,
+              "maximum": 86400
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "claudeModel": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 512,
+              "allOf": [
+                {
+                  "pattern": "\\S"
+                },
+                {
+                  "pattern": "^[^\\p{Cc}]+$"
+                }
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "claudeEffort": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64,
+              "allOf": [
+                {
+                  "pattern": "\\S"
+                },
+                {
+                  "pattern": "^[^\\p{Cc}]+$"
+                }
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "codexModel": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 512,
+              "allOf": [
+                {
+                  "pattern": "\\S"
+                },
+                {
+                  "pattern": "^[^\\p{Cc}]+$"
+                }
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "codexEffort": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64,
+              "allOf": [
+                {
+                  "pattern": "\\S"
+                },
+                {
+                  "pattern": "^[^\\p{Cc}]+$"
+                }
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "opencodeModel": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 512,
+              "allOf": [
+                {
+                  "pattern": "\\S"
+                },
+                {
+                  "pattern": "^[^\\p{Cc}]+$"
+                }
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "opencodeEffort": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64,
+              "allOf": [
+                {
+                  "pattern": "\\S"
+                },
+                {
+                  "pattern": "^[^\\p{Cc}]+$"
+                }
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "SettingsSaveParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "expectedVersion",
+        "settings"
+      ],
+      "properties": {
+        "expectedVersion": {
+          "type": "string",
+          "pattern": "^[a-fA-F0-9]{64}$"
+        },
+        "settings": {
+          "$ref": "#/definitions/WorkspaceSettings"
+        }
+      }
+    },
+    "EmptyParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {}
+    },
+    "AuthProviderParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "provider"
+      ],
+      "properties": {
+        "provider": {
+          "type": "string",
+          "enum": [
+            "github",
+            "bitbucket",
+            "jira",
+            "notion"
+          ]
+        }
+      }
+    },
+    "AuthSetParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "provider",
+        "token"
+      ],
+      "properties": {
+        "provider": {
+          "type": "string",
+          "enum": [
+            "github",
+            "bitbucket",
+            "jira",
+            "notion"
+          ]
+        },
+        "username": {
+          "anyOf": [
+            {
+              "type": "string",
+              "maxLength": 256,
+              "pattern": "^[^\\p{Cc}]*$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "token": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 8192,
+          "allOf": [
+            {
+              "pattern": "\\S"
+            },
+            {
+              "pattern": "^[^\\p{Cc}]+$"
+            }
+          ]
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "provider": {
+                "const": "bitbucket"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "username": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "\\S"
+              }
+            },
+            "required": [
+              "username"
+            ]
+          }
+        }
+      ]
     }
   },
   "oneOf": [
@@ -1414,6 +1783,126 @@
                   "pattern": "^[0-9a-fA-F]{64}$"
                 }
               }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "type": {
+              "const": "request"
+            },
+            "id": {
+              "$ref": "#/definitions/RequestId"
+            },
+            "method": {
+              "const": "settings.get"
+            },
+            "params": {
+              "$ref": "#/definitions/EmptyParams"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "type": {
+              "const": "request"
+            },
+            "id": {
+              "$ref": "#/definitions/RequestId"
+            },
+            "method": {
+              "const": "settings.save"
+            },
+            "params": {
+              "$ref": "#/definitions/SettingsSaveParams"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "type": {
+              "const": "request"
+            },
+            "id": {
+              "$ref": "#/definitions/RequestId"
+            },
+            "method": {
+              "const": "auth.status"
+            },
+            "params": {
+              "$ref": "#/definitions/EmptyParams"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "type": {
+              "const": "request"
+            },
+            "id": {
+              "$ref": "#/definitions/RequestId"
+            },
+            "method": {
+              "const": "auth.set"
+            },
+            "params": {
+              "$ref": "#/definitions/AuthSetParams"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "type": {
+              "const": "request"
+            },
+            "id": {
+              "$ref": "#/definitions/RequestId"
+            },
+            "method": {
+              "const": "auth.clear"
+            },
+            "params": {
+              "$ref": "#/definitions/AuthProviderParams"
             }
           }
         }

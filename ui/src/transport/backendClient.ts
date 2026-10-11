@@ -1,3 +1,7 @@
+import type {
+  AuthProviderParams,
+  WorkspaceSettings,
+} from "../../../src/protocol/generated/protocol";
 // Typed facade over a BackendTransport. Domain methods are added as later
 // migration steps land; the first slice exposes repository listing and diffs.
 
@@ -106,11 +110,48 @@ export interface FixState {
   tests: string[];
 }
 
+export interface SettingsSnapshot {
+  version: string;
+  settings: WorkspaceSettings;
+}
+export interface CredentialStatus {
+  provider: AuthProviderParams["provider"];
+  available: boolean;
+  source: "keychain" | "environment" | "none";
+}
+
 export class BackendClient {
   constructor(private readonly transport: BackendTransport) {}
 
   start() {
     return this.transport.start();
+  }
+
+  async settings(): Promise<SettingsSnapshot> {
+    return (await this.transport.request("settings.get", {})) as unknown as SettingsSnapshot;
+  }
+  async saveSettings(
+    expectedVersion: string,
+    settings: WorkspaceSettings,
+  ): Promise<SettingsSnapshot> {
+    return (await this.transport.request("settings.save", {
+      expectedVersion,
+      settings,
+    })) as unknown as SettingsSnapshot;
+  }
+  async credentialStatus(): Promise<CredentialStatus[]> {
+    const result = await this.transport.request("auth.status", {});
+    return result.credentials as unknown as CredentialStatus[];
+  }
+  async setCredential(
+    provider: CredentialStatus["provider"],
+    username: string | null,
+    token: string,
+  ): Promise<void> {
+    await this.transport.request("auth.set", { provider, username, token });
+  }
+  async clearCredential(provider: CredentialStatus["provider"]): Promise<void> {
+    await this.transport.request("auth.clear", { provider });
   }
 
   async repositories(): Promise<RepositorySummary[]> {
