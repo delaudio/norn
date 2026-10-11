@@ -55,3 +55,28 @@ publication/feedback updates and recovery after acknowledged remote results.
 - Claimed by: default-agent, 2026-10-11, `issue-304-approved-publication`.
 - Blockers: implementation/gates and PR CI/merge; #353 merged at `3385fe1`.
 - Stopped:
+
+## Completion (effective on merge to main)
+
+Implementation commit `7b2ec318414eeb7b59ecc0cf5454855d0b9250e2`, based on
+journal PR #353 merge `3385fe1`. Completes #304 with bounded provider adapters,
+expiring single-use exact previews and sequential native approval, durable
+per-item status/cancel/read-only reconciliation, root replies and atomic
+finding publication/feedback before conditional canonical cleanup. Preserves
+original identity/content and outstanding or uncertain drafts without blind
+POST retries. Evidence: `docs/opentui-migration/approved-publication.md`.
+
+Root typecheck/123 tests+tooling/lint/Archgate 12/12, UI typecheck/136 tests/830
+assertions/89 native frames, full core 660+2 ignored, 49 stdio, five CLI/five
+onboarding, no-GUI dependency guard and strict all-feature/all-target Clippy
+pass. Native input and fake-provider tests cover explicit action, partial
+batches, source/scope/CAS fencing, timeout/restart, cancellation, stale anchors,
+legacy journal migration, unknown-field retention and feedback rollback.
+React Doctor now reports only seven DOM-rule warnings for OpenTUI's typed
+native `flexShrink`; no suppressions. Main slot/contiguous ADRs/INDEX metadata
+and active references pass; historical ADR 0011 coverage remains unchanged.
+
+Prepared for PR integration, not yet shipped before merge. ADR 0020 remains
+Accepted until complete cutover. #305–#309 and the epic remain open. No live
+provider publication, real credential/agent access, Norn review or user-data
+removal. The unrelated `.norn.yaml` remains untouched.
