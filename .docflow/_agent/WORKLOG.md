@@ -198,3 +198,5 @@ Append one row per commit. Newest at the bottom.
 | 2026-10-11 | default-agent | PR #336 merged at `350103f` with UI and Rust CI green. Plan 0035 is prepared in PR #337; all local gates pass and React Doctor reports no issues after panel extraction. No Norn review used. |
 
 | 2026-10-11 | default-agent | Plan 0036 prepared: late start/reply/fix ownership, exact cancellation IDs, target/sequence fencing, coalesced gap/status recovery, mounted polling with unmount cleanup, final saved-run/finding refresh and native error/draft recovery. UI 56 tests and 26 frames pass; root/Archgate gates pass. React Doctor await-in-loop diagnostic is intentional serialization, covered by burst bounds; no suppression. |
+
+| 2026-10-11 | default-agent | PR #337 merged at `2f9b58e`, all CI green. Plan 0036 is prepared in PR #338 with 56 UI tests/26 frames and root/Archgate gates. Next: settings/onboarding and local user-data recovery for #305. |

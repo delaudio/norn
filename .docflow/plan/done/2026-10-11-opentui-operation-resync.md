@@ -34,5 +34,15 @@ reply drafts on failure while fencing composer updates by generation.
 ## Status
 
 - Claimed by: default-agent, 2026-10-11, `issue-303-operation-resync`.
-- Blockers: preceding delivery awaits CI/merge.
+- Blockers: None; PR #337 merged at `2f9b58e`.
 - Stopped:
+
+## Delivery prepared for merge
+
+- PR: https://github.com/delaudio/norn/pull/338
+- Effective on merge to main; ADR 0020 remains Accepted until full cutover.
+- Validation: 56 UI tests, 26 checked native frames, root lint/typecheck/tests
+  and Archgate 17/17. Rust/protocol unchanged from the preceding verified merge.
+- Coalesced await-in-loop is intentional response ordering, verified by burst
+  tests; no React Doctor suppression. Live provider smoke is documented opt-in
+  and was not run.
