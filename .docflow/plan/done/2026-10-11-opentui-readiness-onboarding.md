@@ -42,8 +42,26 @@ commands and documented recovery routes.
 - #301 is merged; plans 0037/0038/0042 own settings/import/record foundations.
 - Integrate after the syntax/clipboard PR; isolated preparation while CI runs.
 
-## Status
+## Delivery
 
-- Claimed by: default-agent, 2026-10-11, `issue-305-readiness-onboarding`.
-- Blockers: syntax/clipboard PR must merge before integration.
-- Stopped:
+Effective on merge to main of this onboarding PR. Implementation `8c7974c`,
+based on PR #346 merge `066174e` (both CI gates green). Root typecheck,
+123 tests/tooling, lint/protocol and Archgate 17/17 pass. UI typecheck,
+102 tests/574 assertions and 59 native frames pass. Rust core 625 tests pass
+(2 intentional ignored), no-GUI guard, 44 backend subprocess tests and strict
+all-feature/all-target Clippy pass. Five command-distribution onboarding tests
+pass; doctor parser/engine use an isolated mock-keyring child with synthetic
+versions asserted for all three agents; actual doctor help/init/data routing
+uses the real CLI with isolated storage. The old unisolated doctor attempt was
+interrupted and is excluded from evidence.
+
+Readiness performs executable metadata checks only, no CLI execution, credential
+read, repository/policy scan, login or publication. Native input tests exercise
+first-run guidance, settings opening, Ctrl+R refresh and delayed Esc parsing;
+coalescing/disposal tests preserve unsaved edits and fence late status/save
+results. Native-store gaps remain explicit with no plaintext fallback. React
+Doctor finds no issues in nine changed UI files (score 60, no global-clean claim).
+
+Remaining #305 data consumption/recovery, physical image gate for #302 and
+installed runtime/worker pair remain explicit; this increment does not close
+#305 or the migration decision.
