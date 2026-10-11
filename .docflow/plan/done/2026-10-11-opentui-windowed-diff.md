@@ -36,5 +36,17 @@ mount/repaint/scroll cost and bounded mounted-row counts honestly.
 ## Status
 
 - Claimed by: default-agent, 2026-10-11, `issue-302-windowed-diff`.
-- Blockers: PR #341 CI pending; isolated local preparation only.
+- Blockers: None; PR #341 merged with UI and verify green. Matched Ratatui/platform evidence remains a final gate.
 - Stopped:
+
+## Delivery
+
+Effective on merge to main of the text-windowing PR. Root lint/typecheck,
+123 frontend tests/tooling and Archgate 17/17; 75 UI tests (409 assertions)
+and 44 native frames; React Doctor. Expanded 10,000-row fixtures retain at
+most 39 mounted rows, with native tests proving end access, exact wrapped
+old/new anchors, Unicode/tab/odd-width geometry, actual child heights, resize
+and offscreen horizontal extent. The parent renderer failed to allocate text
+buffers on that expanded workload; the benchmark now rejects missing panels.
+See the internal windowed-diff runbook for repeatable measurements and limits.
+This delivery does not close #302 or implement all of ADR 0020.

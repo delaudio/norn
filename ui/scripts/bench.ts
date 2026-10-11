@@ -117,22 +117,55 @@ async function measureLargeDiff(lineCount: number) {
   );
   const store = new ShellStore();
   await store.connect(client);
+  await settleDiff(store);
   const renderer = await createTestRenderer({ width: 120, height: 30 });
   const mountStart = performance.now();
   const ui = mountApp(renderer.renderer, store, client, () => {});
   await renderer.renderOnce();
   const mountMs = round(performance.now() - mountStart);
 
-  // Repaint a large diff in split mode to exercise the row mapping + culling.
+  // Exercise the full diff, not only the original 2,000-row collapsed slice.
+  store.toggleDiffExpanded();
+  await renderer.renderOnce();
+
+  // Repaint a large diff in split mode to exercise the row mapping + windowing.
   const repaintStart = performance.now();
   store.toggleDiffMode();
   await renderer.renderOnce();
   const splitRepaintMs = round(performance.now() - repaintStart);
+  if (!ui.scroll) throw new Error("Expanded split diff failed to mount; benchmark is invalid");
 
+  const scrollTimes: number[] = [];
+  let maximumMountedRows = 0;
+  for (let index = 0; index < 100; index += 1) {
+    const start = performance.now();
+    if (!ui.scroll) throw new Error("Expanded diff renderer disappeared; benchmark is invalid");
+    ui.scroll.scrollTop = Math.floor((index * ui.scroll.scrollHeight) / 100);
+    // First frame moves the native viewport; the second commits its React window.
+    await renderer.renderOnce();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await renderer.renderOnce();
+    scrollTimes.push(performance.now() - start);
+    maximumMountedRows = Math.max(
+      maximumMountedRows,
+      ui.scroll?.getChildren().filter((row) => row.id.startsWith("diff-row-")).length ?? 0,
+    );
+  }
+  scrollTimes.sort((a, b) => a - b);
+  const scrollP95Ms = round(scrollTimes[Math.ceil(scrollTimes.length * 0.95) - 1] ?? 0);
   const processRssMb = Math.round(process.memoryUsage().rss / (1024 * 1024));
   ui.unmount();
   renderer.renderer.destroy();
-  return { lines: lineCount, mountMs, splitRepaintMs, processRssMb };
+  return {
+    expanded: true,
+    scrollSamples: scrollTimes.length,
+    scrollP95Ms,
+    maximumMountedRows,
+    lines: lineCount,
+    mountMs,
+    splitRepaintMs,
+    processRssMb,
+  };
 }
 
 const largeDiffResults = [];
