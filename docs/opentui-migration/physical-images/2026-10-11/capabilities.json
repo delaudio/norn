@@ -1,0 +1,38 @@
+{
+  "dimensions": {
+    "width": 120,
+    "height": 30
+  },
+  "capabilities": {
+    "kitty_keyboard": true,
+    "kitty_graphics": true,
+    "rgb": true,
+    "ansi256": true,
+    "unicode": "unicode",
+    "sgr_pixels": false,
+    "color_scheme_updates": true,
+    "explicit_width": false,
+    "scaled_text": false,
+    "sixel": true,
+    "focus_tracking": true,
+    "sync": true,
+    "bracketed_paste": true,
+    "hyperlinks": true,
+    "osc52": true,
+    "osc52_support": "supported",
+    "notifications": true,
+    "explicit_cursor_positioning": false,
+    "remote": false,
+    "multiplexer": "none",
+    "image_protocol": "auto",
+    "terminal": {
+      "name": "iTerm2",
+      "version": "3.6.11",
+      "from_xtversion": true
+    }
+  },
+  "resolution": {
+    "width": 850,
+    "height": 517
+  }
+}
