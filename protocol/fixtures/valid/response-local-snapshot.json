@@ -1,0 +1,76 @@
+{
+  "type": "response",
+  "id": "owned",
+  "ok": true,
+  "result": {
+    "request": {
+      "captureId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "comparison": {
+        "source": {
+          "kind": "current"
+        },
+        "mode": "workingTree",
+        "baseRef": null,
+        "layers": [
+          "committed",
+          "staged",
+          "unstaged"
+        ]
+      }
+    },
+    "info": {
+      "comparison": {
+        "source": {
+          "kind": "current"
+        },
+        "mode": "workingTree",
+        "baseRef": null,
+        "layers": [
+          "committed",
+          "staged",
+          "unstaged"
+        ]
+      },
+      "snapshot": {
+        "source": {
+          "kind": "current"
+        },
+        "repository": {
+          "provider": "github",
+          "workspace": "owned",
+          "repo": "same"
+        },
+        "rootId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "snapshotId": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+      },
+      "branch": "main",
+      "headSha": "dddddddddddddddddddddddddddddddddddddddd",
+      "baseSha": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      "nativeSnapshotSha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "localReviewId": 3435973836,
+      "layers": [
+        {
+          "kind": "committed",
+          "fileCount": 0,
+          "patchBytes": 0
+        },
+        {
+          "kind": "staged",
+          "fileCount": 0,
+          "patchBytes": 0
+        },
+        {
+          "kind": "unstaged",
+          "fileCount": 0,
+          "patchBytes": 0
+        }
+      ],
+      "fileCount": 0,
+      "patchBytes": 0,
+      "warnings": [
+        "Untracked files are excluded from this comparison."
+      ],
+      "warningsTruncated": false
+    }
+  }
+}

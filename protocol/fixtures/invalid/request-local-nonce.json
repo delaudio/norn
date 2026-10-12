@@ -1,0 +1,20 @@
+{
+  "type": "request",
+  "id": "owned",
+  "method": "local.snapshot",
+  "params": {
+    "captureId": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    "comparison": {
+      "source": {
+        "kind": "current"
+      },
+      "mode": "workingTree",
+      "baseRef": null,
+      "layers": [
+        "committed",
+        "staged",
+        "unstaged"
+      ]
+    }
+  }
+}

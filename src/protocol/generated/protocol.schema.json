@@ -4603,6 +4603,701 @@
           }
         }
       ]
+    },
+    "LocalSource": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind"
+          ],
+          "properties": {
+            "kind": {
+              "const": "current"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "repository"
+          ],
+          "properties": {
+            "kind": {
+              "const": "configured"
+            },
+            "repository": {
+              "$ref": "#/definitions/PrRepositoryIdentity"
+            }
+          }
+        }
+      ]
+    },
+    "LocalComparison": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "source",
+            "mode",
+            "baseRef",
+            "layers"
+          ],
+          "properties": {
+            "source": {
+              "$ref": "#/definitions/LocalSource"
+            },
+            "mode": {
+              "const": "workingTree"
+            },
+            "baseRef": {
+              "type": "null"
+            },
+            "layers": {
+              "type": "array",
+              "items": {
+                "enum": [
+                  "committed",
+                  "staged",
+                  "unstaged"
+                ]
+              },
+              "minItems": 1,
+              "maxItems": 3,
+              "uniqueItems": true
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "source",
+            "mode",
+            "baseRef",
+            "layers"
+          ],
+          "properties": {
+            "source": {
+              "$ref": "#/definitions/LocalSource"
+            },
+            "mode": {
+              "const": "branch"
+            },
+            "baseRef": {
+              "type": "string",
+              "maxLength": 256,
+              "minLength": 1,
+              "pattern": "^(?!-)[^\\s\\u0000-\\u001f\\u007f]+$"
+            },
+            "layers": {
+              "type": "array",
+              "items": {
+                "const": "committed"
+              },
+              "minItems": 1,
+              "maxItems": 1
+            }
+          }
+        }
+      ]
+    },
+    "LocalCaptureParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "captureId",
+        "comparison"
+      ],
+      "properties": {
+        "captureId": {
+          "type": "string",
+          "maxLength": 64,
+          "minLength": 64,
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "comparison": {
+          "$ref": "#/definitions/LocalComparison"
+        }
+      }
+    },
+    "LocalOptionsParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source",
+        "offset",
+        "limit"
+      ],
+      "properties": {
+        "source": {
+          "$ref": "#/definitions/LocalSource"
+        },
+        "offset": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 32
+        }
+      }
+    },
+    "LocalCancelParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source",
+        "captureId"
+      ],
+      "properties": {
+        "source": {
+          "$ref": "#/definitions/LocalSource"
+        },
+        "captureId": {
+          "type": "string",
+          "maxLength": 64,
+          "minLength": 64,
+          "pattern": "^[a-f0-9]{64}$"
+        }
+      }
+    },
+    "LocalSnapshotRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source",
+        "repository",
+        "rootId",
+        "snapshotId"
+      ],
+      "properties": {
+        "source": {
+          "$ref": "#/definitions/LocalSource"
+        },
+        "repository": {
+          "$ref": "#/definitions/PrRepositoryIdentity"
+        },
+        "rootId": {
+          "type": "string",
+          "maxLength": 64,
+          "minLength": 64,
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "snapshotId": {
+          "type": "string",
+          "maxLength": 64,
+          "minLength": 64,
+          "pattern": "^[a-f0-9]{64}$"
+        }
+      }
+    },
+    "LocalLookupParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "snapshot"
+      ],
+      "properties": {
+        "snapshot": {
+          "$ref": "#/definitions/LocalSnapshotRef"
+        }
+      }
+    },
+    "LocalRecheckParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "snapshot",
+        "captureId"
+      ],
+      "properties": {
+        "snapshot": {
+          "$ref": "#/definitions/LocalSnapshotRef"
+        },
+        "captureId": {
+          "type": "string",
+          "maxLength": 64,
+          "minLength": 64,
+          "pattern": "^[a-f0-9]{64}$"
+        }
+      }
+    },
+    "LocalFilesParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "snapshot",
+        "offset",
+        "limit"
+      ],
+      "properties": {
+        "snapshot": {
+          "$ref": "#/definitions/LocalSnapshotRef"
+        },
+        "offset": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 6000
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 32
+        }
+      }
+    },
+    "LocalDiffParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "snapshot",
+        "layer",
+        "path",
+        "offset"
+      ],
+      "properties": {
+        "snapshot": {
+          "$ref": "#/definitions/LocalSnapshotRef"
+        },
+        "layer": {
+          "enum": [
+            "committed",
+            "staged",
+            "unstaged"
+          ]
+        },
+        "path": {
+          "$ref": "#/definitions/LocalRelativePath"
+        },
+        "offset": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 16777216
+        }
+      }
+    },
+    "LocalLayerInfo": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "fileCount",
+        "patchBytes"
+      ],
+      "properties": {
+        "kind": {
+          "enum": [
+            "committed",
+            "staged",
+            "unstaged"
+          ]
+        },
+        "fileCount": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 6000
+        },
+        "patchBytes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 16777216
+        }
+      }
+    },
+    "LocalSnapshotInfo": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "comparison",
+        "snapshot",
+        "branch",
+        "headSha",
+        "baseSha",
+        "nativeSnapshotSha256",
+        "localReviewId",
+        "layers",
+        "fileCount",
+        "patchBytes",
+        "warnings",
+        "warningsTruncated"
+      ],
+      "properties": {
+        "comparison": {
+          "$ref": "#/definitions/LocalComparison"
+        },
+        "snapshot": {
+          "$ref": "#/definitions/LocalSnapshotRef"
+        },
+        "branch": {
+          "type": "string",
+          "maxLength": 256,
+          "minLength": 1
+        },
+        "headSha": {
+          "anyOf": [
+            {
+              "type": "string",
+              "maxLength": 64,
+              "minLength": 40,
+              "pattern": "^(?:[a-f0-9]{40}|[a-f0-9]{64})$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "baseSha": {
+          "type": "string",
+          "maxLength": 64,
+          "minLength": 40,
+          "pattern": "^(?:[a-f0-9]{40}|[a-f0-9]{64})$"
+        },
+        "nativeSnapshotSha256": {
+          "type": "string",
+          "maxLength": 64,
+          "minLength": 64,
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "localReviewId": {
+          "type": "integer",
+          "minimum": 2147483648,
+          "maximum": 4294967295
+        },
+        "layers": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/LocalLayerInfo"
+          },
+          "minItems": 1,
+          "maxItems": 3
+        },
+        "fileCount": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 6000
+        },
+        "patchBytes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 16777216
+        },
+        "warnings": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "maxLength": 512,
+            "minLength": 0
+          },
+          "minItems": 0,
+          "maxItems": 128
+        },
+        "warningsTruncated": {
+          "type": "boolean"
+        }
+      }
+    },
+    "LocalCaptureResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "request",
+        "info"
+      ],
+      "properties": {
+        "request": {
+          "$ref": "#/definitions/LocalCaptureParams"
+        },
+        "info": {
+          "$ref": "#/definitions/LocalSnapshotInfo"
+        }
+      }
+    },
+    "LocalInfoResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "request",
+        "info"
+      ],
+      "properties": {
+        "request": {
+          "$ref": "#/definitions/LocalLookupParams"
+        },
+        "info": {
+          "$ref": "#/definitions/LocalSnapshotInfo"
+        }
+      }
+    },
+    "LocalRecheckResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "request",
+        "info",
+        "unchanged"
+      ],
+      "properties": {
+        "request": {
+          "$ref": "#/definitions/LocalRecheckParams"
+        },
+        "info": {
+          "$ref": "#/definitions/LocalSnapshotInfo"
+        },
+        "unchanged": {
+          "const": true
+        }
+      }
+    },
+    "LocalCancelResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "request",
+        "canceled"
+      ],
+      "properties": {
+        "request": {
+          "$ref": "#/definitions/LocalCancelParams"
+        },
+        "canceled": {
+          "type": "boolean"
+        }
+      }
+    },
+    "LocalOptionsResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "request",
+        "repository",
+        "rootId",
+        "branch",
+        "headSha",
+        "baseRefs",
+        "total",
+        "nextOffset"
+      ],
+      "properties": {
+        "request": {
+          "$ref": "#/definitions/LocalOptionsParams"
+        },
+        "repository": {
+          "$ref": "#/definitions/PrRepositoryIdentity"
+        },
+        "rootId": {
+          "type": "string",
+          "maxLength": 64,
+          "minLength": 64,
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "branch": {
+          "anyOf": [
+            {
+              "type": "string",
+              "maxLength": 256,
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "headSha": {
+          "anyOf": [
+            {
+              "type": "string",
+              "maxLength": 64,
+              "minLength": 40,
+              "pattern": "^(?:[a-f0-9]{40}|[a-f0-9]{64})$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "baseRefs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "maxLength": 256,
+            "minLength": 1,
+            "pattern": "^(?!-)[^\\s\\u0000-\\u001f\\u007f]+$"
+          },
+          "minItems": 0,
+          "maxItems": 32
+        },
+        "total": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000
+        },
+        "nextOffset": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1000
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "LocalSnapshotFile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "layer",
+        "path",
+        "oldPath",
+        "status",
+        "additions",
+        "deletions",
+        "binary"
+      ],
+      "properties": {
+        "layer": {
+          "enum": [
+            "committed",
+            "staged",
+            "unstaged"
+          ]
+        },
+        "path": {
+          "$ref": "#/definitions/LocalRelativePath"
+        },
+        "oldPath": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/LocalRelativePath"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "status": {
+          "enum": [
+            "added",
+            "modified",
+            "deleted",
+            "renamed",
+            "copied"
+          ]
+        },
+        "additions": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4294967295
+        },
+        "deletions": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4294967295
+        },
+        "binary": {
+          "type": "boolean"
+        }
+      }
+    },
+    "LocalFilesPage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "request",
+        "files",
+        "total",
+        "nextOffset"
+      ],
+      "properties": {
+        "request": {
+          "$ref": "#/definitions/LocalFilesParams"
+        },
+        "files": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/LocalSnapshotFile"
+          },
+          "minItems": 0,
+          "maxItems": 32
+        },
+        "total": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 6000
+        },
+        "nextOffset": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 6000
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "LocalDiffPage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "request",
+        "text",
+        "totalBytes",
+        "contentSha256",
+        "nextOffset"
+      ],
+      "properties": {
+        "request": {
+          "$ref": "#/definitions/LocalDiffParams"
+        },
+        "text": {
+          "type": "string",
+          "maxLength": 65536,
+          "minLength": 0
+        },
+        "totalBytes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 16777216
+        },
+        "contentSha256": {
+          "type": "string",
+          "maxLength": 64,
+          "minLength": 64,
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "nextOffset": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 16777216
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "LocalRelativePath": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4096,
+      "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*//)(?!.*/$)[^\\\\\\u0000-\\u001f\\u007f-\\u009f]+$"
     }
   },
   "oneOf": [
@@ -6129,6 +6824,174 @@
               "$ref": "#/definitions/ReviewProfilesParams"
             }
           }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "type": {
+              "const": "request"
+            },
+            "id": {
+              "$ref": "#/definitions/RequestId"
+            },
+            "method": {
+              "const": "local.options"
+            },
+            "params": {
+              "$ref": "#/definitions/LocalOptionsParams"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "type": {
+              "const": "request"
+            },
+            "id": {
+              "$ref": "#/definitions/RequestId"
+            },
+            "method": {
+              "const": "local.snapshot"
+            },
+            "params": {
+              "$ref": "#/definitions/LocalCaptureParams"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "type": {
+              "const": "request"
+            },
+            "id": {
+              "$ref": "#/definitions/RequestId"
+            },
+            "method": {
+              "const": "local.snapshot.cancel"
+            },
+            "params": {
+              "$ref": "#/definitions/LocalCancelParams"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "type": {
+              "const": "request"
+            },
+            "id": {
+              "$ref": "#/definitions/RequestId"
+            },
+            "method": {
+              "const": "local.snapshot.info"
+            },
+            "params": {
+              "$ref": "#/definitions/LocalLookupParams"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "type": {
+              "const": "request"
+            },
+            "id": {
+              "$ref": "#/definitions/RequestId"
+            },
+            "method": {
+              "const": "local.snapshot.files"
+            },
+            "params": {
+              "$ref": "#/definitions/LocalFilesParams"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "type": {
+              "const": "request"
+            },
+            "id": {
+              "$ref": "#/definitions/RequestId"
+            },
+            "method": {
+              "const": "local.snapshot.diff"
+            },
+            "params": {
+              "$ref": "#/definitions/LocalDiffParams"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "type": {
+              "const": "request"
+            },
+            "id": {
+              "$ref": "#/definitions/RequestId"
+            },
+            "method": {
+              "const": "local.snapshot.recheck"
+            },
+            "params": {
+              "$ref": "#/definitions/LocalRecheckParams"
+            }
+          }
         }
       ]
     },
@@ -6258,6 +7121,27 @@
             },
             {
               "$ref": "#/definitions/ReviewProfileCatalog"
+            },
+            {
+              "$ref": "#/definitions/LocalOptionsResult"
+            },
+            {
+              "$ref": "#/definitions/LocalCaptureResult"
+            },
+            {
+              "$ref": "#/definitions/LocalCancelResult"
+            },
+            {
+              "$ref": "#/definitions/LocalInfoResult"
+            },
+            {
+              "$ref": "#/definitions/LocalFilesPage"
+            },
+            {
+              "$ref": "#/definitions/LocalDiffPage"
+            },
+            {
+              "$ref": "#/definitions/LocalRecheckResult"
             }
           ]
         }

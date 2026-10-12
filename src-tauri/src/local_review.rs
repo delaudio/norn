@@ -218,6 +218,27 @@ pub(crate) fn local_review_snapshot_for_approval_path(
     )
 }
 
+/// The caller has already proved the exact source/root/remote. Keep collection
+/// on one shared deadline and cancellation instead of rediscovering a checkout.
+pub(crate) fn local_review_snapshot_for_verified_path(
+    provider: ReviewProvider,
+    workspace: &str,
+    repo: &str,
+    repo_path: &Path,
+    cancellation: LocalReviewCancellation,
+    timeout: Duration,
+) -> Result<LocalReviewSnapshot, String> {
+    local_review_snapshot_for_path_with_control(
+        provider,
+        workspace,
+        repo,
+        repo_path,
+        cancellation,
+        timeout,
+        false,
+    )
+}
+
 pub(crate) fn local_review_snapshot_for_configured_path(
     provider: ReviewProvider,
     workspace: &str,
@@ -466,11 +487,27 @@ pub(crate) fn local_branch_review_snapshot_for_configured_path(
     base_ref: &str,
     cancellation: LocalReviewCancellation,
 ) -> Result<LocalReviewSnapshot, String> {
-    let control = GitRunControl::new(
-        LOCAL_GIT_TIMEOUT,
+    local_branch_review_snapshot_for_verified_path(
+        provider,
+        workspace,
+        repo,
+        repo_path,
+        base_ref,
         cancellation,
-        "Local branch review snapshot",
-    );
+        LOCAL_GIT_TIMEOUT,
+    )
+}
+
+pub(crate) fn local_branch_review_snapshot_for_verified_path(
+    provider: ReviewProvider,
+    workspace: &str,
+    repo: &str,
+    repo_path: &Path,
+    base_ref: &str,
+    cancellation: LocalReviewCancellation,
+    timeout: Duration,
+) -> Result<LocalReviewSnapshot, String> {
+    let control = GitRunControl::new(timeout, cancellation, "Local branch review snapshot");
 
     let base_ref = base_ref.trim();
     if base_ref.is_empty() {

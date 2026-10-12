@@ -13,8 +13,11 @@ Git is authoritative. Durable history lives in WORKLOG and plan/done.
   passed both jobs. Main synced; approval journal schema19 is shipped.
 - PR#374 final3dd4fb0 passed both required CI38205709559 jobs; verified
   squash-merged a3b6e4dcdd62278fb3cd5e781df4f8597e80b5c6 at05:09:19UTC.
-  Plan0063 completion is effective. Rebase0064 onto actual main before restoring
-  the owned uncommitted source/DTO/native timeout foundation.
+  Plan0063 completion is effective. Rebased0064 onto actual main. Implemented
+  strict sources, native double capture, separate layers, schema20 durable evidence,
+  bounded pages/recheck/cancel, typed client and owned tests. Local11 core tests,
+  two real stdio scenarios and four client tests passed; full integration gates
+  and exact-head CI/PR merge are pending. Actual local UI/engine remains next.
 - Fixtures only: no live provider writes/private credentials/profiles/releases,
   no root unrelated .norn.yaml read/copy/stage.
 
@@ -22,7 +25,7 @@ Git is authoritative. Durable history lives in WORKLOG and plan/done.
 
 - Complete #358–#364/#306, #307 hardening, #308 matched installed packaging,
   #309 verified removal/cutover, then close the epic. Profile default/catalog
-  delivered in pending374; policy editor is #359, canonical prompt editor shipped.
+  verified shipped in374; policy editor is #359, canonical prompt editor shipped.
 - Preserve maintainer closures including #357/#305. ADR0020 Accepted until
   actual complete cutover. Native desktop-profile runtime/platform recovery
   remains unobserved; compile/copy smoke is not evidence of recovery.

@@ -247,3 +247,10 @@ These deliveries do not close the full parity row.
   gate; installed-artifact and upgrade tests; then remove Tauri, Ratatui, and
   obsolete build requirements. Release publication and destructive user-data
   cleanup are separate, explicit steps.
+
+Local immutable source/options/capture/read/recheck IPC is documented in
+[local snapshots](local-snapshots.md). It retains the shipped working-tree and
+committed-only branch collectors, separate layers and durable root/provider
+ownership. Native terminal controls, local review payload/cancel/history and
+Pierre consumers still require the next integration step; local parity remains
+open.

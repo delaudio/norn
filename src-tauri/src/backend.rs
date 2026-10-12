@@ -108,6 +108,8 @@ struct Backend {
     active_publication: Arc<AtomicUsize>,
     active_publication_reads: Arc<AtomicUsize>,
     publication: Arc<crate::services::draft_publication::Manager>,
+    local_snapshots: Arc<crate::services::local_snapshot::Manager>,
+    active_local: Arc<AtomicUsize>,
     provider_approval: Arc<crate::services::provider_approval::Manager>,
     active_approval: Arc<AtomicUsize>,
     browser: Arc<Mutex<Option<WebDiffServer>>>,
@@ -183,6 +185,12 @@ pub fn run() -> Result<(), i32> {
             active_provider_reads.clone(),
             Arc::new(AtomicBool::new(false)),
         )),
+        local_snapshots: Arc::new(crate::services::local_snapshot::Manager::new(
+            std::env::var_os("NORN_BACKEND_REPO_PATH")
+                .map(std::path::PathBuf::from)
+                .unwrap_or_else(|| std::env::current_dir().unwrap_or_default()),
+        )),
+        active_local: Arc::new(AtomicUsize::new(0)),
         provider_approval: Arc::new(crate::services::provider_approval::Manager::new(
             shutdown.clone(),
         )),
@@ -220,6 +228,7 @@ pub fn run() -> Result<(), i32> {
             "diff".to_string(),
             "review".to_string(),
             "review-profile-catalog".to_string(),
+            "local-snapshots".to_string(),
         ],
     }));
 
@@ -231,12 +240,16 @@ pub fn run() -> Result<(), i32> {
             operation.cancel.store(true, Ordering::SeqCst);
         }
     }
+    backend.local_snapshots.stop();
     // Stop spawning new children, terminate the ones this backend owns, and let
     // the writer flush and exit.
     shutting_down().store(true, Ordering::SeqCst);
     kill_git_children();
     let deadline = Instant::now() + Duration::from_secs(15);
-    while backend.active_operations.load(Ordering::SeqCst) > 0 && Instant::now() < deadline {
+    while (backend.active_operations.load(Ordering::SeqCst) > 0
+        || backend.active_local.load(Ordering::SeqCst) > 0)
+        && Instant::now() < deadline
+    {
         thread::sleep(Duration::from_millis(25));
     }
     backend.shutdown.store(true, Ordering::SeqCst);
@@ -357,6 +370,130 @@ fn dispatch(request: Request, backend: &Backend) -> bool {
     let id = request.id().to_string();
     let method = request.method();
     match request {
+        Request::LocalSnapshotCancel { params, .. } => {
+            match backend.local_snapshots.cancel(params.clone()) {
+                Ok(canceled) => {
+                    backend.respond(
+                        &id,
+                        json!(crate::services::local_snapshot::CancelResult {
+                            request: params,
+                            canceled
+                        }),
+                    );
+                }
+                Err(message) => {
+                    backend.fail(
+                        &id,
+                        ProtocolError::new(ProtocolErrorCode::Conflict, message),
+                    );
+                }
+            }
+            false
+        }
+        Request::LocalOptions { .. }
+        | Request::LocalSnapshot { .. }
+        | Request::LocalSnapshotInfo { .. }
+        | Request::LocalSnapshotFiles { .. }
+        | Request::LocalSnapshotDiff { .. }
+        | Request::LocalSnapshotRecheck { .. } => {
+            let active = backend.active_local.clone();
+            if active
+                .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| {
+                    (n < 2).then_some(n + 1)
+                })
+                .is_err()
+            {
+                backend.fail(
+                    &id,
+                    ProtocolError::new(
+                        ProtocolErrorCode::Conflict,
+                        "Two local evidence requests are already running.",
+                    ),
+                );
+                return false;
+            }
+            let manager = backend.local_snapshots.clone();
+            let shutdown = backend.shutdown.clone();
+            let control = backend.control.clone();
+            let reservation = match &request {
+                Request::LocalSnapshot { params, .. } => {
+                    Some(crate::services::local_snapshot::CancelParams {
+                        source: params.comparison.source.clone(),
+                        capture_id: params.capture_id.clone(),
+                    })
+                }
+                Request::LocalSnapshotRecheck { params, .. } => {
+                    Some(crate::services::local_snapshot::CancelParams {
+                        source: params.snapshot.source.clone(),
+                        capture_id: params.capture_id.clone(),
+                    })
+                }
+                _ => None,
+            };
+            let ticket = match reservation
+                .map(|params| manager.reserve(params))
+                .transpose()
+            {
+                Ok(ticket) => ticket,
+                Err(message) => {
+                    active.fetch_sub(1, Ordering::SeqCst);
+                    backend.fail(
+                        &id,
+                        ProtocolError::new(ProtocolErrorCode::Conflict, message),
+                    );
+                    return false;
+                }
+            };
+            thread::spawn(move || {
+                let result = match request {
+                    Request::LocalOptions { params, .. } => {
+                        manager.options(params).map(|v| json!(v))
+                    }
+                    Request::LocalSnapshot { params, .. } => manager
+                        .capture_reserved(params, ticket.expect("capture reserved before dispatch"))
+                        .map(|v| json!(v)),
+                    Request::LocalSnapshotInfo { params, .. } => {
+                        manager.info(params).map(|v| json!(v))
+                    }
+                    Request::LocalSnapshotFiles { params, .. } => {
+                        manager.files(params).map(|v| json!(v))
+                    }
+                    Request::LocalSnapshotDiff { params, .. } => {
+                        manager.diff(params).map(|v| json!(v))
+                    }
+                    Request::LocalSnapshotRecheck { params, .. } => manager
+                        .recheck_reserved(params, ticket.expect("recheck reserved before dispatch"))
+                        .map(|v| json!(v)),
+                    _ => unreachable!(),
+                };
+                if !shutdown.load(Ordering::Acquire) && !manager.stopped() {
+                    let response = match result {
+                        Ok(value) => Response {
+                            id,
+                            ok: true,
+                            result: Some(value),
+                            error: None,
+                        },
+                        Err(message) => Response {
+                            id,
+                            ok: false,
+                            result: None,
+                            error: Some(ProtocolError::new(
+                                if message.contains("stale") {
+                                    ProtocolErrorCode::TargetStale
+                                } else {
+                                    ProtocolErrorCode::Conflict
+                                },
+                                message,
+                            )),
+                        },
+                    };
+                    let _ = control.send(ServerMessage::Response(response));
+                }
+                active.fetch_sub(1, Ordering::SeqCst);
+            });
+            false
+        }
         Request::PublicationCancel { params, .. } => {
             match backend.publication.cancel(params) {
                 Ok(canceled) => {

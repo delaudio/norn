@@ -1,0 +1,11 @@
+{
+  "type": "request",
+  "id": "owned",
+  "method": "local.snapshot.cancel",
+  "params": {
+    "source": {
+      "kind": "current"
+    },
+    "captureId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  }
+}

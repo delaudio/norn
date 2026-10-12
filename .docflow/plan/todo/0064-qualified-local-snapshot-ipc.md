@@ -82,5 +82,5 @@ diff/findings/review start/cancel/history/Pierre to these same snapshots before
 - Branch: `issue-358-local-snapshot-ipc`.
 - Location: isolated `/private/tmp/norn-local-snapshot-ipc`.
 - Blockers: implementation/local gates, predecessor verified merge/rebase,
-  own exact-head CI and verified PR integration.
+  own exact-head CI and verified PR integration. Predecessor verified/rebased.
 - Stopped:

@@ -1,0 +1,12 @@
+{
+  "type": "request",
+  "id": "owned",
+  "method": "local.options",
+  "params": {
+    "source": {
+      "kind": "current"
+    },
+    "offset": 0,
+    "limit": 32
+  }
+}

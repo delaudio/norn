@@ -370,6 +370,48 @@ export type Request =
       id: RequestId;
       method: "review.profiles";
       params: ReviewProfilesParams;
+    }
+  | {
+      type: "request";
+      id: RequestId;
+      method: "local.options";
+      params: LocalOptionsParams;
+    }
+  | {
+      type: "request";
+      id: RequestId;
+      method: "local.snapshot";
+      params: LocalCaptureParams;
+    }
+  | {
+      type: "request";
+      id: RequestId;
+      method: "local.snapshot.cancel";
+      params: LocalCancelParams;
+    }
+  | {
+      type: "request";
+      id: RequestId;
+      method: "local.snapshot.info";
+      params: LocalLookupParams;
+    }
+  | {
+      type: "request";
+      id: RequestId;
+      method: "local.snapshot.files";
+      params: LocalFilesParams;
+    }
+  | {
+      type: "request";
+      id: RequestId;
+      method: "local.snapshot.diff";
+      params: LocalDiffParams;
+    }
+  | {
+      type: "request";
+      id: RequestId;
+      method: "local.snapshot.recheck";
+      params: LocalRecheckParams;
     };
 export type RequestId = string;
 /**
@@ -461,6 +503,43 @@ export type ProviderSnapshotImageParams = {
  * Strict target for the read-only native profile catalog.
  */
 export type ReviewProfileTarget = ReviewProfileProviderTarget | ReviewProfileLocalTarget;
+export type LocalSource =
+  | {
+      kind: "current";
+    }
+  | {
+      kind: "configured";
+      repository: PrRepositoryIdentity;
+    };
+export type LocalComparison =
+  | {
+      source: LocalSource;
+      mode: "workingTree";
+      baseRef: null;
+      /**
+       * @minItems 1
+       * @maxItems 3
+       */
+      layers:
+        | ["committed" | "staged" | "unstaged"]
+        | ["committed" | "staged" | "unstaged", "committed" | "staged" | "unstaged"]
+        | [
+            "committed" | "staged" | "unstaged",
+            "committed" | "staged" | "unstaged",
+            "committed" | "staged" | "unstaged"
+          ];
+    }
+  | {
+      source: LocalSource;
+      mode: "branch";
+      baseRef: string;
+      /**
+       * @minItems 1
+       * @maxItems 1
+       */
+      layers: ["committed"];
+    };
+export type LocalRelativePath = string;
 export type OperationState = "accepted" | "running" | "succeeded" | "failed" | "cancelled";
 export type ErrorCode =
   | "invalidRequest"
@@ -903,6 +982,43 @@ export interface ReviewProfileLocalTarget {
   kind: "local";
   localSnapshotSha256: string;
 }
+export interface LocalOptionsParams {
+  source: LocalSource;
+  offset: number;
+  limit: number;
+}
+export interface LocalCaptureParams {
+  captureId: string;
+  comparison: LocalComparison;
+}
+export interface LocalCancelParams {
+  source: LocalSource;
+  captureId: string;
+}
+export interface LocalLookupParams {
+  snapshot: LocalSnapshotRef;
+}
+export interface LocalSnapshotRef {
+  source: LocalSource;
+  repository: PrRepositoryIdentity;
+  rootId: string;
+  snapshotId: string;
+}
+export interface LocalFilesParams {
+  snapshot: LocalSnapshotRef;
+  offset: number;
+  limit: number;
+}
+export interface LocalDiffParams {
+  snapshot: LocalSnapshotRef;
+  layer: "committed" | "staged" | "unstaged";
+  path: LocalRelativePath;
+  offset: number;
+}
+export interface LocalRecheckParams {
+  snapshot: LocalSnapshotRef;
+  captureId: string;
+}
 export interface ResponseOk {
   type: "response";
   id: RequestId;
@@ -942,7 +1058,14 @@ export interface ResponseOk {
     | ProviderBrowserResult
     | ProviderApprovalPreview
     | ProviderApprovalResult
-    | ReviewProfileCatalog;
+    | ReviewProfileCatalog
+    | LocalOptionsResult
+    | LocalCaptureResult
+    | LocalCancelResult
+    | LocalInfoResult
+    | LocalFilesPage
+    | LocalDiffPage
+    | LocalRecheckResult;
 }
 export interface DiffFileResult {
   target: TargetIdentity;
@@ -1610,6 +1733,90 @@ export interface ReviewProfileCatalog {
   defaultProfile: string | null;
   source: "policy" | "base";
   notice: string | null;
+}
+export interface LocalOptionsResult {
+  request: LocalOptionsParams;
+  repository: PrRepositoryIdentity;
+  rootId: string;
+  branch: string | null;
+  headSha: string | null;
+  /**
+   * @minItems 0
+   * @maxItems 32
+   */
+  baseRefs: string[];
+  total: number;
+  nextOffset: number | null;
+}
+export interface LocalCaptureResult {
+  request: LocalCaptureParams;
+  info: LocalSnapshotInfo;
+}
+export interface LocalSnapshotInfo {
+  comparison: LocalComparison;
+  snapshot: LocalSnapshotRef;
+  branch: string;
+  headSha: string | null;
+  baseSha: string;
+  nativeSnapshotSha256: string;
+  localReviewId: number;
+  /**
+   * @minItems 1
+   * @maxItems 3
+   */
+  layers: [LocalLayerInfo] | [LocalLayerInfo, LocalLayerInfo] | [LocalLayerInfo, LocalLayerInfo, LocalLayerInfo];
+  fileCount: number;
+  patchBytes: number;
+  /**
+   * @minItems 0
+   * @maxItems 128
+   */
+  warnings: string[];
+  warningsTruncated: boolean;
+}
+export interface LocalLayerInfo {
+  kind: "committed" | "staged" | "unstaged";
+  fileCount: number;
+  patchBytes: number;
+}
+export interface LocalCancelResult {
+  request: LocalCancelParams;
+  canceled: boolean;
+}
+export interface LocalInfoResult {
+  request: LocalLookupParams;
+  info: LocalSnapshotInfo;
+}
+export interface LocalFilesPage {
+  request: LocalFilesParams;
+  /**
+   * @minItems 0
+   * @maxItems 32
+   */
+  files: LocalSnapshotFile[];
+  total: number;
+  nextOffset: number | null;
+}
+export interface LocalSnapshotFile {
+  layer: "committed" | "staged" | "unstaged";
+  path: LocalRelativePath;
+  oldPath: LocalRelativePath | null;
+  status: "added" | "modified" | "deleted" | "renamed" | "copied";
+  additions: number;
+  deletions: number;
+  binary: boolean;
+}
+export interface LocalDiffPage {
+  request: LocalDiffParams;
+  text: string;
+  totalBytes: number;
+  contentSha256: string;
+  nextOffset: number | null;
+}
+export interface LocalRecheckResult {
+  request: LocalRecheckParams;
+  info: LocalSnapshotInfo;
+  unchanged: true;
 }
 export interface ResponseError {
   type: "response";
