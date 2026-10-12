@@ -14,6 +14,7 @@ import { PublicationStore } from "../src/app/publicationStore";
 import { ReferenceStore } from "../src/app/referenceStore";
 import { SettingsStore } from "../src/app/settingsStore";
 import { WorkspaceStore } from "../src/app/workspaceStore";
+import { FakeProfileTransport } from "../src/transport/fakeProfileTransport";
 import {
   FakeProviderTransport,
   providerFixtureRepositories,
@@ -934,7 +935,28 @@ async function providerPreviewScene(kind: "github" | "bitbucket" | "saved" | "er
   return { client, store };
 }
 
+async function profileScene(kind: "catalog" | "base" | "error" | "loading") {
+  const transport = new FakeProfileTransport({ repositories });
+  if (kind === "base") {
+    transport.profiles = [];
+    transport.defaultProfile = null;
+    transport.source = "base";
+    transport.notice = "No local checkout is configured. The native base profile is available.";
+  }
+  if (kind === "error") transport.error = "The repository review policy is invalid.";
+  if (kind === "loading") transport.gate = new Promise<void>(() => {});
+  const { client, store, ready } = readyStore(transport);
+  await ready;
+  if (kind === "loading") void store.openReviewProfiles(client);
+  else await store.openReviewProfiles(client);
+  return { client, store };
+}
+
 const scenes: Scene[] = [
+  ...(["catalog", "base", "error", "loading"] as const).flatMap((kind) => [
+    { id: `shell-profiles-${kind}-120x30`, cols: 120, rows: 30, build: () => profileScene(kind) },
+    { id: `shell-profiles-${kind}-50x18`, cols: 50, rows: 18, build: () => profileScene(kind) },
+  ]),
   ...(
     [
       "approval",

@@ -364,6 +364,12 @@ export type Request =
       id: RequestId;
       method: "provider.approval.reconcile";
       params: ProviderPrDetailParams;
+    }
+  | {
+      type: "request";
+      id: RequestId;
+      method: "review.profiles";
+      params: ReviewProfilesParams;
     };
 export type RequestId = string;
 /**
@@ -451,6 +457,10 @@ export type ProviderSnapshotImageParams = {
   maxBytes: number;
   contentSha256: string | null;
 };
+/**
+ * Strict target for the read-only native profile catalog.
+ */
+export type ReviewProfileTarget = ReviewProfileProviderTarget | ReviewProfileLocalTarget;
 export type OperationState = "accepted" | "running" | "succeeded" | "failed" | "cancelled";
 export type ErrorCode =
   | "invalidRequest"
@@ -878,6 +888,21 @@ export interface ProviderApprovalConfirmParams {
   request: ProviderPrDetailParams;
   approvalId: string;
 }
+export interface ReviewProfilesParams {
+  target: ReviewProfileTarget;
+}
+export interface ReviewProfileProviderTarget {
+  kind: "provider";
+  provider: "github" | "bitbucket";
+  workspace: string;
+  repo: string;
+  prId?: number;
+  runId?: string;
+}
+export interface ReviewProfileLocalTarget {
+  kind: "local";
+  localSnapshotSha256: string;
+}
 export interface ResponseOk {
   type: "response";
   id: RequestId;
@@ -916,7 +941,8 @@ export interface ResponseOk {
     | ProviderSnapshotBrowserResult
     | ProviderBrowserResult
     | ProviderApprovalPreview
-    | ProviderApprovalResult;
+    | ProviderApprovalResult
+    | ReviewProfileCatalog;
 }
 export interface DiffFileResult {
   target: TargetIdentity;
@@ -1574,6 +1600,16 @@ export interface ProviderApprovalResult {
   observedApproved: boolean;
   outdated: boolean;
   localSaved: boolean;
+}
+export interface ReviewProfileCatalog {
+  target: ReviewProfileTarget;
+  /**
+   * @maxItems 100
+   */
+  profiles: string[];
+  defaultProfile: string | null;
+  source: "policy" | "base";
+  notice: string | null;
 }
 export interface ResponseError {
   type: "response";

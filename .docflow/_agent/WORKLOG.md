@@ -619,3 +619,5 @@ Plan 0053 completion prepared after implementation `e4264db`, effective only on 
   retained policy-file editing belongs to #359; canonical prompt editing exists.
 - Claim written before code; owned fixtures only, no unrelated root .norn.yaml,
   private credentials/profiles, live provider writes, Norn reviews or releases.
+
+- 2026-10-12: PR #373 fixed2db1dcb passed exact-head CI38202396806 and was verified squash-merged at 04:23:57 UTC as ac077cd48ff96d6a6248f1ee941dd7904e2d9ce5. Plan0062 completion is effective. Rebased the claimed plan0063 onto the actual squash. Implemented strict bounded native profile catalog, exact provider/local ownership, shared actual Rust policy validation/default and F6 selection with full-target/generation fencing, no raw config/commands/credentials. Native local override semantics and existing organization verified-cache maintenance are explicitly retained rather than redefined. Owned policy, signed-layer, real Git, stdio/fake-agent and native input/frame proofs; full gates pending final receipt. No Norn review, private profiles, live provider writes or releases.

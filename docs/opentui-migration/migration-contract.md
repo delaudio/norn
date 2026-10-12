@@ -231,10 +231,13 @@ operations. It preserves legacy run ownership and distinct approval/diff pins.
 Plan 0060 persists content-addressed exact provider evidence separately from
 conversation JSON, starts fresh captures with explicit pin/provenance rechecks,
 and restores saved files/diffs/replies without a clone. F6 selects a bounded
-profile name, with empty input choosing the repository default; catalog/editor
-parity remains retained work. Plan 0062 supplies explicit provider approval
+profile name, with empty input choosing the repository default. The native
+[profile catalog](./review-profiles.md) now supplies declared names and the effective
+default through the shared Rust policy seam; policy-file editing remains part of
+repository/editor integration. Plan 0062 supplies explicit provider approval
 with a native pre-send journal; plan 0061 supplies the
-external provider page action; profile catalog/editor still remain.
+external provider page action. The declared profile/default picker is supplied
+by the native catalog; remaining repository/editor parity stays retained.
 These deliveries do not close the full parity row.
 
 - **First vertical slice (#301):** real file → diff → finding through the Rust

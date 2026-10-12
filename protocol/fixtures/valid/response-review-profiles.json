@@ -1,0 +1,22 @@
+{
+  "type": "response",
+  "id": "profiles",
+  "ok": true,
+  "result": {
+    "target": {
+      "kind": "provider",
+      "provider": "github",
+      "workspace": "owned",
+      "repo": "same",
+      "prId": 7,
+      "runId": "saved"
+    },
+    "profiles": [
+      "default",
+      "security"
+    ],
+    "defaultProfile": "default",
+    "source": "policy",
+    "notice": null
+  }
+}

@@ -42,6 +42,7 @@ import { FixPanel } from "./FixPanel";
 import { ProviderPanel } from "./ProviderPanel";
 import { PublicationPanel } from "./PublicationPanel";
 import { ReferencePanel } from "./ReferencePanel";
+import { ReviewProfilesPanel } from "./ReviewProfilesPanel";
 import { SettingsPanel } from "./SettingsPanel";
 import { VirtualDiff } from "./VirtualDiff";
 import { WorkspacePanel } from "./WorkspacePanel";
@@ -89,6 +90,17 @@ function useShellInput(
     if (key.ctrl || key.meta || key.super || key.option) {
       return;
     }
+    if (store.getSnapshot().profileOpen) {
+      key.preventDefault();
+      if (key.name === "escape") store.dismissReviewProfiles();
+      else if (key.name === "return") store.chooseReviewProfile();
+      else if (key.name === "r") void store.openReviewProfiles(client);
+      else if (key.name === "down" || key.name === "j") store.moveReviewProfile(1);
+      else if (key.name === "up" || key.name === "k") store.moveReviewProfile(-1);
+      else if (key.name === "pagedown") store.moveReviewProfile(5);
+      else if (key.name === "pageup") store.moveReviewProfile(-5);
+      return;
+    }
     if (store.getSnapshot().fixPreview) {
       key.preventDefault();
       if (key.name === "y") void store.confirmFix(client);
@@ -122,7 +134,7 @@ function useShellInput(
     } else if (key.name === "f3") {
       void store.toggleProviderPreview();
     } else if (key.name === "f6") {
-      store.beginReviewProfile();
+      void store.openReviewProfiles(client);
     } else if (key.name === "f5") {
       void store.toggleProviderPreview(true);
     } else if (key.name === "tab") {
@@ -207,6 +219,10 @@ function useShellInput(
       store.getSnapshot().findingStage !== null
     )
       return;
+    if (store.getSnapshot().profileOpen) {
+      event.preventDefault();
+      return;
+    }
     if (store.getSnapshot().searchOpen) {
       event.preventDefault();
       store.appendSearch(new TextDecoder().decode(event.bytes));
@@ -1100,7 +1116,7 @@ export function Shell({ store, client, quit }: ShellProps) {
     return () => clearInterval(timer);
   }, [store, state.operation?.state]);
   const scroll = useRef<ScrollBoxRenderable | null>(null);
-  const { width } = useTerminalDimensions();
+  const { width, height } = useTerminalDimensions();
   const fixScroll = useRef<ScrollBoxRenderable | null>(null);
   useShellInput(store, client, quit, scroll, fixScroll);
   const wide = width >= 100;
@@ -1180,6 +1196,8 @@ export function Shell({ store, client, quit }: ShellProps) {
               options: findingOptions(state),
               selectedIndex: state.selectedFinding,
             };
+
+  if (state.profileOpen) return <ReviewProfilesPanel state={state} width={width} height={height} />;
 
   if (state.providerOpen)
     return (

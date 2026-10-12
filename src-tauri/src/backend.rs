@@ -219,6 +219,7 @@ pub fn run() -> Result<(), i32> {
             "repository".to_string(),
             "diff".to_string(),
             "review".to_string(),
+            "review-profile-catalog".to_string(),
         ],
     }));
 
@@ -955,6 +956,51 @@ fn dispatch(request: Request, backend: &Backend) -> bool {
         }
         Request::ReviewTargets { .. } => {
             backend.respond(&id, review_targets_response());
+            false
+        }
+        Request::ReviewProfiles { params, .. } => {
+            let active = backend.active_provider_reads.clone();
+            if active
+                .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |count| {
+                    (count < 2).then_some(count + 1)
+                })
+                .is_err()
+            {
+                backend.fail(
+                    &id,
+                    ProtocolError::new(
+                        ProtocolErrorCode::Conflict,
+                        "Too many concurrent profile requests.",
+                    ),
+                );
+                return false;
+            }
+            let counter = ActiveCounter(active);
+            let control = backend.control.clone();
+            let shutdown = backend.shutdown.clone();
+            thread::spawn(move || {
+                let result = if shutdown.load(Ordering::SeqCst) {
+                    Err(ProtocolError::new(
+                        ProtocolErrorCode::Cancelled,
+                        "Profile request cancelled.",
+                    ))
+                } else {
+                    review_profiles_response(&params.target)
+                };
+                if !shutdown.load(Ordering::SeqCst) {
+                    let (value, error) = match result {
+                        Ok(value) => (Some(value), None),
+                        Err(error) => (None, Some(error)),
+                    };
+                    let _ = control.send(ServerMessage::Response(Response {
+                        id,
+                        ok: error.is_none(),
+                        result: value,
+                        error,
+                    }));
+                }
+                counter.decrement();
+            });
             false
         }
         Request::ReviewHistory { params, .. } => {
@@ -4222,38 +4268,201 @@ fn emit_failed(
     );
 }
 
+fn load_inline_review_policy(
+    _target: &TargetIdentity,
+    repo_path: &Path,
+    profile: Option<&str>,
+) -> Result<crate::repo_config::RepoReviewConfigLoadResult, ProtocolError> {
+    crate::services::bitbucket::validate_repo_review_config_native(repo_path, profile).map_err(
+        |_| {
+            ProtocolError::new(
+                ProtocolErrorCode::InvalidParams,
+                "This repository's review policy is unavailable or invalid.",
+            )
+        },
+    )
+}
+
+fn review_profiles_response(target: &TargetIdentity) -> Result<serde_json::Value, ProtocolError> {
+    use crate::services::review_profiles::{Catalog, Params, Source};
+    Params {
+        target: target.clone(),
+    }
+    .validate()?;
+    if let TargetIdentity::Provider {
+        run_id: Some(run_id),
+        ..
+    } = target
+    {
+        let store = load_provider_review_store(target).map_err(|_| {
+            ProtocolError::new(
+                ProtocolErrorCode::Conflict,
+                "Cannot validate the saved review owner.",
+            )
+        })?;
+        let owned =
+            store.and_then(|store| store.review_runs.into_iter().find(|run| run.id == *run_id));
+        if owned.is_none() {
+            return Err(ProtocolError::new(
+                ProtocolErrorCode::TargetStale,
+                "The selected saved review is unavailable.",
+            ));
+        }
+    }
+    let path = if let TargetIdentity::Provider {
+        provider,
+        workspace,
+        repo,
+        ..
+    } = target
+    {
+        let entries: Vec<_> = config::load()
+            .repos
+            .into_iter()
+            .filter(|entry| {
+                entry.provider == provider_matches(*provider)
+                    && entry.workspace == *workspace
+                    && entry.repo == *repo
+            })
+            .collect();
+        if entries.len() > 1 {
+            return Err(ProtocolError::new(
+                ProtocolErrorCode::Conflict,
+                "The selected repository has ambiguous checkout configuration.",
+            ));
+        }
+        entries
+            .first()
+            .and_then(|entry| entry.local_path.as_deref())
+            .filter(|path| !path.trim().is_empty())
+            .map(|path| {
+                PathBuf::from(path).canonicalize().map_err(|_| {
+                    ProtocolError::new(
+                        ProtocolErrorCode::TargetStale,
+                        "The configured checkout is unavailable.",
+                    )
+                })
+            })
+            .transpose()?
+    } else {
+        resolve_repo_path(target)
+    };
+    let Some(path) = path else {
+        if matches!(target, TargetIdentity::Local { .. })
+            || crate::organization_policy::organization_policy_is_configured()
+        {
+            return Err(ProtocolError::new(
+                ProtocolErrorCode::InvalidParams,
+                "Review profiles require a configured local repository.",
+            ));
+        }
+        return Ok(serde_json::json!(Catalog {
+            target: target.clone(),
+            profiles: vec![],
+            default_profile: None,
+            source: Source::Base,
+            notice: Some(
+                "No local checkout is configured. The native base profile is available.".into()
+            )
+        }));
+    };
+    let canonical = path.canonicalize().map_err(|_| {
+        ProtocolError::new(
+            ProtocolErrorCode::TargetStale,
+            "The configured repository is unavailable.",
+        )
+    })?;
+    let top = git(&canonical, &["rev-parse", "--show-toplevel"])
+        .and_then(|value| PathBuf::from(value.trim()).canonicalize().ok());
+    if top.as_ref() != Some(&canonical) {
+        return Err(ProtocolError::new(
+            ProtocolErrorCode::TargetStale,
+            "The configured path is not the selected Git repository root.",
+        ));
+    }
+    if let TargetIdentity::Provider {
+        provider,
+        workspace,
+        repo,
+        ..
+    } = target
+    {
+        let remote = git(&canonical, &["remote", "get-url", "origin"]);
+        if !remote.is_some_and(|remote| {
+            crate::local_repo::matches_remote(
+                remote.trim(),
+                provider_matches(*provider),
+                workspace,
+                repo,
+            )
+        }) {
+            return Err(ProtocolError::new(
+                ProtocolErrorCode::TargetStale,
+                "The configured checkout does not match the selected provider repository.",
+            ));
+        }
+    }
+    if let TargetIdentity::Local {
+        local_snapshot_sha256,
+    } = target
+    {
+        let owners: Vec<_> = config::load()
+            .repos
+            .into_iter()
+            .filter(|entry| {
+                entry
+                    .local_path
+                    .as_deref()
+                    .and_then(|value| PathBuf::from(value).canonicalize().ok())
+                    .as_ref()
+                    == Some(&canonical)
+            })
+            .collect();
+        if owners.len() != 1 {
+            return Err(ProtocolError::new(
+                ProtocolErrorCode::TargetStale,
+                "Select one explicitly configured local repository before choosing profiles.",
+            ));
+        }
+        let owner = &owners[0];
+        let snapshot = crate::local_review::local_review_snapshot_for_configured_path(
+            owner.provider,
+            &owner.workspace,
+            &owner.repo,
+            &canonical,
+            crate::local_review::LocalReviewCancellation::new(),
+        )
+        .map_err(|_| {
+            ProtocolError::new(
+                ProtocolErrorCode::TargetStale,
+                "The local review snapshot is unavailable.",
+            )
+        })?;
+        if snapshot.snapshot_sha256 != *local_snapshot_sha256 {
+            return Err(ProtocolError::new(
+                ProtocolErrorCode::TargetStale,
+                "The local review snapshot changed. Refresh it before choosing profiles.",
+            ));
+        }
+    }
+    serde_json::to_value(Catalog::from_policy(
+        target.clone(),
+        load_inline_review_policy(target, &canonical, None)?,
+    )?)
+    .map_err(|_| {
+        ProtocolError::new(
+            ProtocolErrorCode::Internal,
+            "Cannot encode the review profile catalog.",
+        )
+    })
+}
+
 fn resolve_inline_prompt_with_profile(
     target: &TargetIdentity,
     repo_path: &std::path::Path,
     profile: Option<&str>,
 ) -> Result<(String, Option<String>), ProtocolError> {
-    let mut loaded = crate::repo_config::load_from_repo_path_with_profile(repo_path, profile)
-        .map_err(|_| {
-            ProtocolError::new(
-                ProtocolErrorCode::InvalidParams,
-                "Cannot read this repository's review policy.",
-            )
-        })?;
-    if matches!(target, TargetIdentity::Provider { .. })
-        && crate::organization_policy::organization_policy_is_configured()
-    {
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis() as u64;
-        if let Some(resolved) = crate::organization_policy::resolve_configured_organization_policy(
-            repo_path, profile, None, now,
-        )
-        .map_err(|_| {
-            ProtocolError::new(
-                ProtocolErrorCode::InvalidParams,
-                "This repository's organization review policy is unavailable or invalid.",
-            )
-        })? {
-            loaded.config = Some(resolved.config);
-            loaded.selected_profile = resolved.selected_profile;
-        }
-    }
+    let loaded = load_inline_review_policy(target, repo_path, profile)?;
     if !loaded.errors.is_empty()
         && (matches!(target, TargetIdentity::Provider { .. }) || profile.is_some())
     {
@@ -4988,6 +5197,145 @@ fn write_frame(stdout: &mut impl Write, message: ServerMessage) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn native_profile_catalog_proves_local_snapshot_and_exact_provider_checkout() {
+        struct Restore(Vec<(&'static str, Option<std::ffi::OsString>)>);
+        impl Drop for Restore {
+            fn drop(&mut self) {
+                for (key, value) in &self.0 {
+                    if let Some(value) = value {
+                        std::env::set_var(key, value);
+                    } else {
+                        std::env::remove_var(key);
+                    }
+                }
+            }
+        }
+        let _lock = crate::review_storage::TEST_DATA_DIR_ENV_LOCK
+            .lock()
+            .unwrap();
+        let root = tempfile::tempdir().unwrap();
+        let config_dir = tempfile::tempdir().unwrap();
+        let mut restore = Restore(Vec::new());
+        for (key, value) in [
+            ("NORN_CONFIG_DIR", config_dir.path()),
+            ("NORN_BACKEND_REPO_PATH", root.path()),
+        ] {
+            restore.0.push((key, std::env::var_os(key)));
+            std::env::set_var(key, value);
+        }
+        for args in [
+            vec!["init"],
+            vec!["config", "user.name", "Owned"],
+            vec!["config", "user.email", "owned@example.invalid"],
+            vec![
+                "remote",
+                "add",
+                "origin",
+                "https://github.com/owned/same.git",
+            ],
+        ] {
+            assert!(Command::new("git")
+                .arg("-C")
+                .arg(root.path())
+                .args(args)
+                .output()
+                .unwrap()
+                .status
+                .success());
+        }
+        std::fs::write(root.path().join("tracked.txt"), "before\n").unwrap();
+        for args in [
+            vec!["add", "tracked.txt"],
+            vec!["-c", "commit.gpgsign=false", "commit", "-m", "owned"],
+        ] {
+            assert!(Command::new("git")
+                .arg("-C")
+                .arg(root.path())
+                .args(args)
+                .output()
+                .unwrap()
+                .status
+                .success());
+        }
+        std::fs::write(
+            root.path().join(".norn.yaml"),
+            "version: 0.1\nprofiles:\n  default: {}\n  security: {}\n",
+        )
+        .unwrap();
+        let settings = serde_json::json!({"repos":[{"provider":"github","workspace":"owned","repo":"same","localPath":root.path()}],"defaultDiffView":"unified","theme":"dark"});
+        std::fs::write(
+            config_dir.path().join("settings.json"),
+            settings.to_string(),
+        )
+        .unwrap();
+        let snapshot = crate::local_review::local_review_snapshot_for_configured_path(
+            config::ReviewProvider::Github,
+            "owned",
+            "same",
+            root.path(),
+            crate::local_review::LocalReviewCancellation::new(),
+        )
+        .unwrap();
+        let target = TargetIdentity::Local {
+            local_snapshot_sha256: snapshot.snapshot_sha256,
+        };
+        let catalog = review_profiles_response(&target).unwrap();
+        assert_eq!(
+            catalog["profiles"],
+            serde_json::json!(["default", "security"])
+        );
+        assert_eq!(catalog["defaultProfile"], "default");
+        std::fs::write(root.path().join("tracked.txt"), "after\n").unwrap();
+        assert_eq!(
+            review_profiles_response(&target).unwrap_err().code,
+            ProtocolErrorCode::TargetStale
+        );
+        let github = TargetIdentity::Provider {
+            provider: ProviderKind::Github,
+            workspace: "owned".into(),
+            repo: "same".into(),
+            pr_id: Some(7),
+            run_id: None,
+        };
+        assert_eq!(
+            review_profiles_response(&github).unwrap()["source"],
+            "policy"
+        );
+        let bitbucket = TargetIdentity::Provider {
+            provider: ProviderKind::Bitbucket,
+            workspace: "owned".into(),
+            repo: "same".into(),
+            pr_id: Some(7),
+            run_id: None,
+        };
+        assert_eq!(
+            review_profiles_response(&bitbucket).unwrap()["source"],
+            "base"
+        );
+        let mut broken = settings.clone();
+        broken["repos"][0]["localPath"] = serde_json::json!(root.path().join("missing"));
+        std::fs::write(config_dir.path().join("settings.json"), broken.to_string()).unwrap();
+        assert_eq!(
+            review_profiles_response(&github).unwrap_err().code,
+            ProtocolErrorCode::TargetStale
+        );
+        let mut ambiguous = settings.clone();
+        ambiguous["repos"]
+            .as_array_mut()
+            .unwrap()
+            .push(settings["repos"][0].clone());
+        std::fs::write(
+            config_dir.path().join("settings.json"),
+            ambiguous.to_string(),
+        )
+        .unwrap();
+        assert_eq!(
+            review_profiles_response(&github).unwrap_err().code,
+            ProtocolErrorCode::Conflict
+        );
+    }
 
     #[cfg(unix)]
     #[test]

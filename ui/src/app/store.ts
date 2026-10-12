@@ -2,6 +2,7 @@ import type {
   DraftTarget,
   ProviderSnapshotInfo,
   PrRepositoryIdentity,
+  ReviewProfileCatalog,
   WorkspaceScope,
   WorkspaceSettings,
 } from "../../../src/protocol/generated/protocol";
@@ -194,6 +195,13 @@ export interface ShellSnapshot {
   fixState: FixState | null;
   composerKind: "reply" | "commit" | "profile";
   selectedReviewProfile: string | null;
+  profileCatalogAvailable: boolean;
+  profileOpen: boolean;
+  profileLoading: boolean;
+  profileError: string | null;
+  profileCatalog: ReviewProfileCatalog | null;
+  profileTarget: TargetIdentity | null;
+  profileCursor: number;
   composing: boolean;
   composerText: string;
   diffExpanded: boolean;
@@ -228,6 +236,13 @@ const INITIAL: ShellSnapshot = {
   providerPreview: false,
   providerEvidenceReviews: false,
   selectedReviewProfile: null,
+  profileCatalogAvailable: false,
+  profileOpen: false,
+  profileLoading: false,
+  profileError: null,
+  profileCatalog: null,
+  profileTarget: null,
+  profileCursor: 0,
   liveSnapshot: null,
   snapshotLoading: false,
   settingsOpen: false,
@@ -613,7 +628,23 @@ export class ShellStore {
 
   getSnapshot = (): ShellSnapshot => this.state;
 
+  private profileGeneration = 0;
   private update(patch: Partial<ShellSnapshot>): void {
+    if (
+      (patch.generation !== undefined && patch.generation !== this.state.generation) ||
+      patch.status === "closed"
+    ) {
+      this.profileGeneration++;
+      patch = {
+        ...patch,
+        selectedReviewProfile: null,
+        profileOpen: false,
+        profileLoading: false,
+        profileCatalog: null,
+        profileTarget: null,
+        profileError: null,
+      };
+    }
     this.state = { ...this.state, ...patch };
     for (const listener of this.listeners) {
       listener();
@@ -857,6 +888,7 @@ export class ShellStore {
         repositories,
         selected: 0,
         picker: this.mergeRemote(buildPicker(repositories, targets, scopes)),
+        profileCatalogAvailable: ready.capabilities.includes("review-profile-catalog"),
         providerReads: ready.capabilities.includes("provider-pr-reads"),
         providerExternalBrowser: ready.capabilities.includes("provider-external-browser"),
         providerApproval: ready.capabilities.includes("provider-pr-approval"),
@@ -1746,6 +1778,92 @@ export class ShellStore {
     const field = side === "old" ? "before" : "after";
     const errorField = side === "old" ? "beforeError" : "afterError";
     this.update({ preview: { ...preview, [field]: null, [errorField]: error } });
+  }
+
+  async openReviewProfiles(client: BackendClient): Promise<void> {
+    if (!this.state.profileCatalogAvailable) {
+      this.beginReviewProfile();
+      return;
+    }
+    if (
+      this.requestInFlight() ||
+      ["running", "accepted"].includes(this.state.operation?.state ?? "")
+    )
+      return;
+    const target = this.activeTarget();
+    if (!target || this.state.status !== "ready") return;
+    const request = ++this.profileGeneration;
+    const generation = this.state.generation;
+    this.update({
+      profileTarget: target,
+      profileOpen: true,
+      profileLoading: true,
+      profileError: null,
+      profileCatalog: null,
+      profileCursor: 0,
+    });
+    const current = () =>
+      request === this.profileGeneration &&
+      this.state.profileOpen &&
+      this.state.status === "ready" &&
+      generation === this.state.generation &&
+      sameTarget(target, this.activeTarget());
+    try {
+      const catalog = await client.reviewProfiles(target);
+      if (!current()) return;
+      const selected = this.state.selectedReviewProfile;
+      const valid = selected === null || catalog.profiles.includes(selected);
+      this.update({
+        profileLoading: false,
+        profileCatalog: catalog,
+        profileCursor: selected !== null && valid ? catalog.profiles.indexOf(selected) + 1 : 0,
+        selectedReviewProfile: valid ? selected : null,
+        notice: valid
+          ? this.state.notice
+          : "The previous profile is unavailable. Using the repository default.",
+      });
+    } catch (error) {
+      if (current()) this.update({ profileLoading: false, profileError: message(error) });
+    }
+  }
+  dismissReviewProfiles(): void {
+    this.profileGeneration++;
+    this.update({
+      profileTarget: null,
+      profileOpen: false,
+      profileLoading: false,
+      profileCatalog: null,
+      profileError: null,
+    });
+  }
+  moveReviewProfile(delta: number): void {
+    if (this.state.profileCatalog && !this.state.profileLoading)
+      this.update({
+        profileCursor: Math.max(
+          0,
+          Math.min(this.state.profileCatalog.profiles.length, this.state.profileCursor + delta),
+        ),
+      });
+  }
+  chooseReviewProfile(): void {
+    const catalog = this.state.profileCatalog;
+    if (
+      !this.state.profileOpen ||
+      this.state.profileLoading ||
+      !catalog ||
+      !sameTarget(catalog.target, this.activeTarget())
+    )
+      return;
+    const selected =
+      this.state.profileCursor === 0 ? null : catalog.profiles[this.state.profileCursor - 1];
+    if (selected === undefined) return;
+    this.dismissReviewProfiles();
+    this.update({
+      selectedReviewProfile: selected,
+      notice: selected
+        ? `Review profile: ${selected}. Press Enter to start.`
+        : "Using the repository's default review profile.",
+    });
   }
 
   beginReviewProfile(): void {

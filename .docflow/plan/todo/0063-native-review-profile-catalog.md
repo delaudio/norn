@@ -34,7 +34,7 @@ file editing is part of retained repository/editor integration in #359.
    profile semantics, including organization/local/repository layers, declared
    names and invalid/unknown/default profiles. Bound returned names/collections/
    diagnostics. Fail before agent launch on invalid policy rather than silently
-   choosing base. No new provider or filesystem writes from catalog/navigation.
+   choosing base. No agent, provider, policy-file, Git index or worktree writes from catalog/navigation. Existing verified organization-policy cache maintenance remains in the native resolver; do not bypass rollback checks or change policy layer semantics.
 4. Native F6 exposes actual names and the effective repository default with
    keyboard selection, refresh/error/cancel and narrow/wide rendering. Selecting
    the default passes null (native effective default); selecting a named profile
@@ -61,7 +61,7 @@ file editing is part of retained repository/editor integration in #359.
 ## Dependencies
 
 - PR #373 fixed head `2db1dcb8dba87aafd48b16c1e5b42858319b31fb`,
-  CI38202396806: UI passed, verify in progress. Not yet merged; rebase required.
+  CI38202396806 passed both jobs; verified merged `ac077cd48ff96d6a6248f1ee941dd7904e2d9ce5` at 04:23:57 UTC. Rebased onto the actual squash.
 - Shared native review/policy resolution, explicit provider clone ownership,
   target validation, F6 manual selection and canonical prompt editor.
 
