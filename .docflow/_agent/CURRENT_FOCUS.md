@@ -13,7 +13,7 @@ Git is authoritative. Durable history lives in WORKLOG and plan/done.
   fixed648e253 CI38198661868 passed both jobs. Rebased onto actual main.
 - #373 fixed2db1dcb CI38202396806 passed both jobs; verified merged ac077cd at 04:23:57 UTC.
   Native approval local proof is prepared. Keep its head fixed and verify the
-  merge/rebase/audit before the next PR. Native profile catalog implementation and local proof complete; PR preparation next.
+  merge/rebase/audit before the next PR. Native profile catalog implementation and local proof complete; PR#374 open; priorbd9a511 CI superseded by exact-origin fix57875cd. Full local gate passed again; final receipt/new fixed-head CI next.
 - Tests use only owned providers/agents/data; no live provider writes/private
   profiles/releases. Root unrelated `.norn.yaml` never read/copied/staged.
 

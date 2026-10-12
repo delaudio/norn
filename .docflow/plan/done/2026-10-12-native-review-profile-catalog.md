@@ -67,7 +67,7 @@ file editing is part of retained repository/editor integration in #359.
 
 ## Prepared completion — effective only after verified merge
 
-- Implementation commit: `8e57d2a97b43950e3fde99b4932684e6c57ac7d4`.
+- Implementation commit: `8e57d2a97b43950e3fde99b4932684e6c57ac7d4`; exact remote-owner correction `57875cd2d5c1b2c93d682744ca609573bf3ea6d7`.
 - Predecessor PR #373 passed exact-head CI38202396806 and was verified merged
   as `ac077cd48ff96d6a6248f1ee941dd7904e2d9ce5` at 04:23:57 UTC. Rebased
   onto the actual squash; main numbering/metadata/link audit passed.
@@ -76,7 +76,7 @@ file editing is part of retained repository/editor integration in #359.
 - UI typecheck,197 tests/1,225 assertions and135 native frame fixtures passed.
   Eight new frames cover catalog/base/error/loading at120x30/50x18; owned
   native input also proves full128-character wide Unicode names at50x18.
-- Rust no-default full suite passed731 core tests +2 existing ignored,62 real
+- Rust no-default full suite passed732 core tests +2 existing ignored,62 real
   stdio,6 CLI,5 onboarding and3 binary tests. Strict all-features/all-targets
   Clippy, fmt, no-default all-target compile and no-GUI dependencies passed.
 - Owned native catalog unit/signed policy/Git/stdio tests prove strict targets,
@@ -99,3 +99,9 @@ file editing is part of retained repository/editor integration in #359.
   local-workflow/repository/editor/native-profile/install/platform gates.
 - Completion requires this fixed head's required CI and verified squash merge;
   the prepared done file is not evidence that those have happened.
+
+- Final exact-origin hardening uses native parsed provider/owner/repository
+  equality, never a substring. Both-provider owned negatives cover repository
+  suffix, foreign host and nested path; the full Rust gate and integration
+  gate passed again. Supersedes the prior bd9a511 CI head; final CI must verify
+  the new fixed head after this receipt.
