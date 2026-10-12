@@ -1,0 +1,16 @@
+{
+  "type": "request",
+  "id": "status",
+  "method": "repository.operation.status",
+  "params": {
+    "context": {
+      "repository": {
+        "provider": "github",
+        "workspace": "owned",
+        "repo": "operations"
+      },
+      "rootId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "operationId": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+  }
+}

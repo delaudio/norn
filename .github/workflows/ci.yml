@@ -129,6 +129,9 @@ jobs:
       - name: Verify native editor argument and association adapters
         run: cargo test --locked --manifest-path src-tauri/Cargo.toml --no-default-features --lib repository_editor -- --test-threads=1
 
+      - name: Exercise approved native Git operations with owned loopback remotes
+        run: bun run ui/scripts/check-repository-operations-ipc.ts
+
       - name: Exercise scoped native editor authorization and launch
         run: bun run ui/scripts/check-editor-ipc.ts
 

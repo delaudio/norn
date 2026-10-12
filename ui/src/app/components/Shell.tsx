@@ -1312,6 +1312,8 @@ export function Shell({ store, client, quit }: ShellProps) {
         store={explorer}
         client={client}
         editorAvailable={state.editorAvailable}
+        operationsAvailable={state.repositoryOperationsAvailable}
+        onRepositoryObserved={(checkout) => store.repositoryStateObserved(client, checkout)}
         editorBusy={
           state.status !== "ready" ||
           state.localForm?.loading ||

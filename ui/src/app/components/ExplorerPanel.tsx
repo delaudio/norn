@@ -1,6 +1,7 @@
 import { type ScrollBoxRenderable, SyntaxStyle } from "@opentui/core";
 import { useKeyboard, usePaste, useRenderer } from "@opentui/react";
-import { useEffect, useMemo, useRef, useSyncExternalStore } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import type { RepositoryOperationCheckout } from "../../../../src/protocol/generated/protocol";
 import type { BackendClient } from "../../transport/backendClient";
 import { EditorController } from "../editorController";
 import {
@@ -10,7 +11,9 @@ import {
   explorerText,
   treeRows,
 } from "../explorerStore";
+import { RepositoryOperationsStore } from "../repositoryOperationsStore";
 import { theme } from "../theme";
+import { RepositoryOperationsPanel } from "./RepositoryOperationsPanel";
 
 function statusLabel(status: string) {
   return status[0]!.toUpperCase() + status.slice(1);
@@ -38,6 +41,8 @@ export function ExplorerPanel({
   client,
   editorAvailable,
   editorBusy = false,
+  operationsAvailable = false,
+  onRepositoryObserved,
 }: {
   store: ExplorerStore;
   width: number;
@@ -48,9 +53,24 @@ export function ExplorerPanel({
   client: BackendClient;
   editorAvailable: boolean;
   editorBusy?: boolean;
+  operationsAvailable?: boolean;
+  onRepositoryObserved?: (checkout: RepositoryOperationCheckout) => void | Promise<void>;
 }) {
   const state = useSyncExternalStore(store.subscribe, store.getSnapshot);
   const renderer = useRenderer();
+  const [operationsOpen, setOperationsOpen] = useState(false);
+  const observed = useRef(onRepositoryObserved);
+  useEffect(() => {
+    observed.current = onRepositoryObserved;
+  }, [onRepositoryObserved]);
+  const operations = useMemo(
+    () =>
+      new RepositoryOperationsStore(client, async (checkout) => {
+        await observed.current?.(checkout);
+      }),
+    [client],
+  );
+  useEffect(() => () => operations.dispose(), [operations]);
   const editor = useMemo(() => new EditorController(client, renderer), [client, renderer]);
   const editorState = useSyncExternalStore(editor.subscribe, editor.getSnapshot);
   useEffect(() => () => editor.dispose(), [editor]);
@@ -59,7 +79,7 @@ export function ExplorerPanel({
   const markdownScroll = useRef<ScrollBoxRenderable | null>(null);
   const blameScroll = useRef<ScrollBoxRenderable | null>(null);
   useKeyboard((key) => {
-    if (key.defaultPrevented) return;
+    if (key.defaultPrevented || operationsOpen) return;
     key.preventDefault();
     if (key.ctrl && key.name === "c") {
       quit();
@@ -99,6 +119,13 @@ export function ExplorerPanel({
                 : null,
         });
       else store.editorError("Select a regular repository file first.");
+    } else if (key.name === "b") {
+      if (editorBusy || editorState.busy)
+        store.editorError("Finish the current operation before changing Git state.");
+      else {
+        setOperationsOpen(true);
+        void operations.load(state.repository, operationsAvailable);
+      }
     } else if (key.name === "m") onSettings();
     else if (key.name === "r") void store.refresh();
     else if (key.name === "tab") store.cycleFocus();
@@ -147,8 +174,23 @@ export function ExplorerPanel({
   });
   usePaste((event) => {
     event.preventDefault();
-    if (state.input) store.appendInput(new TextDecoder().decode(event.bytes));
+    if (!operationsOpen && state.input) store.appendInput(new TextDecoder().decode(event.bytes));
   });
+  if (operationsOpen)
+    return (
+      <RepositoryOperationsPanel
+        store={operations}
+        width={width}
+        height={height}
+        quit={quit}
+        onClose={() => {
+          if (operations.getSnapshot().busy || operations.getSnapshot().loading) return;
+          operations.dispose();
+          setOperationsOpen(false);
+          void store.refresh();
+        }}
+      />
+    );
   const rows = treeRows(state);
   const wide = width >= 90;
   const bodyHeight = Math.max(3, height - 7);
@@ -287,7 +329,7 @@ export function ExplorerPanel({
       <text height={1} flexShrink={0} fg={theme.muted} truncate>
         {editorBusy
           ? "Workspace busy · wait before opening an editor"
-          : "o open · O terminal · r refresh · m settings"}
+          : "o open · O terminal · b branches · r refresh · m settings"}
       </text>
       <text height={1} flexShrink={0} fg={theme.muted} truncate>
         F8/Esc return to review · q quit

@@ -1,0 +1,15 @@
+{
+  "type": "request",
+  "id": "oversized-page",
+  "method": "repository.operation.list",
+  "params": {
+    "repository": {
+      "provider": "github",
+      "workspace": "owned",
+      "repo": "operations"
+    },
+    "offset": 0,
+    "limit": 101,
+    "version": null
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "type": "request",
+  "id": "remote-url",
+  "method": "repository.operation.preview",
+  "params": {
+    "context": {
+      "repository": {
+        "provider": "github",
+        "workspace": "owned",
+        "repo": "operations"
+      },
+      "rootId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "action": {
+      "kind": "fetch",
+      "url": "https://outside.invalid"
+    }
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "type": "request",
+  "id": "apply",
+  "method": "repository.operation.apply",
+  "params": {
+    "context": {
+      "repository": {
+        "provider": "github",
+        "workspace": "owned",
+        "repo": "operations"
+      },
+      "rootId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "action": {
+      "kind": "checkout",
+      "reference": "refs/heads/feature-ü;$(owned)",
+      "branchKind": "local"
+    },
+    "token": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "confirm": true
+  }
+}

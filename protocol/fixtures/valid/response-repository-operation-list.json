@@ -1,0 +1,54 @@
+{
+  "type": "response",
+  "id": "list",
+  "ok": true,
+  "result": {
+    "request": {
+      "repository": {
+        "provider": "github",
+        "workspace": "owned",
+        "repo": "operations"
+      },
+      "offset": 0,
+      "limit": 100,
+      "version": null
+    },
+    "checkout": {
+      "repository": {
+        "provider": "github",
+        "workspace": "owned",
+        "repo": "operations"
+      },
+      "context": {
+        "repository": {
+          "provider": "github",
+          "workspace": "owned",
+          "repo": "operations"
+        },
+        "rootId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "state": "ready",
+      "branch": "main",
+      "headSha": "dddddddddddddddddddddddddddddddddddddddd",
+      "upstream": "refs/remotes/origin/main",
+      "stashSha": null,
+      "dirty": false,
+      "filtered": false,
+      "conflicted": false,
+      "pending": false,
+      "version": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      "message": null
+    },
+    "branches": [
+      {
+        "reference": "refs/heads/main",
+        "name": "main",
+        "kind": "local",
+        "oid": "dddddddddddddddddddddddddddddddddddddddd",
+        "current": true
+      }
+    ],
+    "total": 1,
+    "nextOffset": null
+  }
+}

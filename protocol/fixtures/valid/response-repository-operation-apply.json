@@ -1,0 +1,72 @@
+{
+  "type": "response",
+  "id": "apply",
+  "ok": true,
+  "result": {
+    "request": {
+      "context": {
+        "repository": {
+          "provider": "github",
+          "workspace": "owned",
+          "repo": "operations"
+        },
+        "rootId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "action": {
+        "kind": "checkout",
+        "branchKind": "local",
+        "reference": "refs/heads/main"
+      },
+      "token": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "confirm": true
+    },
+    "operation": {
+      "operationId": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "context": {
+        "repository": {
+          "provider": "github",
+          "workspace": "owned",
+          "repo": "operations"
+        },
+        "rootId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "action": {
+        "kind": "checkout",
+        "branchKind": "local",
+        "reference": "refs/heads/main"
+      },
+      "state": "starting",
+      "before": {
+        "repository": {
+          "provider": "github",
+          "workspace": "owned",
+          "repo": "operations"
+        },
+        "context": {
+          "repository": {
+            "provider": "github",
+            "workspace": "owned",
+            "repo": "operations"
+          },
+          "rootId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "state": "ready",
+        "branch": "main",
+        "headSha": "dddddddddddddddddddddddddddddddddddddddd",
+        "upstream": "refs/remotes/origin/main",
+        "stashSha": null,
+        "dirty": false,
+        "filtered": false,
+        "conflicted": false,
+        "pending": false,
+        "version": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "message": null
+      },
+      "after": null,
+      "exitCode": null,
+      "stateChanged": null,
+      "recoveryRequired": false,
+      "message": "Checking the approved checkout."
+    }
+  }
+}

@@ -170,7 +170,7 @@ removal with maintainer decision; `shared` = Rust/native service reused as-is.
 | Native notifications | desktop | `useMenuBarPrSync`, `App.tsx` | localStorage snapshot | #306 | retire |
 | Automatic sync polling | desktop | `useAutomaticSyncPolling` | `config.rs` | #305 | port |
 | Repository explorer (tree/content/blame/diff/find) | desktop | `RepositoryExplorerPanel`, `localRepoService`; bounded native `repository_reader` + typed explorer IPC/client | in-memory | #359 | native API PR379/b15d80b and F8 tree/previews/Markdown/blame/find PR380/d623231 merged with real3OS proof; editor PR381/29f5e2a merged with real3OS terminal proof |
-| Branch/worktree operations | desktop | `RepositoryBranchesPanel`, `localRepoService` | local git | #360 | claimed0071 after actual381merge; explicit approvals and native operations pending |
+| Branch/worktree operations | desktop | `RepositoryBranchesPanel`, `localRepoService` | local git | #360 | 0071 implementation prepared: typed approved checkout/fetch/ff-pull/stash and native branch panel; local gates pass, exact-head3OS CI and actual merge pending |
 | Review history panel | desktop | `ReviewHistoryPanel` | Rust review store | #306 | port |
 | Analytics: closed-PR metrics, review effectiveness | desktop | `OverviewPanel`, `ClosedPrAnalyticsPanel`, `ReviewEffectivenessDashboard` | Rust review store | #306 | port |
 | References panel (PR/Jira/Notion/note) | desktop | `ReviewReferencesPanel`, `reviewReferencesStorage` | localStorage | #305 | port |

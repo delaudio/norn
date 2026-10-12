@@ -376,3 +376,20 @@ export const RepositoryEditorBusy: Story = { args: { frameId: "explorer-editor-b
 export const CompactRepositoryEditorBusy: Story = {
   args: { frameId: "explorer-editor-busy-50x20" },
 };
+
+export const RepositoryBranches: Story = {
+  args: { frameId: "repository-operations-branches-120x30" },
+};
+export const CompactRepositoryBranches: Story = {
+  args: { frameId: "repository-operations-branches-50x20" },
+};
+export const RepositoryApproval: Story = {
+  args: { frameId: "repository-operations-preview-120x30" },
+};
+export const CompactRepositoryApproval: Story = {
+  args: { frameId: "repository-operations-preview-50x20" },
+};
+export const RepositoryBusy: Story = { args: { frameId: "repository-operations-busy-120x30" } };
+export const RepositoryRecovery: Story = {
+  args: { frameId: "repository-operations-uncertain-50x20" },
+};

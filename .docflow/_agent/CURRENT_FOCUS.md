@@ -12,8 +12,17 @@ Git is authoritative. Durable history lives in WORKLOG and plan/done.
   0071 claimed before code: issue360 repository branch/status/approved
   checkout/fetch/pull/stash, isolated /private/tmp/norn-repository-operations,
   branch issue-360-repository-operations on actual381main.
-- Owned loopback smart-Git proxy research PASS for both provider identities,
-  real fetch/pull against temporary bare only. Implementation not started.
+- 0071 implementation prepared: typed Rust Git manager/stdio and native branch
+  panel with read-only preview, one-use30s approval, cancellation, actual-state
+  recovery and full provider/root fencing. No PR/merge yet; plan stays todo.
+- Owned native IPC passes both provider identities via fixed loopback-only
+  smart Git CGI, checkout/ff-pull/fetch/stash, dirty/ignored/conflict protection,
+  tracking/detached/local-commit semantics, stale config/token/restart/expiry.
+- Local gates: UI259tests, root30files/123tests, core772+2ignored/noGUI,
+  stdio76, strict all-feature Clippy, typechecks,209frames/Storybook, Archgate
+  and audit. Doctor rendering-ref issue corrected;2maintainability warnings.
+- Actual post-checkout-hook drift proof PASS; final source commit pending;
+  native3OS exact-head CI and actual merge remain required.
 - Rootmain synced actual381. Never read/copy/stage unrelated untracked.norn.yaml;
   preserve user stash5f69c995c9b79fc163b60955cbe73987d346086a.
 - Keep0071 todo until actual verified merge;360/294 remain open. Preserve

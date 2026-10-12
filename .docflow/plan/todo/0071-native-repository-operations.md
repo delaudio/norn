@@ -79,7 +79,11 @@ resolution. Keep existing review prompts/drafts and provider identity intact.
 - Claimed by default-agent2026-10-12, single writer, after actual381merge.
 - Branch issue-360-repository-operations.
 - Location /private/tmp/norn-repository-operations on actual381main.
-- Implementation not started; plan precedes code.
+- Implementation prepared after claim725bacc: Rust manager and five typed
+  stdio methods, native branch panel, lifecycle/input/frame/owned native proof.
+- Local core772+2ignored/noGUI, stdio76, UI259, root123, strictClippy,
+  typechecks,209frames/Storybook, Archgate/audit pass. All3OS exact-head CI,
+  actual PR/merge remain pending; actual hook-drift proof passes.
 - No delegation, Norn code review, real provider writes or private profiles.
 - Keep todo until actual verified PR merge.
 - Stopped:

@@ -5,6 +5,7 @@ import { ExplorerPanel } from "../src/app/components/ExplorerPanel";
 import { ProviderPanel } from "../src/app/components/ProviderPanel";
 import { PublicationPanel } from "../src/app/components/PublicationPanel";
 import { ReferencePanel } from "../src/app/components/ReferencePanel";
+import { RepositoryOperationsPanel } from "../src/app/components/RepositoryOperationsPanel";
 import { SettingsPanel } from "../src/app/components/SettingsPanel";
 import { WorkspacePanel } from "../src/app/components/WorkspacePanel";
 import { DataStore } from "../src/app/dataStore";
@@ -14,6 +15,7 @@ import { ExplorerStore, treeRows } from "../src/app/explorerStore";
 import { ProviderStore } from "../src/app/providerStore";
 import { PublicationStore } from "../src/app/publicationStore";
 import { ReferenceStore } from "../src/app/referenceStore";
+import { RepositoryOperationsStore } from "../src/app/repositoryOperationsStore";
 import { SettingsStore } from "../src/app/settingsStore";
 import { WorkspaceStore } from "../src/app/workspaceStore";
 import { FakeProfileTransport } from "../src/transport/fakeProfileTransport";
@@ -29,6 +31,7 @@ import { EditorExplorerFixture } from "../test/fixtures/editor-backend";
 import { ExplorerFixture } from "../test/fixtures/explorer-backend";
 import { LocalTransport } from "../test/fixtures/local-backend";
 import { LocalRasterTransport } from "../test/fixtures/local-raster-backend";
+import { RepositoryOperationsFixture } from "../test/fixtures/repository-operations-backend";
 import { SavedTransport } from "../test/fixtures/saved-local-backend";
 // Renders every terminal component/scene with the real OpenTUI renderer and
 // serializes bounded frame fixtures (cell spans, colors, attributes) for the
@@ -1136,6 +1139,49 @@ const scenes: Scene[] = [
               await Bun.sleep(0);
               await test.renderOnce();
             }
+          },
+        };
+      },
+    })),
+  ),
+  ...(
+    ["branches", "preview", "busy", "failed", "uncertain", "canceled", "unavailable"] as const
+  ).flatMap((kind) =>
+    [120, 50].map((cols) => ({
+      id: `repository-operations-${kind}-${cols}x${cols === 120 ? 30 : 20}`,
+      cols,
+      rows: cols === 120 ? 30 : 20,
+      build: async () => {
+        const fixture = new RepositoryOperationsFixture();
+        const { client, store, ready } = readyStore(fixture);
+        await ready;
+        const operations = new RepositoryOperationsStore(client);
+        await operations.load(
+          { provider: "github", workspace: "owned", repo: "same" },
+          kind !== "unavailable",
+        );
+        if (kind !== "branches" && kind !== "unavailable")
+          await operations.preview({ kind: "fetch" });
+        if (["busy", "failed", "uncertain", "canceled"].includes(kind)) {
+          fixture.hold = kind === "busy";
+          fixture.finalState =
+            kind === "failed" || kind === "uncertain" || kind === "canceled" ? kind : "completed";
+          await operations.confirm();
+        }
+        return {
+          store,
+          client,
+          node: (
+            <RepositoryOperationsPanel
+              store={operations}
+              width={cols}
+              height={cols === 120 ? 30 : 20}
+              onClose={() => {}}
+              quit={() => {}}
+            />
+          ),
+          afterMount: async () => {
+            operations.dispose();
           },
         };
       },

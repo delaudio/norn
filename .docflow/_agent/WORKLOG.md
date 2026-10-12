@@ -1122,3 +1122,27 @@ Plan 0053 completion prepared after implementation `e4264db`, effective only on 
   This is research, not future native acceptance; fail-closed tests required.
 - Plan/audit before implementation; no unrelated user config/profile read.
   ADR0020 Accepted,360/294 active; no Norn review or delegation.
+
+## 2026-10-12 —0071 approved repository operations prepared
+
+- Implemented full-provider/root-bound Rust Git operations and five stdio
+  methods with read-only previews, keyed secret-config fingerprints, one-use
+  30s approvals, bounded process supervision, responsive status/cancel and
+  fresh state checks before writes and between fetch/ff-merge.
+- Native explorer branch panel requires a separate approval key; paste is
+  inert, writes fence navigation, late clone results are discarded and actual
+  completion refreshes matching options without touching review drafts/prompts.
+- Actual owned IPC proves both provider identities via fixed loopback-only
+  smart Git CGI, branch semantics, native stash bytes, local commits/divergence,
+  ignored/conflict protection, config drift, expiry/reuse/restart and cancel.
+  Added actual post-checkout-hook drift detection; actual native proof PASS.
+- Corrected write-path literal-pathspec contamination: stash had saved a
+  hostile untracked filename but left it in the clone. Read previews retain
+  literal semantics; approved Git writes use normal semantics. Rust/native
+  regressions now preserve actual saved bytes and assert the clean result.
+- Gates pass: root123/UI259/core772+2ignored/stdio76, typechecks/noGUI,
+  strictallfeatureClippy,209frames/Storybook, Archgate/audit. Sandbox socket
+  failures were rerun with owned loopback permission and all core tests pass.
+  Doctor rendering-ref error fixed;2nonblocking maintainability warnings.
+- Source commit/PR/3OS exact-head checks and actual merge still required.
+ 0071 stays todo;360/294 stay open; no Norn review/delegation/private data.

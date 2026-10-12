@@ -50,7 +50,8 @@
     "docs:preview": "pnpm --filter @norn/docs preview",
     "docs:deploy": "npx wrangler deploy --config wrangler.docs.jsonc",
     "build-storybook": "storybook build",
-    "ui:bench": "bun run --cwd ui bench"
+    "ui:bench": "bun run --cwd ui bench",
+    "ui:repository-operations": "cargo build --locked --manifest-path src-tauri/Cargo.toml --no-default-features --bin norn-backend && bun run ui/scripts/check-repository-operations-ipc.ts"
   },
   "dependencies": {
     "@fontsource-variable/geist": "^5.2.9",
