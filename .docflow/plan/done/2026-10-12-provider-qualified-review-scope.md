@@ -48,3 +48,21 @@ The fresh preview review action remains unavailable until that integration ships
 - Claimed by: default-agent, 2026-10-12, `issue-306-provider-review-scope`.
 - Blockers: implementation, local gate, exact-head CI and verified merge.
 - Stopped:
+
+## Prepared completion receipt
+
+Prepared 2026-10-12 for verified PR integration. This path becomes a completion
+record only after exact-head CI success and verified squash merge into main.
+
+- Feature commit: `48cafd4e21e144dc6cbad1f049fc717866d560fb`.
+- Local gate: root typecheck/123 tests plus tooling/lint/protocol; UI typecheck,
+  172 tests/1057 assertions/115 unchanged frames; Rust 704 core plus two existing
+  ignored/54 stdio/six CLI/five onboarding/three bin tests; strict all-feature/
+  all-target Clippy, fmt, no-GUI, Archgate 12/12 and docflow audit.
+- Owned two-provider storage/session/publication fixtures and real stdio restart
+  pass. Final targeted publication/ownership tests rerun after SQL scope change.
+- No React changes, Norn review, live credentials/provider writes or private
+  profile data. Existing coverage/Archgate advisories unchanged.
+- Exact snapshot review-start, profile and native reply/fix activation remain
+  subsequent integration; this foundation does not complete retained #306 parity
+  or advance ADR 0020 / epic #294 to completed.

@@ -10,7 +10,7 @@ Git is authoritative. Durable history lives in WORKLOG and plan/done.
 - Baseline: PR #368 merged at `1f9b3d3e0d491c2321817e21bd6f1944194665df`
   on 2026-10-12T00:18:43Z after exact `af7f523` UI/verify success;
   CI 38186484683, verify 12m58s. Plan 0057 receipt is now effective.
-- State: plan 0058 local gate passed; preparing PR. Provider-qualified storage/
+- State: plan 0058 local gate passed; prepared receipt, PR/CI pending. Provider-qualified storage/
   session identity foundation does not enable preview review-start yet.
 - Gate: root 123 tests plus tooling/typecheck/lint/protocol, UI 172 tests/1057
   asserts/115 unchanged frames, Rust 704 core plus two ignored/54 stdio/six CLI/
