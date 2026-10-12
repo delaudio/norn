@@ -307,6 +307,8 @@ pub struct ReviewRun {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reviewed_base_sha: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reviewed_diff_base_sha: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reviewed_head_sha: Option<String>,
     pub status: AiReviewRunStatus,
     pub turn_kind: AiReviewTurnKind,
@@ -671,9 +673,31 @@ fn pr_key(workspace: &str, repo: &str, id: u32) -> String {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ProviderInlineContext {
+    pub scope: super::review_scope::Scope,
+    pub repo_path: Option<PathBuf>,
+    pub reviewed_diff_base_sha: Option<String>,
+}
+
+pub(crate) struct ProviderInlineReviewRequest {
+    pub context: ProviderInlineContext,
+    pub title: String,
+    pub source_branch: String,
+    pub destination_branch: String,
+    pub reviewed_base_sha: Option<String>,
+    pub reviewed_head_sha: Option<String>,
+    pub payload: String,
+    pub ai_provider: AiProvider,
+    pub review_profile: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 enum ReviewStoreTarget {
     PullRequest {
         id: u32,
+    },
+    Provider {
+        context: ProviderInlineContext,
     },
     Local {
         snapshot_sha256: String,
@@ -701,6 +725,7 @@ impl ReviewStoreTarget {
     fn legacy_id(&self) -> u32 {
         match self {
             Self::PullRequest { id } => *id,
+            Self::Provider { context } => context.scope.pr_id,
             Self::Local { legacy_id, .. } => *legacy_id,
         }
     }
@@ -708,6 +733,7 @@ impl ReviewStoreTarget {
     fn session_key(&self, workspace: &str, repo: &str) -> String {
         match self {
             Self::PullRequest { id } => pr_key(workspace, repo, *id),
+            Self::Provider { context } => context.scope.key(),
             Self::Local {
                 snapshot_sha256, ..
             } => format!(
@@ -717,12 +743,35 @@ impl ReviewStoreTarget {
             ),
         }
     }
+
+    fn native_context(&self) -> Option<&ProviderInlineContext> {
+        match self {
+            Self::Provider { context } => Some(context),
+            _ => None,
+        }
+    }
 }
 
 fn fix_key(workspace: &str, repo: &str, id: u32, thread_id: Option<&str>) -> String {
     match thread_id.filter(|value| !value.trim().is_empty()) {
         Some(thread_id) => format!("{}/{thread_id}", pr_key(workspace, repo, id)),
         None => format!("{}/default", pr_key(workspace, repo, id)),
+    }
+}
+
+fn native_fix_key(
+    scope: Option<&super::review_scope::Scope>,
+    workspace: &str,
+    repo: &str,
+    id: u32,
+    thread_id: Option<&str>,
+) -> String {
+    match scope {
+        Some(scope) => match thread_id.filter(|id| !id.trim().is_empty()) {
+            Some(thread) => format!("{}:fix:thread:{}:{}", scope.key(), thread.len(), thread),
+            None => format!("{}:fix:none", scope.key()),
+        },
+        None => fix_key(workspace, repo, id, thread_id),
     }
 }
 
@@ -823,6 +872,7 @@ fn load_review_store_for_target(
 ) -> Result<Option<AiReviewStoreData>, String> {
     match target {
         ReviewStoreTarget::PullRequest { id } => load_review_store(workspace, repo, *id),
+        ReviewStoreTarget::Provider { context } => super::review_scope::load_owned(&context.scope),
         ReviewStoreTarget::Local {
             snapshot_sha256, ..
         } => load_local_review_store(workspace, repo, snapshot_sha256),
@@ -838,6 +888,7 @@ fn save_review_store_for_target(
 ) -> Result<(), String> {
     match target {
         ReviewStoreTarget::PullRequest { id } => save_review_store(workspace, repo, *id, store),
+        ReviewStoreTarget::Provider { context } => super::review_scope::save(&context.scope, store),
         ReviewStoreTarget::Local {
             snapshot_sha256,
             legacy_id,
@@ -2213,6 +2264,7 @@ fn materialize_review_run(
         source_branch: source_branch.to_string(),
         destination_branch: destination_branch.to_string(),
         reviewed_base_sha: reviewed_base_sha.map(ToOwned::to_owned),
+        reviewed_diff_base_sha: None,
         reviewed_head_sha: reviewed_head_sha.map(ToOwned::to_owned),
         status: AiReviewRunStatus::Succeeded,
         turn_kind,
@@ -5254,8 +5306,16 @@ fn run_inline_review_pipeline(
         AiProvider::Codex => ReviewEvidenceSource::Codex,
         AiProvider::Opencode => ReviewEvidenceSource::Opencode,
     };
-    let repo_path = repo_path_override.or_else(|| resolve_local_repo(&workspace, &repo).ok());
-    let provider_execution_context = if isolate_provider {
+    let native_context = target.native_context();
+    let requested_profile = review_profile.clone();
+    let review_provider_override = native_context
+        .map(|context| context.scope.provider)
+        .or(review_provider_override);
+    let repo_path = match native_context {
+        Some(context) => context.repo_path.clone(),
+        None => repo_path_override.or_else(|| resolve_local_repo(&workspace, &repo).ok()),
+    };
+    let provider_execution_context = if isolate_provider || native_context.is_some() {
         ProviderExecutionContext::Isolated
     } else {
         ProviderExecutionContext::Repository
@@ -5265,6 +5325,7 @@ fn run_inline_review_pipeline(
     let mut effective_fallback_payload = fallback_payload.clone();
     let mut effective_snapshot_payload = snapshot_payload.clone();
     let mut resolved_policy_config = resolved_policy_config_override;
+    let mut native_local_profile_only = false;
 
     if !organization_policy_checked && resolved_policy_config.is_none() {
         let policy_repo_path = validate_organization_policy_repo_path(
@@ -5304,6 +5365,45 @@ fn run_inline_review_pipeline(
             }
         }
     }
+    if native_context.is_some() && resolved_policy_config.is_none() {
+        if let Some(path) = repo_path.as_deref() {
+            let loaded =
+                repo_config::load_from_repo_path_with_profile(path, requested_profile.as_deref())
+                    .map_err(ReviewPipelineFailure::internal)?;
+            if !loaded.errors.is_empty() {
+                return Err(ReviewPipelineFailure::internal(
+                    "Repository review policy is invalid.",
+                ));
+            }
+            review_profile = loaded.selected_profile;
+            resolved_policy_config = loaded.config;
+            native_local_profile_only = true;
+        } else if requested_profile.is_some() {
+            return Err(ReviewPipelineFailure::internal(
+                "The selected review profile requires a configured local repository.",
+            ));
+        }
+    }
+    if native_context.is_some()
+        && requested_profile
+            .as_deref()
+            .is_some_and(|requested| review_profile.as_deref() != Some(requested))
+    {
+        return Err(ReviewPipelineFailure::internal(
+            "The selected review profile is unavailable.",
+        ));
+    }
+    if native_context.is_some() {
+        if let Some(config) = resolved_policy_config.as_ref() {
+            required_policy_analyzers.extend(
+                config
+                    .analyzers
+                    .iter()
+                    .filter(|(_, analyzer)| analyzer.required)
+                    .map(|(id, _)| id.clone()),
+            );
+        }
+    }
     if let Some(appendix) = resolved_policy_config
         .as_ref()
         .and_then(review_policy_prompt_appendix)
@@ -5320,6 +5420,32 @@ fn run_inline_review_pipeline(
         should_execute_analyzers(turn_kind, run_analyzers, run_required_policy_analyzers);
 
     if execute_analyzers {
+        if native_context.is_some() {
+            let path = repo_path.as_deref().ok_or_else(|| {
+                ReviewPipelineFailure::analyzer(
+                    "Required local evidence is unavailable without a configured clone.",
+                )
+            })?;
+            let head = reviewed_head_sha.as_deref().ok_or_else(|| {
+                ReviewPipelineFailure::analyzer(
+                    "Pinned review revision is unavailable for local evidence.",
+                )
+            })?;
+            let actual = run_git_capture(path, &["rev-parse", "HEAD"])
+                .map_err(ReviewPipelineFailure::analyzer)?;
+            let status =
+                run_git_capture(path, &["status", "--porcelain=v1", "--untracked-files=all"])
+                    .map_err(ReviewPipelineFailure::analyzer)?;
+            if actual.code != Some(0)
+                || actual.stdout.trim() != head
+                || status.code != Some(0)
+                || !status.stdout.trim().is_empty()
+            {
+                return Err(ReviewPipelineFailure::analyzer(
+                    "Local evidence requires a clean checkout at the exact reviewed head.",
+                ));
+            }
+        }
         if let Some(repo_path) = repo_path.as_deref() {
             append_inline_review_log(&store, &key, run_id, "Running local evidence analyzers.");
             let analyzer_specs = review_analyzer_specs(
@@ -5438,7 +5564,9 @@ fn run_inline_review_pipeline(
     }
 
     append_execution_policy_to_payloads(
-        resolved_policy_config.as_ref(),
+        resolved_policy_config
+            .as_ref()
+            .filter(|_| !native_local_profile_only),
         &mut effective_payload,
         &mut effective_snapshot_payload,
         &mut effective_fallback_payload,
@@ -5832,7 +5960,11 @@ fn run_inline_review_pipeline(
                 &store,
                 &key,
                 run_id,
-                format!("Claude session: {session_id}"),
+                if native_context.is_some() {
+                    "Claude session captured.".to_string()
+                } else {
+                    format!("Claude session: {session_id}")
+                },
             );
         }
     } else if response.session_id.is_some() {
@@ -5850,7 +5982,7 @@ fn run_inline_review_pipeline(
         .ok_or_else(|| {
             ReviewPipelineFailure::internal("The AI review store could not be loaded.")
         })?;
-    let review_run = materialize_review_run(
+    let mut review_run = materialize_review_run(
         &workspace,
         &repo,
         review_provider_override,
@@ -5871,6 +6003,8 @@ fn run_inline_review_pipeline(
         analyzer_artifacts,
     )
     .map_err(ReviewPipelineFailure::provider)?;
+    review_run.reviewed_diff_base_sha =
+        native_context.and_then(|context| context.reviewed_diff_base_sha.clone());
     let thread = find_review_thread_mut(&mut review_store, &thread_id)
         .map_err(ReviewPipelineFailure::internal)?;
     append_review_message(
@@ -5980,6 +6114,41 @@ pub fn start_inline_review_native(
     )
 }
 
+pub(crate) fn start_provider_inline_review_native(
+    store: AiReviewRunStore,
+    request: ProviderInlineReviewRequest,
+) -> Result<AiReviewRunState, String> {
+    let workspace = request.context.scope.workspace.clone();
+    let repo = request.context.scope.repo.clone();
+    let thread_title = request.title.clone();
+    start_inline_review_for_target(
+        store,
+        workspace,
+        repo,
+        ReviewStoreTarget::Provider {
+            context: request.context,
+        },
+        request.title,
+        request.source_branch,
+        request.destination_branch,
+        request.reviewed_base_sha,
+        request.reviewed_head_sha,
+        request.payload,
+        None,
+        None,
+        Some(thread_title),
+        true,
+        request.ai_provider,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        request.review_profile,
+    )
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn start_local_inline_review_native(
     store: AiReviewRunStore,
@@ -6056,6 +6225,8 @@ fn start_inline_review_for_target(
     opencode_effort: Option<String>,
     review_profile: Option<String>,
 ) -> Result<AiReviewRunState, String> {
+    let mut review_store =
+        load_review_store_for_target(&workspace, &repo, &target)?.unwrap_or_default();
     let key = target.session_key(&workspace, &repo);
     let thread_id = now_id("thread");
     let (initial, run_id) = begin_inline_review_run(
@@ -6069,8 +6240,6 @@ fn start_inline_review_for_target(
     )?;
     let started_at = initial.started_at.clone().unwrap_or_else(now_ms);
     let created_at = now_ms();
-    let mut review_store =
-        load_review_store_for_target(&workspace, &repo, &target)?.unwrap_or_default();
     review_store.active_thread_id = Some(thread_id.clone());
     let mut thread = AiReviewThread {
         id: thread_id.clone(),
@@ -6720,16 +6889,127 @@ pub fn reply_inline_review_native(
     opencode_model: Option<String>,
     opencode_effort: Option<String>,
 ) -> Result<AiReviewRunState, String> {
+    reply_inline_review_for_target(
+        store,
+        ReviewStoreTarget::PullRequest { id },
+        None,
+        workspace,
+        repo,
+        id,
+        title,
+        source_branch,
+        destination_branch,
+        reviewed_base_sha,
+        reviewed_head_sha,
+        thread_id,
+        user_message,
+        base_payload,
+        ai_provider,
+        claude_model,
+        claude_effort,
+        codex_model,
+        codex_effort,
+        opencode_model,
+        opencode_effort,
+    )
+}
+
+pub(crate) fn reply_provider_inline_review_native(
+    store: &AiReviewRunStore,
+    request: ProviderInlineReviewRequest,
+    selected_run_id: &str,
+    thread_id: String,
+    user_message: String,
+) -> Result<AiReviewRunState, String> {
+    let workspace = request.context.scope.workspace.clone();
+    let repo = request.context.scope.repo.clone();
+    let id = request.context.scope.pr_id;
+    reply_inline_review_for_target(
+        store,
+        ReviewStoreTarget::Provider {
+            context: request.context,
+        },
+        Some(selected_run_id),
+        &workspace,
+        &repo,
+        id,
+        request.title,
+        request.source_branch,
+        request.destination_branch,
+        request.reviewed_base_sha,
+        request.reviewed_head_sha,
+        thread_id,
+        user_message,
+        request.payload,
+        request.ai_provider,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn reply_inline_review_for_target(
+    store: &AiReviewRunStore,
+    target: ReviewStoreTarget,
+    selected_run_id: Option<&str>,
+    workspace: &str,
+    repo: &str,
+    id: u32,
+    title: String,
+    source_branch: String,
+    destination_branch: String,
+    reviewed_base_sha: Option<String>,
+    reviewed_head_sha: Option<String>,
+    thread_id: String,
+    user_message: String,
+    base_payload: String,
+    ai_provider: AiProvider,
+    claude_model: Option<String>,
+    claude_effort: Option<String>,
+    codex_model: Option<String>,
+    codex_effort: Option<String>,
+    opencode_model: Option<String>,
+    opencode_effort: Option<String>,
+) -> Result<AiReviewRunState, String> {
     let trimmed_message = user_message.trim();
     if trimmed_message.is_empty() {
         return Err("A reply message is required.".to_string());
     }
     let workspace = workspace.to_string();
     let repo = repo.to_string();
-    let key = pr_key(&workspace, &repo, id);
-    let mut review_store = load_review_store(&workspace, &repo, id)?
+    let key = target.session_key(&workspace, &repo);
+    let native_context = target.native_context();
+    let read_store = match native_context {
+        Some(context) => super::review_scope::load(&context.scope),
+        None => load_review_store(&workspace, &repo, id),
+    }?;
+    let review_store = read_store
         .ok_or_else(|| "No saved AI review exists for this pull request yet.".to_string())?;
-    let review_profile = review_profile_for_thread(&review_store, &thread_id);
+    let review_profile = if let Some(context) = native_context {
+        let selected = review_store
+            .review_runs
+            .iter()
+            .find(|run| {
+                Some(run.id.as_str()) == selected_run_id
+                    && run.thread_id.as_deref() == Some(thread_id.as_str())
+            })
+            .ok_or("The selected review conversation is unavailable.")?;
+        if selected.reviewed_base_sha != reviewed_base_sha
+            || selected.reviewed_head_sha != reviewed_head_sha
+            || selected.reviewed_diff_base_sha != context.reviewed_diff_base_sha
+            || selected.source_branch != source_branch
+            || selected.destination_branch != destination_branch
+        {
+            return Err("The selected review evidence changed before reply.".into());
+        }
+        selected.review_profile.clone()
+    } else {
+        review_profile_for_thread(&review_store, &thread_id)
+    };
     let thread = find_review_thread(&review_store, &thread_id)?;
     let resume_session_id = if ai_provider == AiProvider::Claude {
         thread.claude_session_id.clone()
@@ -6737,6 +7017,14 @@ pub fn reply_inline_review_native(
         None
     };
     let fallback_payload = build_reply_fallback_payload(&base_payload, thread, trimmed_message);
+    let mut review_store = if let Some(context) = native_context {
+        let mut owned = super::review_scope::load_owned(&context.scope)?.unwrap_or_default();
+        owned.threads.retain(|old| old.id != thread_id);
+        owned.threads.push(thread.clone());
+        owned
+    } else {
+        review_store
+    };
     let (initial, run_id) = begin_inline_review_run(
         store,
         &key,
@@ -6748,6 +7036,12 @@ pub fn reply_inline_review_native(
     )?;
     let started_at = initial.started_at.clone().unwrap_or_else(now_ms);
     let thread = find_review_thread_mut(&mut review_store, &thread_id)?;
+    if native_context.is_some() {
+        thread.ai_provider = Some(ai_provider);
+        if ai_provider != AiProvider::Claude {
+            thread.claude_session_id = None;
+        }
+    }
     append_review_message(
         thread,
         AiReviewMessageRole::User,
@@ -6755,7 +7049,9 @@ pub fn reply_inline_review_native(
         now_ms(),
     );
     review_store.active_thread_id = Some(thread_id.clone());
-    if let Err(error) = save_review_store(&workspace, &repo, id, &review_store) {
+    if let Err(error) =
+        save_review_store_for_target(&workspace, &repo, &target, &review_store, store)
+    {
         set_inline_review_failed(store, &key, run_id, error.clone());
         return Err(error);
     }
@@ -6776,7 +7072,7 @@ pub fn reply_inline_review_native(
             run_id,
             workspace,
             repo,
-            ReviewStoreTarget::PullRequest { id },
+            target,
             source_branch,
             destination_branch,
             reviewed_base_sha,
@@ -7219,12 +7515,13 @@ pub(crate) fn start_branch_merge_native(
     expected: String,
     cancellation: Arc<AtomicBool>,
     resolve: bool,
+    scope: Option<&super::review_scope::Scope>,
 ) -> Result<AiReviewFixState, String> {
-    let key = fix_key(workspace, repo, id, Some(thread_id));
+    let key = native_fix_key(scope, workspace, repo, id, Some(thread_id));
     let initial = begin_operation(
         store,
         &key,
-        &pr_key(workspace, repo, id),
+        &scope.map_or_else(|| pr_key(workspace, repo, id), |scope| scope.key()),
         Some(thread_id.to_string()),
         AiReviewFixPhase::Preflight,
         Some(path.display().to_string()),
@@ -7428,11 +7725,12 @@ pub(crate) fn start_ai_review_commit_native(
     expected: String,
     cancellation: Arc<AtomicBool>,
     approved_files: Vec<String>,
+    scope: Option<&super::review_scope::Scope>,
 ) -> Result<AiReviewFixState, String> {
     if message.trim().is_empty() || message.chars().count() > 4096 {
         return Err("A commit message between 1 and 4096 characters is required.".to_string());
     }
-    let key = fix_key(workspace, repo, id, Some(thread_id));
+    let key = native_fix_key(scope, workspace, repo, id, Some(thread_id));
     let initial = begin_session_step(store, &key, AiReviewFixPhase::Committing, |session| {
         if session.public.status != AiReviewFixStatus::Succeeded
             || session.public.phase != AiReviewFixPhase::ReadyToCommit
@@ -7481,8 +7779,9 @@ pub(crate) fn start_ai_review_push_native(
     source_branch: String,
     expected: String,
     cancellation: Arc<AtomicBool>,
+    scope: Option<&super::review_scope::Scope>,
 ) -> Result<AiReviewFixState, String> {
-    let key = fix_key(workspace, repo, id, Some(thread_id));
+    let key = native_fix_key(scope, workspace, repo, id, Some(thread_id));
     let initial = begin_session_step(store, &key, AiReviewFixPhase::Pushing, |session| {
         if session.public.status != AiReviewFixStatus::Succeeded
             || session.public.phase != AiReviewFixPhase::ReadyToPush
@@ -7546,12 +7845,13 @@ pub(crate) fn start_ai_review_fix_native(
     destination_branch: String,
     cancellation: Arc<AtomicBool>,
     expected_fingerprint: Option<String>,
+    scope: Option<&super::review_scope::Scope>,
 ) -> Result<AiReviewFixState, String> {
-    let key = fix_key(&workspace, &repo, id, thread_id.as_deref());
+    let key = native_fix_key(scope, &workspace, &repo, id, thread_id.as_deref());
     let initial = begin_operation(
         store,
         &key,
-        &pr_key(&workspace, &repo, id),
+        &scope.map_or_else(|| pr_key(&workspace, &repo, id), |scope| scope.key()),
         thread_id,
         AiReviewFixPhase::Preflight,
         Some(repo_path.display().to_string()),
@@ -7579,12 +7879,19 @@ pub(crate) fn start_ai_review_fix_native(
 
 pub(crate) fn get_ai_review_fix_state_native(
     store: &AiReviewFixStore,
-    workspace: &str,
-    repo: &str,
-    id: u32,
+    scope: &super::review_scope::Scope,
     thread_id: Option<&str>,
 ) -> Option<AiReviewFixState> {
-    clone_public_state(store, &fix_key(workspace, repo, id, thread_id))
+    clone_public_state(
+        store,
+        &native_fix_key(
+            Some(scope),
+            &scope.workspace,
+            &scope.repo,
+            scope.pr_id,
+            thread_id,
+        ),
+    )
 }
 
 fn check_fix_cancellation(store: &AiReviewFixStore, key: &str) -> Result<(), String> {
@@ -7643,6 +7950,7 @@ pub async fn start_ai_review_fix(
         source_branch,
         destination_branch,
         Arc::new(AtomicBool::new(false)),
+        None,
         None,
     )
 }
@@ -7837,31 +8145,6 @@ fn review_provider_for_repo(workspace: &str, repo: &str) -> ReviewProvider {
     }
 }
 
-pub(crate) fn legacy_inline_context_matches(
-    scope: &super::review_scope::Scope,
-    repo_path: &Path,
-) -> bool {
-    let Some(expected) = repo_path.canonicalize().ok() else {
-        return false;
-    };
-    config::load()
-        .repos
-        .iter()
-        .find(|entry| entry.workspace == scope.workspace && entry.repo == scope.repo)
-        .is_some_and(|entry| {
-            let provider = match entry.provider {
-                ConfigReviewProvider::Github => ReviewProvider::Github,
-                ConfigReviewProvider::Bitbucket => ReviewProvider::Bitbucket,
-            };
-            provider == scope.provider
-                && entry
-                    .local_path
-                    .as_deref()
-                    .and_then(|path| Path::new(path).canonicalize().ok())
-                    == Some(expected)
-        })
-}
-
 #[cfg(test)]
 mod tests {
     use super::{
@@ -7885,6 +8168,56 @@ mod tests {
         STRUCTURED_REVIEW_SCHEMA_VERSION,
     };
     use serde_json::json;
+
+    #[test]
+    fn native_fix_lookup_keeps_same_thread_ids_separate_between_providers() {
+        let github = super::super::review_scope::tests::scope(ReviewProvider::Github);
+        let bitbucket = super::super::review_scope::tests::scope(ReviewProvider::Bitbucket);
+        let store = super::AiReviewFixStore::default();
+        let key = |scope: &super::super::review_scope::Scope| {
+            super::native_fix_key(
+                Some(scope),
+                &scope.workspace,
+                &scope.repo,
+                scope.pr_id,
+                Some("same/thread"),
+            )
+        };
+        super::begin_operation(
+            &store,
+            &key(&github),
+            &github.key(),
+            Some("same/thread".into()),
+            super::AiReviewFixPhase::Preflight,
+            Some("github-clone".into()),
+        )
+        .unwrap();
+        super::set_fix_failed(&store, &key(&github), "github failure");
+        super::begin_operation(
+            &store,
+            &key(&bitbucket),
+            &bitbucket.key(),
+            Some("same/thread".into()),
+            super::AiReviewFixPhase::Preflight,
+            Some("bitbucket-clone".into()),
+        )
+        .unwrap();
+        let gh =
+            super::get_ai_review_fix_state_native(&store, &github, Some("same/thread")).unwrap();
+        let bb =
+            super::get_ai_review_fix_state_native(&store, &bitbucket, Some("same/thread")).unwrap();
+        assert_eq!(gh.status, super::AiReviewFixStatus::Failed);
+        assert_eq!(gh.repo_path.as_deref(), Some("github-clone"));
+        assert_eq!(bb.status, super::AiReviewFixStatus::Running);
+        assert_eq!(bb.repo_path.as_deref(), Some("bitbucket-clone"));
+        assert!(
+            super::get_ai_review_fix_state_native(&store, &github, Some("other-thread")).is_none()
+        );
+        assert_ne!(
+            super::native_fix_key(Some(&github), "", "", 0, None),
+            super::native_fix_key(Some(&github), "", "", 0, Some("default"))
+        );
+    }
 
     #[test]
     fn cancel_inline_review_without_a_session_is_an_error() {

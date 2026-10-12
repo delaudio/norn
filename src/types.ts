@@ -460,6 +460,7 @@ export interface ReviewRun {
   sourceBranch: string;
   destinationBranch: string;
   reviewedBaseSha?: string | null;
+  reviewedDiffBaseSha?: string | null;
   reviewedHeadSha?: string | null;
   status: AiReviewRunStatus;
   turnKind: AiReviewTurnKind;

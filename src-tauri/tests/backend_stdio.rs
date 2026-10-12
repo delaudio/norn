@@ -1136,7 +1136,7 @@ fn native_provider_rows_survive_restart_and_never_borrow_foreign_reviews() {
 
 #[cfg(unix)]
 #[test]
-fn legacy_agent_handoff_rejects_ambiguous_or_native_owned_context_before_spawn() {
+fn native_agent_handoff_accepts_owned_context_and_rejects_ambiguous_conversations() {
     use norn_lib::{ProviderReviewScope as Scope, SavedReviewProvider as ReviewProvider};
     for scenario in [
         "ambiguous",
@@ -1146,10 +1146,11 @@ fn legacy_agent_handoff_rejects_ambiguous_or_native_owned_context_before_spawn()
     ] {
         let mut fixture = FixFixture::new("#!/bin/sh\nexit 99\n");
         let marker = fixture._agent.path().join("must-not-start");
+        let foreign_clone = tempfile::tempdir().unwrap();
         std::fs::write(
             fixture._agent.path().join("fake-agent"),
             format!(
-                "#!/bin/sh\nprintf started > '{}'\nexit 99\n",
+                "#!/bin/sh\ncat >/dev/null\nprintf started > '{}'\nprintf '%s\\n' '{{\"result\":\"Native session complete.\",\"session_id\":\"owned-session\"}}'\n",
                 marker.display()
             ),
         )
@@ -1181,6 +1182,17 @@ fn legacy_agent_handoff_rejects_ambiguous_or_native_owned_context_before_spawn()
                 serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
             let mut wrong = settings["repos"][0].clone();
             wrong["provider"] = json!("bitbucket");
+            git(
+                foreign_clone.path(),
+                &[
+                    "clone",
+                    "--no-hardlinks",
+                    fixture.repo.path().to_str().unwrap(),
+                    ".",
+                ],
+            );
+            std::fs::write(foreign_clone.path().join(".norn.yaml"), "invalid: [\n").unwrap();
+            wrong["localPath"] = json!(foreign_clone.path().canonicalize().unwrap());
             settings["repos"].as_array_mut().unwrap().insert(0, wrong);
             std::fs::write(path, settings.to_string()).unwrap();
         } else {
@@ -1231,14 +1243,21 @@ fn legacy_agent_handoff_rejects_ambiguous_or_native_owned_context_before_spawn()
         );
         assert_eq!(started["ok"], true, "{scenario}: {started}");
         let terminal = fixture.terminal(started["result"]["operationId"].as_str().unwrap());
-        assert_eq!(
-            terminal["event"]["state"], "failed",
-            "{scenario}: {terminal}"
-        );
-        assert_eq!(
-            terminal["event"]["error"]["code"], "targetStale",
-            "{scenario}: {terminal}"
-        );
+        if scenario == "ambiguous" {
+            assert_eq!(
+                terminal["event"]["state"], "failed",
+                "{scenario}: {terminal}"
+            );
+            assert_eq!(
+                terminal["event"]["error"]["code"], "targetStale",
+                "{scenario}: {terminal}"
+            );
+        } else {
+            assert_eq!(
+                terminal["event"]["state"], "succeeded",
+                "{scenario}: {terminal}"
+            );
+        }
         if scenario == "native-run" || scenario == "wrong-config-provider" {
             fixture.backend.send(json!({"type":"request","id":"fenced-start","method":"review.start","params":{"target":fixture.target}}));
             let started = fixture.backend.wait_for(
@@ -1248,18 +1267,36 @@ fn legacy_agent_handoff_rejects_ambiguous_or_native_owned_context_before_spawn()
             assert_eq!(started["ok"], true, "{started}");
             let terminal = fixture.terminal(started["result"]["operationId"].as_str().unwrap());
             assert_eq!(
-                terminal["event"]["state"], "failed",
-                "{scenario}: {terminal}"
-            );
-            assert_eq!(
-                terminal["event"]["error"]["code"], "targetStale",
+                terminal["event"]["state"], "succeeded",
                 "{scenario}: {terminal}"
             );
         }
-        assert!(
-            !marker.exists(),
-            "{scenario} launched an incompatible agent"
+        assert_eq!(
+            marker.exists(),
+            scenario != "ambiguous",
+            "{scenario}: agent execution"
         );
+        if scenario != "ambiguous" {
+            let scope = Scope {
+                provider: ReviewProvider::Github,
+                workspace: "fixture".into(),
+                repo: "demo".into(),
+                pr_id: 9,
+            };
+            let owned: String = connection
+                .query_row(
+                    "SELECT store_json FROM ai_review_stores WHERE review_key=?1",
+                    [scope.key()],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            let owned: Value = serde_json::from_str(&owned).unwrap();
+            assert!(owned["reviewRuns"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|run| run["provider"] == "github" && run["id"] != "run-fix"));
+        }
         let after: String = connection
             .query_row(
                 "SELECT store_json FROM ai_review_stores WHERE review_key='fixture_demo_9'",
@@ -1269,6 +1306,375 @@ fn legacy_agent_handoff_rejects_ambiguous_or_native_owned_context_before_spawn()
             .unwrap();
         assert_eq!(after, before, "{scenario} changed legacy data");
     }
+}
+
+#[cfg(unix)]
+#[test]
+fn native_review_applies_explicit_default_profiles_and_preserves_pins_and_legacy() {
+    use norn_lib::{ProviderReviewScope as Scope, SavedReviewProvider as ReviewProvider};
+    for provider in ["github", "bitbucket"] {
+        for requested in [Some("security"), None, Some("missing")] {
+            let fixture = FixFixture::new("#!/bin/sh\nexit 99\n");
+            let capture = fixture._agent.path().join("payload");
+            let cwd = fixture._agent.path().join("cwd");
+            std::fs::write(fixture._agent.path().join("fake-agent"), format!(
+                "#!/bin/sh\npwd > '{}'\ncat > '{}'\nprintf '%s\\n' '{{\"result\":\"Native profile complete.\",\"session_id\":\"private-native-profile\"}}'\n", cwd.display(), capture.display())).unwrap();
+            std::fs::write(fixture.repo.path().join(".norn.yaml"), "version: 0.1\nprofiles:\n  default:\n    prompt:\n      extend: DEFAULT_NATIVE_PROFILE\n  security:\n    prompt:\n      extend: SECURITY_NATIVE_PROFILE\n").unwrap();
+            git(fixture.repo.path(), &["add", ".norn.yaml"]);
+            git(fixture.repo.path(), &["commit", "-qm", "owned policy"]);
+            let head = Command::new("git")
+                .arg("-C")
+                .arg(fixture.repo.path())
+                .args(["rev-parse", "HEAD"])
+                .output()
+                .unwrap();
+            let head = String::from_utf8(head.stdout).unwrap().trim().to_string();
+            let path = fixture._config.path().join("settings.json");
+            let mut settings: Value =
+                serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+            settings["repos"][0]["provider"] = json!(provider);
+            std::fs::write(path, settings.to_string()).unwrap();
+            let db = rusqlite::Connection::open(fixture._data.path().join("norn.sqlite3")).unwrap();
+            let legacy: String = db
+                .query_row(
+                    "SELECT store_json FROM ai_review_stores WHERE review_key='fixture_demo_9'",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            let mut saved: Value = serde_json::from_str(&legacy).unwrap();
+            let original_base = saved["reviewRuns"][0]["reviewedBaseSha"].clone();
+            saved["reviewRuns"][0]["provider"] = json!(provider);
+            saved["reviewRuns"][0]["reviewedDiffBaseSha"] = original_base;
+            saved["reviewRuns"][0]["reviewedBaseSha"] = json!(head);
+            saved["reviewRuns"][0]["reviewedHeadSha"] = json!(head);
+            saved["reviewRuns"][0]["id"] = json!("native-source");
+            let scope = Scope {
+                provider: if provider == "github" {
+                    ReviewProvider::Github
+                } else {
+                    ReviewProvider::Bitbucket
+                },
+                workspace: "fixture".into(),
+                repo: "demo".into(),
+                pr_id: 9,
+            };
+            db.execute("INSERT INTO ai_review_stores(review_key,workspace,repo,pr_id,store_json,created_at,updated_at) VALUES (?1,'fixture','demo',9,?2,'100','100')", rusqlite::params![scope.key(),saved.to_string()]).unwrap();
+            let mut backend = Backend::spawn_env(
+                fixture.repo.path(),
+                &[
+                    ("NORN_REVIEW_ENGINE", "real"),
+                    ("NORN_CONFIG_DIR", fixture._config.path().to_str().unwrap()),
+                    (
+                        "NORN_REVIEW_DATA_DIR",
+                        fixture._data.path().to_str().unwrap(),
+                    ),
+                    (
+                        "NORN_REVIEW_AGENT_BIN",
+                        fixture._agent.path().join("fake-agent").to_str().unwrap(),
+                    ),
+                ],
+            );
+            backend.handshake();
+            let target = json!({"kind":"provider","provider":provider,"workspace":"fixture","repo":"demo","prId":9,"runId":"native-source"});
+            backend.send(json!({"type":"request","id":"native-profile","method":"review.start","params":{"target":target,"profile":requested}}));
+            let response =
+                backend.wait_for(|v| v["id"] == "native-profile", Duration::from_secs(5));
+            assert_eq!(response["ok"], true, "{response}");
+            let operation = response["result"]["operationId"].as_str().unwrap();
+            let terminal = backend.wait_for(
+                |v| {
+                    v["operationId"] == operation
+                        && ["succeeded", "failed"]
+                            .contains(&v["event"]["state"].as_str().unwrap_or(""))
+                },
+                Duration::from_secs(15),
+            );
+            if requested == Some("missing") {
+                assert_eq!(terminal["event"]["state"], "failed", "{terminal}");
+                assert_eq!(
+                    terminal["event"]["error"]["code"], "invalidParams",
+                    "{terminal}"
+                );
+                assert!(!capture.exists());
+            } else {
+                assert_eq!(terminal["event"]["state"], "succeeded", "{terminal}");
+                let payload = std::fs::read_to_string(&capture).unwrap();
+                assert!(payload.contains(if requested.is_some() {
+                    "SECURITY_NATIVE_PROFILE"
+                } else {
+                    "DEFAULT_NATIVE_PROFILE"
+                }));
+                assert!(payload.contains("diff --git"));
+                assert_ne!(
+                    std::fs::read_to_string(&cwd).unwrap().trim(),
+                    fixture
+                        .repo
+                        .path()
+                        .canonicalize()
+                        .unwrap()
+                        .to_str()
+                        .unwrap()
+                );
+                let owned: String = db
+                    .query_row(
+                        "SELECT store_json FROM ai_review_stores WHERE review_key=?1",
+                        [scope.key()],
+                        |row| row.get(0),
+                    )
+                    .unwrap();
+                let owned: Value = serde_json::from_str(&owned).unwrap();
+                let run = owned["reviewRuns"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .find(|run| run["id"] != "native-source")
+                    .unwrap();
+                assert_eq!(run["reviewProfile"], requested.unwrap_or("default"));
+                assert_eq!(run["provider"], provider);
+                assert_eq!(run["reviewedBaseSha"], head);
+                assert_eq!(run["reviewedHeadSha"], head);
+                assert_eq!(
+                    run["reviewedDiffBaseSha"],
+                    saved["reviewRuns"][0]["reviewedDiffBaseSha"]
+                );
+                assert!(!terminal.to_string().contains("private-native-profile"));
+            }
+            let after: String = db
+                .query_row(
+                    "SELECT store_json FROM ai_review_stores WHERE review_key='fixture_demo_9'",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(after, legacy);
+        }
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn native_mandatory_analyzer_requires_clean_pinned_checkout_before_agent() {
+    for dirty in [false, true] {
+        let fixture = FixFixture::new("#!/bin/sh\nexit 99\n");
+        let agent = fixture._agent.path().join("agent-started");
+        let analyzer = fixture._agent.path().join("analyzer-started");
+        std::fs::write(fixture._agent.path().join("fake-agent"), format!("#!/bin/sh\ncat >/dev/null\nprintf started > '{}'\nprintf '%s\\n' '{{\"result\":\"Required evidence complete.\"}}'\n", agent.display())).unwrap();
+        let command = format!("printf checked > '{}'", analyzer.display());
+        std::fs::write(fixture.repo.path().join(".norn.yaml"), format!("version: 0.1\nprofiles:\n  mandatory:\n    analyzers:\n      evidence: required\nanalyzers:\n  evidence:\n    enabled: true\n    required: true\n    command: {}\n", serde_json::to_string(&command).unwrap())).unwrap();
+        git(fixture.repo.path(), &["add", ".norn.yaml"]);
+        git(
+            fixture.repo.path(),
+            &["commit", "-qm", "owned mandatory policy"],
+        );
+        let head = Command::new("git")
+            .arg("-C")
+            .arg(fixture.repo.path())
+            .args(["rev-parse", "HEAD"])
+            .output()
+            .unwrap();
+        let head = String::from_utf8(head.stdout).unwrap().trim().to_string();
+        let db = rusqlite::Connection::open(fixture._data.path().join("norn.sqlite3")).unwrap();
+        let old: String = db
+            .query_row(
+                "SELECT store_json FROM ai_review_stores WHERE review_key='fixture_demo_9'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let mut saved: Value = serde_json::from_str(&old).unwrap();
+        saved["reviewRuns"][0]["reviewedHeadSha"] = json!(head);
+        db.execute(
+            "UPDATE ai_review_stores SET store_json=?1 WHERE review_key='fixture_demo_9'",
+            [saved.to_string()],
+        )
+        .unwrap();
+        if dirty {
+            std::fs::write(
+                fixture.repo.path().join("tracked.txt"),
+                "unreviewed changes\n",
+            )
+            .unwrap();
+        }
+        let mut backend = Backend::spawn_env(
+            fixture.repo.path(),
+            &[
+                ("NORN_REVIEW_ENGINE", "real"),
+                ("NORN_CONFIG_DIR", fixture._config.path().to_str().unwrap()),
+                (
+                    "NORN_REVIEW_DATA_DIR",
+                    fixture._data.path().to_str().unwrap(),
+                ),
+                (
+                    "NORN_REVIEW_AGENT_BIN",
+                    fixture._agent.path().join("fake-agent").to_str().unwrap(),
+                ),
+            ],
+        );
+        backend.handshake();
+        backend.send(json!({"type":"request","id":"mandatory","method":"review.start","params":{"target":fixture.target,"profile":"mandatory"}}));
+        let response = backend.wait_for(|v| v["id"] == "mandatory", Duration::from_secs(5));
+        assert_eq!(response["ok"], true, "{response}");
+        let operation = response["result"]["operationId"].as_str().unwrap();
+        let terminal = backend.wait_for(
+            |v| {
+                v["operationId"] == operation
+                    && ["succeeded", "failed"].contains(&v["event"]["state"].as_str().unwrap_or(""))
+            },
+            Duration::from_secs(15),
+        );
+        assert_eq!(
+            terminal["event"]["state"],
+            if dirty { "failed" } else { "succeeded" },
+            "{terminal}"
+        );
+        assert_eq!(agent.exists(), !dirty);
+        assert_eq!(analyzer.exists(), !dirty);
+        let after: String = db
+            .query_row(
+                "SELECT store_json FROM ai_review_stores WHERE review_key='fixture_demo_9'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(after, saved.to_string());
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn native_provider_sessions_cancel_independently_with_same_names_ids_and_threads() {
+    use norn_lib::{ProviderReviewScope as Scope, SavedReviewProvider as ReviewProvider};
+    let fixture = FixFixture::new("#!/bin/sh\nexit 99\n");
+    let other = tempfile::tempdir().unwrap();
+    git(
+        other.path(),
+        &[
+            "clone",
+            "--no-hardlinks",
+            fixture.repo.path().to_str().unwrap(),
+            ".",
+        ],
+    );
+    // Git clone does not copy repository-local identity. Own both commits even
+    // on CI hosts without a user-global Git configuration.
+    git(other.path(), &["config", "user.name", "Norn owned fixture"]);
+    git(
+        other.path(),
+        &["config", "user.email", "owned-fixture@example.invalid"],
+    );
+    let db = rusqlite::Connection::open(fixture._data.path().join("norn.sqlite3")).unwrap();
+    let legacy: String = db
+        .query_row(
+            "SELECT store_json FROM ai_review_stores WHERE review_key='fixture_demo_9'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let mut settings = json!({"repos":[],"defaultDiffView":"unified","theme":"dark"});
+    for (provider, path, marker) in [
+        ("github", fixture.repo.path(), "GH_EVIDENCE"),
+        ("bitbucket", other.path(), "BB_EVIDENCE"),
+    ] {
+        std::fs::write(path.join("tracked.txt"), format!("{marker}\n")).unwrap();
+        git(path, &["add", "tracked.txt"]);
+        git(path, &["commit", "-qm", "owned provider evidence"]);
+        let output = Command::new("git")
+            .arg("-C")
+            .arg(path)
+            .args(["rev-parse", "HEAD"])
+            .output()
+            .unwrap();
+        let head = String::from_utf8(output.stdout).unwrap().trim().to_string();
+        let mut saved: Value = serde_json::from_str(&legacy).unwrap();
+        saved["reviewRuns"][0]["provider"] = json!(provider);
+        saved["reviewRuns"][0]["id"] = json!("native-source");
+        saved["reviewRuns"][0]["reviewedHeadSha"] = json!(head);
+        let scope = Scope {
+            provider: if provider == "github" {
+                ReviewProvider::Github
+            } else {
+                ReviewProvider::Bitbucket
+            },
+            workspace: "fixture".into(),
+            repo: "demo".into(),
+            pr_id: 9,
+        };
+        db.execute("INSERT INTO ai_review_stores(review_key,workspace,repo,pr_id,store_json,created_at,updated_at) VALUES (?1,'fixture','demo',9,?2,'100','100')", rusqlite::params![scope.key(),saved.to_string()]).unwrap();
+        settings["repos"].as_array_mut().unwrap().push(json!({"provider":provider,"workspace":"fixture","repo":"demo","localPath":path.canonicalize().unwrap()}));
+    }
+    std::fs::write(
+        fixture._config.path().join("settings.json"),
+        settings.to_string(),
+    )
+    .unwrap();
+    let release = fixture._agent.path().join("release");
+    let gh_marker = fixture._agent.path().join("github-started");
+    let bb_marker = fixture._agent.path().join("bitbucket-started");
+    std::fs::write(fixture._agent.path().join("fake-agent"), format!(
+        "#!/bin/sh\npayload=$(cat)\ncase \"$payload\" in *GH_EVIDENCE*) printf started > '{}' ;; *BB_EVIDENCE*) printf started > '{}' ;; *) exit 99 ;; esac\nwhile [ ! -f '{}' ]; do sleep 0.05; done\nprintf '%s\\n' '{{\"result\":\"Independent native review complete.\"}}'\n", gh_marker.display(), bb_marker.display(), release.display())).unwrap();
+    let mut backend = Backend::spawn_env(
+        fixture.repo.path(),
+        &[
+            ("NORN_REVIEW_ENGINE", "real"),
+            ("NORN_CONFIG_DIR", fixture._config.path().to_str().unwrap()),
+            (
+                "NORN_REVIEW_DATA_DIR",
+                fixture._data.path().to_str().unwrap(),
+            ),
+            (
+                "NORN_REVIEW_AGENT_BIN",
+                fixture._agent.path().join("fake-agent").to_str().unwrap(),
+            ),
+        ],
+    );
+    backend.handshake();
+    let mut operation_ids = Vec::new();
+    for provider in ["github", "bitbucket"] {
+        let target = json!({"kind":"provider","provider":provider,"workspace":"fixture","repo":"demo","prId":9,"runId":"native-source"});
+        backend.send(json!({"type":"request","id":provider,"method":"review.start","params":{"target":target}}));
+        let response = backend.wait_for(|v| v["id"] == provider, Duration::from_secs(5));
+        assert_eq!(response["ok"], true, "{response}");
+        operation_ids.push(
+            response["result"]["operationId"]
+                .as_str()
+                .unwrap()
+                .to_string(),
+        );
+    }
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    while !gh_marker.exists() || !bb_marker.exists() {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "both scoped agents must start"
+        );
+        thread::sleep(Duration::from_millis(10));
+    }
+    backend.send(json!({"type":"request","id":"cancel-gh","method":"operation.cancel","params":{"operationId":operation_ids[0]}}));
+    let cancelled = backend.wait_for(
+        |v| v["operationId"] == operation_ids[0] && v["event"]["state"] == "cancelled",
+        Duration::from_secs(10),
+    );
+    assert_eq!(cancelled["target"]["provider"], "github");
+    std::fs::write(&release, "release owned surviving agent").unwrap();
+    let completed = backend.wait_for(
+        |v| {
+            v["operationId"] == operation_ids[1]
+                && ["succeeded", "failed", "cancelled"]
+                    .contains(&v["event"]["state"].as_str().unwrap_or(""))
+        },
+        Duration::from_secs(10),
+    );
+    assert_eq!(completed["event"]["state"], "succeeded", "{completed}");
+    assert_eq!(completed["target"]["provider"], "bitbucket");
+    let after: String = db
+        .query_row(
+            "SELECT store_json FROM ai_review_stores WHERE review_key='fixture_demo_9'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(after, legacy);
 }
 
 #[cfg(unix)]

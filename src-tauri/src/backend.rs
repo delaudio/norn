@@ -32,10 +32,9 @@ use crate::protocol::{
     MAX_FRAME_BYTES, PROTOCOL_VERSION,
 };
 use crate::services::review::{
-    cancel_inline_review_native, cancel_local_inline_review_native, get_ai_review_fix_state_native,
-    get_ai_review_run_state_native, get_local_ai_review_run_state_native,
-    reply_inline_review_native, start_ai_review_commit_native, start_ai_review_fix_native,
-    start_ai_review_push_native, start_inline_review_native, start_local_inline_review_native,
+    cancel_local_inline_review_native, get_ai_review_fix_state_native,
+    get_local_ai_review_run_state_native, start_ai_review_commit_native,
+    start_ai_review_fix_native, start_ai_review_push_native, start_local_inline_review_native,
     validate_fix_commit_paths, AiReviewFixPhase, AiReviewFixStatus, AiReviewFixStore,
     AiReviewRunStatus, AiReviewRunStore,
 };
@@ -711,7 +710,7 @@ fn dispatch(request: Request, backend: &Backend) -> bool {
                 "op-{}",
                 backend.next_operation.fetch_add(1, Ordering::SeqCst)
             );
-            backend.start_review(&id, &operation_id, params.target);
+            backend.start_review(&id, &operation_id, params);
             false
         }
         Request::ReviewFixState { params, .. } => {
@@ -1101,6 +1100,30 @@ fn review_targets_response() -> serde_json::Value {
     json!({ "targets": targets })
 }
 
+fn provider_review_scope(
+    target: &TargetIdentity,
+) -> Result<crate::services::review_scope::Scope, ProtocolError> {
+    let TargetIdentity::Provider {
+        provider,
+        workspace,
+        repo,
+        pr_id: Some(pr_id),
+        ..
+    } = target
+    else {
+        return Err(fix_error("Select a saved pull-request review."));
+    };
+    Ok(crate::services::review_scope::Scope {
+        provider: match provider {
+            ProviderKind::Github => crate::services::review::ReviewProvider::Github,
+            ProviderKind::Bitbucket => crate::services::review::ReviewProvider::Bitbucket,
+        },
+        workspace: workspace.clone(),
+        repo: repo.clone(),
+        pr_id: *pr_id,
+    })
+}
+
 fn load_provider_review_store(
     target: &TargetIdentity,
 ) -> Result<Option<crate::services::review::AiReviewStoreData>, String> {
@@ -1123,42 +1146,6 @@ fn load_provider_review_store(
         repo: repo.clone(),
         pr_id: *pr_id,
     })
-}
-
-fn require_legacy_inline_handoff(
-    target: &TargetIdentity,
-    run: &crate::services::review::ReviewRun,
-    thread: Option<&crate::services::review::AiReviewThread>,
-    repo_path: &Path,
-) -> Result<(), ProtocolError> {
-    let TargetIdentity::Provider {
-        provider,
-        workspace,
-        repo,
-        pr_id: Some(pr_id),
-        ..
-    } = target
-    else {
-        return Err(ProtocolError::new(
-            ProtocolErrorCode::TargetStale,
-            "Select a saved provider review.",
-        ));
-    };
-    crate::services::review_scope::require_legacy_inline_handoff(
-        &crate::services::review_scope::Scope {
-            provider: match provider {
-                ProviderKind::Github => crate::services::review::ReviewProvider::Github,
-                ProviderKind::Bitbucket => crate::services::review::ReviewProvider::Bitbucket,
-            },
-            workspace: workspace.clone(),
-            repo: repo.clone(),
-            pr_id: *pr_id,
-        },
-        run,
-        thread,
-        repo_path,
-    )
-    .map_err(|message| ProtocolError::new(ProtocolErrorCode::TargetStale, message))
 }
 
 /// Filter shared legacy storage by the complete saved run identity before
@@ -1928,7 +1915,7 @@ fn resolve_repo_path(target: &TargetIdentity) -> Option<PathBuf> {
                     entry
                         .local_path
                         .filter(|path| !path.is_empty())
-                        .map(PathBuf::from)
+                        .and_then(|path| PathBuf::from(path).canonicalize().ok())
                 } else {
                     None
                 }
@@ -2409,7 +2396,10 @@ fn reviewed_range(target: &TargetIdentity) -> Result<Option<(String, String)>, P
             "Stored review does not match this provider and repository target.",
         ));
     }
-    match (run.reviewed_base_sha, run.reviewed_head_sha) {
+    match (
+        run.reviewed_diff_base_sha.or(run.reviewed_base_sha),
+        run.reviewed_head_sha,
+    ) {
         (Some(base), Some(head)) => Ok(Some((base, head))),
         _ => Ok(None),
     }
@@ -2963,7 +2953,12 @@ impl Backend {
         });
     }
 
-    fn start_review(&self, request_id: &str, operation_id: &str, target: TargetIdentity) {
+    fn start_review(
+        &self,
+        request_id: &str,
+        operation_id: &str,
+        params: protocol::ReviewStartParams,
+    ) {
         let cancel = Arc::new(AtomicBool::new(false));
         {
             let mut operations = self.operations.lock().expect("operations lock");
@@ -2981,7 +2976,7 @@ impl Backend {
         self.respond(
             request_id,
             json!({
-                "target": target,
+                "target": params.target,
                 "operationId": operation_id,
                 "state": "accepted",
             }),
@@ -2998,7 +2993,7 @@ impl Backend {
                 &writer,
                 &operations,
                 &operation_id,
-                &target,
+                &params,
                 &cancel,
                 delay,
             );
@@ -3088,10 +3083,11 @@ fn run_review_operation(
     writer: &SyncSender<ServerMessage>,
     operations: &Operations,
     operation_id: &str,
-    target: &TargetIdentity,
+    params: &protocol::ReviewStartParams,
     cancel: &AtomicBool,
     delay: Duration,
 ) {
+    let target = &params.target;
     match engine {
         ReviewEngine::Simulated => {
             run_simulated_review_operation(writer, operations, operation_id, target, cancel, delay);
@@ -3099,9 +3095,14 @@ fn run_review_operation(
         ReviewEngine::Fake => {
             run_fake_review_operation(writer, operations, operation_id, target, cancel)
         }
-        ReviewEngine::Real => {
-            run_real_review_operation(writer, operations, operation_id, target, cancel)
-        }
+        ReviewEngine::Real => run_real_review_operation(
+            writer,
+            operations,
+            operation_id,
+            target,
+            cancel,
+            params.profile.as_deref(),
+        ),
     }
 }
 
@@ -3169,6 +3170,7 @@ fn run_real_review_operation(
     operation_id: &str,
     target: &TargetIdentity,
     cancel: &AtomicBool,
+    profile: Option<&str>,
 ) {
     set_operation(operations, operation_id, OperationState::Running, 0, None);
     emit_event(
@@ -3188,7 +3190,7 @@ fn run_real_review_operation(
         finish_cancelled(writer, operations, operation_id, target, 2);
         return;
     }
-    match start_inline_session(target) {
+    match start_inline_session(target, profile) {
         Ok(session) => {
             monitor_inline_session(writer, operations, operation_id, target, cancel, session)
         }
@@ -3352,6 +3354,7 @@ fn start_inline_reply_session(
 ) -> Result<InlineSession, ProtocolError> {
     let store = review_run_store().clone();
     let TargetIdentity::Provider {
+        provider,
         workspace,
         repo,
         pr_id: Some(pr_id),
@@ -3382,7 +3385,7 @@ fn start_inline_reply_session(
             "reviewed revisions are not available in the local checkout",
         ));
     }
-    let store_data = load_provider_review_store(target).ok().flatten();
+    let store_data = load_provider_review_store(target).map_err(inline_start_error)?;
     let run = select_review_run(store_data.clone(), run_id.as_deref());
     let thread_id = run
         .as_ref()
@@ -3404,16 +3407,11 @@ fn start_inline_reply_session(
                 "The selected review has no unambiguous saved conversation.",
             )
         })?;
-    require_legacy_inline_handoff(
-        target,
-        run.as_ref().expect("run with thread checked"),
-        Some(thread),
-        &repo_path,
-    )?;
-    let (source_branch, destination_branch) = run
-        .map(|run| (run.source_branch, run.destination_branch))
-        .unwrap_or_else(|| ("source".to_string(), "destination".to_string()));
-    let prompt = resolve_inline_prompt(target, &repo_path)?;
+    let run = run.expect("selected run with thread checked");
+    let source_branch = run.source_branch.clone();
+    let destination_branch = run.destination_branch.clone();
+    let (prompt, _) =
+        resolve_inline_prompt_with_profile(target, &repo_path, run.review_profile.as_deref())?;
     let diff = git(
         &repo_path,
         &[
@@ -3449,42 +3447,52 @@ fn start_inline_reply_session(
                 .map(|_| config::AiProvider::Claude)
         })
         .unwrap_or_else(|| config::load().ai_provider);
-    let workspace = workspace.clone();
-    let repo = repo.clone();
-    let pr_id = *pr_id;
-    let started = reply_inline_review_native(
+    let scope = crate::services::review_scope::Scope {
+        provider: match provider {
+            ProviderKind::Github => crate::services::review::ReviewProvider::Github,
+            ProviderKind::Bitbucket => crate::services::review::ReviewProvider::Bitbucket,
+        },
+        workspace: workspace.clone(),
+        repo: repo.clone(),
+        pr_id: *pr_id,
+    };
+    let read_scope = scope.clone();
+    let cancel_scope = scope.clone();
+    let selected_run_id = run.id.clone();
+    let started = crate::services::review::reply_provider_inline_review_native(
         &store,
-        &workspace,
-        &repo,
-        pr_id,
-        format!("Pull request #{pr_id}"),
-        source_branch,
-        destination_branch,
-        Some(base),
-        Some(head),
+        crate::services::review::ProviderInlineReviewRequest {
+            context: crate::services::review::ProviderInlineContext {
+                scope,
+                repo_path: Some(repo_path),
+                reviewed_diff_base_sha: run.reviewed_diff_base_sha,
+            },
+            title: format!("Pull request #{pr_id}"),
+            source_branch,
+            destination_branch,
+            reviewed_base_sha: run.reviewed_base_sha,
+            reviewed_head_sha: run.reviewed_head_sha,
+            payload: base_payload,
+            ai_provider,
+            review_profile: run.review_profile,
+        },
+        &selected_run_id,
         thread_id,
         message.to_string(),
-        base_payload,
-        ai_provider,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
     )
     .map_err(inline_start_error)?;
-    let thread = started.thread_id.clone();
     let read_store = store.clone();
-    let read_workspace = workspace.clone();
-    let read_repo = repo.clone();
     Ok(InlineSession {
-        thread_id: thread,
+        thread_id: started.thread_id,
         read: Box::new(move || {
-            get_ai_review_run_state_native(&read_store, &read_workspace, &read_repo, pr_id)
+            crate::services::review::get_provider_ai_review_run_state_native(
+                &read_store,
+                &read_scope,
+            )
         }),
         cancel: Box::new(move || {
-            cancel_inline_review_native(&store, &workspace, &repo, pr_id).map(|_| ())
+            crate::services::review::cancel_provider_inline_review_native(&store, &cancel_scope)
+                .map(|_| ())
         }),
     })
 }
@@ -3634,8 +3642,7 @@ fn mutation_preview(
             "Run Claude with file-edit permissions using the saved conversation.".to_string(),
             "Leave edits for inspection; committing, pushing and publication require separate actions.".to_string()],
         ApprovedAction::Commit | ApprovedAction::Push => {
-            let TargetIdentity::Provider { workspace, repo, pr_id: Some(pr_id), .. } = target else { return Err(fix_error("Select a saved pull-request review.")); };
-            let state = get_ai_review_fix_state_native(fix_store(), workspace, repo, *pr_id, Some(&approval.thread_id))
+            let state = get_ai_review_fix_state_native(fix_store(), &provider_review_scope(target)?, Some(&approval.thread_id))
                 .ok_or_else(|| fix_error("No fix session exists for the selected conversation."))?;
             if state.status != AiReviewFixStatus::Succeeded || current_branch.trim() != approval.source ||
                 state.repo_path.as_deref().and_then(|path| Path::new(path).canonicalize().ok()).as_ref() != Some(&approval.repo_path) {
@@ -3726,9 +3733,7 @@ fn consume_fix_approval(
 
 fn fix_state_response(target: &TargetIdentity) -> Result<serde_json::Value, ProtocolError> {
     let TargetIdentity::Provider {
-        workspace,
-        repo,
-        pr_id: Some(pr_id),
+        pr_id: Some(_),
         run_id: Some(run_id),
         ..
     } = target
@@ -3740,9 +3745,9 @@ fn fix_state_response(target: &TargetIdentity) -> Result<serde_json::Value, Prot
         .as_ref()
         .and_then(|data| data.review_runs.iter().find(|run| run.id == *run_id))
         .and_then(|run| run.thread_id.as_deref());
-    let state = thread_id.and_then(|thread_id| {
-        get_ai_review_fix_state_native(fix_store(), workspace, repo, *pr_id, Some(thread_id))
-    });
+    let scope = provider_review_scope(target)?;
+    let state = thread_id
+        .and_then(|thread_id| get_ai_review_fix_state_native(fix_store(), &scope, Some(thread_id)));
     Ok(json!({ "target": target, "state": state.map(|state| json!({
         "status": state.status, "phase": state.phase, "commitSha": state.commit_sha,
         "summary": state.summary.map(|s| s.chars().take(4096).collect::<String>()),
@@ -3793,6 +3798,7 @@ fn run_fix_operation(
     else {
         return;
     };
+    let scope = provider_review_scope(target).expect("provider target checked");
     let started = match approval.action {
         ApprovedAction::Sync | ApprovedAction::Conflicts => {
             crate::services::review::start_branch_merge_native(
@@ -3807,6 +3813,7 @@ fn run_fix_operation(
                 approval.snapshot,
                 cancel.clone(),
                 approval.action == ApprovedAction::Conflicts,
+                Some(&scope),
             )
         }
         ApprovedAction::Fix => start_ai_review_fix_native(
@@ -3821,6 +3828,7 @@ fn run_fix_operation(
             approval.destination,
             cancel.clone(),
             Some(approval.snapshot),
+            Some(&scope),
         ),
         ApprovedAction::Commit => start_ai_review_commit_native(
             fix_store(),
@@ -3834,6 +3842,7 @@ fn run_fix_operation(
             approval.snapshot,
             cancel.clone(),
             approval.files,
+            Some(&scope),
         ),
         ApprovedAction::Push => start_ai_review_push_native(
             fix_store(),
@@ -3845,6 +3854,7 @@ fn run_fix_operation(
             approval.source,
             approval.snapshot,
             cancel.clone(),
+            Some(&scope),
         ),
     };
     if let Err(error) = started {
@@ -3861,13 +3871,9 @@ fn run_fix_operation(
     let mut sequence = 1;
     let mut previous_logs = Vec::new();
     loop {
-        if let Some(state) = get_ai_review_fix_state_native(
-            fix_store(),
-            workspace,
-            repo,
-            *pr_id,
-            Some(&approval.thread_id),
-        ) {
+        if let Some(state) =
+            get_ai_review_fix_state_native(fix_store(), &scope, Some(&approval.thread_id))
+        {
             if state.logs != previous_logs {
                 // A bounded ring can drop its prefix; emit only the new suffix.
                 let overlap = (0..=previous_logs.len().min(state.logs.len()))
@@ -3977,10 +3983,52 @@ fn emit_failed(
     );
 }
 
-fn resolve_inline_prompt(
+fn resolve_inline_prompt_with_profile(
     target: &TargetIdentity,
     repo_path: &std::path::Path,
-) -> Result<String, ProtocolError> {
+    profile: Option<&str>,
+) -> Result<(String, Option<String>), ProtocolError> {
+    let mut loaded = crate::repo_config::load_from_repo_path_with_profile(repo_path, profile)
+        .map_err(|_| {
+            ProtocolError::new(
+                ProtocolErrorCode::InvalidParams,
+                "Cannot read this repository's review policy.",
+            )
+        })?;
+    if matches!(target, TargetIdentity::Provider { .. })
+        && crate::organization_policy::organization_policy_is_configured()
+    {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64;
+        if let Some(resolved) = crate::organization_policy::resolve_configured_organization_policy(
+            repo_path, profile, None, now,
+        )
+        .map_err(|_| {
+            ProtocolError::new(
+                ProtocolErrorCode::InvalidParams,
+                "This repository's organization review policy is unavailable or invalid.",
+            )
+        })? {
+            loaded.config = Some(resolved.config);
+            loaded.selected_profile = resolved.selected_profile;
+        }
+    }
+    if !loaded.errors.is_empty()
+        && (matches!(target, TargetIdentity::Provider { .. }) || profile.is_some())
+    {
+        return Err(ProtocolError::new(
+            ProtocolErrorCode::InvalidParams,
+            "This repository's review policy is invalid; correct it before starting.",
+        ));
+    }
+    if profile.is_some_and(|requested| loaded.selected_profile.as_deref() != Some(requested)) {
+        return Err(ProtocolError::new(
+            ProtocolErrorCode::InvalidParams,
+            "The selected review profile is unavailable.",
+        ));
+    }
     let canonical_repo = std::fs::canonicalize(repo_path).ok();
     let owner = match target {
         TargetIdentity::Provider {
@@ -4005,10 +4053,10 @@ fn resolve_inline_prompt(
         let user = crate::services::workspace_data::prompt_for_scope(provider, &workspace, &repo)
             .map_err(|message| ProtocolError::new(ProtocolErrorCode::Conflict, message))?;
         if let Some(prompt) = user.filter(|prompt| !prompt.trim().is_empty()) {
-            return prompt_with_references(target, prompt.trim().to_string());
+            return prompt_with_references(target, prompt.trim().to_string())
+                .map(|prompt| (prompt, loaded.selected_profile.clone()));
         }
     }
-    let loaded=crate::repo_config::load_from_repo_path(repo_path).map_err(|_|ProtocolError::new(ProtocolErrorCode::InvalidParams,"Cannot read this repository's review policy; preserve it and inspect it before starting."))?;
     if !loaded.errors.is_empty() {
         return Err(ProtocolError::new(
             ProtocolErrorCode::InvalidParams,
@@ -4016,6 +4064,7 @@ fn resolve_inline_prompt(
         ));
     }
     prompt_with_references(target, resolve_review_prompt(loaded.config.as_ref()))
+        .map(|prompt| (prompt, loaded.selected_profile))
 }
 
 fn prompt_with_references(
@@ -4043,7 +4092,10 @@ fn prompt_with_references(
         .map_err(|message| ProtocolError::new(ProtocolErrorCode::InvalidParams, message))
 }
 
-fn start_inline_session(target: &TargetIdentity) -> Result<InlineSession, ProtocolError> {
+fn start_inline_session(
+    target: &TargetIdentity,
+    profile: Option<&str>,
+) -> Result<InlineSession, ProtocolError> {
     let store = review_run_store().clone();
     let repo_path = resolve_repo_path(target).ok_or_else(|| {
         ProtocolError::new(
@@ -4057,108 +4109,106 @@ fn start_inline_session(target: &TargetIdentity) -> Result<InlineSession, Protoc
             "no reviewable local repository for this target",
         ));
     }
-    let prompt = resolve_inline_prompt(target, &repo_path)?;
+    let (prompt, selected_profile) =
+        resolve_inline_prompt_with_profile(target, &repo_path, profile)?;
     let ai_provider = config::load().ai_provider;
 
     match target {
         TargetIdentity::Provider {
+            provider,
             workspace,
             repo,
             pr_id: Some(pr_id),
             run_id,
             ..
         } => {
-            let Some((base, head)) = reviewed_range(target)? else {
-                return Err(ProtocolError::new(
-                    ProtocolErrorCode::TargetStale,
-                    "no stored reviewed range for this pull request",
-                ));
+            let scope = crate::services::review_scope::Scope {
+                provider: match provider {
+                    ProviderKind::Github => crate::services::review::ReviewProvider::Github,
+                    ProviderKind::Bitbucket => crate::services::review::ReviewProvider::Bitbucket,
+                },
+                workspace: workspace.clone(),
+                repo: repo.clone(),
+                pr_id: *pr_id,
             };
-            if !revisions_available(&repo_path, &base, &head) {
-                return Err(ProtocolError::new(
-                    ProtocolErrorCode::TargetStale,
-                    "reviewed revisions are not available in the local checkout",
-                ));
-            }
-            let diff = git(
-                &repo_path,
-                &[
-                    "diff",
-                    "--no-ext-diff",
-                    "--no-textconv",
-                    "-M",
-                    base.as_str(),
-                    head.as_str(),
-                ],
-            )
-            .ok_or_else(|| {
-                ProtocolError::new(
-                    ProtocolErrorCode::Internal,
-                    "failed to generate the reviewed diff",
-                )
-            })?;
-            let run = load_provider_review_store(target)
-                .ok()
-                .flatten()
-                .and_then(|store| select_review_run(Some(store), run_id.as_deref()));
-            let saved = run.as_ref().ok_or_else(|| {
+            let data = load_provider_review_store(target).map_err(inline_start_error)?;
+            let saved = select_review_run(data, run_id.as_deref()).ok_or_else(|| {
                 ProtocolError::new(
                     ProtocolErrorCode::TargetStale,
                     "The selected saved review is unavailable.",
                 )
             })?;
-            require_legacy_inline_handoff(target, saved, None, &repo_path)?;
-            let (source_branch, destination_branch) = run
-                .map(|run| (run.source_branch, run.destination_branch))
-                .unwrap_or_else(|| ("source".to_string(), "destination".to_string()));
+            let base = saved
+                .reviewed_diff_base_sha
+                .as_ref()
+                .or(saved.reviewed_base_sha.as_ref());
+            let (Some(base), Some(head)) = (base, saved.reviewed_head_sha.as_ref()) else {
+                return Err(ProtocolError::new(
+                    ProtocolErrorCode::TargetStale,
+                    "No pinned reviewed range is available.",
+                ));
+            };
+            if !revisions_available(&repo_path, base, head) {
+                return Err(ProtocolError::new(
+                    ProtocolErrorCode::TargetStale,
+                    "Reviewed revisions are not available in the configured clone.",
+                ));
+            }
+            let diff = git(
+                &repo_path,
+                &["diff", "--no-ext-diff", "--no-textconv", "-M", base, head],
+            )
+            .ok_or_else(|| {
+                ProtocolError::new(
+                    ProtocolErrorCode::Internal,
+                    "Cannot generate the pinned review diff.",
+                )
+            })?;
             let payload = build_review_payload(
                 &prompt,
                 &format!("Pull request #{pr_id}"),
                 "pr",
                 "This target contains the provider pull-request diff.",
-                &source_branch,
-                &destination_branch,
+                &saved.source_branch,
+                &saved.destination_branch,
                 &diff,
             );
-            let workspace = workspace.clone();
-            let repo = repo.clone();
-            let pr_id = *pr_id;
-            let started = start_inline_review_native(
+            let read_scope = scope.clone();
+            let cancel_scope = scope.clone();
+            let started = crate::services::review::start_provider_inline_review_native(
                 store.clone(),
-                workspace.clone(),
-                repo.clone(),
-                pr_id,
-                format!("Pull request #{pr_id}"),
-                source_branch,
-                destination_branch,
-                Some(base),
-                Some(head),
-                payload,
-                None,
-                None,
-                Some("Review".to_string()),
-                true,
-                ai_provider,
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
+                crate::services::review::ProviderInlineReviewRequest {
+                    context: crate::services::review::ProviderInlineContext {
+                        scope,
+                        repo_path: Some(repo_path.clone()),
+                        reviewed_diff_base_sha: saved.reviewed_diff_base_sha,
+                    },
+                    title: format!("Pull request #{pr_id}"),
+                    source_branch: saved.source_branch,
+                    destination_branch: saved.destination_branch,
+                    reviewed_base_sha: saved.reviewed_base_sha,
+                    reviewed_head_sha: saved.reviewed_head_sha,
+                    payload,
+                    ai_provider,
+                    review_profile: profile.map(ToOwned::to_owned),
+                },
             )
             .map_err(inline_start_error)?;
-            let thread_id = started.thread_id.clone();
             let read_store = store.clone();
-            let read_workspace = workspace.clone();
-            let read_repo = repo.clone();
             Ok(InlineSession {
-                thread_id,
+                thread_id: started.thread_id,
                 read: Box::new(move || {
-                    get_ai_review_run_state_native(&read_store, &read_workspace, &read_repo, pr_id)
+                    crate::services::review::get_provider_ai_review_run_state_native(
+                        &read_store,
+                        &read_scope,
+                    )
                 }),
                 cancel: Box::new(move || {
-                    cancel_inline_review_native(&store, &workspace, &repo, pr_id).map(|_| ())
+                    crate::services::review::cancel_provider_inline_review_native(
+                        &store,
+                        &cancel_scope,
+                    )
+                    .map(|_| ())
                 }),
             })
         }
@@ -4202,7 +4252,7 @@ fn start_inline_session(target: &TargetIdentity) -> Result<InlineSession, Protoc
                 None,
                 None,
                 None,
-                None,
+                selected_profile,
             )
             .map_err(inline_start_error)?;
             let thread_id = started.thread_id.clone();

@@ -448,3 +448,60 @@ Plan 0053 completion prepared after implementation `e4264db`, effective only on 
   six CLI/five onboarding/three bin tests, strict all-feature/all-target Clippy,
   fmt/no-GUI, Archgate12/12 and docflow audit. Frontend gate remains unchanged
   (root123, UI172/1057 assertions/115 frames), no React source edits.
+
+## 2026-10-12 — claim isolated plan0059 while predecessor CI runs
+
+- #369 final head `0e828f7c0eb6a02579a4450eb2fce974605a567e` is under
+  CI38190456486; earlier6433 head gate passed but cannot authorize final merge.
+- Claimed0059 before code in isolated `/private/tmp/norn-provider-inline-engine`
+  on `issue-306-provider-inline-engine`. Same single agent; predecessor code/CI
+  head remains fixed. Native context/profile/inline reply/fix integration reuses
+  shared core. No fresh-preview activation until durable evidence integration.
+- Sequential PR integration remains mandatory: verify/merge369 first, rebase
+  isolated branch onto actual squash baseline, audit, then open next PR.
+
+## 2026-10-12 — provider-qualified execution implementation and predecessor merge
+
+- Verified #369 exact head `0e828f7` against successful UI/verify CI38190456486;
+  squash merged at `68c69399cc879b29873846a65fd7c79ad42baee9`, 01:22:43Z.
+- Implemented explicit native provider/clone context, isolated initial/reply
+  execution, proved conversation inheritance without legacy run copies,
+  bounded review.start profile handoff, mandatory analyzer checkout fences,
+  distinct optional diff-base pins and scoped approved filesystem state.
+- Owned real stdio tests cover native/legacy conversation inheritance,
+  ambiguous provenance, explicit/default/unknown profiles on both providers,
+  canonical clone selection and clean pinned mandatory evidence. Adding final
+  concurrent cancellation proof before final gate/PR; no shipped claim yet.
+- No Norn review, live provider writes, private data/profiles or public releases.
+  Fresh-preview activation and the remaining parity/hardening/package/cutover
+  tasks remain outstanding. Single agent, authorized sequential PR integration.
+
+## 2026-10-12 — prepare provider-qualified inline engine PR receipt
+
+- Implementation `4db90405f7d80692c54ea491facc97de32ec8110` rebased onto
+  #369 squash `68c6939`; tree comparison is identical. Number0059 collision
+  audit passed against fresh origin/main.
+- Final local gate: root123+tooling/typecheck/lint/protocol; UI172 tests,
+  1057 assertions, 115 unchanged frames; Rust706+two ignored/58 stdio/six CLI/
+  five onboarding/three bin tests; strict Clippy/fmt/no-GUI/Archgate/audit.
+- Added real simultaneous same-identity GitHub/Bitbucket sessions in separate
+  clones: both fake agents start; cancel GitHub only, Bitbucket succeeds;
+  legacy bytes preserved. Mandatory local analyzer runs only on clean pinned
+  checkout. Scoped fix-state lookup preserves each provider's lifecycle.
+- Prepared plan/done receipt is conditional on exact-head CI and verified PR
+  squash merge; full ADR0020/#306/epic remain incomplete.
+
+## 2026-10-12 — fix provider cancellation fixture CI identity
+
+- #370 CI38192754060 passed UI but failed verify at the second owned clone's
+  Git commit. Linux runner has no global identity; clone does not copy the
+  original repository-local user.name/user.email. Production code was not the
+  failing operation.
+- The fixture now declares a local synthetic name/email in the cloned repo.
+  Targeted independent-cancel test passes with GIT_CONFIG_GLOBAL=/dev/null and
+  GIT_CONFIG_NOSYSTEM=1. Running the whole stdio suite in that same isolation
+  and strict Clippy before push; exact new-head CI/merge still required.
+
+- Follow-up verification completed: all 58 stdio tests pass with personal/system
+  Git config disabled, strict all-feature/all-target Clippy passes. Existing
+  production/local root/UI/core gates remain unchanged; new PR head CI required.
