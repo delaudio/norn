@@ -24,7 +24,10 @@ Git is authoritative. Durable history lives in WORKLOG and plan/done.
   Rust745 core/72stdio/6CLI/5onboarding/3binary+2existingignored; root123+tooling,
   lint/protocol/Archgate17/audit; UI206/1277/135frames; Doctor100;
   noDefault allTargets/strict allFeature allTarget Clippy/fmt/noGUI.
-  Implementationd3c670bae36dd4e7317c95cfc41cf9bc9cda1f51; prepared receipt
+  PR#376 open, implementationd3c670bae36dd4e7317c95cfc41cf9bc9cda1f51;
+  fresh timeline confirms maintainer closed#306at01:22:44UTC without associated
+  commit; earlier open-state references were stale. Preserve that closure and
+  continue required child workflow/cutover proof. Prepared receipt
   is ineffective until exact-head required CI and actual PR squash merge.
   Eight real owned native child/stdio cases cover providers/wrong defaults/layers/
   base/missing checkout/clone/persistence/cancel/EOF/preflight/failure/oversize/publication.
@@ -38,7 +41,7 @@ Git is authoritative. Durable history lives in WORKLOG and plan/done.
 
 ## Remaining work
 
-- Complete #358–#364/#306, #307 hardening, #308 matched installed packaging,
+- Complete #358–#364, #307 hardening, #308 matched installed packaging,
   #309 verified removal/cutover, then close the epic. Profile catalog374 and
   immutable local foundation375 are merged. Policy editor is #359; canonical
   prompt editor is shipped. Local UI/engine parity is still open.

@@ -671,3 +671,9 @@ Plan 0053 completion prepared after implementation `e4264db`, effective only on 
 - Prepared plan0065 receipt after all local gates. Implementationd3c670bae36dd4e7317c95cfc41cf9bc9cda1f51;
   origin/main remains actual3755e4e1b2; no number collision. Receipt ineffective
   until exact-head required CI and actual squash merge. No child/epic closure.
+
+- Fresh GitHub timeline correction: #306 was maintainer-closed at01:22:44UTC,
+  no associated commit. Earlier open-state references were stale; preserve the
+  closure without inventing child parity/cutover proof. PR#376 body removes an
+  unintended GitHub closing reference to#358 caused by a negated closure sentence.
+  Actual #358/#294 remain open; required child implementation continues.

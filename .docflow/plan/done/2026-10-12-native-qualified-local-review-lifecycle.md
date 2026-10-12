@@ -86,7 +86,7 @@ Use owned fixtures and fake native agent children only.
    Clippy/fmt/noGUI and docflow audit. Preserve Makefile/justfile parity.
 10. Claim the plan before code, after predecessor#375 exact-head CI/actual squash
     merge and rebase. Prepare a focused PR, verify its actual fixed-head required
-    CI and squash merge before completion. #358/#306/#294 remain open and
+    CI and squash merge before completion. #358/#294 remain open; preserve maintainer-closed #306 and
     ADR0020 Accepted. The next UI/Pierre slice must prove actual native inputs,
     wide/narrow frames, late selection fencing and complete local workflow.
 
@@ -128,5 +128,5 @@ native context retains operation cancellation through policy/preflight/retries.
 
 Schema20 compatibility/verified matched rollback still belongs to#308. Actual
 terminal local controls, pinned preview/Pierre consumers, local reply/fix and full
-workflow proof remain subsequent work. #358/#306/#294 stay open and ADR0020 stays
+workflow proof remain subsequent work. #358/#294 stay open; preserve maintainer-closed #306 and ADR0020 stays
 Accepted. No private profile/live credential/provider write/agent/release occurred.
