@@ -97,3 +97,17 @@ test("fake transport lists stored review targets", async () => {
   const targets = await client.reviewTargets();
   expect(targets[0]?.prId).toBe(1);
 });
+
+test("production local options remain pending beyond the native 30-second Git budget", async () => {
+  const script = fileURLToPath(new URL("./fixtures/fake-backend.ts", import.meta.url));
+  chmodSync(script, 0o755);
+  const client = new BackendClient(new ProcessBackendTransport(script));
+  try {
+    await client.start();
+    const result = await client.localOptions({ source: { kind: "current" }, offset: 0, limit: 32 });
+    expect(result.baseRefs).toEqual(["comparison"]);
+    expect(result.repository).toEqual({ provider: "github", workspace: "owned", repo: "same" });
+  } finally {
+    client.close();
+  }
+}, 50_000);

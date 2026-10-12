@@ -1,5 +1,7 @@
 import type {
   DraftTarget,
+  LocalSnapshotInfo,
+  LocalSource,
   ProviderSnapshotInfo,
   PrRepositoryIdentity,
   ReviewProfileCatalog,
@@ -7,7 +9,21 @@ import type {
   WorkspaceSettings,
 } from "../../../src/protocol/generated/protocol";
 import type { WorkspaceReadiness } from "../transport/backendClient";
+import {
+  type LocalLayer,
+  loadLocalFiles,
+  loadLocalOptions,
+  loadLocalPatch,
+  localFileKey,
+} from "../transport/localEvidence";
+import { sameLocalValue } from "../transport/localValidation";
 import { validPublicationDTO } from "../transport/publicationValidation";
+import {
+  LOCAL_LAYERS,
+  type LocalComparisonForm,
+  localComparisonForm,
+  selectedLocalLayers,
+} from "./localComparison";
 import { SyntaxHighlighter } from "./syntaxHighlighter";
 import type { DiffSyntax, SyntaxReader } from "./syntaxTypes";
 import { setTheme } from "./theme";
@@ -128,7 +144,8 @@ export interface DiffView {
 /// repository, followed by stored PR review targets. Working-tree entries carry
 /// no `prId`; review entries do.
 export interface PickerEntry {
-  origin?: "remote";
+  origin?: "remote" | "current";
+  localSource?: LocalSource;
   kind: "working-tree" | "review";
   provider: "github" | "bitbucket";
   workspace: string;
@@ -140,6 +157,13 @@ export interface PickerEntry {
 }
 
 export interface ShellSnapshot {
+  localAvailable: boolean;
+  localProfilesAvailable: boolean;
+  localInfo: LocalSnapshotInfo | null;
+  localForm: LocalComparisonForm | null;
+  localRunId: string | null;
+  findingLayers: LocalLayer[];
+  findingLayerCursor: number;
   readiness: WorkspaceReadiness | null;
   syntax: DiffSyntax | null;
   syntaxLoading: boolean;
@@ -214,6 +238,13 @@ export interface ShellSnapshot {
 }
 
 const INITIAL: ShellSnapshot = {
+  localAvailable: false,
+  localProfilesAvailable: false,
+  localInfo: null,
+  localForm: null,
+  localRunId: null,
+  findingLayers: [],
+  findingLayerCursor: 0,
   readiness: null,
   syntax: null,
   syntaxLoading: false,
@@ -445,9 +476,17 @@ export function anchorPresent(text: string, line: number, side: "old" | "new"): 
 }
 
 export class ShellStore {
+  private localRequest = 0;
+  private localCapture: { captureId: string; source: LocalSource } | null = null;
   private readonly remoteEntries = new Map<string, PickerEntry>();
   private pickerScope(entry: PickerEntry): string {
-    return JSON.stringify([entry.provider, entry.workspace, entry.repo, entry.prId]);
+    return JSON.stringify([
+      entry.provider,
+      entry.workspace,
+      entry.repo,
+      entry.prId,
+      entry.localSource ?? null,
+    ]);
   }
   private mergeRemote(picker: PickerEntry[]): PickerEntry[] {
     const existing = new Set(picker.map((entry) => this.pickerScope(entry)));
@@ -527,6 +566,31 @@ export class ShellStore {
       return;
     }
     const target = this.activeTarget();
+    if (target?.kind === "local" && this.state.localInfo) {
+      const info = this.state.localInfo;
+      const generation = this.state.generation;
+      this.copyPending = true;
+      try {
+        const result = await client.localReviewOutput({
+          snapshot: info.snapshot,
+          runId: this.state.localRunId,
+        });
+        if (
+          generation === this.state.generation &&
+          sameLocalValue(this.state.localInfo?.snapshot, info.snapshot)
+        )
+          this.update({
+            notice: copy(result.text)
+              ? "Review output sent through the terminal clipboard. Paste to verify."
+              : "Terminal clipboard is unavailable; nothing was copied.",
+          });
+      } catch (error) {
+        if (generation === this.state.generation) this.update({ error: message(error) });
+      } finally {
+        this.copyPending = false;
+      }
+      return;
+    }
     if (target?.kind !== "provider" || !target.prId) {
       this.update({ notice: "Select a stored pull-request review to copy its output." });
       return;
@@ -659,12 +723,280 @@ export class ShellStore {
   private activeTarget(): TargetIdentity | null {
     const entry = this.state.picker[this.state.selectedPicker];
     if (!entry) return null;
+    if (entry.kind === "working-tree" && this.state.localAvailable) {
+      const source = entry.localSource ?? this.configuredLocalSource(entry);
+      if (!this.state.localInfo || !sameLocalValue(this.state.localInfo.comparison.source, source))
+        return null;
+      return { kind: "local", localSnapshotSha256: this.state.localInfo.snapshot.snapshotId };
+    }
     const target = pickerTargetIdentity(entry);
     if (this.state.providerPreview && target.kind === "provider") {
       const { runId: _run, ...preview } = target;
       return preview;
     }
     return target;
+  }
+
+  private configuredLocalSource(entry: PickerEntry): LocalSource {
+    return {
+      kind: "configured",
+      repository: { provider: entry.provider, workspace: entry.workspace, repo: entry.repo },
+    };
+  }
+  private cancelLocalCapture(): void {
+    const active = this.localCapture;
+    this.localCapture = null;
+    if (active && this.client) void this.client.localCancel(active).catch(() => {});
+  }
+  async openLocalComparison(client: BackendClient, source?: LocalSource): Promise<void> {
+    if (!this.state.localAvailable) {
+      this.update({ notice: "Qualified local comparisons require an updated backend." });
+      return;
+    }
+    if (
+      this.state.composing ||
+      this.state.fixPreview ||
+      this.state.fixPreviewLoading ||
+      this.state.findingStage ||
+      this.state.searchOpen ||
+      this.state.settingsOpen ||
+      this.state.dataOpen ||
+      this.state.workspaceOpen ||
+      this.state.referencesOpen ||
+      this.state.draftsOpen
+    ) {
+      this.update({ notice: "Finish or close the current editor or approval first." });
+      return;
+    }
+    this.localRequest++;
+    this.cancelLocalCapture();
+    this.update({
+      localForm: localComparisonForm(
+        this.state.repositories,
+        source ?? this.state.localInfo?.comparison.source,
+      ),
+      profileOpen: false,
+    });
+    await this.loadLocalFormOptions(client);
+  }
+  dismissLocalComparison(): void {
+    this.localRequest++;
+    this.cancelLocalCapture();
+    this.update({ localForm: null });
+  }
+  cycleLocalField(): void {
+    const form = this.state.localForm;
+    if (!form || form.capturing) return;
+    const fields = ["source", "base", "layers"] as const;
+    this.update({
+      localForm: { ...form, focus: fields[(fields.indexOf(form.focus) + 1) % fields.length]! },
+    });
+  }
+  async moveLocalComparison(delta: number): Promise<void> {
+    const form = this.state.localForm;
+    if (!form) return;
+    if (form.focus === "source") {
+      this.localRequest++;
+      this.cancelLocalCapture();
+      const sourceIndex = (form.sourceIndex + delta + form.sources.length) % form.sources.length;
+      this.update({
+        localForm: {
+          ...form,
+          sourceIndex,
+          baseIndex: 0,
+          options: null,
+          loading: true,
+          capturing: false,
+          error: null,
+        },
+      });
+      if (this.client) await this.loadLocalFormOptions(this.client);
+    } else if (form.focus === "base" && !form.loading && !form.capturing) {
+      const length = (form.options?.baseRefs.length ?? 0) + 1;
+      this.update({
+        localForm: { ...form, baseIndex: (form.baseIndex + delta + length) % length, error: null },
+      });
+    } else if (form.focus === "layers" && !form.capturing) {
+      this.update({ localForm: { ...form, layerCursor: (form.layerCursor + delta + 3) % 3 } });
+    }
+  }
+  toggleLocalLayer(): void {
+    const form = this.state.localForm;
+    if (!form || form.capturing || form.baseIndex !== 0 || form.focus !== "layers") return;
+    const layer = LOCAL_LAYERS[form.layerCursor]!;
+    const layers = form.layers.includes(layer)
+      ? form.layers.filter((value) => value !== layer)
+      : LOCAL_LAYERS.filter((value) => value === layer || form.layers.includes(value));
+    if (layers.length === 0) {
+      this.update({ localForm: { ...form, error: "Select at least one tracked layer." } });
+      return;
+    }
+    this.update({ localForm: { ...form, layers, error: null } });
+  }
+  async refreshLocalOptions(client: BackendClient): Promise<void> {
+    if (!this.state.localForm) return;
+    this.localRequest++;
+    this.cancelLocalCapture();
+    this.update({
+      localForm: {
+        ...this.state.localForm,
+        options: null,
+        loading: true,
+        capturing: false,
+        error: null,
+        baseIndex: 0,
+      },
+    });
+    await this.loadLocalFormOptions(client);
+  }
+  private async loadLocalFormOptions(client: BackendClient): Promise<void> {
+    const form = this.state.localForm;
+    if (!form) return;
+    const request = ++this.localRequest;
+    const source = form.sources[form.sourceIndex]?.source;
+    if (!source) return;
+    const current = () =>
+      request === this.localRequest &&
+      this.state.localForm !== null &&
+      this.state.status !== "closed";
+    try {
+      const options = await loadLocalOptions(client, source, current);
+      if (current())
+        this.update({
+          localForm: { ...this.state.localForm!, options, loading: false, error: null },
+        });
+    } catch (error) {
+      if (current())
+        this.update({
+          localForm: { ...this.state.localForm!, loading: false, error: message(error) },
+        });
+    }
+  }
+  async applyLocalComparison(client: BackendClient): Promise<void> {
+    const form = this.state.localForm;
+    if (!form || form.loading || form.capturing || !form.options) return;
+    const source = form.sources[form.sourceIndex]?.source;
+    if (!source) return;
+    const options = form.options;
+    const baseRef = form.baseIndex === 0 ? null : options.baseRefs[form.baseIndex - 1];
+    if (baseRef === undefined) return;
+    const request = ++this.localRequest;
+    const captureId = Array.from(crypto.getRandomValues(new Uint8Array(32)), (byte) =>
+      byte.toString(16).padStart(2, "0"),
+    ).join("");
+    this.localCapture = { source, captureId };
+    this.update({ localForm: { ...form, capturing: true, error: null } });
+    const current = () =>
+      request === this.localRequest &&
+      this.state.localForm !== null &&
+      this.state.status !== "closed";
+    try {
+      const result = await client.localCapture({
+        captureId,
+        comparison:
+          baseRef === null
+            ? {
+                source,
+                mode: "workingTree",
+                baseRef: null,
+                layers: selectedLocalLayers(form.layers),
+              }
+            : { source, mode: "branch", baseRef, layers: ["committed"] },
+      });
+      if (!current()) return;
+      const info = result.info;
+      if (
+        info.snapshot.rootId !== options.rootId ||
+        !sameLocalValue(info.snapshot.repository, options.repository)
+      )
+        throw new Error(
+          "The local source changed after selecting its options. Refresh before capturing.",
+        );
+      this.localCapture = null;
+      const row: PickerEntry = {
+        ...options.repository,
+        kind: "working-tree",
+        origin: source.kind === "current" ? "current" : undefined,
+        localSource: source,
+        prId: null,
+        runId: null,
+        title: source.kind === "current" ? "Current repository" : "Working tree",
+        status: "local",
+      };
+      const picker = [...this.state.picker];
+      let selectedPicker = picker.findIndex(
+        (entry) =>
+          entry.kind === "working-tree" &&
+          sameLocalValue(entry.localSource ?? this.configuredLocalSource(entry), source),
+      );
+      if (selectedPicker < 0) {
+        picker.unshift(row);
+        selectedPicker = 0;
+      } else picker[selectedPicker] = row;
+      const generation = this.state.generation + 1;
+      this.cancelSyntax();
+      this.clearSearch();
+      this.update({
+        picker,
+        selectedPicker,
+        localInfo: info,
+        localForm: null,
+        localRunId: null,
+        findingLayers: [],
+        liveSnapshot: null,
+        providerPreview: false,
+        generation,
+        files: [],
+        findings: [],
+        history: [],
+        threads: [],
+        selectedFile: 0,
+        selectedFinding: 0,
+        selectedThread: 0,
+        viewedFiles: [],
+        diff: null,
+        syntax: null,
+        syntaxLoading: false,
+        diffError: null,
+        diffLoading: false,
+        preview: null,
+        previewError: null,
+        highlightLine: null,
+        selectedReviewProfile: null,
+        error: null,
+        notice: null,
+      });
+      await this.loadSnapshot(client, generation);
+    } catch (error) {
+      if (request === this.localRequest) this.cancelLocalCapture();
+      if (current())
+        this.update({
+          localForm: { ...this.state.localForm!, capturing: false, error: message(error) },
+        });
+    } finally {
+      if (request === this.localRequest) this.localCapture = null;
+    }
+  }
+  async cycleLocalBase(client: BackendClient): Promise<void> {
+    const info = this.state.localInfo;
+    if (!info || this.state.localForm || this.state.composing || this.state.fixPreview) return;
+    await this.openLocalComparison(client, info.comparison.source);
+    const form = this.getSnapshot().localForm;
+    if (!form?.options || form.error) return;
+    const previous =
+      info.comparison.baseRef === null
+        ? 0
+        : form.options.baseRefs.indexOf(info.comparison.baseRef) + 1;
+    const baseIndex = (previous + 1) % (form.options.baseRefs.length + 1);
+    this.update({
+      localForm: {
+        ...form,
+        baseIndex,
+        layers:
+          info.comparison.mode === "workingTree" ? [...info.comparison.layers] : [...LOCAL_LAYERS],
+      },
+    });
+    await this.applyLocalComparison(client);
   }
 
   toggleData(): void {
@@ -888,6 +1220,10 @@ export class ShellStore {
         repositories,
         selected: 0,
         picker: this.mergeRemote(buildPicker(repositories, targets, scopes)),
+        localAvailable:
+          ready.capabilities.includes("local-snapshots") &&
+          ready.capabilities.includes("local-evidence-reviews"),
+        localProfilesAvailable: ready.capabilities.includes("local-profile-catalog"),
         profileCatalogAvailable: ready.capabilities.includes("review-profile-catalog"),
         providerReads: ready.capabilities.includes("provider-pr-reads"),
         providerExternalBrowser: ready.capabilities.includes("provider-external-browser"),
@@ -907,7 +1243,10 @@ export class ShellStore {
         highlightSide: "new",
         scrollRequest: 0,
       });
-      await this.loadSnapshot(client, this.state.generation);
+      if (this.state.localAvailable) {
+        await this.openLocalComparison(client, { kind: "current" });
+        await this.applyLocalComparison(client);
+      } else await this.loadSnapshot(client, this.state.generation);
     } catch (error) {
       this.update({ status: "error", error: message(error), diffLoading: false });
     }
@@ -918,6 +1257,10 @@ export class ShellStore {
     if (this.state.status === "closed") return;
     const target = this.activeTarget();
     if (!target) {
+      return;
+    }
+    if (target.kind === "local" && this.state.localInfo) {
+      await this.loadLocalSnapshot(client, generation, this.state.localInfo);
       return;
     }
     if (this.state.providerPreview) {
@@ -1014,6 +1357,105 @@ export class ShellStore {
     void this.loadPreview(client);
   }
 
+  private async loadLocalSnapshot(
+    client: BackendClient,
+    generation: number,
+    info: LocalSnapshotInfo,
+  ): Promise<void> {
+    const current = () =>
+      generation === this.state.generation &&
+      this.state.status !== "closed" &&
+      sameLocalValue(this.state.localInfo?.snapshot, info.snapshot);
+    this.update({ snapshotLoading: true, error: null });
+    try {
+      const inventory = await loadLocalFiles(client, info, current);
+      if (!current()) return;
+      const oldKey = this.state.files[this.state.selectedFile]
+        ? localFileKey(this.state.files[this.state.selectedFile]!)
+        : null;
+      const files: ChangedFile[] = inventory.map((file) => ({
+        path: file.path,
+        oldPath: file.oldPath,
+        status: file.status,
+        additions: file.additions,
+        deletions: file.deletions,
+        binary: file.binary,
+        localLayer: file.layer,
+      }));
+      this.update({
+        files,
+        selectedFile: Math.max(
+          0,
+          files.findIndex((file) => localFileKey(file) === oldKey),
+        ),
+        snapshotLoading: false,
+      });
+      const history: ReviewRunSummary[] = [];
+      let offset = 0;
+      for (let pageNumber = 0; pageNumber < 32; pageNumber++) {
+        const page = await client.localReviewHistory({
+          snapshot: info.snapshot,
+          offset,
+          limit: 32,
+        });
+        if (!current()) return;
+        for (const run of page.runs) {
+          if (history.some((previous) => previous.runId === run.runId))
+            throw new Error("Duplicate local review run.");
+          history.push(run);
+        }
+        if (page.nextOffset === null) break;
+        if (page.nextOffset <= offset || pageNumber === 31)
+          throw new Error("Local history pagination did not finish.");
+        offset = page.nextOffset;
+      }
+      const runId = this.state.localRunId ?? history[0]?.runId ?? null;
+      const findings: FindingSummary[] = [];
+      offset = 0;
+      for (let pageNumber = 0; pageNumber < 189; pageNumber++) {
+        const page = await client.localReviewFindings({
+          snapshot: info.snapshot,
+          runId,
+          offset,
+          limit: 32,
+        });
+        if (!current()) return;
+        for (const finding of page.findings) {
+          if (findings.some((previous) => previous.id === finding.id))
+            throw new Error("Duplicate local finding.");
+          findings.push(finding);
+        }
+        if (page.nextOffset === null) break;
+        if (page.nextOffset <= offset || pageNumber === 188)
+          throw new Error("Local finding pagination did not finish.");
+        offset = page.nextOffset;
+      }
+      const threads = await client.localReviewThreads({ snapshot: info.snapshot, runId });
+      if (!current()) return;
+      const selectedId = visibleFindings(this.state)[this.state.selectedFinding]?.id;
+      this.update({
+        history,
+        findings,
+        threads: threads.threads,
+        localRunId: runId,
+        selectedThread: Math.max(
+          0,
+          threads.threads.findIndex((thread) => thread.selected),
+        ),
+      });
+      this.update({
+        selectedFinding: Math.max(
+          0,
+          visibleFindings(this.state).findIndex((finding) => finding.id === selectedId),
+        ),
+      });
+      if (this.state.focus !== "findings" || !this.jumpToFinding()) await this.loadDiff(client);
+      if (current()) void this.loadPreview(client);
+    } catch (error) {
+      if (current()) this.update({ snapshotLoading: false, error: message(error) });
+    }
+  }
+
   private async loadProviderPreview(
     client: BackendClient,
     generation: number,
@@ -1107,6 +1549,8 @@ export class ShellStore {
   }
 
   async selectPicker(selectedPicker: number, selected?: number, preview?: boolean): Promise<void> {
+    this.localRequest++;
+    this.cancelLocalCapture();
     this.cancelSyntax();
     this.clearSearch();
     const generation = this.state.generation + 1;
@@ -1125,6 +1569,10 @@ export class ShellStore {
         !!nextEntry.prId &&
         nextEntry.prId < 0x80000000 &&
         (preview ?? !nextEntry.runId),
+      localInfo: null,
+      localForm: null,
+      localRunId: null,
+      findingLayers: [],
       liveSnapshot: null,
       snapshotLoading: false,
       selectedPicker,
@@ -1159,6 +1607,14 @@ export class ShellStore {
       error: null,
     });
     if (!this.client) {
+      return;
+    }
+    if (nextEntry?.kind === "working-tree" && this.state.localAvailable) {
+      await this.openLocalComparison(
+        this.client,
+        nextEntry.localSource ?? this.configuredLocalSource(nextEntry),
+      );
+      await this.applyLocalComparison(this.client);
       return;
     }
     // Coalesce target navigation: at most one snapshot load runs at a time, and
@@ -1216,20 +1672,37 @@ export class ShellStore {
     this.update({ diffLoading: true, diffError: null });
     try {
       const snapshot = this.state.liveSnapshot;
-      const result = snapshot
-        ? {
-            path: file.path,
-            diff: await client.providerSnapshotPatch(
-              snapshot!.snapshot,
-              file.path,
-              () =>
-                request === this.diffRequest &&
-                generation === this.state.generation &&
-                this.state.status !== "closed",
-            ),
-            truncated: false,
-          }
-        : await client.diffFile(target, file.path, { oldPath: file.oldPath });
+      const localInfo = this.state.localInfo;
+      const result =
+        target.kind === "local" && localInfo && file.localLayer
+          ? {
+              path: file.path,
+              diff: await loadLocalPatch(
+                client,
+                localInfo.snapshot,
+                file.localLayer,
+                file.path,
+                () =>
+                  request === this.diffRequest &&
+                  generation === this.state.generation &&
+                  this.state.status !== "closed",
+              ),
+              truncated: false,
+            }
+          : snapshot
+            ? {
+                path: file.path,
+                diff: await client.providerSnapshotPatch(
+                  snapshot!.snapshot,
+                  file.path,
+                  () =>
+                    request === this.diffRequest &&
+                    generation === this.state.generation &&
+                    this.state.status !== "closed",
+                ),
+                truncated: false,
+              }
+            : await client.diffFile(target, file.path, { oldPath: file.oldPath });
       if (
         request === this.diffRequest &&
         generation === this.state.generation &&
@@ -1329,7 +1802,7 @@ export class ShellStore {
   /// Move selection (and the diff) to the selected finding's anchor without
   /// guessing: a missing target file or a null/outdated anchor surfaces a notice.
   /// Returns true when it started a diff load for the anchor file.
-  private jumpToFinding(): boolean {
+  private jumpToFinding(chosenLayer?: LocalLayer): boolean {
     this.clearSearch();
     const finding = visibleFindings(this.state)[this.state.selectedFinding];
     if (!finding) {
@@ -1343,6 +1816,17 @@ export class ShellStore {
       });
       return false;
     }
+    const layers = this.state.localInfo ? (finding.candidateLayers ?? []) : [];
+    if (layers.length > 1 && !chosenLayer) {
+      this.update({
+        findingLayers: layers,
+        findingLayerCursor: 0,
+        highlightLine: null,
+        notice: "Choose a captured layer for this finding.",
+      });
+      return true;
+    }
+    const layer = chosenLayer ?? layers[0];
     const anchor = finding.anchor;
     const side = anchor.side ?? "new";
     // A side-specific match avoids selecting a recreated file: an old-side
@@ -1351,13 +1835,13 @@ export class ShellStore {
       side === "old"
         ? findFile(
             this.state.files,
-            (file) => file.oldPath === anchor.path,
-            (file) => file.path === anchor.path,
+            (file) => (!layer || file.localLayer === layer) && file.oldPath === anchor.path,
+            (file) => (!layer || file.localLayer === layer) && file.path === anchor.path,
           )
         : findFile(
             this.state.files,
-            (file) => file.path === anchor.path,
-            (file) => file.oldPath === anchor.path,
+            (file) => (!layer || file.localLayer === layer) && file.path === anchor.path,
+            (file) => (!layer || file.localLayer === layer) && file.oldPath === anchor.path,
           );
     if (index < 0) {
       this.update({
@@ -1379,6 +1863,22 @@ export class ShellStore {
       return true;
     }
     return false;
+  }
+
+  dismissFindingLayers(): void {
+    this.update({ findingLayers: [], findingLayerCursor: 0 });
+  }
+  moveFindingLayer(delta: number): void {
+    const length = this.state.findingLayers.length;
+    if (length)
+      this.update({
+        findingLayerCursor: (this.state.findingLayerCursor + delta + length) % length,
+      });
+  }
+  chooseFindingLayer(): void {
+    const layer = this.state.findingLayers[this.state.findingLayerCursor];
+    this.dismissFindingLayers();
+    if (layer) this.jumpToFinding(layer);
   }
 
   toggleDiffMode(): void {
@@ -1448,6 +1948,12 @@ export class ShellStore {
       return;
     }
     const entry = this.state.picker[this.state.selectedPicker];
+    if (entry?.kind === "working-tree" && this.state.localInfo) {
+      this.update({ localRunId: thread.latestRunId, generation: this.state.generation + 1 });
+      await this.loadSnapshot(this.client, this.state.generation);
+      this.update({ conversationOpen: true });
+      return;
+    }
     if (entry?.kind !== "review") return;
     const picker = this.state.picker.map((row, index) =>
       index === this.state.selectedPicker ? { ...row, runId: thread.latestRunId } : row,
@@ -1497,11 +2003,17 @@ export class ShellStore {
     const generation = this.state.generation;
     this.starting = true;
     try {
-      const result = await client.startReview(
-        target,
-        this.state.selectedReviewProfile,
-        snapshot ?? null,
-      );
+      const info = this.state.localInfo;
+      const result =
+        target.kind === "local" && info
+          ? {
+              ...(await client.localReviewStart({
+                snapshot: info.snapshot,
+                profile: this.state.selectedReviewProfile,
+              })),
+              sequence: 0,
+            }
+          : await client.startReview(target, this.state.selectedReviewProfile, snapshot ?? null);
       this.operationTarget = target;
       this.operationKind = "review";
       this.operationGeneration = generation;
@@ -1656,6 +2168,11 @@ export class ShellStore {
       return;
     }
     if (state !== "succeeded") return;
+    if (target.kind === "local" && this.state.localInfo) {
+      this.update({ localRunId: null });
+      await this.loadSnapshot(client, generation);
+      return;
+    }
     try {
       const [targets, scopes] = await Promise.all([
         client.reviewTargets(),
@@ -1736,6 +2253,13 @@ export class ShellStore {
       this.update({ preview: null, previewError: null });
       return;
     }
+    if (target.kind === "local" && this.state.localInfo) {
+      this.update({
+        preview: null,
+        previewError: "Image previews for captured local layers are not available yet.",
+      });
+      return;
+    }
     const generation = this.state.generation;
     this.update({ preview: null, previewError: null });
     const current = () =>
@@ -1781,7 +2305,10 @@ export class ShellStore {
   }
 
   async openReviewProfiles(client: BackendClient): Promise<void> {
-    if (!this.state.profileCatalogAvailable) {
+    if (
+      !this.state.profileCatalogAvailable &&
+      !(this.state.localInfo && this.state.localProfilesAvailable)
+    ) {
       this.beginReviewProfile();
       return;
     }
@@ -1809,7 +2336,13 @@ export class ShellStore {
       generation === this.state.generation &&
       sameTarget(target, this.activeTarget());
     try {
-      const catalog = await client.reviewProfiles(target);
+      const info = this.state.localInfo;
+      if (target.kind === "local" && info && !this.state.localProfilesAvailable)
+        throw new Error("The backend does not support local review profiles.");
+      const catalog =
+        target.kind === "local" && info
+          ? (await client.localReviewProfiles({ snapshot: info.snapshot })).catalog
+          : await client.reviewProfiles(target);
       if (!current()) return;
       const selected = this.state.selectedReviewProfile;
       const valid = selected === null || catalog.profiles.includes(selected);
@@ -2197,6 +2730,10 @@ export class ShellStore {
     if (!target) {
       return;
     }
+    if (target.kind === "local" && this.state.localInfo) {
+      this.update({ notice: "Browser diffs for captured local layers are not available yet." });
+      return;
+    }
     const generation = this.state.generation;
     try {
       if (this.state.providerPreview && !this.state.liveSnapshot)
@@ -2228,6 +2765,8 @@ export class ShellStore {
   }
 
   markClosed(): void {
+    this.localRequest++;
+    this.cancelLocalCapture();
     this.cancelSyntax();
     this.update({ status: "closed" });
   }

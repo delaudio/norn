@@ -133,7 +133,16 @@ export class ProcessBackendTransport implements BackendTransport {
               method === "publication.reconcile" ||
               method === "comments.list"
             ? 90_000
-            : REQUEST_TIMEOUT_MS,
+            : [
+                  "local.options",
+                  "local.snapshot",
+                  "local.snapshot.recheck",
+                  "local.review.profiles",
+                ].includes(method)
+              ? // Native Git has a 30s budget; allow bounded SQLite/policy/codec
+                // work too, rather than timing out as the Git budget expires.
+                45_000
+              : REQUEST_TIMEOUT_MS,
       );
       this.pending.set(id, { resolve, reject, timer });
       this.write({ type: "request", id, method, params } as unknown as NornStdioProtocol);

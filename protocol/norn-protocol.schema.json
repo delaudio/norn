@@ -5806,6 +5806,22 @@
           "type": "boolean"
         }
       }
+    },
+    "LocalReviewProfilesResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "request",
+        "catalog"
+      ],
+      "properties": {
+        "request": {
+          "$ref": "#/definitions/LocalLookupParams"
+        },
+        "catalog": {
+          "$ref": "#/definitions/ReviewProfileCatalog"
+        }
+      }
     }
   },
   "oneOf": [
@@ -7620,6 +7636,30 @@
               "$ref": "#/definitions/LocalReviewQueryParams"
             }
           }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "type": {
+              "const": "request"
+            },
+            "id": {
+              "$ref": "#/definitions/RequestId"
+            },
+            "method": {
+              "const": "local.review.profiles"
+            },
+            "params": {
+              "$ref": "#/definitions/LocalLookupParams"
+            }
+          }
         }
       ]
     },
@@ -7785,6 +7825,9 @@
             },
             {
               "$ref": "#/definitions/LocalReviewThreads"
+            },
+            {
+              "$ref": "#/definitions/LocalReviewProfilesResult"
             }
           ]
         }

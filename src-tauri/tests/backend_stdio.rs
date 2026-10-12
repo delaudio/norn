@@ -4199,6 +4199,10 @@ fn captured_local_native_review_uses_exact_owner_layers_and_restores_history() {
                 && payload.contains("+unstaged 世界\n")
         );
         assert!(!payload.contains("EXCLUDED_UNTRACKED_SECRET"));
+        assert!(payload.contains("Repository:") && payload.contains("owned/same"));
+        assert!(payload.contains("Captured head:") && payload.contains("Captured base:"));
+        assert!(payload.contains("staged means base to index"));
+        assert!(payload.contains("Local evidence may include unpublished work"));
         let history = f.read("local.review.history", json!({"offset":0,"limit":1}));
         assert_eq!(history["ok"], true, "{history}");
         assert_eq!(history["result"]["total"], 1);
@@ -4621,4 +4625,53 @@ fn captured_local_native_cancel_during_required_preflight_fences_agent_launch() 
         !f.agent.path().join("preflight-complete").exists(),
         "canceled preflight completed late"
     );
+}
+
+#[cfg(unix)]
+#[test]
+fn captured_local_profile_catalog_uses_qualified_live_root_without_agent() {
+    for provider in ["github", "bitbucket"] {
+        let mut f = CapturedLocalFixture::new(provider, CAPTURED_LOCAL_AGENT, false);
+        let response = f.read("local.review.profiles", json!({}));
+        assert_eq!(response["ok"], true, "{response}");
+        assert_eq!(response["result"]["request"]["snapshot"], f.snapshot);
+        assert_eq!(
+            response["result"]["catalog"]["target"]["localSnapshotSha256"],
+            f.snapshot["snapshotId"]
+        );
+        assert_eq!(
+            response["result"]["catalog"]["profiles"],
+            json!(["default", "security"])
+        );
+        assert_eq!(response["result"]["catalog"]["defaultProfile"], "security");
+        assert!(!f.agent.path().join("cwd").exists());
+        let original = f.snapshot.clone();
+        f.snapshot["rootId"] = json!("e".repeat(64));
+        assert_eq!(
+            f.read("local.review.profiles", json!({}))["error"]["code"],
+            "targetStale"
+        );
+        f.snapshot = original;
+        std::fs::write(f.repo.path().join(".norn.yaml"), "version: 9.0\n").unwrap();
+        let invalid = f.read("local.review.profiles", json!({}));
+        assert_eq!(invalid["ok"], false, "{invalid}");
+        assert_eq!(invalid["error"]["code"], "invalidParams");
+        assert!(!f.agent.path().join("cwd").exists());
+        // A saved evidence read is still valid after changing the remote, but
+        // a live policy read cannot grant the old source a new checkout owner.
+        git(
+            f.repo.path(),
+            &[
+                "remote",
+                "set-url",
+                "origin",
+                "https://github.com/foreign/other.git",
+            ],
+        );
+        assert_eq!(f.read("local.snapshot.info", json!({}))["ok"], true);
+        assert_eq!(
+            f.read("local.review.profiles", json!({}))["error"]["code"],
+            "targetStale"
+        );
+    }
 }

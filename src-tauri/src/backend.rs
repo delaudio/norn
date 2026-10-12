@@ -230,6 +230,7 @@ pub fn run() -> Result<(), i32> {
             "review-profile-catalog".to_string(),
             "local-snapshots".to_string(),
             "local-evidence-reviews".to_string(),
+            "local-profile-catalog".to_string(),
         ],
     }));
 
@@ -395,7 +396,8 @@ fn dispatch(request: Request, backend: &Backend) -> bool {
             backend.start_local_review(&id, &operation_id, params);
             false
         }
-        Request::LocalReviewHistory { .. }
+        Request::LocalReviewProfiles { .. }
+        | Request::LocalReviewHistory { .. }
         | Request::LocalReviewFindings { .. }
         | Request::LocalReviewOutput { .. }
         | Request::LocalReviewThreads { .. } => {
@@ -421,17 +423,36 @@ fn dispatch(request: Request, backend: &Backend) -> bool {
             let control = backend.control.clone();
             thread::spawn(move || {
                 let result = match request {
+                    Request::LocalReviewProfiles { params, .. } => {
+                        local_review_profiles_response(&manager, params)
+                    }
                     Request::LocalReviewHistory { params, .. } => {
-                        crate::services::local_reviews::history(&manager, params).map(|v| json!(v))
+                        crate::services::local_reviews::history(&manager, params)
+                            .map(|v| json!(v))
+                            .map_err(|message| {
+                                ProtocolError::new(ProtocolErrorCode::TargetStale, message)
+                            })
                     }
                     Request::LocalReviewFindings { params, .. } => {
-                        crate::services::local_reviews::findings(&manager, params).map(|v| json!(v))
+                        crate::services::local_reviews::findings(&manager, params)
+                            .map(|v| json!(v))
+                            .map_err(|message| {
+                                ProtocolError::new(ProtocolErrorCode::TargetStale, message)
+                            })
                     }
                     Request::LocalReviewOutput { params, .. } => {
-                        crate::services::local_reviews::output(&manager, params).map(|v| json!(v))
+                        crate::services::local_reviews::output(&manager, params)
+                            .map(|v| json!(v))
+                            .map_err(|message| {
+                                ProtocolError::new(ProtocolErrorCode::TargetStale, message)
+                            })
                     }
                     Request::LocalReviewThreads { params, .. } => {
-                        crate::services::local_reviews::threads(&manager, params).map(|v| json!(v))
+                        crate::services::local_reviews::threads(&manager, params)
+                            .map(|v| json!(v))
+                            .map_err(|message| {
+                                ProtocolError::new(ProtocolErrorCode::TargetStale, message)
+                            })
                     }
                     _ => unreachable!(),
                 };
@@ -443,14 +464,11 @@ fn dispatch(request: Request, backend: &Backend) -> bool {
                             result: Some(value),
                             error: None,
                         },
-                        Err(message) => Response {
+                        Err(error) => Response {
                             id,
                             ok: false,
                             result: None,
-                            error: Some(ProtocolError::new(
-                                ProtocolErrorCode::TargetStale,
-                                message,
-                            )),
+                            error: Some(error),
                         },
                     };
                     let _ = control.send(ServerMessage::Response(response));
@@ -4677,13 +4695,32 @@ fn start_captured_local_session(
         layered.push_str(&format!("\n## {label} layer\n"));
         layered.push_str(patch);
     }
+    let mut description = format!(
+        "Repository: {:?} {}/{}\nBranch: {}\nCaptured head: {}\nCaptured base: {}\nComparison: {}\nSelected layers: {:?}\nLocal evidence may include unpublished work. Each labeled layer is independent captured evidence. Committed means base to HEAD; staged means base to index; unstaged means index to working tree. The same path may have incompatible hunks in different layers; name its layer in findings. Untracked contents and unselected layers are excluded.",
+        repo.provider, repo.workspace, repo.repo, info.branch, info.head_sha.as_deref().unwrap_or("unborn"), info.base_sha,
+        info.comparison.base_ref.as_deref().unwrap_or("working tree"), info.comparison.layers,
+    );
+    for warning in &info.warnings {
+        description.push_str("\nWarning: ");
+        description.push_str(warning);
+    }
+    if info.warnings_truncated {
+        description.push_str("\nAdditional capture warnings were omitted.");
+    }
     let payload = build_review_payload(
         &prompt,
         &format!("Local review · {}", info.branch),
-        if info.comparison.mode == crate::services::local_snapshot::Mode::Branch { "branch" } else { "working-tree" },
-        "Each labeled layer is independent captured evidence. The same path may have incompatible hunks in different layers; name its layer in findings. Untracked contents and unselected layers are excluded.",
+        if info.comparison.mode == crate::services::local_snapshot::Mode::Branch {
+            "branch"
+        } else {
+            "working-tree"
+        },
+        &description,
         &info.branch,
-        info.comparison.base_ref.as_deref().unwrap_or("working tree"),
+        info.comparison
+            .base_ref
+            .as_deref()
+            .unwrap_or("working tree"),
         &layered,
     );
     if canceled() {
@@ -4784,6 +4821,23 @@ fn profile_remote_matches(
             && owner.eq_ignore_ascii_case(workspace)
             && name.eq_ignore_ascii_case(repo)
     })
+}
+
+fn local_review_profiles_response(
+    manager: &crate::services::local_snapshot::Manager,
+    request: crate::services::local_snapshot::LookupParams,
+) -> Result<serde_json::Value, ProtocolError> {
+    let data = manager
+        .live_data(&request.snapshot)
+        .map_err(|message| ProtocolError::new(ProtocolErrorCode::TargetStale, message))?;
+    let target = TargetIdentity::Local {
+        local_snapshot_sha256: request.snapshot.snapshot_id.clone(),
+    };
+    let catalog = crate::services::review_profiles::Catalog::from_policy(
+        target.clone(),
+        load_inline_review_policy(&target, data.root(), None)?,
+    )?;
+    Ok(json!({"request":request,"catalog":catalog}))
 }
 
 fn review_profiles_response(target: &TargetIdentity) -> Result<serde_json::Value, ProtocolError> {

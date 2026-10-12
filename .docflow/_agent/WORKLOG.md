@@ -677,3 +677,54 @@ Plan 0053 completion prepared after implementation `e4264db`, effective only on 
   closure without inventing child parity/cutover proof. PR#376 body removes an
   unintended GitHub closing reference to#358 caused by a negated closure sentence.
   Actual #358/#294 remain open; required child implementation continues.
+
+## 2026-10-12 — verified#376 merge, plan0066 claim
+
+- #376 actual squash4644a03739c78fbe7e687edbb7a03d54f8366c13 at07:12:32Z,
+  final19610d53dc067148367371ee56dd346bfcab2a3f both requiredCI38214976426
+  SUCCESS: UI06:56:27Z and verify07:10:53Z (14m51sjob). No auto-closure links;
+  #358/#294 remain open, maintainer-closed#306 preserved. Root main ff synced;
+  unrelated .norn.yaml and existing5f69c995stash preserved without reading.
+- Plan0065 receipt effective only from this verified merge. Proof remains eight
+  actual owned native child/stdio scenarios and full gates listed in its receipt.
+  API does not establish actual UI/Pierre/local full workflow parity by itself.
+- Plan0066 claimed before source edits in isolated branch/worktree on actual376.
+  Existing shell gets exact local source/base/layer capture, snapshot consumers,
+  native lifecycle/profiles and owned wide/narrow input/frames. Following pinned
+  preview/Pierre/saved history/unsafe fallback/full workflow proof is still required.
+  No new0066implementation or gate success claimed yet; no Norn review/delegation.
+
+## 2026-10-12 — plan0066 local controls implementation prepared
+
+- Existing Shell now explicitly captures backend Current/configured sources,
+  listed working/branch bases and independent layers; keeps Rust full refs/runs
+  authoritative for files/diffs/findings/history/conversations/profile/start/cancel.
+  F4/source form and B/base cycling never launch an agent; pasted actions are
+  ignored. Layer ambiguity asks before opening a patch. Qualified clipboard and
+  source/nonce/generation/operation fences retain selected evidence/run identity.
+- Native local.review.profiles uses live qualified source/root/provider proof and
+  shared policy/default/errors. Local capture/options/recheck/profile transport
+  deadlines45s exceed native Git30s; actual fixture subprocess31s response passed.
+  Captured pins/owner/warnings/layer meanings/local unpublished context reach
+  the shared native payload without untracked/excluded content.
+- Local gates:745core/73stdio/6CLI/5onboarding/3binary+2existingignored;
+  corealltargets/strict allfeaturesalltargetsClippy/fmt/noGUI; root123+tooling/
+  typecheck/lint/protocol/Archgate17/audit; UI219/1346/147 native frames.
+  Nine owned native scenarios and eight local Shell/input cases plus four
+  aggregate/client cases and the slow production transport check passed.
+- Doctor65 has9 no-unknown-property warnings solely on truncate, a supported
+  OpenTUI TextBufferOptions property (local installed.d.ts and native frames).
+  This custom renderer has no DOM property problem; no diagnostic suppression.
+  Existing frame changes are only F4/footer; twelve new local/profile/error/loading
+  frames added. Failures were retained and corrected: TS layer tuple/narrowing,
+  nullable HEAD formatting, test Escape decoding delay, fixture diff routing and
+  qualified snapshot-derived ID. No gate failure silently counted as success.
+- #358/#294 remain open; maintainer-closed#306 preserved. Pinned image/Pierre,
+  saved snapshots/global history/legacy fallback/full native UI+Rust workflow proof
+  remain required. ADR0020 Accepted; no Norn review, delegation, private data,
+  provider write, actual agent, release, or user stash mutation. PR/merge pending.
+
+- Source db8bc372d4c03f2ad5bcfaacdb79e9653e36d761 committed after full gates.
+  origin/main still4644a03; number audit passed with existing0011/0013 advisories.
+  Prepared0066receipt is conditional on exact final-head CI and actual squash;
+  no completed child/epic claim. Additional source tests did not alter Rust gates.

@@ -1,0 +1,34 @@
+{
+  "type": "response",
+  "id": "owned",
+  "ok": true,
+  "result": {
+    "request": {
+      "snapshot": {
+        "source": {
+          "kind": "current"
+        },
+        "repository": {
+          "provider": "github",
+          "workspace": "owned",
+          "repo": "same"
+        },
+        "rootId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "snapshotId": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+      }
+    },
+    "catalog": {
+      "target": {
+        "kind": "local",
+        "localSnapshotSha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+      },
+      "profiles": [
+        "default",
+        "security"
+      ],
+      "defaultProfile": "security",
+      "source": "policy",
+      "notice": null
+    }
+  }
+}
