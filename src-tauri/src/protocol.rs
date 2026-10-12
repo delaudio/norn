@@ -391,6 +391,31 @@ pub enum Request {
     ReviewFiles { id: String, params: TargetParams },
     #[serde(rename = "review.findings")]
     ReviewFindings { id: String, params: TargetParams },
+    #[serde(rename = "local.review.start")]
+    LocalReviewStart {
+        id: String,
+        params: crate::services::local_reviews::StartParams,
+    },
+    #[serde(rename = "local.review.history")]
+    LocalReviewHistory {
+        id: String,
+        params: crate::services::local_reviews::HistoryParams,
+    },
+    #[serde(rename = "local.review.findings")]
+    LocalReviewFindings {
+        id: String,
+        params: crate::services::local_reviews::FindingsParams,
+    },
+    #[serde(rename = "local.review.output")]
+    LocalReviewOutput {
+        id: String,
+        params: crate::services::local_reviews::QueryParams,
+    },
+    #[serde(rename = "local.review.threads")]
+    LocalReviewThreads {
+        id: String,
+        params: crate::services::local_reviews::QueryParams,
+    },
     #[serde(rename = "local.options")]
     LocalOptions {
         id: String,
@@ -547,6 +572,11 @@ impl Request {
             | Self::ProviderPrDetail { id, .. }
             | Self::ProviderUser { id, .. }
             | Self::WorkspaceScopes { id, .. }
+            | Self::LocalReviewStart { id, .. }
+            | Self::LocalReviewHistory { id, .. }
+            | Self::LocalReviewFindings { id, .. }
+            | Self::LocalReviewOutput { id, .. }
+            | Self::LocalReviewThreads { id, .. }
             | Self::LocalOptions { id, .. }
             | Self::LocalSnapshot { id, .. }
             | Self::LocalSnapshotCancel { id, .. }
@@ -619,6 +649,11 @@ impl Request {
             Self::ProviderPrDetail { .. } => "provider.pr.detail",
             Self::ProviderUser { .. } => "provider.user",
             Self::WorkspaceScopes { .. } => "workspace.scopes",
+            Self::LocalReviewStart { .. } => "local.review.start",
+            Self::LocalReviewHistory { .. } => "local.review.history",
+            Self::LocalReviewFindings { .. } => "local.review.findings",
+            Self::LocalReviewOutput { .. } => "local.review.output",
+            Self::LocalReviewThreads { .. } => "local.review.threads",
             Self::LocalOptions { .. } => "local.options",
             Self::LocalSnapshot { .. } => "local.snapshot",
             Self::LocalSnapshotCancel { .. } => "local.snapshot.cancel",
@@ -885,6 +920,17 @@ impl Request {
                 if params.message.trim().is_empty() {
                     return Err(invalid_request("`review.reply` message must not be empty"));
                 }
+            }
+            Self::LocalReviewStart { params, .. } => params.validate().map_err(invalid_request)?,
+            Self::LocalReviewHistory { params, .. } => {
+                params.validate().map_err(invalid_request)?
+            }
+            Self::LocalReviewFindings { params, .. } => {
+                params.validate().map_err(invalid_request)?
+            }
+            Self::LocalReviewOutput { params, .. } => params.validate().map_err(invalid_request)?,
+            Self::LocalReviewThreads { params, .. } => {
+                params.validate().map_err(invalid_request)?
             }
             Self::LocalOptions { params, .. } => params.validate().map_err(invalid_request)?,
             Self::LocalSnapshot { params, .. } => params.validate().map_err(invalid_request)?,
@@ -1265,6 +1311,16 @@ mod tests {
             "valid/response-provider-snapshot-files.json",
             "valid/response-provider-snapshot-diff.json",
             "valid/request-provider-prs.json",
+            "valid/request-local-review-start.json",
+            "valid/response-local-review-start.json",
+            "valid/request-local-review-history.json",
+            "valid/response-local-review-history.json",
+            "valid/request-local-review-findings.json",
+            "valid/response-local-review-findings.json",
+            "valid/request-local-review-output.json",
+            "valid/response-local-review-output.json",
+            "valid/request-local-review-threads.json",
+            "valid/response-local-review-threads.json",
             "valid/request-local-options.json",
             "valid/response-local-options.json",
             "valid/request-local-snapshot.json",
@@ -1332,6 +1388,10 @@ mod tests {
             "invalid/request-provider-snapshot-image-missing-hash.json",
             "invalid/request-provider-pr-unsafe-owner.json",
             "invalid/request-provider-pr-local-id.json",
+            "invalid/request-local-review-path.json",
+            "invalid/request-local-review-run.json",
+            "invalid/request-local-review-page.json",
+            "invalid/request-local-review-profile.json",
             "invalid/request-local-path.json",
             "invalid/request-local-layers.json",
             "invalid/request-local-nonce.json",

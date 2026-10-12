@@ -90,3 +90,56 @@ UTF-8 pages, stale/corrupt/foreign data, restart, backup/cascade, atomic quota,
 reservation/cancel limits, responsive stdio control and bounded EOF cleanup.
 The native terminal local controls, finding context, real/fake review payload,
 cancel/history and Pierre integration are still required in the next step.
+
+Captured local evidence also has a native review lifecycle. The backend
+advertises `local-evidence-reviews`; these methods require the full saved
+`SnapshotRef`, including source, actual provider/repository and canonical root
+identity. They do not accept a filesystem path or an arbitrary local SHA.
+
+| Method | Input | Result |
+| --- | --- | --- |
+| `local.review.start` | saved snapshot, optional profile | accepted operation and exact local snapshot target |
+| `local.review.history` | snapshot, offset, limit 1–32 | newest first, bounded run metadata and next offset |
+| `local.review.findings` | snapshot, optional run ID, offset, limit 1–32 | exact run findings and captured candidate layers |
+| `local.review.output` | snapshot, optional run ID | saved canonical markdown, at most 64 KiB |
+| `local.review.threads` | snapshot, optional run ID | at most 12 attributable threads, with bounded messages |
+
+Omitting a run ID selects the latest saved run; supplying an unknown ID fails.
+Requests and selected run IDs are echoed and checked by the typed client.
+History reads inspect only the verified native local parent. They work after a
+backend restart even if the original checkout no longer exists. Oversized or
+corrupt storage fails without loading an unbounded SQLite value. Conversation
+reads omit private agent resume tokens and orphan threads that have no owned
+run. Truncated conversation excerpts are marked explicitly; canonical output
+is never silently truncated.
+
+A start rechecks the same saved comparison with native Git cancellation before
+execution. A changed source, checkout identity, base, index or relevant tracked
+content fails instead of capturing a replacement. This is a point-in-time
+check, not a filesystem lock. The existing Rust inline engine receives the
+actual saved root and provider, bypassing provider-less checkout discovery and
+process cwd. Shared native prompt/profile/policy validation and finding parsing
+remain authoritative. This API always uses the native engine; deterministic
+integration tests substitute an owned fake child through the existing agent
+binary seam.
+
+Each selected layer is labeled independently in the payload. Unselected and
+untracked content is excluded from the captured payload. A finding anchor can
+match multiple captured layers; `candidateLayers` preserves that ambiguity for
+an explicit UI choice, rather than selecting the first same-name file. Local
+reviews retain the existing repository read-tool context; the payload exclusion
+does not promise that the agent cannot read other files in that checkout.
+
+The complete local agent payload is limited to 8 MiB, including policy/analyzer
+appendices, and is rejected before agent launch when oversized. Navigation can
+still retain the larger 16 MiB captured patch. Native operations stream through
+the existing operation ID and `operation.cancel`; cancellation terminates owned
+agent children, including required preflight commands, and EOF fences queued
+starts. The operation cancellation flag is retained through policy/preflight
+work and checked before agent construction and launch, including retries.
+Synthetic local review IDs do
+not authorize provider comment publication or approval.
+
+These backend methods do not yet add terminal local comparison controls,
+pinned image/Pierre consumers, or local reply/fix controls. Those consumers
+must use this same qualified evidence rather than legacy fresh-cwd reads.

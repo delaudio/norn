@@ -16,4 +16,5 @@ pub(crate) mod workspace_data;
 
 pub(crate) mod review_profiles;
 
+pub(crate) mod local_reviews;
 pub(crate) mod local_snapshot;

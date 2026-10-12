@@ -64,6 +64,11 @@ pub(crate) struct Ticket {
     request: CancelParams,
     cancellation: LocalReviewCancellation,
 }
+impl Ticket {
+    pub(crate) fn cancellation(&self) -> LocalReviewCancellation {
+        self.cancellation.clone()
+    }
+}
 impl Drop for Ticket {
     fn drop(&mut self) {
         if let Ok(mut active) = self.manager.active.lock() {
@@ -171,6 +176,26 @@ impl Stored {
     }
 }
 impl Data {
+    pub(crate) fn root(&self) -> &Path {
+        &self.root
+    }
+    pub(crate) fn layers_for_path(&self, path: &str) -> Vec<Layer> {
+        let mut layers = Vec::new();
+        for file in &self.files {
+            if (file.file.path == path || file.file.old_path.as_deref() == Some(path))
+                && !layers.contains(&file.file.layer)
+            {
+                layers.push(file.file.layer);
+            }
+        }
+        layers
+    }
+    pub(crate) fn layers(&self) -> impl Iterator<Item = (Layer, &str)> {
+        self.layers
+            .iter()
+            .map(|layer| (layer.kind, layer.patch.as_str()))
+    }
+
     fn stored(&self) -> Stored {
         Stored {
             format_version: 1,

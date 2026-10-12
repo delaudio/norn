@@ -5298,6 +5298,514 @@
       "minLength": 1,
       "maxLength": 4096,
       "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*//)(?!.*/$)[^\\\\\\u0000-\\u001f\\u007f-\\u009f]+$"
+    },
+    "LocalRunId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256,
+      "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]+$"
+    },
+    "LocalReviewStartParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "snapshot"
+      ],
+      "properties": {
+        "snapshot": {
+          "$ref": "#/definitions/LocalSnapshotRef"
+        },
+        "profile": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]+$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "LocalReviewQueryParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "snapshot"
+      ],
+      "properties": {
+        "snapshot": {
+          "$ref": "#/definitions/LocalSnapshotRef"
+        },
+        "runId": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/LocalRunId"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "LocalReviewHistoryParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "snapshot",
+        "offset",
+        "limit"
+      ],
+      "properties": {
+        "snapshot": {
+          "$ref": "#/definitions/LocalSnapshotRef"
+        },
+        "offset": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 32
+        }
+      }
+    },
+    "LocalReviewFindingsParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "snapshot",
+        "offset",
+        "limit"
+      ],
+      "properties": {
+        "snapshot": {
+          "$ref": "#/definitions/LocalSnapshotRef"
+        },
+        "runId": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/LocalRunId"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "offset": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 6000
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 32
+        }
+      }
+    },
+    "LocalReviewAccepted": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "request",
+        "target",
+        "operationId",
+        "state"
+      ],
+      "properties": {
+        "request": {
+          "$ref": "#/definitions/LocalReviewStartParams"
+        },
+        "target": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "localSnapshotSha256"
+          ],
+          "properties": {
+            "kind": {
+              "const": "local"
+            },
+            "localSnapshotSha256": {
+              "type": "string",
+              "maxLength": 64,
+              "minLength": 64,
+              "pattern": "^[a-f0-9]{64}$"
+            }
+          }
+        },
+        "operationId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]+$"
+        },
+        "state": {
+          "const": "accepted"
+        }
+      }
+    },
+    "LocalRunSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "runId",
+        "createdAt",
+        "status",
+        "turnKind",
+        "findingsCount"
+      ],
+      "properties": {
+        "runId": {
+          "$ref": "#/definitions/LocalRunId"
+        },
+        "createdAt": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 32,
+          "pattern": "^[0-9]+$"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "idle",
+            "running",
+            "succeeded",
+            "failed",
+            "cancelled"
+          ]
+        },
+        "turnKind": {
+          "type": "string",
+          "enum": [
+            "initial",
+            "reply"
+          ]
+        },
+        "findingsCount": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 6000
+        }
+      }
+    },
+    "LocalReviewHistoryPage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "request",
+        "runs",
+        "total",
+        "nextOffset"
+      ],
+      "properties": {
+        "request": {
+          "$ref": "#/definitions/LocalReviewHistoryParams"
+        },
+        "runs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/LocalRunSummary"
+          },
+          "maxItems": 32
+        },
+        "total": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000
+        },
+        "nextOffset": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 1000
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "LocalFindingAnchor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "startLine",
+        "endLine",
+        "side"
+      ],
+      "properties": {
+        "path": {
+          "$ref": "#/definitions/LocalRelativePath"
+        },
+        "startLine": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4294967295
+        },
+        "endLine": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 4294967295
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "side": {
+          "type": "string",
+          "enum": [
+            "new",
+            "old"
+          ]
+        }
+      }
+    },
+    "LocalReviewFinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "title",
+        "severity",
+        "summary",
+        "anchor",
+        "candidateLayers"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/definitions/LocalRunId"
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096,
+          "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]+$"
+        },
+        "severity": {
+          "type": "string",
+          "enum": [
+            "info",
+            "low",
+            "medium",
+            "high",
+            "critical"
+          ]
+        },
+        "summary": {
+          "type": "string",
+          "maxLength": 8192
+        },
+        "anchor": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/LocalFindingAnchor"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "candidateLayers": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "committed",
+              "staged",
+              "unstaged"
+            ]
+          },
+          "maxItems": 3
+        }
+      }
+    },
+    "LocalReviewFindingsPage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "request",
+        "runId",
+        "findings",
+        "total",
+        "nextOffset"
+      ],
+      "properties": {
+        "request": {
+          "$ref": "#/definitions/LocalReviewFindingsParams"
+        },
+        "runId": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/LocalRunId"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "findings": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/LocalReviewFinding"
+          },
+          "maxItems": 32
+        },
+        "total": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 6000
+        },
+        "nextOffset": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 6000
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "LocalReviewOutput": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "request",
+        "runId",
+        "text"
+      ],
+      "properties": {
+        "request": {
+          "$ref": "#/definitions/LocalReviewQueryParams"
+        },
+        "runId": {
+          "$ref": "#/definitions/LocalRunId"
+        },
+        "text": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 65536
+        }
+      }
+    },
+    "LocalReviewMessage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "role",
+        "content",
+        "truncated"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/definitions/LocalRunId"
+        },
+        "role": {
+          "type": "string",
+          "enum": [
+            "user",
+            "assistant"
+          ]
+        },
+        "content": {
+          "type": "string",
+          "maxLength": 1000
+        },
+        "truncated": {
+          "type": "boolean"
+        }
+      }
+    },
+    "LocalReviewThread": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "title",
+        "latestRunId",
+        "selected",
+        "messages",
+        "truncated"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/definitions/LocalRunId"
+        },
+        "title": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "latestRunId": {
+          "$ref": "#/definitions/LocalRunId"
+        },
+        "selected": {
+          "type": "boolean"
+        },
+        "messages": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/LocalReviewMessage"
+          },
+          "maxItems": 8
+        },
+        "truncated": {
+          "type": "boolean"
+        }
+      }
+    },
+    "LocalReviewThreads": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "request",
+        "runId",
+        "threads",
+        "truncated"
+      ],
+      "properties": {
+        "request": {
+          "$ref": "#/definitions/LocalReviewQueryParams"
+        },
+        "runId": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/LocalRunId"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "threads": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/LocalReviewThread"
+          },
+          "maxItems": 12
+        },
+        "truncated": {
+          "type": "boolean"
+        }
+      }
     }
   },
   "oneOf": [
@@ -6992,6 +7500,126 @@
               "$ref": "#/definitions/LocalRecheckParams"
             }
           }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "type": {
+              "const": "request"
+            },
+            "id": {
+              "$ref": "#/definitions/RequestId"
+            },
+            "method": {
+              "const": "local.review.start"
+            },
+            "params": {
+              "$ref": "#/definitions/LocalReviewStartParams"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "type": {
+              "const": "request"
+            },
+            "id": {
+              "$ref": "#/definitions/RequestId"
+            },
+            "method": {
+              "const": "local.review.history"
+            },
+            "params": {
+              "$ref": "#/definitions/LocalReviewHistoryParams"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "type": {
+              "const": "request"
+            },
+            "id": {
+              "$ref": "#/definitions/RequestId"
+            },
+            "method": {
+              "const": "local.review.findings"
+            },
+            "params": {
+              "$ref": "#/definitions/LocalReviewFindingsParams"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "type": {
+              "const": "request"
+            },
+            "id": {
+              "$ref": "#/definitions/RequestId"
+            },
+            "method": {
+              "const": "local.review.output"
+            },
+            "params": {
+              "$ref": "#/definitions/LocalReviewQueryParams"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "type": {
+              "const": "request"
+            },
+            "id": {
+              "$ref": "#/definitions/RequestId"
+            },
+            "method": {
+              "const": "local.review.threads"
+            },
+            "params": {
+              "$ref": "#/definitions/LocalReviewQueryParams"
+            }
+          }
         }
       ]
     },
@@ -7142,6 +7770,21 @@
             },
             {
               "$ref": "#/definitions/LocalRecheckResult"
+            },
+            {
+              "$ref": "#/definitions/LocalReviewAccepted"
+            },
+            {
+              "$ref": "#/definitions/LocalReviewHistoryPage"
+            },
+            {
+              "$ref": "#/definitions/LocalReviewFindingsPage"
+            },
+            {
+              "$ref": "#/definitions/LocalReviewOutput"
+            },
+            {
+              "$ref": "#/definitions/LocalReviewThreads"
             }
           ]
         }

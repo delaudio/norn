@@ -1,0 +1,21 @@
+{
+  "type": "request",
+  "id": "owned",
+  "method": "local.review.history",
+  "params": {
+    "snapshot": {
+      "source": {
+        "kind": "current"
+      },
+      "repository": {
+        "provider": "github",
+        "workspace": "owned",
+        "repo": "same"
+      },
+      "rootId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "snapshotId": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+    },
+    "offset": 0,
+    "limit": 33
+  }
+}

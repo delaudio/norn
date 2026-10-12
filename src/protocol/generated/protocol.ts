@@ -412,6 +412,36 @@ export type Request =
       id: RequestId;
       method: "local.snapshot.recheck";
       params: LocalRecheckParams;
+    }
+  | {
+      type: "request";
+      id: RequestId;
+      method: "local.review.start";
+      params: LocalReviewStartParams;
+    }
+  | {
+      type: "request";
+      id: RequestId;
+      method: "local.review.history";
+      params: LocalReviewHistoryParams;
+    }
+  | {
+      type: "request";
+      id: RequestId;
+      method: "local.review.findings";
+      params: LocalReviewFindingsParams;
+    }
+  | {
+      type: "request";
+      id: RequestId;
+      method: "local.review.output";
+      params: LocalReviewQueryParams;
+    }
+  | {
+      type: "request";
+      id: RequestId;
+      method: "local.review.threads";
+      params: LocalReviewQueryParams;
     };
 export type RequestId = string;
 /**
@@ -540,6 +570,7 @@ export type LocalComparison =
       layers: ["committed"];
     };
 export type LocalRelativePath = string;
+export type LocalRunId = string;
 export type OperationState = "accepted" | "running" | "succeeded" | "failed" | "cancelled";
 export type ErrorCode =
   | "invalidRequest"
@@ -1019,6 +1050,25 @@ export interface LocalRecheckParams {
   snapshot: LocalSnapshotRef;
   captureId: string;
 }
+export interface LocalReviewStartParams {
+  snapshot: LocalSnapshotRef;
+  profile?: string | null;
+}
+export interface LocalReviewHistoryParams {
+  snapshot: LocalSnapshotRef;
+  offset: number;
+  limit: number;
+}
+export interface LocalReviewFindingsParams {
+  snapshot: LocalSnapshotRef;
+  runId?: LocalRunId | null;
+  offset: number;
+  limit: number;
+}
+export interface LocalReviewQueryParams {
+  snapshot: LocalSnapshotRef;
+  runId?: LocalRunId | null;
+}
 export interface ResponseOk {
   type: "response";
   id: RequestId;
@@ -1065,7 +1115,12 @@ export interface ResponseOk {
     | LocalInfoResult
     | LocalFilesPage
     | LocalDiffPage
-    | LocalRecheckResult;
+    | LocalRecheckResult
+    | LocalReviewAccepted
+    | LocalReviewHistoryPage
+    | LocalReviewFindingsPage
+    | LocalReviewOutput
+    | LocalReviewThreads;
 }
 export interface DiffFileResult {
   target: TargetIdentity;
@@ -1817,6 +1872,202 @@ export interface LocalRecheckResult {
   request: LocalRecheckParams;
   info: LocalSnapshotInfo;
   unchanged: true;
+}
+export interface LocalReviewAccepted {
+  request: LocalReviewStartParams;
+  target: {
+    kind: "local";
+    localSnapshotSha256: string;
+  };
+  operationId: string;
+  state: "accepted";
+}
+export interface LocalReviewHistoryPage {
+  request: LocalReviewHistoryParams;
+  /**
+   * @maxItems 32
+   */
+  runs: LocalRunSummary[];
+  total: number;
+  nextOffset: number | null;
+}
+export interface LocalRunSummary {
+  runId: LocalRunId;
+  createdAt: string;
+  status: "idle" | "running" | "succeeded" | "failed" | "cancelled";
+  turnKind: "initial" | "reply";
+  findingsCount: number;
+}
+export interface LocalReviewFindingsPage {
+  request: LocalReviewFindingsParams;
+  runId: LocalRunId | null;
+  /**
+   * @maxItems 32
+   */
+  findings: LocalReviewFinding[];
+  total: number;
+  nextOffset: number | null;
+}
+export interface LocalReviewFinding {
+  id: LocalRunId;
+  title: string;
+  severity: "info" | "low" | "medium" | "high" | "critical";
+  summary: string;
+  anchor: LocalFindingAnchor | null;
+  /**
+   * @maxItems 3
+   */
+  candidateLayers:
+    | []
+    | ["committed" | "staged" | "unstaged"]
+    | ["committed" | "staged" | "unstaged", "committed" | "staged" | "unstaged"]
+    | ["committed" | "staged" | "unstaged", "committed" | "staged" | "unstaged", "committed" | "staged" | "unstaged"];
+}
+export interface LocalFindingAnchor {
+  path: LocalRelativePath;
+  startLine: number;
+  endLine: number | null;
+  side: "new" | "old";
+}
+export interface LocalReviewOutput {
+  request: LocalReviewQueryParams;
+  runId: LocalRunId;
+  text: string;
+}
+export interface LocalReviewThreads {
+  request: LocalReviewQueryParams;
+  runId: LocalRunId | null;
+  /**
+   * @maxItems 12
+   */
+  threads:
+    | []
+    | [LocalReviewThread]
+    | [LocalReviewThread, LocalReviewThread]
+    | [LocalReviewThread, LocalReviewThread, LocalReviewThread]
+    | [LocalReviewThread, LocalReviewThread, LocalReviewThread, LocalReviewThread]
+    | [LocalReviewThread, LocalReviewThread, LocalReviewThread, LocalReviewThread, LocalReviewThread]
+    | [LocalReviewThread, LocalReviewThread, LocalReviewThread, LocalReviewThread, LocalReviewThread, LocalReviewThread]
+    | [
+        LocalReviewThread,
+        LocalReviewThread,
+        LocalReviewThread,
+        LocalReviewThread,
+        LocalReviewThread,
+        LocalReviewThread,
+        LocalReviewThread
+      ]
+    | [
+        LocalReviewThread,
+        LocalReviewThread,
+        LocalReviewThread,
+        LocalReviewThread,
+        LocalReviewThread,
+        LocalReviewThread,
+        LocalReviewThread,
+        LocalReviewThread
+      ]
+    | [
+        LocalReviewThread,
+        LocalReviewThread,
+        LocalReviewThread,
+        LocalReviewThread,
+        LocalReviewThread,
+        LocalReviewThread,
+        LocalReviewThread,
+        LocalReviewThread,
+        LocalReviewThread
+      ]
+    | [
+        LocalReviewThread,
+        LocalReviewThread,
+        LocalReviewThread,
+        LocalReviewThread,
+        LocalReviewThread,
+        LocalReviewThread,
+        LocalReviewThread,
+        LocalReviewThread,
+        LocalReviewThread,
+        LocalReviewThread
+      ]
+    | [
+        LocalReviewThread,
+        LocalReviewThread,
+        LocalReviewThread,
+        LocalReviewThread,
+        LocalReviewThread,
+        LocalReviewThread,
+        LocalReviewThread,
+        LocalReviewThread,
+        LocalReviewThread,
+        LocalReviewThread,
+        LocalReviewThread
+      ]
+    | [
+        LocalReviewThread,
+        LocalReviewThread,
+        LocalReviewThread,
+        LocalReviewThread,
+        LocalReviewThread,
+        LocalReviewThread,
+        LocalReviewThread,
+        LocalReviewThread,
+        LocalReviewThread,
+        LocalReviewThread,
+        LocalReviewThread,
+        LocalReviewThread
+      ];
+  truncated: boolean;
+}
+export interface LocalReviewThread {
+  id: LocalRunId;
+  title: string;
+  latestRunId: LocalRunId;
+  selected: boolean;
+  /**
+   * @maxItems 8
+   */
+  messages:
+    | []
+    | [LocalReviewMessage]
+    | [LocalReviewMessage, LocalReviewMessage]
+    | [LocalReviewMessage, LocalReviewMessage, LocalReviewMessage]
+    | [LocalReviewMessage, LocalReviewMessage, LocalReviewMessage, LocalReviewMessage]
+    | [LocalReviewMessage, LocalReviewMessage, LocalReviewMessage, LocalReviewMessage, LocalReviewMessage]
+    | [
+        LocalReviewMessage,
+        LocalReviewMessage,
+        LocalReviewMessage,
+        LocalReviewMessage,
+        LocalReviewMessage,
+        LocalReviewMessage
+      ]
+    | [
+        LocalReviewMessage,
+        LocalReviewMessage,
+        LocalReviewMessage,
+        LocalReviewMessage,
+        LocalReviewMessage,
+        LocalReviewMessage,
+        LocalReviewMessage
+      ]
+    | [
+        LocalReviewMessage,
+        LocalReviewMessage,
+        LocalReviewMessage,
+        LocalReviewMessage,
+        LocalReviewMessage,
+        LocalReviewMessage,
+        LocalReviewMessage,
+        LocalReviewMessage
+      ];
+  truncated: boolean;
+}
+export interface LocalReviewMessage {
+  id: LocalRunId;
+  role: "user" | "assistant";
+  content: string;
+  truncated: boolean;
 }
 export interface ResponseError {
   type: "response";

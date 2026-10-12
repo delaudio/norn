@@ -694,6 +694,55 @@ pub(crate) struct ProviderInlineReviewRequest {
     pub review_profile: Option<String>,
 }
 
+#[derive(Debug, Clone)]
+struct CapturedLocalContext {
+    info: super::local_snapshot::Info,
+    root: PathBuf,
+    cancel: Arc<AtomicBool>,
+}
+impl PartialEq for CapturedLocalContext {
+    fn eq(&self, other: &Self) -> bool {
+        self.info == other.info
+            && self.root == other.root
+            && Arc::ptr_eq(&self.cancel, &other.cancel)
+    }
+}
+impl Eq for CapturedLocalContext {}
+impl CapturedLocalContext {
+    fn provider(&self) -> ReviewProvider {
+        match self.info.snapshot.repository.provider {
+            ConfigReviewProvider::Github => ReviewProvider::Github,
+            ConfigReviewProvider::Bitbucket => ReviewProvider::Bitbucket,
+        }
+    }
+    fn validate_store(
+        &self,
+        workspace: &str,
+        repo: &str,
+        store: &AiReviewStoreData,
+    ) -> Result<(), String> {
+        let owner = &self.info.snapshot.repository;
+        if owner.workspace != workspace || owner.repo != repo {
+            return Err("The captured local review owner does not match its native store.".into());
+        }
+        let scope = super::review_scope::Scope {
+            provider: self.provider(),
+            workspace: workspace.into(),
+            repo: repo.into(),
+            pr_id: self.info.local_review_id,
+        };
+        scope.validate_owned(store)?;
+        if store.review_runs.iter().any(|run| {
+            run.reviewed_head_sha.as_deref() != Some(self.info.snapshot.snapshot_id.as_str())
+                || run.reviewed_base_sha.as_deref() != Some(self.info.base_sha.as_str())
+                || run.source_branch != self.info.branch
+        }) {
+            return Err("The saved local review does not match its immutable evidence.".into());
+        }
+        Ok(())
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum ReviewStoreTarget {
     PullRequest {
@@ -705,6 +754,7 @@ enum ReviewStoreTarget {
     Local {
         snapshot_sha256: String,
         legacy_id: u32,
+        captured: Option<Box<CapturedLocalContext>>,
     },
 }
 
@@ -722,7 +772,15 @@ impl ReviewStoreTarget {
         Ok(Self::Local {
             snapshot_sha256,
             legacy_id,
+            captured: None,
         })
+    }
+
+    fn captured_local_context(&self) -> Option<&CapturedLocalContext> {
+        match self {
+            Self::Local { captured, .. } => captured.as_deref(),
+            _ => None,
+        }
     }
 
     fn legacy_id(&self) -> u32 {
@@ -877,8 +935,18 @@ fn load_review_store_for_target(
         ReviewStoreTarget::PullRequest { id } => load_review_store(workspace, repo, *id),
         ReviewStoreTarget::Provider { context } => super::review_scope::load_owned(&context.scope),
         ReviewStoreTarget::Local {
-            snapshot_sha256, ..
-        } => load_local_review_store(workspace, repo, snapshot_sha256),
+            snapshot_sha256,
+            captured,
+            ..
+        } => {
+            if let Some(context) = captured {
+                let store = review_storage::local_evidence::owned_store(&context.info)?;
+                context.validate_store(workspace, repo, &store)?;
+                Ok(Some(store))
+            } else {
+                load_local_review_store(workspace, repo, snapshot_sha256)
+            }
+        }
     }
 }
 
@@ -895,7 +963,11 @@ fn save_review_store_for_target(
         ReviewStoreTarget::Local {
             snapshot_sha256,
             legacy_id,
+            captured,
         } => {
+            if let Some(context) = captured {
+                context.validate_store(workspace, repo, store)?;
+            }
             let json = serde_json::to_string(store).map_err(|error| error.to_string())?;
             let protected_snapshots = active_local_snapshot_sha256s(run_store, workspace, repo);
             review_storage::save_local_review_json_with_protected(
@@ -3316,6 +3388,8 @@ fn format_claude_stream_log_line(stream_name: &'static str, line: &str) -> Vec<S
             Some(subtype) => vec![format!("Claude event: {other}/{subtype}")],
             None => vec![format!("Claude event: {other}")],
         },
+        None if value.get("result").is_some() => vec!["Claude produced a result.".into()],
+        None if value.get("session_id").is_some() => vec!["Claude session event.".into()],
         None => vec![format!("[stdout] {trimmed}")],
     }
 }
@@ -5311,13 +5385,19 @@ fn run_inline_review_pipeline(
         AiProvider::Opencode => ReviewEvidenceSource::Opencode,
     };
     let native_context = target.native_context();
+    let captured_local = target.captured_local_context();
+    let qualified_native = native_context.is_some() || captured_local.is_some();
     let requested_profile = review_profile.clone();
     let review_provider_override = native_context
         .map(|context| context.scope.provider)
+        .or_else(|| captured_local.map(CapturedLocalContext::provider))
         .or(review_provider_override);
     let repo_path = match native_context {
         Some(context) => context.repo_path.clone(),
-        None => repo_path_override.or_else(|| resolve_local_repo(&workspace, &repo).ok()),
+        None => match captured_local {
+            Some(context) => Some(context.root.clone()),
+            None => repo_path_override.or_else(|| resolve_local_repo(&workspace, &repo).ok()),
+        },
     };
     let provider_execution_context = if isolate_provider || native_context.is_some() {
         ProviderExecutionContext::Isolated
@@ -5347,7 +5427,7 @@ fn run_inline_review_pipeline(
                     },
                     workspace: workspace.clone(),
                     repository: repo.clone(),
-                    pull_request_id: (id > 0).then_some(u64::from(id)),
+                    pull_request_id: (captured_local.is_none() && id > 0).then_some(u64::from(id)),
                     actor_kind: AdministrativeAuditActorKind::System,
                     actor_id: "system:local-review".to_string(),
                     correlation_id: format!("correlation:{thread_id}"),
@@ -5369,7 +5449,7 @@ fn run_inline_review_pipeline(
             }
         }
     }
-    if native_context.is_some() && resolved_policy_config.is_none() {
+    if qualified_native && resolved_policy_config.is_none() {
         if let Some(path) = repo_path.as_deref() {
             let loaded =
                 repo_config::load_from_repo_path_with_profile(path, requested_profile.as_deref())
@@ -5388,7 +5468,7 @@ fn run_inline_review_pipeline(
             ));
         }
     }
-    if native_context.is_some()
+    if qualified_native
         && requested_profile
             .as_deref()
             .is_some_and(|requested| review_profile.as_deref() != Some(requested))
@@ -5397,7 +5477,7 @@ fn run_inline_review_pipeline(
             "The selected review profile is unavailable.",
         ));
     }
-    if native_context.is_some() {
+    if qualified_native {
         if let Some(config) = resolved_policy_config.as_ref() {
             required_policy_analyzers.extend(
                 config
@@ -5424,6 +5504,9 @@ fn run_inline_review_pipeline(
         should_execute_analyzers(turn_kind, run_analyzers, run_required_policy_analyzers);
 
     if execute_analyzers {
+        // Provider evidence requires a clean pinned Git checkout. Captured Local
+        // evidence names a verified dirty working-tree comparison, whose opaque
+        // snapshot identity is deliberately not a Git commit OID.
         if native_context.is_some() {
             let path = repo_path.as_deref().ok_or_else(|| {
                 ReviewPipelineFailure::analyzer(
@@ -5624,9 +5707,19 @@ fn run_inline_review_pipeline(
         }
     }
 
+    // Retain operation cancellation through native policy/preflight work and
+    // retries, so a canceled queued local run cannot launch after that work.
+    let captured_canceled = || {
+        captured_local.is_some_and(|context| context.cancel.load(Ordering::Acquire))
+            || inline_review_cancel_requested(&store, &key, run_id)
+    };
+
     let attempt_claude = |prompt: &str,
                           resume_id: Option<&str>|
      -> Result<Option<ParsedClaudeTextResponse>, String> {
+        if captured_local.is_some() && captured_canceled() {
+            return Ok(None);
+        }
         let (mut command, _temp_dir) = build_claude_text_command(
             repo_path.as_deref(),
             provider_execution_context,
@@ -5635,6 +5728,9 @@ fn run_inline_review_pipeline(
             claude_model.as_deref(),
             claude_effort.as_deref(),
         )?;
+        if captured_local.is_some() && captured_canceled() {
+            return Ok(None);
+        }
         let mut child = command
             .spawn()
             .map_err(|e| format!("Failed to run claude: {e}"))?;
@@ -5710,6 +5806,9 @@ fn run_inline_review_pipeline(
     };
 
     let attempt_codex = |prompt: &str| -> Result<Option<ParsedClaudeTextResponse>, String> {
+        if captured_local.is_some() && captured_canceled() {
+            return Ok(None);
+        }
         let (mut command, _temp_dir, output_path) = build_codex_text_command(
             repo_path.as_deref(),
             provider_execution_context,
@@ -5717,6 +5816,9 @@ fn run_inline_review_pipeline(
             codex_model.as_deref(),
             codex_effort.as_deref(),
         )?;
+        if captured_local.is_some() && captured_canceled() {
+            return Ok(None);
+        }
         let mut child = command
             .spawn()
             .map_err(|e| format!("Failed to run codex: {e}"))?;
@@ -5804,6 +5906,9 @@ fn run_inline_review_pipeline(
     };
 
     let attempt_opencode = |prompt: &str| -> Result<Option<ParsedClaudeTextResponse>, String> {
+        if captured_local.is_some() && captured_canceled() {
+            return Ok(None);
+        }
         let (mut command, _temp_dir) = build_opencode_text_command(
             repo_path.as_deref(),
             provider_execution_context,
@@ -5811,6 +5916,9 @@ fn run_inline_review_pipeline(
             opencode_model.as_deref(),
             opencode_effort.as_deref(),
         )?;
+        if captured_local.is_some() && captured_canceled() {
+            return Ok(None);
+        }
         let mut child = command
             .spawn()
             .map_err(|e| format!("Failed to run opencode: {e}"))?;
@@ -5884,6 +5992,11 @@ fn run_inline_review_pipeline(
         Ok(Some(parsed))
     };
 
+    if captured_local.is_some() && effective_payload.len() > CAPTURED_LOCAL_AGENT_BYTES {
+        return Err(ReviewPipelineFailure::internal(
+            "The complete local review payload exceeds the agent limit.",
+        ));
+    }
     let response = (|| -> Result<Option<ParsedClaudeTextResponse>, String> {
         match ai_provider {
             AiProvider::Claude => {
@@ -5964,7 +6077,7 @@ fn run_inline_review_pipeline(
                 &store,
                 &key,
                 run_id,
-                if native_context.is_some() {
+                if qualified_native {
                     "Claude session captured.".to_string()
                 } else {
                     format!("Claude session: {session_id}")
@@ -6007,8 +6120,9 @@ fn run_inline_review_pipeline(
         analyzer_artifacts,
     )
     .map_err(ReviewPipelineFailure::provider)?;
-    review_run.reviewed_diff_base_sha =
-        native_context.and_then(|context| context.reviewed_diff_base_sha.clone());
+    review_run.reviewed_diff_base_sha = native_context
+        .and_then(|context| context.reviewed_diff_base_sha.clone())
+        .or_else(|| captured_local.map(|context| context.info.base_sha.clone()));
     review_run.provider_evidence_id =
         native_context.and_then(|context| context.provider_evidence_id.clone());
     let thread = find_review_thread_mut(&mut review_store, &thread_id)
@@ -6170,6 +6284,71 @@ pub(crate) fn start_provider_inline_review_native(
         None,
         None,
         request.review_profile,
+    )
+}
+
+// Captures may retain larger patches for navigation; an agent start must fit
+// its complete evidence and policy in this explicit bounded local payload.
+const CAPTURED_LOCAL_AGENT_BYTES: usize = 8 * 1024 * 1024;
+
+/// Only validated native captured data can construct this source. No IPC path or
+/// caller-selected provider is accepted by the engine adapter.
+pub(crate) fn start_captured_local_inline_review_native(
+    store: AiReviewRunStore,
+    data: &super::local_snapshot::Data,
+    payload: String,
+    review_profile: Option<String>,
+    cancel: Arc<AtomicBool>,
+) -> Result<AiReviewRunState, String> {
+    if cancel.load(Ordering::Acquire) {
+        return Err("Local review canceled before execution.".into());
+    }
+    if data.info.file_count == 0 {
+        return Err("The selected local snapshot contains no reviewable changes.".into());
+    }
+    if payload.len() > CAPTURED_LOCAL_AGENT_BYTES
+        || data.layers().any(|(_, patch)| !payload.contains(patch))
+    {
+        return Err("The local review payload is oversized or does not contain its complete captured evidence.".into());
+    }
+    let info = &data.info;
+    let context = CapturedLocalContext {
+        info: info.clone(),
+        root: data.root().to_path_buf(),
+        cancel,
+    };
+    let owner = &info.snapshot.repository;
+    let target = ReviewStoreTarget::Local {
+        snapshot_sha256: info.snapshot.snapshot_id.clone(),
+        legacy_id: info.local_review_id,
+        captured: Some(Box::new(context)),
+    };
+    start_inline_review_for_target(
+        store,
+        owner.workspace.clone(),
+        owner.repo.clone(),
+        target,
+        format!("Local review · {}", info.branch),
+        info.branch.clone(),
+        info.comparison
+            .base_ref
+            .clone()
+            .unwrap_or_else(|| "working tree".into()),
+        Some(info.base_sha.clone()),
+        Some(info.snapshot.snapshot_id.clone()),
+        payload,
+        None,
+        Some("localReview".into()),
+        Some("Local review".into()),
+        true,
+        config::load().ai_provider,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        review_profile,
     )
 }
 
@@ -9133,6 +9312,19 @@ Fix: rename it to describe the returned shape."#;
         );
         assert_eq!(findings[1].severity, ReviewFindingSeverity::Low);
         assert_eq!(findings[2].severity, ReviewFindingSeverity::Info);
+    }
+
+    #[test]
+    fn compact_claude_envelopes_do_not_log_private_resume_metadata() {
+        let result = format_claude_stream_log_line(
+            "stdout",
+            r#"{"result":"Owned result","session_id":"private-resume"}"#,
+        );
+        assert_eq!(result, vec!["Claude produced a result."]);
+        assert_eq!(
+            format_claude_stream_log_line("stdout", r#"{"session_id":"private-resume"}"#),
+            vec!["Claude session event."]
+        );
     }
 
     #[test]

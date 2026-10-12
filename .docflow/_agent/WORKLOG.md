@@ -637,3 +637,43 @@ Plan 0053 completion prepared after implementation `e4264db`, effective only on 
 - 2026-10-12: Plan0064 local gates passed on implemented immutable local foundation: 744core+2existingignored/64stdio/6CLI/5onboarding/3binary; root123+tooling/Archgate17; UI201/1254/nativeframes135, strict Clippy/fmt/noGUI/protocol/docflow audit. Owned12 local tests include identical clones, real9MiB patches, layers, quota/backup/cascade; actual immediate-cancel/EOF and two-provider restart stdio passed. Root fixture first exposed schema accepting traversal while native/client refused; schema now enforces safe relative paths and full root gate passed. ReactDoctor100, no findings in three changed TS files; no setup/suppression. Schema20 compatible backup/matched rollback remains #308. No claim of completed #358 UI/engine/history/Pierre or full cutover; next slice required.
 
 - 2026-10-12: Implementationd7ba477 passed all local gates. Prepared plan0064 done receipt after verified predecessor374/main rebase and collision audit; it is ineffective until own final-head CI and verified squash merge. #358/#306/#294 remain open and ADR0020 Accepted. Next required slice connects immutable snapshots to actual local controls, native review payload/history/cancel/findings and Pierre.
+
+- 2026-10-12: PR#375 fixed42dea41 passed both required CI38209164847 jobs (UI05:43:35UTC, verify05:57:36UTC); verified squash-merged5e4e1b293b7044c693b5f8f2e8308f59d810cebf at05:58:26UTC. Plan0064 is shipped and main synced. Claimed plan0065 before code on isolated actual-main branch issue-358-local-review-lifecycle: exact captured local native engine/payload/stream/cancel/history/findings/output; actual terminal controls and pinned preview/Pierre follow. #358/#306/#294 remain open; no full local or cutover claim.
+
+## 2026-10-12 — plan0065 native qualified local lifecycle implementation
+
+- Single writer, following actual#375 squash5e4e1b293b7044c693b5f8f2e8308f59d810cebf.
+  Claim7622029 preceded code. No Norn review or live provider/agent/profile access.
+- Qualified saved source/root/actual provider enters existing native inline engine;
+  explicit layer payload, same-comparison canceled recheck, actual profile/policy,
+  opaque local parent/high-bit ID and retained operation cancellation. Bounded SQL
+  store reads; scoped run history/findings/output/conversation contracts and client.
+- Eight real owned Git/fake-native-child stdio cases cover both providers, wrong
+  configured default, roots/clones, layers/base, parser finding ambiguity, restart/
+  missing checkout, run pagination, failure/oversize, cancel/EOF/preflight and local
+  publication decode rejection. Canonical output is not truncated; resume IDs are
+  omitted from bounded conversations and compact Claude progress envelopes.
+- Observed failures: early-return read counter leak delayed EOF (RAII fixed);
+  cancel test discarded a terminal event before its control response (collect both);
+  compact result envelopes leaked session metadata (formatter+unit fixed);
+  high-bit publication frames are rejected before dispatch, not correlated responses
+  (test follows actual codec semantics); required-preflight test revealed provider
+  clean-OID restriction incorrectly applied to local opaque snapshots (separated);
+  strict Clippy large target enum (boxed captured context). Preserve failed logs.
+- Final gates:745 core/72stdio/6CLI/5onboarding/3binary+2existingignored; noDefault
+  allTargets, strict allFeatures/allTargets Clippy, fmt/noGUI; root123+tooling,
+  lint0errors/3existinginfos, protocol, Archgate17, audit PASS with existing0011/0013
+  coverage advisories; UI206tests/1277assertions/135 unchanged nativeframes;
+  ReactDoctor100/no findings in2changedTSfiles. Exact-head CI and PR merge pending.
+- This is backend only. #358/#306/#294 stay open and ADR0020 stays Accepted;
+  actual local terminal controls/Pierre/image consumers/full workflow are next.
+
+- Prepared plan0065 receipt after all local gates. Implementationd3c670bae36dd4e7317c95cfc41cf9bc9cda1f51;
+  origin/main remains actual3755e4e1b2; no number collision. Receipt ineffective
+  until exact-head required CI and actual squash merge. No child/epic closure.
+
+- Fresh GitHub timeline correction: #306 was maintainer-closed at01:22:44UTC,
+  no associated commit. Earlier open-state references were stale; preserve the
+  closure without inventing child parity/cutover proof. PR#376 body removes an
+  unintended GitHub closing reference to#358 caused by a negated closure sentence.
+  Actual #358/#294 remain open; required child implementation continues.
