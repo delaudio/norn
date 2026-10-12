@@ -1,5 +1,5 @@
 //! Native review ownership. Legacy rows remain separate migration input.
-use super::review::{AiReviewStoreData, ReviewProvider, ReviewRun};
+use super::review::{AiReviewStoreData, AiReviewThread, ReviewProvider, ReviewRun};
 use std::collections::HashSet;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -157,6 +157,40 @@ pub fn save(scope: &Scope, store: &AiReviewStoreData) -> Result<(), String> {
     let json = serde_json::to_string(store)
         .map_err(|_| "Cannot encode saved native review.".to_string())?;
     crate::review_storage::save_provider_review_json(scope, &json)
+}
+
+/// The legacy execution seam cannot consume a native-owned run/conversation.
+/// Keep it fenced until the qualified engine handoff replaces that seam.
+pub(crate) fn require_legacy_inline_handoff(
+    scope: &Scope,
+    run: &ReviewRun,
+    thread: Option<&AiReviewThread>,
+    repo_path: &std::path::Path,
+) -> Result<(), String> {
+    let mismatch =
+        || "Saved review provenance does not match the available agent session.".to_string();
+    if !super::review::legacy_inline_context_matches(scope, repo_path) {
+        return Err(mismatch());
+    }
+    let legacy =
+        super::review::load_ai_review_store_native(&scope.workspace, &scope.repo, scope.pr_id)?;
+    let legacy = scope.merge(None, legacy)?.ok_or_else(mismatch)?;
+    if !legacy.review_runs.iter().any(|old| old == run) {
+        return Err(mismatch());
+    }
+    if let Some(thread) = thread {
+        let old = legacy
+            .threads
+            .iter()
+            .find(|old| old.id == thread.id)
+            .ok_or_else(mismatch)?;
+        if serde_json::to_value(old).map_err(|_| mismatch())?
+            != serde_json::to_value(thread).map_err(|_| mismatch())?
+        {
+            return Err(mismatch());
+        }
+    }
+    Ok(())
 }
 
 /// Preserve stale-target diagnostics for explicitly selected foreign IDs,

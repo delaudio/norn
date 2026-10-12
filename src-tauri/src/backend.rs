@@ -1125,6 +1125,42 @@ fn load_provider_review_store(
     })
 }
 
+fn require_legacy_inline_handoff(
+    target: &TargetIdentity,
+    run: &crate::services::review::ReviewRun,
+    thread: Option<&crate::services::review::AiReviewThread>,
+    repo_path: &Path,
+) -> Result<(), ProtocolError> {
+    let TargetIdentity::Provider {
+        provider,
+        workspace,
+        repo,
+        pr_id: Some(pr_id),
+        ..
+    } = target
+    else {
+        return Err(ProtocolError::new(
+            ProtocolErrorCode::TargetStale,
+            "Select a saved provider review.",
+        ));
+    };
+    crate::services::review_scope::require_legacy_inline_handoff(
+        &crate::services::review_scope::Scope {
+            provider: match provider {
+                ProviderKind::Github => crate::services::review::ReviewProvider::Github,
+                ProviderKind::Bitbucket => crate::services::review::ReviewProvider::Bitbucket,
+            },
+            workspace: workspace.clone(),
+            repo: repo.clone(),
+            pr_id: *pr_id,
+        },
+        run,
+        thread,
+        repo_path,
+    )
+    .map_err(|message| ProtocolError::new(ProtocolErrorCode::TargetStale, message))
+}
+
 /// Filter shared legacy storage by the complete saved run identity before
 /// exposing findings or conversations. This does not rewrite legacy storage.
 fn scoped_review_store(
@@ -3361,7 +3397,19 @@ fn start_inline_reply_session(
     // resume session id, then the configured provider).
     let thread = store_data
         .as_ref()
-        .and_then(|data| data.threads.iter().find(|thread| thread.id == thread_id));
+        .and_then(|data| data.threads.iter().find(|thread| thread.id == thread_id))
+        .ok_or_else(|| {
+            ProtocolError::new(
+                ProtocolErrorCode::TargetStale,
+                "The selected review has no unambiguous saved conversation.",
+            )
+        })?;
+    require_legacy_inline_handoff(
+        target,
+        run.as_ref().expect("run with thread checked"),
+        Some(thread),
+        &repo_path,
+    )?;
     let (source_branch, destination_branch) = run
         .map(|run| (run.source_branch, run.destination_branch))
         .unwrap_or_else(|| ("source".to_string(), "destination".to_string()));
@@ -3393,10 +3441,11 @@ fn start_inline_reply_session(
         &diff,
     );
     let ai_provider = thread
-        .and_then(|thread| thread.ai_provider)
+        .ai_provider
         .or_else(|| {
             thread
-                .and_then(|thread| thread.claude_session_id.as_ref())
+                .claude_session_id
+                .as_ref()
                 .map(|_| config::AiProvider::Claude)
         })
         .unwrap_or_else(|| config::load().ai_provider);
@@ -4052,6 +4101,13 @@ fn start_inline_session(target: &TargetIdentity) -> Result<InlineSession, Protoc
                 .ok()
                 .flatten()
                 .and_then(|store| select_review_run(Some(store), run_id.as_deref()));
+            let saved = run.as_ref().ok_or_else(|| {
+                ProtocolError::new(
+                    ProtocolErrorCode::TargetStale,
+                    "The selected saved review is unavailable.",
+                )
+            })?;
+            require_legacy_inline_handoff(target, saved, None, &repo_path)?;
             let (source_branch, destination_branch) = run
                 .map(|run| (run.source_branch, run.destination_branch))
                 .unwrap_or_else(|| ("source".to_string(), "destination".to_string()));

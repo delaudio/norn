@@ -7837,6 +7837,31 @@ fn review_provider_for_repo(workspace: &str, repo: &str) -> ReviewProvider {
     }
 }
 
+pub(crate) fn legacy_inline_context_matches(
+    scope: &super::review_scope::Scope,
+    repo_path: &Path,
+) -> bool {
+    let Some(expected) = repo_path.canonicalize().ok() else {
+        return false;
+    };
+    config::load()
+        .repos
+        .iter()
+        .find(|entry| entry.workspace == scope.workspace && entry.repo == scope.repo)
+        .is_some_and(|entry| {
+            let provider = match entry.provider {
+                ConfigReviewProvider::Github => ReviewProvider::Github,
+                ConfigReviewProvider::Bitbucket => ReviewProvider::Bitbucket,
+            };
+            provider == scope.provider
+                && entry
+                    .local_path
+                    .as_deref()
+                    .and_then(|path| Path::new(path).canonicalize().ok())
+                    == Some(expected)
+        })
+}
+
 #[cfg(test)]
 mod tests {
     use super::{

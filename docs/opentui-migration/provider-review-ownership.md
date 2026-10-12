@@ -33,7 +33,13 @@ retain their existing storage/key formats. Legacy stale-review cleanup only owns
 legacy keys and cannot remove provider-qualified native rows, including when its
 keep list is empty. This is the storage and identity
 foundation; starting a new review directly from immutable provider preview
-requires the subsequent cached-evidence engine integration. Fresh-preview Enter
+requires the subsequent cached-evidence engine integration. During this
+transition, the legacy inline agent is allowed only for the exact proved legacy
+run/conversation and matching configured provider/clone. Ambiguous conversations,
+native-owned runs, replaced native conversations or an incompatible provider
+configuration fail before agent spawn and preserve saved bytes. Native inline
+execution will replace this temporary handoff fence; read access is already
+available for native rows. Fresh-preview Enter
 remains unavailable until that complete behavior is verified.
 
 Owned core/SQLite and real stdio subprocess fixtures exercise two providers with

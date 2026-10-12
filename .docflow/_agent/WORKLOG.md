@@ -429,3 +429,22 @@ Plan 0053 completion prepared after implementation `e4264db`, effective only on 
   two existing ignored, 54 stdio, six CLI, five onboarding, three bin tests;
   strict all-feature/all-target Clippy passes. Replacing PR #369 head requires
   fresh exact-head CI; the prior running head cannot authorize merge.
+
+- A further pre-merge seam check found the old inline reply could recover an
+  ambiguous raw legacy thread despite projection removing it. Require proved
+  conversation presence and exact legacy run/conversation/configured provider/
+  clone before the old inline handoff. Native-owned/replaced context stays read
+  accessible but cannot silently enter that legacy agent seam. Full qualified
+  inline execution follows in 0059; no capability retirement is inferred.
+- Owned real-engine stdio regression covers ambiguous legacy thread, native
+  conversation replacing legacy, native-owned run and mismatched first provider
+  configuration. Fake CLI marker proves no spawn; saved bytes remain identical.
+  Existing prompt/reference/resume tests pass. The first regression attempt used
+  simulated review.start (and could not prove handoff); corrected fixture pins
+  real engine with owned fake CLI. Guard checks configured clone directly and
+  never invokes clone autodiscovery during provenance preflight.
+
+- Final handoff gate passes: 705 Rust core plus two existing ignored/55 stdio/
+  six CLI/five onboarding/three bin tests, strict all-feature/all-target Clippy,
+  fmt/no-GUI, Archgate12/12 and docflow audit. Frontend gate remains unchanged
+  (root123, UI172/1057 assertions/115 frames), no React source edits.
