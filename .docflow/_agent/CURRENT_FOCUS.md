@@ -23,7 +23,9 @@ Git is authoritative. Durable history lives in WORKLOG and plan/done.
   conversations are implemented in the isolated branch; local final gates pass:
   Rust745 core/72stdio/6CLI/5onboarding/3binary+2existingignored; root123+tooling,
   lint/protocol/Archgate17/audit; UI206/1277/135frames; Doctor100;
-  noDefault allTargets/strict allFeature allTarget Clippy/fmt/noGUI. PR pending.
+  noDefault allTargets/strict allFeature allTarget Clippy/fmt/noGUI.
+  Implementationd3c670bae36dd4e7317c95cfc41cf9bc9cda1f51; prepared receipt
+  is ineffective until exact-head required CI and actual PR squash merge.
   Eight real owned native child/stdio cases cover providers/wrong defaults/layers/
   base/missing checkout/clone/persistence/cancel/EOF/preflight/failure/oversize/publication.
   Observed failures led to RAII read-permit release and compact-envelope private
