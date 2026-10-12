@@ -851,7 +851,9 @@ async function publicationScene(mode: "drafts" | "preview" | "partial" | "status
   };
 }
 
-async function providerScene(kind: "list" | "detail" | "empty" | "error" | "loading" | "identity") {
+async function providerScene(
+  kind: "list" | "detail" | "empty" | "error" | "loading" | "identity" | "browser",
+) {
   const transport = new FakeProviderTransport();
   if (kind === "empty") transport.empty = true;
   if (kind === "error") transport.fault = "list";
@@ -866,6 +868,7 @@ async function providerScene(kind: "list" | "detail" | "empty" | "error" | "load
     [],
   );
   for (let i = 0; i < 10; i++) await Bun.sleep(0);
+  if (kind === "browser") await providers.openBrowser(client);
   if (kind === "detail") {
     providers.showDetail(client);
     for (let i = 0; i < 6; i++) await Bun.sleep(0);
@@ -876,6 +879,7 @@ async function providerScene(kind: "list" | "detail" | "empty" | "error" | "load
     view: (
       <ProviderPanel
         store={providers}
+        browserAvailable
         client={client}
         onClose={() => {}}
         onWorkspace={async () => {}}
@@ -907,6 +911,18 @@ async function providerPreviewScene(kind: "github" | "bitbucket" | "saved" | "er
 }
 
 const scenes: Scene[] = [
+  {
+    id: "shell-provider-browser-disabled-120x30",
+    cols: 120,
+    rows: 30,
+    build: () => providerScene("browser"),
+  },
+  {
+    id: "shell-provider-browser-disabled-50x15",
+    cols: 50,
+    rows: 15,
+    build: () => providerScene("browser"),
+  },
   ...(["github", "bitbucket", "saved", "error", "image"] as const).flatMap((kind) => [
     {
       id: `shell-provider-preview-${kind}-120x30`,

@@ -101,3 +101,63 @@ test("detail verifies actual PR number and exact trusted browser URL", async () 
     else await expect(result).rejects.toThrow();
   }
 });
+
+test("provider browser responses prove full request, resolved identity and canonical HTTPS URL", async () => {
+  const request = { repository, prId: 7 };
+  for (const fault of [
+    "none",
+    "scope",
+    "repository",
+    "host",
+    "credentials",
+    "port",
+    "local",
+    "launch",
+  ]) {
+    const transport = new ReadTransport((_method, params) => {
+      const result: Record<string, unknown> = {
+        request: params,
+        repository,
+        url: "https://github.com/Owner/Repo/pull/7",
+        launchRequested: false,
+        launchError: null,
+      };
+      if (fault === "scope") result.request = { ...params, prId: 8 };
+      if (fault === "repository") result.repository = { ...repository, repo: "Other" };
+      if (fault === "host") result.url = "https://evil.test/Owner/Repo/pull/7";
+      if (fault === "credentials") result.url = "https://secret@github.com/Owner/Repo/pull/7";
+      if (fault === "port") result.url = "https://github.com:1234/Owner/Repo/pull/7";
+      if (fault === "local") result.url = "http://127.0.0.1:1234/session/private";
+      if (fault === "launch") result.launchError = "failure";
+      return result;
+    });
+    const result = new BackendClient(transport).providerBrowser(request);
+    if (fault === "none") expect((await result).launchRequested).toBe(false);
+    else await expect(result).rejects.toThrow();
+  }
+  const uuidRequest = {
+    repository: {
+      provider: "bitbucket",
+      workspace: "{11111111-1111-1111-1111-111111111111}",
+      repo: "{22222222-2222-2222-2222-222222222222}",
+    } as const,
+    prId: 7,
+  };
+  const transport = new ReadTransport((_method, params) => ({
+    request: params,
+    repository: { provider: "bitbucket", workspace: "Alias", repo: "Repo" },
+    url: "https://bitbucket.org/Alias/Repo/pull-requests/7",
+    launchRequested: true,
+    launchError: "Owned opener unavailable",
+  }));
+  expect((await new BackendClient(transport).providerBrowser(uuidRequest)).launchError).toBe(
+    "Owned opener unavailable",
+  );
+  await expect(
+    new BackendClient(transport).providerBrowser({
+      repository: { ...repository, workspace: ".." },
+      prId: 7,
+    }),
+  ).rejects.toThrow();
+  expect(transport.calls).toHaveLength(1);
+});

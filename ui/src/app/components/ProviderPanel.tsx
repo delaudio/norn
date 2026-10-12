@@ -18,6 +18,7 @@ export function ProviderPanel({
   onWorkspace,
   onSettings,
   quit,
+  browserAvailable = false,
 }: {
   store: ProviderStore;
   client: BackendClient;
@@ -30,6 +31,7 @@ export function ProviderPanel({
   ) => Promise<void>;
   onSettings: () => void;
   quit: () => void;
+  browserAvailable?: boolean;
 }) {
   const state = useSyncExternalStore(store.subscribe, store.getSnapshot);
   const { width, height } = useTerminalDimensions();
@@ -77,6 +79,11 @@ export function ProviderPanel({
     }
     if (key.name === "m") {
       onSettings();
+      return;
+    }
+    if (key.name === "b") {
+      if (browserAvailable) void store.openBrowser(client);
+      else store.notice("Provider browser opening is unavailable with this backend.");
       return;
     }
     if (state.detailOpen) {
@@ -185,7 +192,7 @@ export function ProviderPanel({
       {state.detailOpen ? (
         <>
           <text height={2} flexShrink={0} fg={theme.muted}>
-            Enter workspace · r refresh · y copy URL · Esc list · arrows scroll
+            Enter workspace · r refresh · y copy URL · b provider page · Esc list · arrows scroll
           </text>
           {state.detailLoading ? (
             <text height={1} flexShrink={0} fg={theme.warning}>
@@ -297,8 +304,8 @@ export function ProviderPanel({
           </text>
           <text height={1} flexShrink={0} truncate fg={theme.muted}>
             {width >= 80
-              ? "Space workspace · n next page · r refresh · / query · m settings"
-              : "Space select · n more · r refresh · m settings"}
+              ? "Space workspace · b provider page · n next page · r refresh · / query · m settings"
+              : "Space select · b page · n more · r refresh · m settings"}
           </text>
           {state.error ? (
             <text height={2} flexShrink={0} fg={theme.error}>

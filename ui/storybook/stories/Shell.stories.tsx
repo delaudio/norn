@@ -207,3 +207,10 @@ export const ProviderPreviewImage50x15: Story = {
 
 export const ReviewProfile: Story = { args: { frameId: "shell-review-profile-120x30" } };
 export const CompactReviewProfile: Story = { args: { frameId: "shell-review-profile-50x15" } };
+
+export const ProviderBrowserDisabled: Story = {
+  args: { frameId: "shell-provider-browser-disabled-120x30" },
+};
+export const CompactProviderBrowserDisabled: Story = {
+  args: { frameId: "shell-provider-browser-disabled-50x15" },
+};

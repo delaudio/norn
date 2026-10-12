@@ -241,6 +241,11 @@ pub enum Request {
         id: String,
         params: crate::services::bitbucket::workspace_prs::ListParams,
     },
+    #[serde(rename = "provider.browser")]
+    ProviderBrowser {
+        id: String,
+        params: crate::services::bitbucket::workspace_prs::DetailParams,
+    },
     #[serde(rename = "provider.pr.detail")]
     ProviderPrDetail {
         id: String,
@@ -474,6 +479,7 @@ impl Request {
             | Self::ProviderSnapshotFiles { id, .. }
             | Self::ProviderSnapshotDiff { id, .. }
             | Self::ProviderPrs { id, .. }
+            | Self::ProviderBrowser { id, .. }
             | Self::ProviderPrDetail { id, .. }
             | Self::ProviderUser { id, .. }
             | Self::WorkspaceScopes { id, .. }
@@ -533,6 +539,7 @@ impl Request {
             Self::ProviderSnapshotFiles { .. } => "provider.snapshot.files",
             Self::ProviderSnapshotDiff { .. } => "provider.snapshot.diff",
             Self::ProviderPrs { .. } => "provider.prs",
+            Self::ProviderBrowser { .. } => "provider.browser",
             Self::ProviderPrDetail { .. } => "provider.pr.detail",
             Self::ProviderUser { .. } => "provider.user",
             Self::WorkspaceScopes { .. } => "workspace.scopes",
@@ -639,7 +646,9 @@ impl Request {
                 params.validate().map_err(invalid_request)?
             }
             Self::ProviderPrs { params, .. } => params.validate().map_err(invalid_request)?,
-            Self::ProviderPrDetail { params, .. } => params.validate().map_err(invalid_request)?,
+            Self::ProviderBrowser { params, .. } | Self::ProviderPrDetail { params, .. } => {
+                params.validate().map_err(invalid_request)?
+            }
             Self::ProviderUser { params, .. } => {
                 params.repository.validate().map_err(invalid_request)?
             }
@@ -1151,6 +1160,8 @@ mod tests {
             "valid/response-provider-snapshot-files.json",
             "valid/response-provider-snapshot-diff.json",
             "valid/request-provider-prs.json",
+            "valid/request-provider-browser.json",
+            "valid/response-provider-browser.json",
             "valid/request-provider-pr-detail.json",
             "valid/request-provider-pr-uuid.json",
             "valid/response-provider-prs.json",
@@ -1194,6 +1205,8 @@ mod tests {
             "invalid/request-provider-snapshot-image-missing-hash.json",
             "invalid/request-provider-pr-unsafe-owner.json",
             "invalid/request-provider-pr-local-id.json",
+            "invalid/request-provider-browser-local-id.json",
+            "invalid/request-provider-browser-url.json",
             "invalid/request-workspace-unpinned-page.json",
             "invalid/request-workspace-empty-version.json",
         ] {

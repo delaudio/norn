@@ -72,6 +72,7 @@ export class FakeProviderTransport extends FakeBackendTransport {
       capabilities: [
         ...ready.capabilities,
         "provider-pr-reads",
+        "provider-external-browser",
         "provider-snapshots",
         "provider-snapshot-preview",
       ],
@@ -85,6 +86,16 @@ export class FakeProviderTransport extends FakeBackendTransport {
         throw new Error(
           "No stored reviewed range exists for this PR. A live pinned diff is not available yet.",
         );
+    }
+    if (method === "provider.browser") {
+      const repository = params.repository as PrRepositoryIdentity;
+      return {
+        request: params,
+        repository,
+        url: `https://${repository.provider === "github" ? "github.com" : "bitbucket.org"}/${repository.workspace}/${repository.repo}/${repository.provider === "github" ? "pull" : "pull-requests"}/${params.prId}`,
+        launchRequested: false,
+        launchError: null,
+      };
     }
     if (!method.startsWith("provider.")) return super.request(method, params);
     this.activeReads++;

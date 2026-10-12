@@ -148,3 +148,45 @@ test("Escape, settings recovery and Ctrl-C remain usable during pending provider
     renderer.renderer.destroy();
   }
 });
+
+for (const width of [120, 50])
+  test(`explicit provider page key uses current identity and pasted keys do not launch at ${width} columns`, async () => {
+    const transport = new FakeProviderTransport();
+    const client = new BackendClient(transport);
+    const store = new ShellStore();
+    await store.connect(client);
+    const renderer = await createTestRenderer({ width, height: width === 50 ? 15 : 30 });
+    const ui = mountApp(renderer.renderer, store, client);
+    const settle = async () => {
+      for (let i = 0; i < 8; i++) {
+        await Bun.sleep(0);
+        await renderer.renderOnce();
+      }
+    };
+    try {
+      renderer.mockInput.pressKey(KeyCodes.F2);
+      await settle();
+      await renderer.mockInput.pasteBracketedText("b\nb\n");
+      await settle();
+      expect(transport.calls.filter((call) => call.method === "provider.browser")).toHaveLength(0);
+      renderer.mockInput.pressKey("b");
+      await settle();
+      expect(transport.calls.filter((call) => call.method === "provider.browser")).toHaveLength(1);
+      expect(transport.calls.find((call) => call.method === "provider.browser")?.params).toEqual({
+        repository: { provider: "github", workspace: "synthetic", repo: "review" },
+        prId: 7,
+      });
+      expect(renderer.captureCharFrame()).toContain("launching is disabled");
+      renderer.mockInput.pressEnter();
+      await settle();
+      renderer.mockInput.pressKey("b");
+      await settle();
+      expect(transport.calls.filter((call) => call.method === "provider.browser")).toHaveLength(2);
+      expect(transport.calls.filter((call) => call.method === "browser.open")).toHaveLength(0);
+    } finally {
+      ui.unmount();
+      store.cancelSyntax();
+      client.close();
+      renderer.renderer.destroy();
+    }
+  });

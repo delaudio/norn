@@ -12,6 +12,65 @@ use serde_json::{json, Value};
 const LOCAL_SHA: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 
 #[test]
+fn explicit_native_provider_browser_is_offline_for_slugs_and_preserves_control() {
+    let owned = tempfile::tempdir().unwrap();
+    let config = tempfile::tempdir().unwrap();
+    let mut backend = Backend::spawn_env(
+        owned.path(),
+        &[
+            ("NORN_BROWSER_OPEN", "0"),
+            ("NORN_CONFIG_DIR", config.path().to_str().unwrap()),
+        ],
+    );
+    backend.send(
+        json!({"type":"hello","protocolVersion":1,"client":{"name":"owned-browser","version":"0"}}),
+    );
+    let ready = backend.wait_for(|v| v["type"] == "ready", Duration::from_secs(5));
+    assert!(ready["capabilities"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|value| value == "provider-external-browser"));
+    for provider in ["github", "bitbucket"] {
+        let params =
+            json!({"repository":{"provider":provider,"workspace":"Owned","repo":"Repo"},"prId":7});
+        backend.send(
+            json!({"type":"request","id":provider,"method":"provider.browser","params":params}),
+        );
+        let result = backend.wait_for(|v| v["id"] == provider, Duration::from_secs(5));
+        assert_eq!(result["ok"], true, "{result}");
+        assert_eq!(result["result"]["request"], params);
+        assert_eq!(result["result"]["launchRequested"], false);
+        assert!(result["result"]["launchError"].is_null());
+        assert_eq!(
+            result["result"]["url"],
+            format!(
+                "https://{}/Owned/Repo/{}/7",
+                if provider == "github" {
+                    "github.com"
+                } else {
+                    "bitbucket.org"
+                },
+                if provider == "github" {
+                    "pull"
+                } else {
+                    "pull-requests"
+                }
+            )
+        );
+    }
+    backend.send(json!({"type":"request","id":"bad","method":"provider.browser","params":{"repository":{"provider":"github","workspace":"..","repo":"Repo"},"prId":7}}));
+    backend.send(json!({"type":"request","id":"control","method":"repository.status","params":{}}));
+    assert_eq!(
+        backend.wait_for(|v| v["id"] == "control", Duration::from_secs(5))["ok"],
+        true
+    );
+    backend.send(json!({"type":"request","id":"shutdown","method":"shutdown","params":{}}));
+    backend.wait_for(|v| v["id"] == "shutdown", Duration::from_secs(5));
+    assert!(backend.child.wait().unwrap().success());
+}
+
+#[test]
 fn provider_reads_advertise_capability_and_reject_invalid_targets_before_credentials() {
     let dir = tempfile::tempdir().unwrap();
     let mut backend = Backend::spawn(dir.path());

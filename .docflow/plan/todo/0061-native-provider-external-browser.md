@@ -47,7 +47,8 @@ catalog/editor are subsequent work; this alone does not close provider parity.
 ## Dependencies
 
 - PR #371 fixed head `78ca5d07949fe12303b618eca2affbe849787545`, CI38197325446
-  verify still running; no merged claim.
+  verified merged at `3322ff050c8d7c6bc115c01c9341cb0594cb4730`,
+  2026-10-12 03:00:52Z after exact-head UI/verify success. Rebase required before PR.
 - Native PR browser, explicit repository identity and bounded native URL opener.
 
 ## Status

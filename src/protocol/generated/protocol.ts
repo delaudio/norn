@@ -334,6 +334,12 @@ export type Request =
       id: RequestId;
       method: "provider.snapshot.browser";
       params: ProviderSnapshotBrowserParams;
+    }
+  | {
+      type: "request";
+      id: RequestId;
+      method: "provider.browser";
+      params: ProviderPrDetailParams;
     };
 export type RequestId = string;
 /**
@@ -879,7 +885,8 @@ export interface ResponseOk {
     | ProviderSnapshotFilesPage
     | ProviderSnapshotDiffPage
     | ProviderSnapshotImagePage
-    | ProviderSnapshotBrowserResult;
+    | ProviderSnapshotBrowserResult
+    | ProviderBrowserResult;
 }
 export interface DiffFileResult {
   target: TargetIdentity;
@@ -1486,6 +1493,13 @@ export interface ProviderSnapshotDiffPage {
 }
 export interface ProviderSnapshotBrowserResult {
   request: ProviderSnapshotBrowserParams;
+  url: string;
+  launchRequested: boolean;
+  launchError: string | null;
+}
+export interface ProviderBrowserResult {
+  request: ProviderPrDetailParams;
+  repository: PrRepositoryIdentity;
   url: string;
   launchRequested: boolean;
   launchError: string | null;

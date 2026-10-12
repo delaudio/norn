@@ -201,6 +201,7 @@ pub fn run() -> Result<(), i32> {
             "provider-pr-reads".to_string(),
             "provider-snapshots".to_string(),
             "provider-evidence-reviews".to_string(),
+            "provider-external-browser".to_string(),
             "provider-snapshot-preview".to_string(),
             "draft-staging".to_string(),
             "draft-publication".to_string(),
@@ -952,7 +953,9 @@ fn dispatch(request: Request, backend: &Backend) -> bool {
             });
             false
         }
-        Request::BrowserOpen { .. } | Request::ProviderSnapshotBrowser { .. } => {
+        Request::BrowserOpen { .. }
+        | Request::ProviderSnapshotBrowser { .. }
+        | Request::ProviderBrowser { .. } => {
             if backend
                 .active_browser
                 .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |current| {
@@ -974,10 +977,32 @@ fn dispatch(request: Request, backend: &Backend) -> bool {
             let counter = ActiveCounter(backend.active_browser.clone());
             let snapshots = backend.provider_snapshots.clone();
             let shutdown = backend.shutdown.clone();
+            let provider_reads = backend.active_provider_reads.clone();
             thread::spawn(move || {
                 match request {
                     Request::BrowserOpen { params, .. } => {
                         browser_open_response(&control, &browser, &id, params.target, &snapshots)
+                    }
+                    Request::ProviderBrowser { params, .. } => {
+                        let result = provider_browser_open(params, &provider_reads, &shutdown);
+                        let response = match result {
+                            Ok(value) => Response {
+                                id,
+                                ok: true,
+                                result: Some(value),
+                                error: None,
+                            },
+                            Err(message) => Response {
+                                id,
+                                ok: false,
+                                result: None,
+                                error: Some(ProtocolError::new(
+                                    ProtocolErrorCode::Conflict,
+                                    message,
+                                )),
+                            },
+                        };
+                        let _ = control.send(ServerMessage::Response(response));
                     }
                     Request::ProviderSnapshotBrowser { params, .. } => {
                         let result = if shutdown.load(Ordering::SeqCst) {
@@ -1750,6 +1775,49 @@ fn snapshot_browser_state(
         ),
         ..WebDiffState::default()
     })
+}
+
+fn provider_browser_open(
+    params: crate::services::bitbucket::workspace_prs::DetailParams,
+    provider_reads: &AtomicUsize,
+    shutdown: &AtomicBool,
+) -> Result<serde_json::Value, String> {
+    use crate::services::bitbucket::workspace_prs::{self, Api};
+    params.validate()?;
+    if shutdown.load(Ordering::Acquire) {
+        return Err("Provider browser canceled during shutdown.".into());
+    }
+    let resolved = if workspace_prs::needs_browser_alias(&params.repository) {
+        provider_reads
+            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| {
+                (n < 2).then_some(n + 1)
+            })
+            .map_err(|_| {
+                "Two provider reads are already in progress; wait before opening this PR."
+                    .to_string()
+            })?;
+        let result = Api::from_stored(params.repository.clone())
+            .and_then(|api| api.browser_repository(&params));
+        provider_reads.fetch_sub(1, Ordering::SeqCst);
+        result?
+    } else {
+        params.repository.clone()
+    };
+    let url = workspace_prs::browser_url(&params, &resolved)?;
+    if shutdown.load(Ordering::Acquire) {
+        return Err("Provider browser canceled during shutdown.".into());
+    }
+    let launch_requested = std::env::var("NORN_BROWSER_OPEN")
+        .map(|value| value != "0")
+        .unwrap_or(true);
+    let launch_error = if launch_requested {
+        open_browser_url(&url).err()
+    } else {
+        None
+    };
+    Ok(
+        json!({"request":params,"repository":resolved,"url":url,"launchRequested":launch_requested,"launchError":launch_error}),
+    )
 }
 
 fn snapshot_browser_open(

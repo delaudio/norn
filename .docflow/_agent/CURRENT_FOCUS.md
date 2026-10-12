@@ -9,7 +9,9 @@ Git is authoritative. Durable history lives in WORKLOG and plan/done.
 - Branch: `issue-306-provider-external-browser`, isolated worktree
   `/private/tmp/norn-provider-external-browser`; plan0061 claimed before code.
 - PR #371 fixed head `78ca5d07949fe12303b618eca2affbe849787545`: UI passed,
-  verify CI38197325446 running. Do not modify that fixed predecessor branch.
+  verify CI38197325446 passed. #371 verified merged at
+  `3322ff050c8d7c6bc115c01c9341cb0594cb4730`, 2026-10-12 03:00:52Z.
+  Rebase this isolated work onto actual squash before PR.
 - State: explicit full-scope native provider PR external browser action; prepare
   here, integrate only after verified #371 merge, actual-squash rebase and audit.
 - Root unrelated `.norn.yaml` must never be read/copied/staged.

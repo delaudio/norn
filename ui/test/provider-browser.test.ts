@@ -230,3 +230,49 @@ test("opening PR browser does not clear a pending reply", async () => {
   shell.cancelSyntax();
   client.close();
 });
+
+test("provider browser requests coalesce and late results cannot overwrite another selection or disposed view", async () => {
+  for (const changed of ["selection", "disposed"]) {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    class BrowserTransport extends FakeProviderTransport {
+      async request(method: string, params: Record<string, unknown>) {
+        if (method === "provider.browser") {
+          this.calls.push({ method, params });
+          await gate;
+          const repository = params.repository as (typeof providerFixtureRepositories)[number];
+          return {
+            request: params,
+            repository,
+            url: `https://github.com/${repository.workspace}/${repository.repo}/pull/${params.prId}`,
+            launchRequested: true,
+            launchError: null,
+          };
+        }
+        return super.request(method, params);
+      }
+    }
+    const transport = new BrowserTransport();
+    const client = new BackendClient(transport);
+    const store = new ProviderStore();
+    store.load(client, repositories, []);
+    await settle();
+    const pending = store.openBrowser(client);
+    await store.openBrowser(client);
+    expect(transport.calls.filter((call) => call.method === "provider.browser")).toHaveLength(1);
+    if (changed === "selection") {
+      store.move(1);
+      store.notice("New selection owns this message.");
+    } else store.dispose();
+    release();
+    await pending;
+    expect(store.getSnapshot().notice).toBe(
+      changed === "selection" ? "New selection owns this message." : null,
+    );
+    expect(store.getSnapshot().browserOpening).toBe(false);
+    store.dispose();
+    client.close();
+  }
+});
