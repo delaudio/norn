@@ -550,3 +550,12 @@ Plan 0053 completion prepared after implementation `e4264db`, effective only on 
   keyboard tests. React Doctor reports no changed-file issues, score64 baseline.
 - No Norn review, live provider writes, private profile/data, releases or full
   parity/ADR0020 completion. Next: exact-head CI and verified PR squash merge.
+
+## 2026-10-12 — claim native external provider browser plan0061
+
+- PR #371 exact fixed head78ca5d0 UI passes; verify still running, no merge claim.
+- Claimed0061 before code in isolated `/private/tmp/norn-provider-external-browser`.
+  Existing native opener reused; UI supplies full PR identity, never a URL.
+  Bitbucket UUID aliases require bounded native metadata resolution.
+- No Norn review/provider writes/private profiles/releases. Integrate only after
+  verified #371 merge, actual squash rebase/audit, local gates and exact next CI.
