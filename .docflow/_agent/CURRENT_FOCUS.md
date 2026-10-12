@@ -6,28 +6,29 @@ Git is authoritative. Durable history lives in WORKLOG and plan/done.
 
 - Goal: complete epic#294 through verified sequential PR/squash merges. Single
   writer, no delegation; never use Norn for review per maintainer instruction.
-- Branch `issue-358-local-snapshot-ipc`, isolated `/private/tmp/norn-local-snapshot-ipc`;
-  plan0064 claimed before code. Qualified immutable local source/options/capture/
-  read/recheck IPC foundation first; actual local UI/engine/history/Pierre next.
-- PR#373 verified mergedac077cd at04:23:57UTC after fixed2db1dcb CI38202396806
-  passed both jobs. Main synced; approval journal schema19 is shipped.
-- PR#374 final3dd4fb0 passed both required CI38205709559 jobs; verified
-  squash-merged a3b6e4dcdd62278fb3cd5e781df4f8597e80b5c6 at05:09:19UTC.
-  Plan0063 completion is effective. Rebased0064 onto actual main. Implemented
-  strict sources, native double capture, separate layers, schema20 durable evidence,
-  bounded pages/recheck/cancel, typed client and owned tests. Implementationd7ba477
-  passed full gates: Rust744/64stdio, root123+tooling/Archgate17, UI201/1254/135frames;
-  Doctor100, Clippy/fmt/noGUI/protocol/audit. Prepared0064 receipt is ineffective
-  until both exact-head CI jobs and verified squash merge. Actual local
-  UI/engine/history/Pierre remains next; no #358 completion claim.
+- PR#375 verified MERGED5e4e1b293b7044c693b5f8f2e8308f59d810cebf
+  at05:58:26UTC after both required CI38209164847 jobs passed on
+  final42dea41dc7723be0a5ad503fc973038f3b47ba89. Root main synced.
+  Plan0064 is shipped: qualified immutable local snapshots, schema20 evidence,
+  independent layers, same-comparison stale recheck/cancel and validating client.
+  Gates: Rust744/64stdio/6CLI/5onboarding/3binary+2existingignored;
+  root123+tooling/Archgate17; UI201/1254/135frames; Doctor100;
+  Clippy/fmt/noGUI/protocol/docflow audit passed.
+- Branch issue-358-local-review-lifecycle, isolated
+  /private/tmp/norn-local-review-lifecycle; plan0065 claimed before code.
+  Connect exact captured local source to native engine/payload/operation/cancel
+  and durable history/findings/output first. Actual local terminal controls,
+  immutable preview/Pierre and full workflow proof remain the next #358 slice.
+  No new lifecycle implementation or gates claimed yet.
 - Fixtures only: no live provider writes/private credentials/profiles/releases,
   no root unrelated .norn.yaml read/copy/stage.
 
 ## Remaining work
 
 - Complete #358–#364/#306, #307 hardening, #308 matched installed packaging,
-  #309 verified removal/cutover, then close the epic. Profile default/catalog
-  verified shipped in374; policy editor is #359, canonical prompt editor shipped.
+  #309 verified removal/cutover, then close the epic. Profile catalog374 and
+  immutable local foundation375 are merged. Policy editor is #359; canonical
+  prompt editor is shipped. Local UI/engine parity is still open.
 - Preserve maintainer closures including #357/#305. ADR0020 Accepted until
   actual complete cutover. Native desktop-profile runtime/platform recovery
   remains unobserved; compile/copy smoke is not evidence of recovery.
