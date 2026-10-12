@@ -4,24 +4,25 @@ Git is authoritative. Durable history lives in WORKLOG and plan/done.
 
 ## Active state
 
-- Goal: finish epic #294 via verified sequential PR/squash merges; no Norn
-  review per maintainer instruction. Single agent, no delegation.
-- Branch: `issue-306-review-profile-catalog`, isolated `/private/tmp/norn-review-profile-catalog`;
-  plan0063 local gates passed; completion prepared, awaiting its fixed-head CI/verified merge. Native declared-profile catalog/effective-default
-  picker with exact target/path policy resolution; no profile rewrite API.
-- #371 merged3322ff0. #372 verified merged84921b7 on 2026-10-12 at 03:29:22 UTC;
-  fixed648e253 CI38198661868 passed both jobs. Rebased onto actual main.
-- #373 fixed2db1dcb CI38202396806 passed both jobs; verified merged ac077cd at 04:23:57 UTC.
-  Native approval local proof is prepared. Keep its head fixed and verify the
-  merge/rebase/audit before the next PR. Native profile catalog implementation and local proof complete; PR#374 open; priorbd9a511 CI superseded by exact-origin fix57875cd. Full local gate passed again. CI38205433114 UI failed inherited F2 timing; fixe3c14a5 waits for actual patch completion with owned delay. All UI/root gates passed again; final receipt/new exact-head CI next.
-- Tests use only owned providers/agents/data; no live provider writes/private
-  profiles/releases. Root unrelated `.norn.yaml` never read/copied/staged.
+- Goal: complete epic#294 through verified sequential PR/squash merges. Single
+  writer, no delegation; never use Norn for review per maintainer instruction.
+- Branch `issue-358-local-snapshot-ipc`, isolated `/private/tmp/norn-local-snapshot-ipc`;
+  plan0064 claimed before code. Qualified immutable local source/options/capture/
+  read/recheck IPC foundation first; actual local UI/engine/history/Pierre next.
+- PR#373 verified mergedac077cd at04:23:57UTC after fixed2db1dcb CI38202396806
+  passed both jobs. Main synced; approval journal schema19 is shipped.
+- PR#374 final3dd4fb0 passed both required CI38205709559 jobs; verified
+  squash-merged a3b6e4dcdd62278fb3cd5e781df4f8597e80b5c6 at05:09:19UTC.
+  Plan0063 completion is effective. Rebase0064 onto actual main before restoring
+  the owned uncommitted source/DTO/native timeout foundation.
+- Fixtures only: no live provider writes/private credentials/profiles/releases,
+  no root unrelated .norn.yaml read/copy/stage.
 
 ## Remaining work
 
-- Ship declared profile catalog/default picker; policy file editor belongs to
-  #359, canonical prompt editor is already delivered. #358–#364/#306, #307 hardening,
-  #308 packaging, #309 verified removal/cutover, then epic closure.
-- Preserve maintainer closures (#357/#305). ADR0020 Accepted until actual full
-  completion. Native profile/platform runtime still unobserved. No private
-  profiles, live provider writes or public releases authorized.
+- Complete #358–#364/#306, #307 hardening, #308 matched installed packaging,
+  #309 verified removal/cutover, then close the epic. Profile default/catalog
+  delivered in pending374; policy editor is #359, canonical prompt editor shipped.
+- Preserve maintainer closures including #357/#305. ADR0020 Accepted until
+  actual complete cutover. Native desktop-profile runtime/platform recovery
+  remains unobserved; compile/copy smoke is not evidence of recovery.
