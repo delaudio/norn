@@ -111,6 +111,7 @@ struct Backend {
     local_snapshots: Arc<crate::services::local_snapshot::Manager>,
     active_local: Arc<AtomicUsize>,
     repository_reader: Arc<crate::services::repository_reader::Manager>,
+    repository_editor: Arc<crate::services::repository_editor::Manager>,
     active_repository_reads: Arc<AtomicUsize>,
     provider_approval: Arc<crate::services::provider_approval::Manager>,
     active_approval: Arc<AtomicUsize>,
@@ -153,6 +154,12 @@ impl Backend {
 }
 
 /// Run the backend until stdin reaches EOF or a `shutdown` request arrives.
+/// Private owned child entry, distinct from the stdio host. The child verifies
+/// the actual parent executable before running a native authorized editor.
+pub fn run_terminal_child(value: &str) -> Result<i32, String> {
+    crate::services::repository_editor::terminal_child(value)
+}
+
 pub fn run() -> Result<(), i32> {
     let stdin = std::io::stdin();
     let mut reader = stdin.lock();
@@ -194,6 +201,7 @@ pub fn run() -> Result<(), i32> {
         )),
         active_local: Arc::new(AtomicUsize::new(0)),
         repository_reader: Arc::new(crate::services::repository_reader::Manager::new()),
+        repository_editor: Arc::new(crate::services::repository_editor::Manager::new()),
         active_repository_reads: Arc::new(AtomicUsize::new(0)),
         provider_approval: Arc::new(crate::services::provider_approval::Manager::new(
             shutdown.clone(),
@@ -231,6 +239,7 @@ pub fn run() -> Result<(), i32> {
             "repository".to_string(),
             "repository-explorer-reads".to_string(),
             "repository-explorer-windowed-find".to_string(),
+            "repository-editor".to_string(),
             "diff".to_string(),
             "review".to_string(),
             "review-profile-catalog".to_string(),
@@ -253,6 +262,7 @@ pub fn run() -> Result<(), i32> {
     }
     backend.local_snapshots.stop();
     backend.repository_reader.stop();
+    backend.repository_editor.stop();
     // Stop spawning new children, terminate the ones this backend owns, and let
     // the writer flush and exit.
     shutting_down().store(true, Ordering::SeqCst);
@@ -381,6 +391,44 @@ fn read_loop(reader: &mut impl BufRead, backend: &Backend) {
 fn dispatch(request: Request, backend: &Backend) -> bool {
     let id = request.id().to_string();
     let method = request.method();
+    if backend.repository_editor.terminal_active()
+        && !matches!(
+            method,
+            "repository.editor.status"
+                | "repository.editor.cancel"
+                | "operation.status"
+                | "operation.cancel"
+                | "shutdown"
+        )
+    {
+        backend.fail(
+            &id,
+            ProtocolError::new(
+                ProtocolErrorCode::Conflict,
+                "Finish the terminal editor before using other workspace actions.",
+            ),
+        );
+        return false;
+    }
+    if matches!(
+        &request,
+        Request::RepositoryEditorPrepare { .. } | Request::RepositoryEditorOpen { .. }
+    ) && (backend.active_operations.load(Ordering::Acquire) > 0
+        || backend.active_publication.load(Ordering::Acquire) > 0
+        || backend.active_local.load(Ordering::Acquire) > 0
+        || backend.active_workspace.load(Ordering::Acquire) > 0
+        || backend.active_settings.load(Ordering::Acquire) > 0
+        || backend.active_approval.load(Ordering::Acquire) > 0)
+    {
+        backend.fail(
+            &id,
+            ProtocolError::new(
+                ProtocolErrorCode::Conflict,
+                "Finish the current operation before opening an editor.",
+            ),
+        );
+        return false;
+    }
     if unqualified_local_request(&request) {
         backend.fail(&id, ProtocolError::new(ProtocolErrorCode::InvalidParams,
             "This local request lacks repository and capture identity. Select a verified local snapshot and use its qualified local API."));
@@ -510,6 +558,74 @@ fn dispatch(request: Request, backend: &Backend) -> bool {
                     );
                 }
             }
+            false
+        }
+        Request::RepositoryEditorStatus { params, .. }
+        | Request::RepositoryEditorCancel { params, .. } => {
+            let cancel = method == "repository.editor.cancel";
+            match backend.repository_editor.status(params, cancel) {
+                Ok(value) => backend.respond(&id, json!(value)),
+                Err(message) => backend.fail(
+                    &id,
+                    ProtocolError::new(ProtocolErrorCode::Conflict, message),
+                ),
+            };
+            false
+        }
+        Request::RepositoryEditorOpen { params, .. } => {
+            // Reserve terminal ownership synchronously in the serial read loop.
+            // Its fresh filesystem/lookup checks and process work run in the
+            // bounded manager worker, so later mutations cannot race the claim.
+            match backend.repository_editor.open(params) {
+                Ok(value) => backend.respond(&id, json!(value)),
+                Err(message) => backend.fail(
+                    &id,
+                    ProtocolError::new(ProtocolErrorCode::Conflict, message),
+                ),
+            };
+            false
+        }
+        Request::RepositoryEditorPrepare { params, .. } => {
+            let active = backend.active_repository_reads.clone();
+            if active
+                .fetch_update(Ordering::AcqRel, Ordering::Acquire, |n| {
+                    (n < 2).then_some(n + 1)
+                })
+                .is_err()
+            {
+                backend.fail(
+                    &id,
+                    ProtocolError::new(
+                        ProtocolErrorCode::Conflict,
+                        "Repository requests are busy. Retry shortly.",
+                    ),
+                );
+                return false;
+            }
+            let manager = backend.repository_editor.clone();
+            let output = backend.control.clone();
+            let shutdown = backend.shutdown.clone();
+            thread::spawn(move || {
+                let result = manager.prepare(params).map(|value| json!(value));
+                if !shutdown.load(Ordering::Acquire) {
+                    let response = match result {
+                        Ok(value) => Response {
+                            id,
+                            ok: true,
+                            result: Some(value),
+                            error: None,
+                        },
+                        Err(message) => Response {
+                            id,
+                            ok: false,
+                            result: None,
+                            error: Some(ProtocolError::new(ProtocolErrorCode::Conflict, message)),
+                        },
+                    };
+                    let _ = output.send(ServerMessage::Response(response));
+                }
+                active.fetch_sub(1, Ordering::AcqRel);
+            });
             false
         }
         Request::RepositoryExploreInfo { .. }

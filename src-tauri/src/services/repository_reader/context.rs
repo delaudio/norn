@@ -1,5 +1,5 @@
 use super::*;
-use crate::services::local_snapshot::{resolve_source, Source};
+use crate::services::local_snapshot::resolve_repository_root;
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Context {
@@ -19,13 +19,7 @@ pub(crate) fn resolve(
     repository: &RepositoryIdentity,
     control: &GitRunControl,
 ) -> Result<crate::services::local_snapshot::ResolvedSource, String> {
-    resolve_source(
-        &Source::Configured {
-            repository: repository.clone(),
-        },
-        Path::new(""),
-        control,
-    )
+    resolve_repository_root(repository, control)
 }
 pub(crate) fn resolve_context(
     context: &Context,

@@ -180,7 +180,7 @@ removal with maintainer decision; `shared` = Rust/native service reused as-is.
 | Clipboard copy | both | `tui/terminal.rs` OSC52, `lib/clipboard.ts` | none | #302 | port |
 | Shortcuts help / theme | desktop | `ShortcutsDialog`, `useTheme` | localStorage | #305 | port |
 | Find in repository | desktop | `RepositoryExplorerPanel`; native selected-file/diff find with original UTF-8 byte and UTF-16 positions | in-memory | #359 | native byte-jump/highlight/result paging merged PR380/d623231 with real3OS F8 proof |
-| External file open | desktop | `localRepoService` `open_repository_file_external` | none | #359 | retained; explicit native editor/real terminal lifecycle claimed0070 |
+| External file open | desktop | `localRepoService` `open_repository_file_external` | none | #359 | native editor prepared0070 with owned GUI IPC and macOS PTY success/error/interrupt/death proof; all3OS CI/merge pending |
 | Tray + menu-bar review trigger | desktop | `App.runBackgroundMenuReview`, `backgroundReviewStart` | Rust review store | #306 | retire |
 | Readiness preflight / `--skip-readiness` / `--current-repo` | TUI | `tui/mod.rs` | `config.rs` | #299 | port |
 | Headless CLI/service | CLI | `cli.rs`, `headless_review.rs`, `self_hosted_service.rs` | Rust stores | n/a | preserve |

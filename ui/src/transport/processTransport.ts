@@ -10,7 +10,13 @@ import {
   parseFrame,
   type TargetIdentity,
 } from "./protocol";
-import type { BackendExit, BackendOperationEvent, BackendTransport, ReadyInfo } from "./types";
+import {
+  type BackendExit,
+  type BackendOperationEvent,
+  BackendRequestError,
+  type BackendTransport,
+  type ReadyInfo,
+} from "./types";
 
 const MAX_PENDING = 64;
 const HANDSHAKE_TIMEOUT_MS = 5_000;
@@ -68,6 +74,7 @@ export class ProcessBackendTransport implements BackendTransport {
   private nextId = 1;
   private closed = false;
   private exitNotified = false;
+  private closing: Promise<void> | null = null;
   private readyResolve: ((info: ReadyInfo) => void) | null = null;
   private readyReject: ((error: Error) => void) | null = null;
 
@@ -159,17 +166,47 @@ export class ProcessBackendTransport implements BackendTransport {
     return () => this.exitListeners.delete(listener);
   }
 
-  close(): void {
-    if (this.closed) {
-      return;
-    }
+  close(): Promise<void> {
+    if (this.closing) return this.closing;
+    if (this.closed) return Promise.resolve();
     this.closed = true;
+    this.readyReject?.(new Error("backend transport closed"));
     this.failPending(new Error("backend transport closed"));
     try {
-      this.proc.kill();
+      // Native editor/process guards must run before the parent disappears.
+      // Protocol output remains drained while shutdown/EOF cancels owned work.
+      this.proc.stdin.write(
+        encodeFrame({
+          type: "request",
+          id: `ui-close-${this.nextId++}`,
+          method: "shutdown",
+          params: {},
+        }),
+      );
+      void Promise.resolve(this.proc.stdin.flush()).catch(() => {});
+      void Promise.resolve(this.proc.stdin.end()).catch(() => {});
     } catch {
-      // Ignore: the process may have already exited.
+      try {
+        this.proc.kill("SIGKILL");
+      } catch {
+        /* Already exited. */
+      }
     }
+    this.closing = (async () => {
+      const timer = setTimeout(() => {
+        try {
+          this.proc.kill("SIGKILL");
+        } catch {
+          /* Already exited. */
+        }
+      }, 5000);
+      try {
+        await this.proc.exited;
+      } finally {
+        clearTimeout(timer);
+      }
+    })();
+    return this.closing;
   }
 
   private write(message: NornStdioProtocol): void {
@@ -220,14 +257,12 @@ export class ProcessBackendTransport implements BackendTransport {
       }
       this.dispatch(frame);
     }
-    // The protocol stream ended: the backend is gone. Reap it and reject
-    // anything still pending instead of waiting for a timeout.
-    this.notifyExit(null);
-    try {
-      this.proc.kill();
-    } catch {
-      // Already exited.
-    }
+    // EOF rejects pending work immediately; report the actual reaped exit code.
+    // An alive process which closed its protocol gets bounded native shutdown.
+    this.readyReject?.(new Error("backend protocol ended before the handshake completed"));
+    this.failPending(new Error("backend protocol ended"));
+    await this.close();
+    this.notifyExit(await this.proc.exited);
   }
 
   private dispatch(frame: NornStdioProtocol): void {
@@ -267,7 +302,7 @@ export class ProcessBackendTransport implements BackendTransport {
 
   private settle(
     id: string,
-    frame: { ok: boolean; result?: unknown; error?: { message?: string } },
+    frame: { ok: boolean; result?: unknown; error?: { message?: string; code?: string } },
   ): void {
     const entry = this.pending.get(id);
     if (!entry) {
@@ -278,7 +313,12 @@ export class ProcessBackendTransport implements BackendTransport {
     if (frame.ok === true) {
       entry.resolve((frame.result as Record<string, unknown>) ?? {});
     } else {
-      entry.reject(new Error(frame.error?.message ?? "backend request failed"));
+      entry.reject(
+        new BackendRequestError(
+          frame.error?.code ?? "internal",
+          frame.error?.message ?? "backend request failed",
+        ),
+      );
     }
   }
 

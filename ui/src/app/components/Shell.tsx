@@ -1310,6 +1310,13 @@ export function Shell({ store, client, quit }: ShellProps) {
     return (
       <ExplorerPanel
         store={explorer}
+        client={client}
+        editorAvailable={state.editorAvailable}
+        editorBusy={
+          state.status !== "ready" ||
+          state.operation?.state === "running" ||
+          state.operation?.state === "pending"
+        }
         width={width}
         height={height}
         onClose={() => store.toggleExplorer()}

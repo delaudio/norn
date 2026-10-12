@@ -67,6 +67,13 @@ import type {
   RecordMutation,
   RecordMutationResult,
   RecordPage,
+  RepositoryEditor,
+  RepositoryEditorOpened,
+  RepositoryEditorOpenParams,
+  RepositoryEditorPrepared,
+  RepositoryEditorPrepareParams,
+  RepositoryEditorStatus,
+  RepositoryEditorStatusParams,
   RepositoryExploreBlamePage,
   RepositoryExploreBlameParams,
   RepositoryExploreContentPage,
@@ -85,6 +92,7 @@ import type {
   WorkspaceScope,
   WorkspaceSettings,
 } from "../../../src/protocol/generated/protocol";
+import { validEditorParams, validEditorResult } from "./editorValidation";
 import { validExploreParams, validExploreResult } from "./explorationValidation";
 import {
   localPath,
@@ -1205,6 +1213,66 @@ export class BackendClient {
       "RepositoryExploreInfo",
     );
   }
+  private async editorRequest<T>(
+    method: string,
+    params: object,
+    requestType: string,
+    resultType: string,
+    expected?: RepositoryEditorPrepareParams | RepositoryEditor,
+  ): Promise<T> {
+    if (!validEditorParams(requestType, params))
+      throw new Error("Invalid repository editor request.");
+    const result = await this.transport.request(method, params as Record<string, unknown>);
+    if (!validEditorResult(resultType, result, params, expected))
+      throw new Error("Invalid or mismatched repository editor response.");
+    return result as T;
+  }
+  repositoryEditorPrepare(
+    params: RepositoryEditorPrepareParams,
+  ): Promise<RepositoryEditorPrepared> {
+    return this.editorRequest(
+      "repository.editor.prepare",
+      params,
+      "RepositoryEditorPrepareParams",
+      "RepositoryEditorPrepared",
+    );
+  }
+  repositoryEditorOpen(
+    params: RepositoryEditorOpenParams,
+    expected: RepositoryEditorPrepareParams,
+  ): Promise<RepositoryEditorOpened> {
+    return this.editorRequest(
+      "repository.editor.open",
+      params,
+      "RepositoryEditorOpenParams",
+      "RepositoryEditorOpened",
+      expected,
+    );
+  }
+  repositoryEditorStatus(
+    params: RepositoryEditorStatusParams,
+    expected: RepositoryEditor,
+  ): Promise<RepositoryEditorStatus> {
+    return this.editorRequest(
+      "repository.editor.status",
+      params,
+      "RepositoryEditorStatusParams",
+      "RepositoryEditorStatus",
+      expected,
+    );
+  }
+  repositoryEditorCancel(
+    params: RepositoryEditorStatusParams,
+    expected: RepositoryEditor,
+  ): Promise<RepositoryEditorStatus> {
+    return this.editorRequest(
+      "repository.editor.cancel",
+      params,
+      "RepositoryEditorStatusParams",
+      "RepositoryEditorStatus",
+      expected,
+    );
+  }
   async repositoryExploreFiles(
     params: RepositoryExploreFilesParams,
   ): Promise<RepositoryExploreFilesPage> {
@@ -1966,7 +2034,7 @@ export class BackendClient {
     return this.transport.onExit(listener);
   }
 
-  close(): void {
-    this.transport.close();
+  async close(): Promise<void> {
+    await this.transport.close();
   }
 }

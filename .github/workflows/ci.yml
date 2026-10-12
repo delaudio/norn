@@ -125,3 +125,12 @@ jobs:
 
       - name: Exercise native local capture, review, cancellation and restart
         run: bun run ui/scripts/check-local-workflow.tsx
+
+      - name: Verify native editor argument and association adapters
+        run: cargo test --locked --manifest-path src-tauri/Cargo.toml --no-default-features repository_editor -- --test-threads=1
+
+      - name: Exercise scoped native editor authorization and launch
+        run: bun run ui/scripts/check-editor-ipc.ts
+
+      - name: Exercise real terminal editor handoff and restoration
+        run: bun run ui/scripts/check-editor-workflow.ts

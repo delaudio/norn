@@ -266,6 +266,26 @@ fn qualified_manager_pages_pin_versions_provider_and_clone_and_shutdown() {
     let other = manager
         .info(request(crate::config::ReviewProvider::Bitbucket))
         .unwrap();
+    let nested = first.path().join("nested configured directory");
+    std::fs::create_dir(&nested).unwrap();
+    write_settings(settings(&nested));
+    let nested_info = manager
+        .info(request(crate::config::ReviewProvider::Github))
+        .unwrap();
+    assert_eq!(nested_info.context, info.context);
+    assert!(
+        crate::services::local_snapshot::resolve_source(
+            &crate::services::local_snapshot::Source::Configured {
+                repository: info.context.repository.clone()
+            },
+            first.path(),
+            &control(),
+        )
+        .is_err(),
+        "Review capture retains its exact-root policy"
+    );
+    write_settings(settings(first.path()));
+
     assert_ne!(info.context.root_id, other.context.root_id);
     let files_params = FilesParams {
         context: info.context.clone(),

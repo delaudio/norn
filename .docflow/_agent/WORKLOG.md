@@ -918,3 +918,22 @@ Plan 0053 completion prepared after implementation `e4264db`, effective only on 
 - Rootmain ff synced, privatefile/userstash intact. #359/#294 remain open;
   maintainerclosures preserved, ADR0020 Accepted untilcutover. No delegated
   agent/Norn code review/privateprofile/live provider writes/releases.
+
+
+## 2026-10-12 — 0070 native editor implementation, pending source merge
+
+- Explicit F8 o/O actions use full provider/root/path context, 30-second one-use
+  authorization and fresh file/integration checks. Native GUI priority/system
+  adapters replace desktop shell interpolation; terminal child never consumes
+  protocol pipes. Owned process groups/Windows jobs, status/cancel, foreground
+  restore and graceful transport shutdown protect the terminal's single reader.
+- Actual owned macOS PTY success/nonzero/Ctrl-C/backend-death tests pass with
+  a compiled editor changing real modes. Native GUI IPC proves both clones,
+  exact Unicode/option-like argv, stale file/root, symlink escape and token
+  binding/replay. Windows ConPTY/witness and Linux native proof remain pending.
+- Root discovery must precede --work-tree pinning; new owned reader test proves
+  nested configured browsing and unchanged strict review-capture root policy.
+- Local UI249/1578,193nativeframes/Storybook, root123+tooling, Rust765+2ignored/
+  76stdio/6CLI/5onboarding/noGUI, Archgate17/audit/Clippy pass including final adapter-test
+  rerun; Doctor17changed/untrackedfiles no diagnostics, score66.
+- Keep0070 todo and #359/#294 open pending all3OS exact-head CI/actualmerge.

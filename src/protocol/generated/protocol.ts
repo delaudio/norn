@@ -502,6 +502,30 @@ export type Request =
       id: RequestId;
       method: "repository.explore.find";
       params: RepositoryExploreFindParams;
+    }
+  | {
+      type: "request";
+      id: RequestId;
+      method: "repository.editor.prepare";
+      params: RepositoryEditorPrepareParams;
+    }
+  | {
+      type: "request";
+      id: RequestId;
+      method: "repository.editor.open";
+      params: RepositoryEditorOpenParams;
+    }
+  | {
+      type: "request";
+      id: RequestId;
+      method: "repository.editor.status";
+      params: RepositoryEditorStatusParams;
+    }
+  | {
+      type: "request";
+      id: RequestId;
+      method: "repository.editor.cancel";
+      params: RepositoryEditorStatusParams;
     };
 export type RequestId = string;
 /**
@@ -662,6 +686,7 @@ export type RepositoryExploreDiffParams = {
   maxBytes: number;
   contentSha256: string | null;
 };
+export type RepositoryEditorMode = "graphical" | "terminal";
 export type OperationState = "accepted" | "running" | "succeeded" | "failed" | "cancelled";
 export type ErrorCode =
   | "invalidRequest"
@@ -739,6 +764,7 @@ export type LocalImagePage = {
       )
     | null;
 };
+export type RepositoryEditorState = "starting" | "launched" | "running" | "exited" | "failed" | "canceled";
 export type OperationEvent =
   | {
       kind: "progress";
@@ -1214,6 +1240,20 @@ export interface RepositoryExploreFindParams {
   limit: number;
   contentSha256: string;
 }
+export interface RepositoryEditorPrepareParams {
+  context: RepositoryExploreContext;
+  path: string;
+  line: number | null;
+  mode: RepositoryEditorMode;
+}
+export interface RepositoryEditorOpenParams {
+  context: RepositoryExploreContext;
+  token: string;
+}
+export interface RepositoryEditorStatusParams {
+  context: RepositoryExploreContext;
+  launchId: string;
+}
 export interface ResponseOk {
   type: "response";
   id: RequestId;
@@ -1275,7 +1315,10 @@ export interface ResponseOk {
     | RepositoryExploreContentPage
     | RepositoryExploreDiffPage
     | RepositoryExploreBlamePage
-    | RepositoryExploreFindPage;
+    | RepositoryExploreFindPage
+    | RepositoryEditorPrepared
+    | RepositoryEditorOpened
+    | RepositoryEditorStatus;
 }
 export interface DiffFileResult {
   target: TargetIdentity;
@@ -2337,6 +2380,32 @@ export interface RepositoryExploreMatch {
   columnUtf16: number;
   startByte: number;
   endByte: number;
+}
+export interface RepositoryEditorPrepared {
+  request: RepositoryEditorPrepareParams;
+  token: string | null;
+  integration: string | null;
+  expiresInMs: number;
+  message: string | null;
+}
+export interface RepositoryEditorOpened {
+  request: RepositoryEditorOpenParams;
+  editor: RepositoryEditor;
+}
+export interface RepositoryEditor {
+  launchId: string;
+  context: RepositoryExploreContext;
+  path: string;
+  line: number | null;
+  mode: RepositoryEditorMode;
+  state: RepositoryEditorState;
+  integration: string;
+  exitCode: number | null;
+  message: string | null;
+}
+export interface RepositoryEditorStatus {
+  request: RepositoryEditorStatusParams;
+  editor: RepositoryEditor;
 }
 export interface ResponseError {
   type: "response";

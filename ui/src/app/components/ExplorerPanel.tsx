@@ -1,6 +1,8 @@
 import { type ScrollBoxRenderable, SyntaxStyle } from "@opentui/core";
-import { useKeyboard, usePaste } from "@opentui/react";
+import { useKeyboard, usePaste, useRenderer } from "@opentui/react";
 import { useEffect, useMemo, useRef, useSyncExternalStore } from "react";
+import type { BackendClient } from "../../transport/backendClient";
+import { EditorController } from "../editorController";
 import {
   type ExplorerState,
   type ExplorerStore,
@@ -33,6 +35,9 @@ export function ExplorerPanel({
   onClose,
   onSettings,
   quit,
+  client,
+  editorAvailable,
+  editorBusy = false,
 }: {
   store: ExplorerStore;
   width: number;
@@ -40,8 +45,17 @@ export function ExplorerPanel({
   onClose: () => void;
   onSettings: () => void;
   quit: () => void;
+  client: BackendClient;
+  editorAvailable: boolean;
+  editorBusy?: boolean;
 }) {
   const state = useSyncExternalStore(store.subscribe, store.getSnapshot);
+  const renderer = useRenderer();
+  const editor = useMemo(() => new EditorController(client, renderer), [client, renderer]);
+  const editorState = useSyncExternalStore(editor.subscribe, editor.getSnapshot);
+  useEffect(() => () => editor.dispose(), [editor]);
+  const editorScope = JSON.stringify([state.context, state.path]);
+  useEffect(() => editor.resetScope(editorScope), [editor, editorScope]);
   const markdownScroll = useRef<ScrollBoxRenderable | null>(null);
   const blameScroll = useRef<ScrollBoxRenderable | null>(null);
   useKeyboard((key) => {
@@ -60,6 +74,7 @@ export function ExplorerPanel({
         store.appendInput(key.sequence);
       return;
     }
+    if (editorState.busy && key.name !== "escape" && key.name !== "f8" && key.name !== "q") return;
     if ((key.ctrl || key.meta || key.super) && key.name === "f") {
       store.openInput("find");
       return;
@@ -67,7 +82,24 @@ export function ExplorerPanel({
     if (key.ctrl || key.meta || key.super || key.option) return;
     if (key.name === "escape" || key.name === "f8") onClose();
     else if (key.name === "q") quit();
-    else if (key.name === "m") onSettings();
+    else if (key.name === "o") {
+      if (!editorAvailable) editor.unavailable();
+      else if (editorBusy)
+        store.editorError("Finish the current operation before opening an editor.");
+      else if (state.context && state.path)
+        void editor.start({
+          context: state.context,
+          path: state.path,
+          mode: key.shift ? "terminal" : "graphical",
+          line:
+            state.mode === "blame"
+              ? (state.blame?.lines[state.blameCursor]?.line ?? null)
+              : state.mode === "content" && !state.markdown && state.preview?.state === "text"
+                ? state.preview.line + state.previewRow
+                : null,
+        });
+      else store.editorError("Select a regular repository file first.");
+    } else if (key.name === "m") onSettings();
     else if (key.name === "r") void store.refresh();
     else if (key.name === "tab") store.cycleFocus();
     else if (key.name === "/") store.openInput("filter");
@@ -124,7 +156,7 @@ export function ExplorerPanel({
   const previewHeight = wide ? bodyHeight : Math.max(3, bodyHeight - treeHeight);
   const treeWidth = wide ? Math.min(44, Math.floor(width / 3)) : width - 2;
   const treeStart = Math.max(0, state.cursor - Math.max(1, treeHeight - 4) + 1);
-  const error = state.error ?? state.previewError;
+  const error = editorState.error ?? state.error ?? state.previewError;
   return (
     <box
       width={width}
@@ -239,19 +271,21 @@ export function ExplorerPanel({
       <text height={1} flexShrink={0} fg={error ? theme.error : theme.muted} truncate>
         {error
           ? explorerLabel(error)
-          : state.input
-            ? `${state.input === "filter" ? "Path filter" : "Find"}: ${explorerLabel(state.inputText)}█ · Enter apply · Esc cancel`
-            : state.searchLoading
-              ? "Finding matches…"
-              : state.search
-                ? `Find ${explorerLabel(state.search.request.query)} · ${state.search.total ? state.search.request.offset + state.searchCursor + 1 : 0}/${state.search.total} · n/N next/previous`
-                : "Tab pane · j/k · Enter · / filter · c changed"}
+          : editorState.message
+            ? explorerLabel(editorState.message)
+            : state.input
+              ? `${state.input === "filter" ? "Path filter" : "Find"}: ${explorerLabel(state.inputText)}█ · Enter apply · Esc cancel`
+              : state.searchLoading
+                ? "Finding matches…"
+                : state.search
+                  ? `Find ${explorerLabel(state.search.request.query)} · ${state.search.total ? state.search.request.offset + state.searchCursor + 1 : 0}/${state.search.total} · n/N next/previous`
+                  : "Tab pane · j/k · Enter · / filter · c changed"}
       </text>
       <text height={1} flexShrink={0} fg={theme.muted} truncate>
         1 text · 2 diff · 3 blame · Ctrl-F find · v MD
       </text>
       <text height={1} flexShrink={0} fg={theme.muted} truncate>
-        r refresh · m settings · PgUp/Dn · ←/→ pan
+        o open · O terminal · r refresh · m settings
       </text>
       <text height={1} flexShrink={0} fg={theme.muted} truncate>
         F8/Esc return to review · q quit

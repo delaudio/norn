@@ -8,9 +8,14 @@ Git is authoritative. Durable history lives in WORKLOG and plan/done.
 - PR380 actually MERGEDd623231b16215a8d828764bfdfe48349c6d73254 at12:43:36Z.
   All5CI38249399379 SUCCESS on99b33bdbe73befa2b2ef25be30171f657cb8bea3,
   including real F8/filter/file/content/diff/blame/find/return on3OS.
-- Reconcile0069 only now from actual source completion; update parity and claim
-  0070 native editor/real terminal handoff before code in isolated
+- 0069 actual source receipt reconciled; 0070 claimed before implementation.
+  Native editor/real terminal handoff WIP in isolated
   /private/tmp/norn-native-editor, issue-359-native-editor, actual380main.
+- Local owned macOS PTY success/nonzero/Ctrl-C/backend-death proof passes;
+  7 controller cases, shared schema fixtures and 10 reader tests pass. Native
+  Windows ConPTY witness/driver prepared but unobserved; Linux/Windows and full
+  gates/PR/actualmerge remain required. Root discovery now precedes work-tree
+  pinning; browsing accepts configured nested paths, review capture stays strict.
 - Keep0070 todo until actual verified merge. #359/#294 remain open pending
   editor/fullparity; preserve maintainer305/306/357closures; ADR0020 Accepted
   until fullcutover. No private profiles/credentials/providerwrites/actualagents.

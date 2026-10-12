@@ -349,3 +349,25 @@ export const RepositoryExplorerLoading: Story = { args: { frameId: "explorer-loa
 export const CompactRepositoryExplorerLoading: Story = {
   args: { frameId: "explorer-loading-50x20" },
 };
+
+export const RepositoryEditorLaunched: Story = {
+  args: { frameId: "explorer-editor-launched-120x30" },
+};
+
+export const CompactRepositoryEditorLaunched: Story = {
+  args: { frameId: "explorer-editor-launched-50x20" },
+};
+
+export const RepositoryEditorFailed: Story = { args: { frameId: "explorer-editor-failed-120x30" } };
+
+export const CompactRepositoryEditorFailed: Story = {
+  args: { frameId: "explorer-editor-failed-50x20" },
+};
+
+export const RepositoryEditorUnavailable: Story = {
+  args: { frameId: "explorer-editor-unavailable-120x30" },
+};
+
+export const CompactRepositoryEditorUnavailable: Story = {
+  args: { frameId: "explorer-editor-unavailable-50x20" },
+};

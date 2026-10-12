@@ -1,0 +1,36 @@
+{
+  "type": "response",
+  "id": "editor-open",
+  "ok": true,
+  "result": {
+    "request": {
+      "context": {
+        "repository": {
+          "provider": "github",
+          "workspace": "owned",
+          "repo": "editor"
+        },
+        "rootId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "token": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+    },
+    "editor": {
+      "context": {
+        "repository": {
+          "provider": "github",
+          "workspace": "owned",
+          "repo": "editor"
+        },
+        "rootId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "path": "--literal ü.txt",
+      "line": 7,
+      "mode": "terminal",
+      "launchId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "integration": "nvim",
+      "state": "running",
+      "exitCode": null,
+      "message": null
+    }
+  }
+}
