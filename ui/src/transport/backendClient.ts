@@ -27,6 +27,7 @@ import type {
   LocalReviewHistoryPage,
   LocalReviewHistoryParams,
   LocalReviewOutput,
+  LocalReviewProfilesResult,
   LocalReviewQueryParams,
   LocalReviewStartParams,
   LocalReviewThreads,
@@ -116,6 +117,8 @@ export type ChangedFileStatus =
   | "untracked";
 
 export interface ChangedFile {
+  localLayer?: "committed" | "staged" | "unstaged";
+  binary?: boolean;
   path: string;
   status: ChangedFileStatus;
   additions: number;
@@ -131,6 +134,7 @@ export interface FindingAnchor {
 }
 
 export interface FindingSummary {
+  candidateLayers?: Array<"committed" | "staged" | "unstaged">;
   id: string;
   title: string;
   severity: "info" | "low" | "medium" | "high" | "critical";
@@ -1287,6 +1291,32 @@ export class BackendClient {
         new Bun.CryptoHasher("sha256").update(result.text).digest("hex") !== result.contentSha256)
     )
       throw new Error("Invalid local evidence diff page.");
+    return result;
+  }
+
+  async localReviewProfiles(params: LocalLookupParams): Promise<LocalReviewProfilesResult> {
+    const result = await this.localRequest<LocalReviewProfilesResult>(
+      "local.review.profiles",
+      params,
+      "LocalLookupParams",
+      "LocalReviewProfilesResult",
+    );
+    const catalog = result.catalog;
+    if (
+      catalog.target.kind !== "local" ||
+      catalog.target.localSnapshotSha256 !== params.snapshot.snapshotId ||
+      catalog.profiles.length > 100 ||
+      new Set(catalog.profiles).size !== catalog.profiles.length ||
+      catalog.profiles.some(
+        (name) =>
+          name.trim() !== name ||
+          /\p{Cc}/u.test(name) ||
+          [...name].length > 128 ||
+          Buffer.byteLength(name) > 512,
+      ) ||
+      (catalog.defaultProfile !== null && !catalog.profiles.includes(catalog.defaultProfile))
+    )
+      throw new Error("Invalid qualified local profile catalog.");
     return result;
   }
 

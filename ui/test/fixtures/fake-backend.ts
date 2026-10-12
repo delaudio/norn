@@ -2,6 +2,8 @@
 // Minimal fixture backend used to exercise the production subprocess transport
 // deterministically. Speaks the versioned stdio protocol on stdin/stdout.
 
+import options from "../../../protocol/fixtures/valid/response-local-options.json";
+
 const decoder = new TextDecoder();
 
 function write(message: unknown): void {
@@ -43,6 +45,18 @@ function handle(message: {
   }
   const params = message.params ?? {};
   switch (message.method) {
+    case "local.options":
+      setTimeout(
+        () =>
+          write({
+            type: "response",
+            id: message.id,
+            ok: true,
+            result: { ...options.result, request: params },
+          }),
+        31_000,
+      );
+      return;
     case "repository.status":
       write({
         type: "response",
@@ -145,5 +159,3 @@ while (true) {
     index = buffer.indexOf("\n");
   }
 }
-
-export {};

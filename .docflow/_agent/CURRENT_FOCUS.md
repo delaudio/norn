@@ -20,7 +20,19 @@ Git is authoritative. Durable history lives in WORKLOG and plan/done.
   source/base/layer controls and qualified snapshot files/diffs/findings/history/
   native start/cancel/profiles into the existing terminal Shell. Pinned images/
   Pierre, broader saved history/unsafe legacy fallbacks/full workflow proof remain
-  following required work before#358 is actually achieved. No implementation yet.
+  following required work before#358 is actually achieved. Implementation now
+  routes local full refs/layers/runs through source/base controls, files/diffs,
+  findings/history/conversations, native profile/start/cancel and clipboard.
+  Final local gates: root123+tooling/lint/protocol/Archgate17/audit/noGUI;
+  Rust745core/73stdio/6CLI/5onboarding/3binary with2existingignored,
+  noDefault allTargets/strict allFeatures allTargets Clippy/fmt; UI219tests/
+  1346assertions/147 native frames. Includes a production subprocess response
+  after31s, owned capture cancellation/foreign roots/configured GH/BB/base/layers,
+  layer ambiguity, previous-thread selection and pre-response/foreign events.
+  Native9 owned stdio scenarios passed, including actual profile/policy source.
+  Doctor65 reports9 renderer false positives on supported OpenTUI
+  TextBufferOptions.truncate; no source suppression or renderer behavior change.
+  Preparing implementation commit/PR; exact-head CI/actual squash still required.
 - Fresh GitHub timeline confirms maintainer closed#306at01:22:44Z without
   associated commit. Preserve it; previous open-state descriptions were stale.
   Its child workflows and cutover proof remain required. #358/#294 still open.

@@ -23,6 +23,7 @@ import {
   FakePublicationTransport,
   publicationFixtureScope,
 } from "../src/transport/fakePublicationTransport";
+import { LocalTransport } from "../test/fixtures/local-backend";
 // Renders every terminal component/scene with the real OpenTUI renderer and
 // serializes bounded frame fixtures (cell spans, colors, attributes) for the
 // Storybook preview and the golden-frame visual lane.
@@ -952,7 +953,56 @@ async function profileScene(kind: "catalog" | "base" | "error" | "loading") {
   return { client, store };
 }
 
+async function localComparisonScene(
+  kind: "source" | "base" | "layers" | "loading" | "error" | "profile",
+) {
+  const transport = new LocalTransport();
+  const { client, store, ready } = readyStore(transport);
+  await ready;
+  if (kind === "profile") {
+    await store.openReviewProfiles(client);
+    return { client, store };
+  }
+  const request = transport.request.bind(transport);
+  if (kind === "loading" || kind === "error")
+    transport.request = async (method, params) => {
+      if (method === "local.options") {
+        if (kind === "error")
+          throw new Error(
+            "The local source could not be verified. Refresh or select another source.",
+          );
+        return new Promise(() => {});
+      }
+      return request(method, params);
+    };
+  if (kind === "loading") {
+    void store.openLocalComparison(client);
+    return { client, store };
+  }
+  await store.openLocalComparison(client);
+  if (kind !== "source") store.cycleLocalField();
+  if (kind === "layers") {
+    store.cycleLocalField();
+    store.toggleLocalLayer();
+  }
+  return { client, store };
+}
+
 const scenes: Scene[] = [
+  ...(["source", "base", "layers", "loading", "error", "profile"] as const).flatMap((kind) => [
+    {
+      id: `shell-local-${kind}-120x30`,
+      cols: 120,
+      rows: 30,
+      build: () => localComparisonScene(kind),
+    },
+    {
+      id: `shell-local-${kind}-50x18`,
+      cols: 50,
+      rows: 18,
+      build: () => localComparisonScene(kind),
+    },
+  ]),
   ...(["catalog", "base", "error", "loading"] as const).flatMap((kind) => [
     { id: `shell-profiles-${kind}-120x30`, cols: 120, rows: 30, build: () => profileScene(kind) },
     { id: `shell-profiles-${kind}-50x18`, cols: 50, rows: 18, build: () => profileScene(kind) },

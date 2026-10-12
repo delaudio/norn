@@ -15,6 +15,7 @@ import {
   useSyncExternalStore,
 } from "react";
 import type { BackendClient } from "../../transport/backendClient";
+import { localFileKey } from "../../transport/localEvidence";
 import { DataStore } from "../dataStore";
 import { DiffScrollPositions } from "../diffScrollPositions";
 import { DraftStagingStore } from "../draftStagingStore";
@@ -39,6 +40,7 @@ import { DataPanel } from "./DataPanel";
 import { DraftPanel } from "./DraftPanel";
 import { DraftStagingPanel } from "./DraftStagingPanel";
 import { FixPanel } from "./FixPanel";
+import { LocalComparisonPanel } from "./LocalComparisonPanel";
 import { ProviderPanel } from "./ProviderPanel";
 import { PublicationPanel } from "./PublicationPanel";
 import { ReferencePanel } from "./ReferencePanel";
@@ -90,6 +92,25 @@ function useShellInput(
     if (key.ctrl || key.meta || key.super || key.option) {
       return;
     }
+    if (store.getSnapshot().localForm) {
+      key.preventDefault();
+      if (key.name === "escape") store.dismissLocalComparison();
+      else if (key.name === "return") void store.applyLocalComparison(client);
+      else if (key.name === "tab") store.cycleLocalField();
+      else if (key.name === "space") store.toggleLocalLayer();
+      else if (key.name === "r") void store.refreshLocalOptions(client);
+      else if (key.name === "down" || key.name === "j") void store.moveLocalComparison(1);
+      else if (key.name === "up" || key.name === "k") void store.moveLocalComparison(-1);
+      return;
+    }
+    if (store.getSnapshot().findingLayers.length) {
+      key.preventDefault();
+      if (key.name === "escape") store.dismissFindingLayers();
+      else if (key.name === "return") store.chooseFindingLayer();
+      else if (key.name === "down" || key.name === "j") store.moveFindingLayer(1);
+      else if (key.name === "up" || key.name === "k") store.moveFindingLayer(-1);
+      return;
+    }
     if (store.getSnapshot().profileOpen) {
       key.preventDefault();
       if (key.name === "escape") store.dismissReviewProfiles();
@@ -133,6 +154,8 @@ function useShellInput(
       store.toggleProvider();
     } else if (key.name === "f3") {
       void store.toggleProviderPreview();
+    } else if (key.name === "f4") {
+      void store.openLocalComparison(client);
     } else if (key.name === "f6") {
       void store.openReviewProfiles(client);
     } else if (key.name === "f5") {
@@ -188,6 +211,8 @@ function useShellInput(
       void store.previewFix(client);
     } else if (key.name === "r") {
       store.beginReply();
+    } else if (key.sequence === "B") {
+      void store.cycleLocalBase(client);
     } else if (key.name === "b") {
       void store.openBrowser(client);
     } else if (key.name === "y") {
@@ -219,7 +244,11 @@ function useShellInput(
       store.getSnapshot().findingStage !== null
     )
       return;
-    if (store.getSnapshot().profileOpen) {
+    if (
+      store.getSnapshot().localForm ||
+      store.getSnapshot().findingLayers.length ||
+      store.getSnapshot().profileOpen
+    ) {
       event.preventDefault();
       return;
     }
@@ -880,7 +909,7 @@ function pickerOptions(state: ShellSnapshot): ListOption[] {
 function fileOptions(state: ShellSnapshot): ListOption[] {
   const viewed = new Set(state.viewedFiles);
   return state.files.map((file) => ({
-    name: `${viewed.has(file.path) ? "✓ " : ""}${file.status[0]?.toUpperCase() ?? "?"} ${file.path}`,
+    name: `${viewed.has(localFileKey(file)) ? "✓ " : ""}${file.status[0]?.toUpperCase() ?? "?"} ${file.localLayer ? `${file.localLayer} · ` : ""}${file.path}`,
     description: `+${file.additions} -${file.deletions}`,
   }));
 }
@@ -937,6 +966,38 @@ function WorkspaceStatus({ state }: { state: ShellSnapshot }) {
   return (
     <>
       <ProviderEvidenceStatus state={state} />
+      {state.localInfo ? (
+        <box flexDirection="column" flexShrink={0}>
+          <text
+            fg={theme.secondary}
+            height={1}
+            wrapMode="none"
+            truncate
+          >{`${state.localInfo.snapshot.repository.provider} ${state.localInfo.snapshot.repository.workspace}/${state.localInfo.snapshot.repository.repo} · ${state.localInfo.branch}`}</text>
+          <text
+            fg={theme.muted}
+            height={1}
+            wrapMode="none"
+            truncate
+          >{`${state.localInfo.comparison.mode === "branch" ? state.localInfo.comparison.baseRef : "Working tree"} · ${state.localInfo.comparison.layers.join(" + ")}`}</text>
+          <text
+            fg={theme.muted}
+            height={1}
+            wrapMode="none"
+            truncate
+          >{`head ${state.localInfo.headSha?.slice(0, 12) ?? "unborn"} · base ${state.localInfo.baseSha.slice(0, 12)} · F4 source · B base`}</text>
+          {[...new Set(state.localInfo.warnings)].slice(0, 2).map((warning) => (
+            <text key={warning} fg={theme.muted} height={1} wrapMode="none" truncate>
+              {warning}
+            </text>
+          ))}
+          {state.localInfo.warnings.length > 2 || state.localInfo.warningsTruncated ? (
+            <text fg={theme.muted} height={1} wrapMode="none">
+              Additional capture warnings are available in review context.
+            </text>
+          ) : null}
+        </box>
+      ) : null}
       {state.error ? (
         <text fg={theme.error} height={1} wrapMode="none">
           Error: {state.error}
@@ -1153,6 +1214,8 @@ export function Shell({ store, client, quit }: ShellProps) {
     entry?.repo,
     entry?.prId,
     entry?.runId,
+    state.localInfo?.snapshot,
+    state.files[state.selectedFile]?.localLayer,
     state.diff?.path,
     contentHash,
     state.diffMode,
@@ -1197,6 +1260,22 @@ export function Shell({ store, client, quit }: ShellProps) {
               selectedIndex: state.selectedFinding,
             };
 
+  if (state.localForm)
+    return <LocalComparisonPanel form={state.localForm} width={width} height={height} />;
+  if (state.findingLayers.length)
+    return (
+      <box width={width} height={height} border padding={1} flexDirection="column">
+        <text>SELECT FINDING LAYER</text>
+        <text>This path occurs in several captured layers.</text>
+        {state.findingLayers.map((layer, index) => (
+          <text key={layer}>
+            {index === state.findingLayerCursor ? "› " : "  "}
+            {layer}
+          </text>
+        ))}
+        <text>↑/↓ choose · Enter open · Esc cancel</text>
+      </box>
+    );
   if (state.profileOpen) return <ReviewProfilesPanel state={state} width={width} height={height} />;
 
   if (state.providerOpen)
@@ -1427,8 +1506,8 @@ export function Shell({ store, client, quit }: ShellProps) {
           {state.fixPreview
             ? "y approve · Esc/n dismiss · ↑/↓ scroll effects"
             : wide
-              ? "F2 PRs · F6 profile · q quit · Tab pane · j/k move · i stage finding · d drafts · w refs · m settings · n prompt/viewed · s split · e expand · a fix · r reply · t threads · v chat · f filter · g group · x cancel · u sync · o conflicts · c commit · p push"
-              : "F2 PRs  F6 profile  j/k  ←/→  s  e  Tab  m settings  n prompt  i stage  d drafts  w refs  q"}
+              ? "F2 PRs · F4 local · F6 profile · q quit · Tab pane · j/k move · i stage finding · d drafts · w refs · m settings · n prompt/viewed · s split · e expand · a fix · r reply · t threads · v chat · f filter · g group · x cancel · u sync · o conflicts · c commit · p push"
+              : "F2 PRs  F4 local  F6 profile  j/k  ←/→  s  e  Tab  m settings  n prompt  i stage  d drafts  w refs  q"}
         </text>
       </box>
     </box>

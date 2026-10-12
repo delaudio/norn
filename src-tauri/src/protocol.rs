@@ -391,6 +391,11 @@ pub enum Request {
     ReviewFiles { id: String, params: TargetParams },
     #[serde(rename = "review.findings")]
     ReviewFindings { id: String, params: TargetParams },
+    #[serde(rename = "local.review.profiles")]
+    LocalReviewProfiles {
+        id: String,
+        params: crate::services::local_snapshot::LookupParams,
+    },
     #[serde(rename = "local.review.start")]
     LocalReviewStart {
         id: String,
@@ -572,6 +577,7 @@ impl Request {
             | Self::ProviderPrDetail { id, .. }
             | Self::ProviderUser { id, .. }
             | Self::WorkspaceScopes { id, .. }
+            | Self::LocalReviewProfiles { id, .. }
             | Self::LocalReviewStart { id, .. }
             | Self::LocalReviewHistory { id, .. }
             | Self::LocalReviewFindings { id, .. }
@@ -649,6 +655,7 @@ impl Request {
             Self::ProviderPrDetail { .. } => "provider.pr.detail",
             Self::ProviderUser { .. } => "provider.user",
             Self::WorkspaceScopes { .. } => "workspace.scopes",
+            Self::LocalReviewProfiles { .. } => "local.review.profiles",
             Self::LocalReviewStart { .. } => "local.review.start",
             Self::LocalReviewHistory { .. } => "local.review.history",
             Self::LocalReviewFindings { .. } => "local.review.findings",
@@ -920,6 +927,9 @@ impl Request {
                 if params.message.trim().is_empty() {
                     return Err(invalid_request("`review.reply` message must not be empty"));
                 }
+            }
+            Self::LocalReviewProfiles { params, .. } => {
+                params.snapshot.validate().map_err(invalid_request)?
             }
             Self::LocalReviewStart { params, .. } => params.validate().map_err(invalid_request)?,
             Self::LocalReviewHistory { params, .. } => {
@@ -1311,6 +1321,8 @@ mod tests {
             "valid/response-provider-snapshot-files.json",
             "valid/response-provider-snapshot-diff.json",
             "valid/request-provider-prs.json",
+            "valid/request-local-review-profiles.json",
+            "valid/response-local-review-profiles.json",
             "valid/request-local-review-start.json",
             "valid/response-local-review-start.json",
             "valid/request-local-review-history.json",
@@ -1388,6 +1400,7 @@ mod tests {
             "invalid/request-provider-snapshot-image-missing-hash.json",
             "invalid/request-provider-pr-unsafe-owner.json",
             "invalid/request-provider-pr-local-id.json",
+            "invalid/request-local-review-profile-path.json",
             "invalid/request-local-review-path.json",
             "invalid/request-local-review-run.json",
             "invalid/request-local-review-page.json",

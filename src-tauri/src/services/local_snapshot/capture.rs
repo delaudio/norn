@@ -240,6 +240,25 @@ impl Manager {
         self.check()?;
         Ok(result)
     }
+    /// Live policy reads require the same actual source/root/provider, while
+    /// saved history/diff reads deliberately remain independent of the checkout.
+    pub(crate) fn live_data(&self, snapshot: &SnapshotRef) -> Result<Arc<Data>, String> {
+        self.check()?;
+        let data = self.get(snapshot)?;
+        let control =
+            GitRunControl::new(TIMEOUT, self.options_cancel.clone(), "Local review policy");
+        let live = resolve_source(&snapshot.source, &self.startup_root, &control)?;
+        if live.root != data.root
+            || live.root_id != snapshot.root_id
+            || live.repository != snapshot.repository
+        {
+            return Err(
+                "The local policy source no longer matches its captured repository.".into(),
+            );
+        }
+        self.check()?;
+        Ok(data)
+    }
     pub(crate) fn cancel(&self, request: CancelParams) -> Result<bool, String> {
         request.validate()?;
         self.check()?;

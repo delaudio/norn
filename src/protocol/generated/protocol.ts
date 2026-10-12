@@ -442,6 +442,12 @@ export type Request =
       id: RequestId;
       method: "local.review.threads";
       params: LocalReviewQueryParams;
+    }
+  | {
+      type: "request";
+      id: RequestId;
+      method: "local.review.profiles";
+      params: LocalLookupParams;
     };
 export type RequestId = string;
 /**
@@ -1120,7 +1126,8 @@ export interface ResponseOk {
     | LocalReviewHistoryPage
     | LocalReviewFindingsPage
     | LocalReviewOutput
-    | LocalReviewThreads;
+    | LocalReviewThreads
+    | LocalReviewProfilesResult;
 }
 export interface DiffFileResult {
   target: TargetIdentity;
@@ -2068,6 +2075,10 @@ export interface LocalReviewMessage {
   role: "user" | "assistant";
   content: string;
   truncated: boolean;
+}
+export interface LocalReviewProfilesResult {
+  request: LocalLookupParams;
+  catalog: ReviewProfileCatalog;
 }
 export interface ResponseError {
   type: "response";

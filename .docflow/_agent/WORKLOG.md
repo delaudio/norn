@@ -693,3 +693,33 @@ Plan 0053 completion prepared after implementation `e4264db`, effective only on 
   native lifecycle/profiles and owned wide/narrow input/frames. Following pinned
   preview/Pierre/saved history/unsafe fallback/full workflow proof is still required.
   No new0066implementation or gate success claimed yet; no Norn review/delegation.
+
+## 2026-10-12 — plan0066 local controls implementation prepared
+
+- Existing Shell now explicitly captures backend Current/configured sources,
+  listed working/branch bases and independent layers; keeps Rust full refs/runs
+  authoritative for files/diffs/findings/history/conversations/profile/start/cancel.
+  F4/source form and B/base cycling never launch an agent; pasted actions are
+  ignored. Layer ambiguity asks before opening a patch. Qualified clipboard and
+  source/nonce/generation/operation fences retain selected evidence/run identity.
+- Native local.review.profiles uses live qualified source/root/provider proof and
+  shared policy/default/errors. Local capture/options/recheck/profile transport
+  deadlines45s exceed native Git30s; actual fixture subprocess31s response passed.
+  Captured pins/owner/warnings/layer meanings/local unpublished context reach
+  the shared native payload without untracked/excluded content.
+- Local gates:745core/73stdio/6CLI/5onboarding/3binary+2existingignored;
+  corealltargets/strict allfeaturesalltargetsClippy/fmt/noGUI; root123+tooling/
+  typecheck/lint/protocol/Archgate17/audit; UI219/1346/147 native frames.
+  Nine owned native scenarios and eight local Shell/input cases plus four
+  aggregate/client cases and the slow production transport check passed.
+- Doctor65 has9 no-unknown-property warnings solely on truncate, a supported
+  OpenTUI TextBufferOptions property (local installed.d.ts and native frames).
+  This custom renderer has no DOM property problem; no diagnostic suppression.
+  Existing frame changes are only F4/footer; twelve new local/profile/error/loading
+  frames added. Failures were retained and corrected: TS layer tuple/narrowing,
+  nullable HEAD formatting, test Escape decoding delay, fixture diff routing and
+  qualified snapshot-derived ID. No gate failure silently counted as success.
+- #358/#294 remain open; maintainer-closed#306 preserved. Pinned image/Pierre,
+  saved snapshots/global history/legacy fallback/full native UI+Rust workflow proof
+  remain required. ADR0020 Accepted; no Norn review, delegation, private data,
+  provider write, actual agent, release, or user stash mutation. PR/merge pending.
