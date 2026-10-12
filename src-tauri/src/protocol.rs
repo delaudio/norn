@@ -421,6 +421,36 @@ pub enum Request {
         id: String,
         params: crate::services::local_reviews::QueryParams,
     },
+    #[serde(rename = "repository.explore.info")]
+    RepositoryExploreInfo {
+        id: String,
+        params: crate::services::repository_reader::InfoParams,
+    },
+    #[serde(rename = "repository.explore.files")]
+    RepositoryExploreFiles {
+        id: String,
+        params: crate::services::repository_reader::FilesParams,
+    },
+    #[serde(rename = "repository.explore.content")]
+    RepositoryExploreContent {
+        id: String,
+        params: crate::services::repository_reader::ContentParams,
+    },
+    #[serde(rename = "repository.explore.diff")]
+    RepositoryExploreDiff {
+        id: String,
+        params: crate::services::repository_reader::DiffParams,
+    },
+    #[serde(rename = "repository.explore.blame")]
+    RepositoryExploreBlame {
+        id: String,
+        params: crate::services::repository_reader::BlameParams,
+    },
+    #[serde(rename = "repository.explore.find")]
+    RepositoryExploreFind {
+        id: String,
+        params: crate::services::repository_reader::FindParams,
+    },
     #[serde(rename = "local.options")]
     LocalOptions {
         id: String,
@@ -598,6 +628,12 @@ impl Request {
             | Self::LocalReviewFindings { id, .. }
             | Self::LocalReviewOutput { id, .. }
             | Self::LocalReviewThreads { id, .. }
+            | Self::RepositoryExploreInfo { id, .. }
+            | Self::RepositoryExploreFiles { id, .. }
+            | Self::RepositoryExploreContent { id, .. }
+            | Self::RepositoryExploreDiff { id, .. }
+            | Self::RepositoryExploreBlame { id, .. }
+            | Self::RepositoryExploreFind { id, .. }
             | Self::LocalOptions { id, .. }
             | Self::LocalSnapshot { id, .. }
             | Self::LocalSnapshotCancel { id, .. }
@@ -679,6 +715,12 @@ impl Request {
             Self::LocalReviewFindings { .. } => "local.review.findings",
             Self::LocalReviewOutput { .. } => "local.review.output",
             Self::LocalReviewThreads { .. } => "local.review.threads",
+            Self::RepositoryExploreInfo { .. } => "repository.explore.info",
+            Self::RepositoryExploreFiles { .. } => "repository.explore.files",
+            Self::RepositoryExploreContent { .. } => "repository.explore.content",
+            Self::RepositoryExploreDiff { .. } => "repository.explore.diff",
+            Self::RepositoryExploreBlame { .. } => "repository.explore.blame",
+            Self::RepositoryExploreFind { .. } => "repository.explore.find",
             Self::LocalOptions { .. } => "local.options",
             Self::LocalSnapshot { .. } => "local.snapshot",
             Self::LocalSnapshotCancel { .. } => "local.snapshot.cancel",
@@ -961,6 +1003,24 @@ impl Request {
             }
             Self::LocalReviewOutput { params, .. } => params.validate().map_err(invalid_request)?,
             Self::LocalReviewThreads { params, .. } => {
+                params.validate().map_err(invalid_request)?
+            }
+            Self::RepositoryExploreInfo { params, .. } => {
+                params.validate().map_err(invalid_request)?
+            }
+            Self::RepositoryExploreFiles { params, .. } => {
+                params.validate().map_err(invalid_request)?
+            }
+            Self::RepositoryExploreContent { params, .. } => {
+                params.validate().map_err(invalid_request)?
+            }
+            Self::RepositoryExploreDiff { params, .. } => {
+                params.validate().map_err(invalid_request)?
+            }
+            Self::RepositoryExploreBlame { params, .. } => {
+                params.validate().map_err(invalid_request)?
+            }
+            Self::RepositoryExploreFind { params, .. } => {
                 params.validate().map_err(invalid_request)?
             }
             Self::LocalOptions { params, .. } => params.validate().map_err(invalid_request)?,
@@ -1333,6 +1393,18 @@ mod tests {
     fn valid_fixtures_decode() {
         for fixture in [
             "valid/hello.json",
+            "valid/request-repository-explore-info.json",
+            "valid/response-repository-explore-info.json",
+            "valid/request-repository-explore-files.json",
+            "valid/response-repository-explore-files.json",
+            "valid/request-repository-explore-content.json",
+            "valid/response-repository-explore-content.json",
+            "valid/request-repository-explore-diff.json",
+            "valid/response-repository-explore-diff.json",
+            "valid/request-repository-explore-blame.json",
+            "valid/response-repository-explore-blame.json",
+            "valid/request-repository-explore-find.json",
+            "valid/response-repository-explore-find.json",
             "valid/ready.json",
             "valid/request-diff-file.json",
             "valid/request-review-start.json",
@@ -1417,6 +1489,11 @@ mod tests {
     fn invalid_fixtures_are_rejected() {
         for fixture in [
             "invalid/unknown-method.json",
+            "invalid/request-repository-explore-unsafe-path.json",
+            "invalid/request-repository-explore-unknown-root.json",
+            "invalid/request-repository-explore-oversize-page.json",
+            "invalid/request-repository-explore-unknown-search.json",
+            "invalid/request-repository-explore-unpinned.json",
             "invalid/error-code.json",
             "invalid/missing-id.json",
             "invalid/unknown-field.json",

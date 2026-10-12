@@ -110,6 +110,8 @@ struct Backend {
     publication: Arc<crate::services::draft_publication::Manager>,
     local_snapshots: Arc<crate::services::local_snapshot::Manager>,
     active_local: Arc<AtomicUsize>,
+    repository_reader: Arc<crate::services::repository_reader::Manager>,
+    active_repository_reads: Arc<AtomicUsize>,
     provider_approval: Arc<crate::services::provider_approval::Manager>,
     active_approval: Arc<AtomicUsize>,
     browser: Arc<Mutex<Option<WebDiffServer>>>,
@@ -191,6 +193,8 @@ pub fn run() -> Result<(), i32> {
                 .unwrap_or_else(|| std::env::current_dir().unwrap_or_default()),
         )),
         active_local: Arc::new(AtomicUsize::new(0)),
+        repository_reader: Arc::new(crate::services::repository_reader::Manager::new()),
+        active_repository_reads: Arc::new(AtomicUsize::new(0)),
         provider_approval: Arc::new(crate::services::provider_approval::Manager::new(
             shutdown.clone(),
         )),
@@ -225,6 +229,7 @@ pub fn run() -> Result<(), i32> {
             "settings".to_string(),
             "auth".to_string(),
             "repository".to_string(),
+            "repository-explorer-reads".to_string(),
             "diff".to_string(),
             "review".to_string(),
             "review-profile-catalog".to_string(),
@@ -246,6 +251,7 @@ pub fn run() -> Result<(), i32> {
         }
     }
     backend.local_snapshots.stop();
+    backend.repository_reader.stop();
     // Stop spawning new children, terminate the ones this backend owns, and let
     // the writer flush and exit.
     shutting_down().store(true, Ordering::SeqCst);
@@ -503,6 +509,74 @@ fn dispatch(request: Request, backend: &Backend) -> bool {
                     );
                 }
             }
+            false
+        }
+        Request::RepositoryExploreInfo { .. }
+        | Request::RepositoryExploreFiles { .. }
+        | Request::RepositoryExploreContent { .. }
+        | Request::RepositoryExploreDiff { .. }
+        | Request::RepositoryExploreBlame { .. }
+        | Request::RepositoryExploreFind { .. } => {
+            let active = backend.active_repository_reads.clone();
+            if active
+                .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |count| {
+                    (count < 2).then_some(count + 1)
+                })
+                .is_err()
+            {
+                backend.fail(
+                    &id,
+                    ProtocolError::new(
+                        ProtocolErrorCode::Conflict,
+                        "Two repository preview requests are already running.",
+                    ),
+                );
+                return false;
+            }
+            let manager = backend.repository_reader.clone();
+            let shutdown = backend.shutdown.clone();
+            let control = backend.control.clone();
+            thread::spawn(move || {
+                let result = match request {
+                    Request::RepositoryExploreInfo { params, .. } => {
+                        manager.info(params).map(|value| json!(value))
+                    }
+                    Request::RepositoryExploreFiles { params, .. } => {
+                        manager.files(params).map(|value| json!(value))
+                    }
+                    Request::RepositoryExploreContent { params, .. } => {
+                        manager.content(params).map(|value| json!(value))
+                    }
+                    Request::RepositoryExploreDiff { params, .. } => {
+                        manager.diff(params).map(|value| json!(value))
+                    }
+                    Request::RepositoryExploreBlame { params, .. } => {
+                        manager.blame(params).map(|value| json!(value))
+                    }
+                    Request::RepositoryExploreFind { params, .. } => {
+                        manager.find(params).map(|value| json!(value))
+                    }
+                    _ => unreachable!(),
+                };
+                if !shutdown.load(Ordering::Acquire) {
+                    let response = match result {
+                        Ok(value) => Response {
+                            id,
+                            ok: true,
+                            result: Some(value),
+                            error: None,
+                        },
+                        Err(message) => Response {
+                            id,
+                            ok: false,
+                            result: None,
+                            error: Some(ProtocolError::new(ProtocolErrorCode::Conflict, message)),
+                        },
+                    };
+                    let _ = control.send(ServerMessage::Response(response));
+                }
+                active.fetch_sub(1, Ordering::SeqCst);
+            });
             false
         }
         Request::LocalOptions { .. }

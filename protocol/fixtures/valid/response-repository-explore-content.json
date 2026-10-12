@@ -1,0 +1,26 @@
+{
+  "type": "response",
+  "id": "explore-content",
+  "ok": true,
+  "result": {
+    "request": {
+      "context": {
+        "repository": {
+          "provider": "github",
+          "workspace": "owned",
+          "repo": "same"
+        },
+        "rootId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "path": "--literal \u00fc.txt",
+      "offset": 0,
+      "maxBytes": 32768,
+      "contentSha256": null
+    },
+    "state": "text",
+    "size": 6,
+    "contentSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "text": "owned\n",
+    "nextOffset": null
+  }
+}

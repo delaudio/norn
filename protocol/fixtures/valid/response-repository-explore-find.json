@@ -1,0 +1,33 @@
+{
+  "type": "response",
+  "id": "explore-find",
+  "ok": true,
+  "result": {
+    "request": {
+      "context": {
+        "repository": {
+          "provider": "github",
+          "workspace": "owned",
+          "repo": "same"
+        },
+        "rootId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "path": "--literal \u00fc.txt",
+      "source": "content",
+      "query": "owned",
+      "offset": 0,
+      "limit": 32,
+      "contentSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    },
+    "total": 1,
+    "matches": [
+      {
+        "startUtf16": 0,
+        "endUtf16": 5,
+        "line": 1,
+        "columnUtf16": 0
+      }
+    ],
+    "nextOffset": null
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "type": "request",
+  "id": "explore-content",
+  "method": "repository.explore.content",
+  "params": {
+    "context": {
+      "repository": {
+        "provider": "github",
+        "workspace": "owned",
+        "repo": "same"
+      },
+      "rootId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "path": "--literal \u00fc.txt",
+    "offset": 1,
+    "maxBytes": 32768,
+    "contentSha256": null
+  }
+}

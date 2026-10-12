@@ -1,0 +1,32 @@
+{
+  "type": "response",
+  "id": "explore-files",
+  "ok": true,
+  "result": {
+    "request": {
+      "context": {
+        "repository": {
+          "provider": "github",
+          "workspace": "owned",
+          "repo": "same"
+        },
+        "rootId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "offset": 0,
+      "limit": 32,
+      "query": "",
+      "changedOnly": false,
+      "version": null
+    },
+    "version": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "total": 1,
+    "files": [
+      {
+        "path": "--literal \u00fc.txt",
+        "oldPath": null,
+        "status": "modified"
+      }
+    ],
+    "nextOffset": null
+  }
+}

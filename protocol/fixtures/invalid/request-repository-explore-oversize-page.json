@@ -1,0 +1,20 @@
+{
+  "type": "request",
+  "id": "bad-explore",
+  "method": "repository.explore.files",
+  "params": {
+    "context": {
+      "repository": {
+        "provider": "github",
+        "workspace": "owned",
+        "repo": "same"
+      },
+      "rootId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "offset": 0,
+    "limit": 33,
+    "query": "",
+    "changedOnly": false,
+    "version": null
+  }
+}

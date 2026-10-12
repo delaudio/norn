@@ -175,7 +175,7 @@ const open = async () => {
       }
     }
   };
-  return { store, renderer, tick, until, stop };
+  return { client, store, renderer, tick, until, stop };
 };
 try {
   process.chdir(repo);
@@ -196,6 +196,70 @@ try {
   assert.equal(JSON.parse(cliReview.stdout.toString()).status, "succeeded");
   assert((await readFile(join(agent, "payload"), "utf8")).includes("same.txt"));
   const first = await open();
+  // Production readonly explorer IPC runs in all three native OS lanes.
+  const explorer = await first.client.repositoryExploreInfo({
+    repository: { provider: "github", workspace: "owned", repo: "workflow" },
+  });
+  const inventory = await first.client.repositoryExploreFiles({
+    context: explorer.context,
+    offset: 0,
+    limit: 32,
+    query: "",
+    changedOnly: false,
+    version: null,
+  });
+  assert(
+    inventory.files.some(
+      (file) => file.path === "private-untracked.txt" && file.status === "untracked",
+    ),
+  );
+  const live = await first.client.repositoryExploreContent({
+    context: explorer.context,
+    path: "same.txt",
+    offset: 0,
+    maxBytes: 32768,
+    contentSha256: null,
+  });
+  assert.equal(live.state, "text");
+  assert.equal(live.text, "unstaged\n");
+  assert.equal(live.contentSha256, new Bun.CryptoHasher("sha256").update(live.text).digest("hex"));
+  const found = await first.client.repositoryExploreFind({
+    context: explorer.context,
+    path: "same.txt",
+    source: "content",
+    query: "staged",
+    offset: 0,
+    limit: 32,
+    contentSha256: live.contentSha256!,
+  });
+  assert.equal(found.total, 1);
+  assert.equal(found.matches[0]?.startUtf16, 2);
+  const blame = await first.client.repositoryExploreBlame({
+    context: explorer.context,
+    path: "same.txt",
+    offset: 0,
+    limit: 32,
+    contentSha256: live.contentSha256!,
+  });
+  assert.equal(blame.totalLines, 1);
+  assert.equal(blame.lines[0]?.line, 1);
+  const untracked = await first.client.repositoryExploreDiff({
+    context: explorer.context,
+    path: "private-untracked.txt",
+    offset: 0,
+    maxBytes: 32768,
+    contentSha256: null,
+  });
+  assert(untracked.text.includes("+EXCLUDED_OWNED_UNTRACKED_MARKER"));
+  const raster = await first.client.repositoryExploreContent({
+    context: explorer.context,
+    path: "picture.png",
+    offset: 0,
+    maxBytes: 32768,
+    contentSha256: null,
+  });
+  assert.equal(raster.state, "binary");
+  assert.equal(raster.text, "");
   try {
     await first.until(() => first.store.getSnapshot().localInfo !== null, "Current capture");
     assert.equal(first.store.getSnapshot().localInfo!.snapshot.repository.repo, "workflow");

@@ -800,3 +800,68 @@ Plan 0053 completion prepared after implementation `e4264db`, effective only on 
   processes are handled explicitly. Unix behavior unchanged. Native Windows CI
   remains required; observed-tree cancellation does not claim JobObject-level
   future descendant/race guarantees (retained hardening).
+
+## 2026-10-12 — verified378merge/358closure, plan0068claim
+
+- PR378 actualsquash8cdd00768eba9b162dd08d6b15717188e77dd455 at10:39:13Z,
+  finalb906071101ba65347b3105358a7fb992a215bb97. All five CI38234834238
+  jobs SUCCESS; actualLinux/macOS/Windowsnativeworkflow andUIpassed.
+  Generalverifyjob repeated on samehead after12m slowAzureUbuntuHTTPdownloads;
+  preserved fourpassjobs, no bypass. Allfrontend/Rust/architecture gatespassed.
+  Normalcancel completed beforeforceattempt409; retryonlyverify114767629843.
+- Rootmain ff synced before nextcheckout/claim. Plan0067receipt effective;
+  #358closed10:40:10Z afterfreshactualacceptancescopeaudit and fullproofupdate.
+  Its broader localreply/fix/globalhistory are retainedfollowups, not added to
+  actual358scope. Maintainer305/306/357closures preserved; ADR0020Accepted.
+- Native Windows API cancellation passes actualowned gate; secureopenedhandle
+  images/cancel/savedrunrestart verified onWindows. Observeddescendant cancellation
+  is not a JobObject race guarantee. Shared globalhardening remains307.
+- Plan0068claimed beforecode on actual378: boundednative readonlyrepository
+  extraction/qualifiedIPC, then native tree/find/editor follow-up for359. Draft
+  only while378CI; no nextsource before actualmerge. Singlewriter, no Nornreview,
+  delegation, private data, actualagent, providerwrite, release or userstashchange.
+
+
+## 2026-10-12 — plan0068 native repository reader implementation gates
+
+- Extract shipped readonly DTO/parsers and native Git/filesystem readers behind
+  full provider/workspace/repository/root identity. Desktop readonly commands
+  delegate to bounded native services, rejecting ambiguous legacy provider
+  selection while preserving their configured-path fallback. Branch/worktree
+  and external-editor adapters remain for their retained follow-ups.
+- Six strict repository.explore methods + generated/shared contract fixtures,
+  two bounded workers, 20s aggregate deadlines, EOF/shutdown cancellation,
+  secure shared file handles and production typed semantic client validation.
+  Inventory continuation pins raw tracked paths/status/index/HEAD and filters;
+  content/diff continuation pins complete UTF8 bytes. Binary/large/missing/
+  deleted/unborn states are explicit. Blame retains full bounded author/commit
+  text without the legacy delimiter ambiguity; find maps lowercase matching
+  back to original UTF16 positions without a full per-character map.
+- Owned10native tests cover state/rename/conflicts, literal/Unicode/control names,
+  symlink confinement/internal links, limits/unborn/binary, cancellation,
+  delimiter-containing messages,10k-line blame and provider/clone/version drift.
+  Fourclienttests + realstdio all-six-method read/stale/control/shutdown test.
+  Native workflow actual macOS PASS with all six methods including untracked
+  no-index and binary; own exacthead Linux/Windows CI remains required.
+- PASS local:763core+2existingignored,76stdio,6CLI,5onboarding,3binary;
+  root123+tooling/typecheck/lint/build,Archgate17,audit/noGUI;
+  UI232/1454,165unchangednativeframes,typecheck/Storybook; strictallfeatures
+  Clippy/fmt. Doctor100/noissues on changed transport files, no project install.
+- Initial owned test roots had macOS temp path aliases; fixtures now create
+  under the canonical temp directory, matching the service's canonical-root
+  authority. Stdio traversal test expected a correlated error although malformed
+  frames are dropped by the established decoder: corrected proof explicitly
+  rejects any such response and verifies the following valid control request.
+  Initial lint/import/control-regex errors fixed without suppression; allgates
+  green. No Norn review, private files, provider calls, credentials or realagents.
+- Prepared source/receipt are not actual completion. Plan0068 only becomes
+  shipped after own exact-final-head CI and actual squash to currentmain.
+  #359 stays open until tree/find/editor UI proof; ADR0020 stays Accepted.
+
+- Source commit `48271cfefd0beb9374dc71775fccf513f1846346` prepared; conditional plan0068 receipt effective only
+  after exact-final-head CI and actual verified squash. Next slice not claimed.
+
+- Automatic approval review rejected pre-merge git mv todo-to-done because it
+  could imply premature completion despite conditional wording. No move or
+  workaround performed. Safer flow: retain0068 in todo for the source PR, then
+  reconcile actual merge proof and move only after verified integration.
