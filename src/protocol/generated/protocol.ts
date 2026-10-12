@@ -568,6 +568,12 @@ export type Request =
       id: RequestId;
       method: "review.metrics.closed";
       params: EmptyResult;
+    }
+  | {
+      type: "request";
+      id: RequestId;
+      method: "review.metrics.effectiveness";
+      params: ReviewEffectivenessParams;
     };
 export type RequestId = string;
 /**
@@ -1350,6 +1356,13 @@ export interface ReviewJobsParams {
   limit?: number;
   offset?: number;
 }
+export interface ReviewEffectivenessParams {
+  provider?: "github" | "bitbucket";
+  workspace?: string | null;
+  repo?: string | null;
+  fromMs?: number | null;
+  toMs?: number | null;
+}
 export interface ResponseOk {
   type: "response";
   id: RequestId;
@@ -1420,7 +1433,8 @@ export interface ResponseOk {
     | RepositoryOperationApplied
     | RepositoryOperationStatus
     | ReviewJobsResult
-    | ClosedPrMetricsResult;
+    | ClosedPrMetricsResult
+    | ReviewEffectivenessResult;
 }
 export interface DiffFileResult {
   target: TargetIdentity;
@@ -2635,6 +2649,59 @@ export interface ClosedPrRiskSummary {
 export interface ClosedPrCount {
   key: string;
   count: number;
+}
+export interface ReviewEffectivenessResult {
+  report: ReviewEffectivenessReport;
+}
+export interface ReviewEffectivenessReport {
+  schemaVersion: string;
+  summary: ReviewEffectivenessSummary;
+  repositories: RepositoryReviewEffectiveness[];
+}
+export interface ReviewEffectivenessSummary {
+  reviewCount: number;
+  findingCount: number;
+  findingsBySeverity: ReviewMetricCount[];
+  findingsByCategory: ReviewMetricCount[];
+  feedback: ReviewFeedbackMetrics;
+  timeToFirstReview: ReviewLatencyMetrics;
+}
+export interface ReviewMetricCount {
+  key: string;
+  count: number;
+}
+export interface ReviewFeedbackMetrics {
+  eligibleFindings: number;
+  findingsWithFeedback: number;
+  findingsWithoutFeedback: number;
+  acceptedFindings: number;
+  falsePositiveFindings: number;
+  fixedFindings: number;
+  dismissedFindings: number;
+  reopenedFindings: number;
+  coverageRate: ReviewMetricRate;
+  acceptanceRate: ReviewMetricRate;
+  falsePositiveRate: ReviewMetricRate;
+  fixedRate: ReviewMetricRate;
+}
+export interface ReviewMetricRate {
+  numerator: number;
+  denominator: number;
+  basisPoints: number | null;
+}
+export interface ReviewLatencyMetrics {
+  sampleCount: number;
+  totalMs: number;
+  averageMs: number | null;
+  medianMs: number | null;
+  minimumMs: number | null;
+  maximumMs: number | null;
+}
+export interface RepositoryReviewEffectiveness {
+  provider: "github" | "bitbucket";
+  workspace: string;
+  repo: string;
+  summary: ReviewEffectivenessSummary;
 }
 export interface ResponseError {
   type: "response";

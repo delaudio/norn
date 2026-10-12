@@ -187,6 +187,61 @@ export interface ReviewRunSummary {
   findingsCount: number;
 }
 
+export interface ReviewMetricCount {
+  key: string;
+  count: number;
+}
+
+export interface ReviewMetricRate {
+  numerator: number;
+  denominator: number;
+  basisPoints: number | null;
+}
+
+export interface ReviewFeedbackMetrics {
+  eligibleFindings: number;
+  findingsWithFeedback: number;
+  findingsWithoutFeedback: number;
+  acceptedFindings: number;
+  falsePositiveFindings: number;
+  fixedFindings: number;
+  dismissedFindings: number;
+  reopenedFindings: number;
+  coverageRate: ReviewMetricRate;
+  acceptanceRate: ReviewMetricRate;
+  falsePositiveRate: ReviewMetricRate;
+  fixedRate: ReviewMetricRate;
+}
+
+export interface ReviewLatencyMetrics {
+  sampleCount: number;
+  totalMs: number;
+  averageMs: number | null;
+  medianMs: number | null;
+  minimumMs: number | null;
+  maximumMs: number | null;
+}
+
+export interface ReviewEffectivenessSummary {
+  reviewCount: number;
+  findingCount: number;
+  findingsBySeverity: ReviewMetricCount[];
+  findingsByCategory: ReviewMetricCount[];
+  feedback: ReviewFeedbackMetrics;
+  timeToFirstReview: ReviewLatencyMetrics;
+}
+
+export interface ReviewEffectivenessReport {
+  schemaVersion: string;
+  summary: ReviewEffectivenessSummary;
+  repositories: Array<{
+    provider: "github" | "bitbucket";
+    workspace: string;
+    repo: string;
+    summary: ReviewEffectivenessSummary;
+  }>;
+}
+
 export interface ClosedPrCount {
   key: string;
   count: number;
@@ -1883,6 +1938,19 @@ export class BackendClient {
   async reviewHistory(target: TargetIdentity): Promise<ReviewRunSummary[]> {
     const result = await this.transport.request("review.history", { target });
     return (result.runs as ReviewRunSummary[]) ?? [];
+  }
+
+  async reviewEffectiveness(
+    params: {
+      provider?: "github" | "bitbucket";
+      workspace?: string | null;
+      repo?: string | null;
+      fromMs?: number | null;
+      toMs?: number | null;
+    } = {},
+  ): Promise<ReviewEffectivenessReport> {
+    const result = await this.transport.request("review.metrics.effectiveness", params);
+    return result.report as unknown as ReviewEffectivenessReport;
   }
 
   async reviewClosedMetrics(): Promise<ClosedPrMetric[]> {

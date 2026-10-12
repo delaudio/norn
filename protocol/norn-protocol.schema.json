@@ -242,7 +242,8 @@
         "comments.list",
         "workspace.scopes",
         "review.jobs",
-        "review.metrics.closed"
+        "review.metrics.closed",
+        "review.metrics.effectiveness"
       ]
     },
     "DiffFileParams": {
@@ -8124,6 +8125,296 @@
           }
         }
       }
+    },
+    "ReviewEffectivenessParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "provider": {
+          "enum": [
+            "github",
+            "bitbucket"
+          ]
+        },
+        "workspace": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "repo": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "fromMs": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "toMs": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      }
+    },
+    "ReviewMetricCount": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "key",
+        "count"
+      ],
+      "properties": {
+        "key": {
+          "type": "string"
+        },
+        "count": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "ReviewMetricRate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "numerator",
+        "denominator",
+        "basisPoints"
+      ],
+      "properties": {
+        "numerator": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "denominator": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "basisPoints": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      }
+    },
+    "ReviewFeedbackMetrics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "eligibleFindings",
+        "findingsWithFeedback",
+        "findingsWithoutFeedback",
+        "acceptedFindings",
+        "falsePositiveFindings",
+        "fixedFindings",
+        "dismissedFindings",
+        "reopenedFindings",
+        "coverageRate",
+        "acceptanceRate",
+        "falsePositiveRate",
+        "fixedRate"
+      ],
+      "properties": {
+        "eligibleFindings": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "findingsWithFeedback": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "findingsWithoutFeedback": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "acceptedFindings": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "falsePositiveFindings": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "fixedFindings": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "dismissedFindings": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "reopenedFindings": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "coverageRate": {
+          "$ref": "#/definitions/ReviewMetricRate"
+        },
+        "acceptanceRate": {
+          "$ref": "#/definitions/ReviewMetricRate"
+        },
+        "falsePositiveRate": {
+          "$ref": "#/definitions/ReviewMetricRate"
+        },
+        "fixedRate": {
+          "$ref": "#/definitions/ReviewMetricRate"
+        }
+      }
+    },
+    "ReviewLatencyMetrics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sampleCount",
+        "totalMs",
+        "averageMs",
+        "medianMs",
+        "minimumMs",
+        "maximumMs"
+      ],
+      "properties": {
+        "sampleCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "totalMs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "averageMs": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "medianMs": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "minimumMs": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "maximumMs": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      }
+    },
+    "ReviewEffectivenessSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "reviewCount",
+        "findingCount",
+        "findingsBySeverity",
+        "findingsByCategory",
+        "feedback",
+        "timeToFirstReview"
+      ],
+      "properties": {
+        "reviewCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "findingCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "findingsBySeverity": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ReviewMetricCount"
+          }
+        },
+        "findingsByCategory": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ReviewMetricCount"
+          }
+        },
+        "feedback": {
+          "$ref": "#/definitions/ReviewFeedbackMetrics"
+        },
+        "timeToFirstReview": {
+          "$ref": "#/definitions/ReviewLatencyMetrics"
+        }
+      }
+    },
+    "RepositoryReviewEffectiveness": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "provider",
+        "workspace",
+        "repo",
+        "summary"
+      ],
+      "properties": {
+        "provider": {
+          "enum": [
+            "github",
+            "bitbucket"
+          ]
+        },
+        "workspace": {
+          "type": "string"
+        },
+        "repo": {
+          "type": "string"
+        },
+        "summary": {
+          "$ref": "#/definitions/ReviewEffectivenessSummary"
+        }
+      }
+    },
+    "ReviewEffectivenessReport": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "summary",
+        "repositories"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "type": "string"
+        },
+        "summary": {
+          "$ref": "#/definitions/ReviewEffectivenessSummary"
+        },
+        "repositories": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/RepositoryReviewEffectiveness"
+          }
+        }
+      }
+    },
+    "ReviewEffectivenessResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "report"
+      ],
+      "properties": {
+        "report": {
+          "$ref": "#/definitions/ReviewEffectivenessReport"
+        }
+      }
     }
   },
   "oneOf": [
@@ -10442,6 +10733,30 @@
               "$ref": "#/definitions/EmptyResult"
             }
           }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "type": {
+              "const": "request"
+            },
+            "id": {
+              "$ref": "#/definitions/RequestId"
+            },
+            "method": {
+              "const": "review.metrics.effectiveness"
+            },
+            "params": {
+              "$ref": "#/definitions/ReviewEffectivenessParams"
+            }
+          }
         }
       ]
     },
@@ -10664,6 +10979,9 @@
             },
             {
               "$ref": "#/definitions/ClosedPrMetricsResult"
+            },
+            {
+              "$ref": "#/definitions/ReviewEffectivenessResult"
             }
           ]
         }

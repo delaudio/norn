@@ -253,6 +253,8 @@ function useShellInput(
       void store.loadJobs(client);
     } else if (key.sequence === "M") {
       void store.loadClosedMetrics(client);
+    } else if (key.sequence === "E") {
+      void store.loadEffectiveness(client);
     } else if (key.name === "b") {
       void store.openBrowser(client);
     } else if (key.name === "y") {

@@ -1607,6 +1607,13 @@ fn dispatch(request: Request, backend: &Backend) -> bool {
             };
             false
         }
+        Request::ReviewEffectiveness { params, .. } => {
+            match review_effectiveness_response(&params) {
+                Ok(value) => backend.respond(&id, value),
+                Err(error) => backend.fail(&id, error),
+            };
+            false
+        }
         Request::ReviewClosedMetrics { .. } => {
             match review_closed_metrics_response() {
                 Ok(value) => backend.respond(&id, value),
@@ -2158,6 +2165,31 @@ fn provider_matches(kind: ProviderKind) -> config::ReviewProvider {
         ProviderKind::Github => config::ReviewProvider::Github,
         ProviderKind::Bitbucket => config::ReviewProvider::Bitbucket,
     }
+}
+
+/// Review-effectiveness report computed in Rust for the local tenant.
+fn review_effectiveness_response(
+    params: &protocol::ReviewEffectivenessParams,
+) -> Result<serde_json::Value, ProtocolError> {
+    use crate::review_event::PullRequestReviewEventProvider;
+    let filter = crate::review_metrics::ReviewEffectivenessFilter {
+        tenant_id: "local".to_string(),
+        provider: params.provider.map(|provider| match provider {
+            ProviderKind::Github => PullRequestReviewEventProvider::Github,
+            ProviderKind::Bitbucket => PullRequestReviewEventProvider::Bitbucket,
+        }),
+        workspace: params.workspace.clone(),
+        repo: params.repo.clone(),
+        from_ms: params.from_ms,
+        to_ms: params.to_ms,
+    };
+    let report = crate::review_storage::review_effectiveness_metrics(filter).map_err(|error| {
+        ProtocolError::new(
+            ProtocolErrorCode::Internal,
+            format!("effectiveness: {error}"),
+        )
+    })?;
+    Ok(json!({ "report": serde_json::to_value(report).unwrap_or(serde_json::Value::Null) }))
 }
 
 /// Bounded closed-PR analytics computed in Rust, newest sync first.

@@ -1320,6 +1320,33 @@ fn review_closed_metrics_returns_a_list() {
 }
 
 #[test]
+fn review_effectiveness_returns_a_report() {
+    let repo = temp_repo();
+    let data_dir = tempfile::tempdir().expect("data dir");
+    let mut backend = Backend::spawn_env(
+        repo.path(),
+        &[(
+            "NORN_REVIEW_DATA_DIR",
+            data_dir.path().to_str().expect("data dir"),
+        )],
+    );
+    backend.handshake();
+    backend.send(json!({
+        "type": "request",
+        "id": "req-effect",
+        "method": "review.metrics.effectiveness",
+        "params": {}
+    }));
+    let response = backend.wait_for(
+        |v| v["type"] == "response" && v["id"] == "req-effect",
+        Duration::from_secs(5),
+    );
+    assert_eq!(response["ok"], true, "response: {response}");
+    assert!(response["result"]["report"]["schemaVersion"].is_string());
+    assert_eq!(response["result"]["report"]["summary"]["reviewCount"], 0);
+}
+
+#[test]
 fn malformed_frames_do_not_stop_the_backend() {
     let repo = temp_repo();
     let mut backend = Backend::spawn(repo.path());
