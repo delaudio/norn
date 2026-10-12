@@ -288,7 +288,9 @@ pub(super) fn snapshot(
                 .to_str()
                 .ok_or_else(invalid)?;
             #[cfg(windows)]
-            let name = name.replace('\\', "/");
+            let normalized_name = name.replace('\\', "/");
+            #[cfg(windows)]
+            let name = normalized_name.as_str();
             let mut file =
                 crate::services::local_fs::open_file(root, name, control)?.ok_or_else(invalid)?;
             let length = file.metadata().map_err(|_| invalid())?.len();

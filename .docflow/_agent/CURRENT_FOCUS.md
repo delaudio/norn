@@ -21,8 +21,11 @@ Git is authoritative. Durable history lives in WORKLOG and plan/done.
 - Local gates: UI259tests, root30files/123tests, core772+2ignored/noGUI,
   stdio76, strict all-feature Clippy, typechecks,209frames/Storybook, Archgate
   and audit. Doctor rendering-ref issue corrected;2maintainability warnings.
-- Actual post-checkout-hook drift proof PASS; final source commit pending;
+- Actual post-checkout-hook drift proof PASS; initial source5a4ccaa committed;
   native3OS exact-head CI and actual merge remain required.
+- PR382 open on source5a4ccaa; firstCI38292751534 UI SUCCESS but Windows
+  build fails ownedString/&str after platform normalization. Narrow borrowing
+  correction prepared; all5checks must rerun on its actual new head.
 - Rootmain synced actual381. Never read/copy/stage unrelated untracked.norn.yaml;
   preserve user stash5f69c995c9b79fc163b60955cbe73987d346086a.
 - Keep0071 todo until actual verified merge;360/294 remain open. Preserve

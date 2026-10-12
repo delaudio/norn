@@ -1146,3 +1146,16 @@ Plan 0053 completion prepared after implementation `e4264db`, effective only on 
   Doctor rendering-ref error fixed;2nonblocking maintainability warnings.
 - Source commit/PR/3OS exact-head checks and actual merge still required.
  0071 stays todo;360/294 stay open; no Norn review/delegation/private data.
+
+## 2026-10-12 — PR382 Windows borrow correction
+
+- Source5a4ccaa opened PR382; first CI38292751534 UI passes, Windows build
+  rejects the changed-content reader because Windows normalization produced
+  an ownedString where the confined open helper requires &str. POSIX strict
+  Clippy correctly required removing the original needless borrow there.
+- Follow the existing cross-platform confined-reader pattern: keep normalized
+  WindowsString alive and pass its as_str view; POSIX uses the original &str.
+  No path confinement, hashes, operation semantics or assertions change.
+- Actual owned post-checkout-hook drift proof and bounded stale branch paging
+  pass. Plan0071/360 stay pending until all5 checks pass on the new exact head
+  and an actual verified squash merge. No Norn review or delegation.
