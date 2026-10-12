@@ -505,3 +505,14 @@ Plan 0053 completion prepared after implementation `e4264db`, effective only on 
 - Follow-up verification completed: all 58 stdio tests pass with personal/system
   Git config disabled, strict all-feature/all-target Clippy passes. Existing
   production/local root/UI/core gates remain unchanged; new PR head CI required.
+
+## 2026-10-12 — claim isolated durable provider evidence plan0060
+
+- #370 fixed head `789bd0347eed8b56bdc6ef79ca9f50c1966dc5e2` is in
+  CI38192754060. Local gates passed; no merge/shipped claim yet.
+- Claimed0060 before code in `/private/tmp/norn-provider-evidence-start` on
+  `issue-306-provider-evidence-start`, single agent. Next integration persists
+  exact captured provider evidence and connects native fresh-preview start,
+  saved/restarted readers and replies with optional explicit clone.
+- Verify/merge #370, rebase onto actual squash and audit before next PR.
+  No Norn review, provider writes, private credentials/profiles or release.
