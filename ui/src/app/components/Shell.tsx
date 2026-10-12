@@ -45,6 +45,7 @@ import { ProviderPanel } from "./ProviderPanel";
 import { PublicationPanel } from "./PublicationPanel";
 import { ReferencePanel } from "./ReferencePanel";
 import { ReviewProfilesPanel } from "./ReviewProfilesPanel";
+import { SavedLocalPanel } from "./SavedLocalPanel";
 import { SettingsPanel } from "./SettingsPanel";
 import { VirtualDiff } from "./VirtualDiff";
 import { WorkspacePanel } from "./WorkspacePanel";
@@ -90,6 +91,17 @@ function useShellInput(
       return;
     }
     if (key.ctrl || key.meta || key.super || key.option) {
+      return;
+    }
+    if (store.getSnapshot().savedLocal) {
+      key.preventDefault();
+      if (key.name === "escape") store.dismissSavedLocal();
+      else if (key.name === "return") void store.chooseSavedLocal(client);
+      else if (key.name === "r") void store.pageSavedLocal(client, 0);
+      else if (key.name === "pagedown") void store.pageSavedLocal(client, 1);
+      else if (key.name === "pageup") void store.pageSavedLocal(client, -1);
+      else if (key.name === "down" || key.name === "j") store.moveSavedLocal(1);
+      else if (key.name === "up" || key.name === "k") store.moveSavedLocal(-1);
       return;
     }
     if (store.getSnapshot().localForm) {
@@ -158,6 +170,8 @@ function useShellInput(
       void store.openLocalComparison(client);
     } else if (key.name === "f6") {
       void store.openReviewProfiles(client);
+    } else if (key.name === "f7") {
+      void store.openSavedLocal(client);
     } else if (key.name === "f5") {
       void store.toggleProviderPreview(true);
     } else if (key.name === "tab") {
@@ -246,6 +260,7 @@ function useShellInput(
       return;
     if (
       store.getSnapshot().localForm ||
+      store.getSnapshot().savedLocal ||
       store.getSnapshot().findingLayers.length ||
       store.getSnapshot().profileOpen
     ) {
@@ -1260,6 +1275,8 @@ export function Shell({ store, client, quit }: ShellProps) {
               selectedIndex: state.selectedFinding,
             };
 
+  if (state.savedLocal)
+    return <SavedLocalPanel form={state.savedLocal} width={width} height={height} />;
   if (state.localForm)
     return <LocalComparisonPanel form={state.localForm} width={width} height={height} />;
   if (state.findingLayers.length)
@@ -1506,8 +1523,8 @@ export function Shell({ store, client, quit }: ShellProps) {
           {state.fixPreview
             ? "y approve · Esc/n dismiss · ↑/↓ scroll effects"
             : wide
-              ? "F2 PRs · F4 local · F6 profile · q quit · Tab pane · j/k move · i stage finding · d drafts · w refs · m settings · n prompt/viewed · s split · e expand · a fix · r reply · t threads · v chat · f filter · g group · x cancel · u sync · o conflicts · c commit · p push"
-              : "F2 PRs  F4 local  F6 profile  j/k  ←/→  s  e  Tab  m settings  n prompt  i stage  d drafts  w refs  q"}
+              ? "F2 PRs · F4 local · F7 saved · F6 profile · q quit · Tab pane · j/k move · i stage finding · d drafts · w refs · m settings · n prompt/viewed · s split · e expand · a fix · r reply · t threads · v chat · f filter · g group · x cancel · u sync · o conflicts · c commit · p push"
+              : "F2 PRs  F4 local  F7 saved  F6 profile  j/k  ←/→  s  e  Tab  m settings  n prompt  i stage  d drafts  w refs  q"}
         </text>
       </box>
     </box>

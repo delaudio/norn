@@ -1,0 +1,25 @@
+{
+  "type": "request",
+  "id": "owned",
+  "method": "local.snapshot.image",
+  "params": {
+    "snapshot": {
+      "source": {
+        "kind": "current"
+      },
+      "repository": {
+        "provider": "github",
+        "workspace": "owned",
+        "repo": "same"
+      },
+      "rootId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "snapshotId": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+    },
+    "layer": "flattened",
+    "path": "picture.png",
+    "side": "new",
+    "offset": 0,
+    "maxBytes": 32,
+    "contentSha256": null
+  }
+}

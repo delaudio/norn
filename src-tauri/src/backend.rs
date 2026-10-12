@@ -231,6 +231,9 @@ pub fn run() -> Result<(), i32> {
             "local-snapshots".to_string(),
             "local-evidence-reviews".to_string(),
             "local-profile-catalog".to_string(),
+            "local-captured-images".to_string(),
+            "local-snapshot-browser".to_string(),
+            "local-saved-snapshots".to_string(),
         ],
     }));
 
@@ -371,6 +374,11 @@ fn read_loop(reader: &mut impl BufRead, backend: &Backend) {
 fn dispatch(request: Request, backend: &Backend) -> bool {
     let id = request.id().to_string();
     let method = request.method();
+    if unqualified_local_request(&request) {
+        backend.fail(&id, ProtocolError::new(ProtocolErrorCode::InvalidParams,
+            "This local request lacks repository and capture identity. Select a verified local snapshot and use its qualified local API."));
+        return false;
+    }
     match request {
         Request::LocalReviewStart { params, .. } => {
             if backend
@@ -501,6 +509,9 @@ fn dispatch(request: Request, backend: &Backend) -> bool {
         | Request::LocalSnapshot { .. }
         | Request::LocalSnapshotInfo { .. }
         | Request::LocalSnapshotFiles { .. }
+        | Request::LocalSnapshotImage { .. }
+        | Request::LocalSnapshotBrowser { .. }
+        | Request::LocalSnapshotList { .. }
         | Request::LocalSnapshotDiff { .. }
         | Request::LocalSnapshotRecheck { .. } => {
             let active = backend.active_local.clone();
@@ -520,6 +531,7 @@ fn dispatch(request: Request, backend: &Backend) -> bool {
                 return false;
             }
             let manager = backend.local_snapshots.clone();
+            let browser = backend.browser.clone();
             let shutdown = backend.shutdown.clone();
             let control = backend.control.clone();
             let reservation = match &request {
@@ -562,8 +574,24 @@ fn dispatch(request: Request, backend: &Backend) -> bool {
                     Request::LocalSnapshotInfo { params, .. } => {
                         manager.info(params).map(|v| json!(v))
                     }
+                    Request::LocalSnapshotList { params, .. } => manager.list(params).map(|v| json!(v)),
                     Request::LocalSnapshotFiles { params, .. } => {
                         manager.files(params).map(|v| json!(v))
+                    }
+                    Request::LocalSnapshotImage { params, .. } => {
+                        manager.image(params).map(|v| json!(v))
+                    }
+                    Request::LocalSnapshotBrowser { params, .. } => {
+                        manager.browser_state(&params).and_then(|state| {
+                            if shutdown.load(Ordering::Acquire) || manager.stopped() {
+                                return Err("Local browser canceled during shutdown.".into());
+                            }
+                            let url = browser_server_url(&browser, state)?;
+                            let launch_requested = std::env::var("NORN_BROWSER_OPEN")
+                                .map(|value| value != "0").unwrap_or(true);
+                            let launch_error = if launch_requested { open_browser_url(&url).err() } else { None };
+                            Ok(json!({"request":params,"url":url,"launchRequested":launch_requested,"launchError":launch_error}))
+                        })
                     }
                     Request::LocalSnapshotDiff { params, .. } => {
                         manager.diff(params).map(|v| json!(v))
@@ -1415,6 +1443,37 @@ fn dispatch(request: Request, backend: &Backend) -> bool {
     }
 }
 
+/// A bare local SHA is a display/event identity, not filesystem authority.
+/// Qualified local requests carry a full source, provider, clone and capture ref.
+fn unqualified_local_request(request: &Request) -> bool {
+    let target = match request {
+        Request::ReviewFiles { params, .. }
+        | Request::ReviewFindings { params, .. }
+        | Request::ReviewHistory { params, .. }
+        | Request::ReviewThreads { params, .. }
+        | Request::ReviewOutput { params, .. }
+        | Request::BrowserOpen { params, .. }
+        | Request::ReviewPushPreview { params, .. }
+        | Request::ReviewSyncPreview { params, .. }
+        | Request::ReviewConflictsPreview { params, .. }
+        | Request::ReviewFixState { params, .. }
+        | Request::ReviewFixPreview { params, .. } => &params.target,
+        Request::ReviewFix { params, .. }
+        | Request::ReviewCommit { params, .. }
+        | Request::ReviewPush { params, .. }
+        | Request::ReviewSync { params, .. }
+        | Request::ReviewConflicts { params, .. } => &params.target,
+        Request::DiffFile { params, .. } => &params.target,
+        Request::FilePreview { params, .. } => &params.target,
+        Request::ReviewProfiles { params, .. } => &params.target,
+        Request::ReviewStart { params, .. } => &params.target,
+        Request::ReviewReply { params, .. } => &params.target,
+        Request::ReviewCommitPreview { params, .. } => &params.target,
+        _ => return false,
+    };
+    matches!(target, TargetIdentity::Local { .. })
+}
+
 #[derive(Clone)]
 struct ActiveCounter(Arc<AtomicUsize>);
 
@@ -2143,7 +2202,8 @@ fn snapshot_browser_state(
             crate::services::provider_snapshot::BrowserSnapshotSource::new(
                 params.snapshot.clone(),
                 snapshots.clone(),
-            ),
+            )
+            .into(),
         ),
         ..WebDiffState::default()
     })

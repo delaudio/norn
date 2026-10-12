@@ -134,3 +134,52 @@ pub(crate) fn load(snapshot: &SnapshotRef) -> Result<Option<String>, String> {
     }
     Ok(json)
 }
+
+/// Only qualified handles leave storage. Full content and parent ownership are
+/// proved by Manager::get before a listed summary is returned to the client.
+pub(crate) fn catalogue() -> Result<Vec<(SnapshotRef, String)>, String> {
+    let mut connection = open()?;
+    let tx = connection.transaction().map_err(|_| invalid())?;
+    let (count, bytes): (i64, i64) = tx.query_row(
+        "SELECT COUNT(*),COALESCE(SUM(length(CAST(metadata_json AS BLOB))),0) FROM local_review_evidence WHERE tenant_id='local'",
+        [], |row| Ok((row.get(0)?, row.get(1)?)),
+    ).map_err(|_| invalid())?;
+    if !(0..=1000).contains(&count) || !(0..=128 * 1024 * 1024).contains(&bytes) {
+        return Err(invalid());
+    }
+    let mut statement = tx.prepare(
+        "SELECT evidence_id,scope_key,CASE WHEN json_valid(metadata_json) AND length(CAST(metadata_json AS BLOB))<=33554432 THEN json_extract(metadata_json,'$.info.snapshot') ELSE NULL END,created_at FROM local_review_evidence WHERE tenant_id='local' ORDER BY CAST(created_at AS INTEGER) DESC,evidence_id DESC LIMIT 1001"
+    ).map_err(|_| invalid())?;
+    let rows = statement
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, Option<String>>(2)?,
+                row.get::<_, String>(3)?,
+            ))
+        })
+        .map_err(|_| invalid())?;
+    let mut entries = Vec::new();
+    for row in rows {
+        let (id, owner, json, created) = row.map_err(|_| invalid())?;
+        let json = json.ok_or_else(invalid)?;
+        if json.len() > 4096
+            || created.is_empty()
+            || created.len() > 19
+            || !created.bytes().all(|byte| byte.is_ascii_digit())
+            || created.parse::<i64>().is_err()
+        {
+            return Err(invalid());
+        }
+        let snapshot: SnapshotRef = serde_json::from_str(&json).map_err(|_| invalid())?;
+        if snapshot.snapshot_id != id || key(&snapshot)? != owner {
+            return Err(invalid());
+        }
+        entries.push((snapshot, created));
+    }
+    if entries.len() != count as usize {
+        return Err(invalid());
+    }
+    Ok(entries)
+}

@@ -451,6 +451,21 @@ pub enum Request {
         id: String,
         params: crate::services::local_snapshot::DiffParams,
     },
+    #[serde(rename = "local.snapshot.image")]
+    LocalSnapshotImage {
+        id: String,
+        params: crate::services::local_snapshot::ImageParams,
+    },
+    #[serde(rename = "local.snapshot.browser")]
+    LocalSnapshotBrowser {
+        id: String,
+        params: crate::services::local_snapshot::BrowserParams,
+    },
+    #[serde(rename = "local.snapshot.list")]
+    LocalSnapshotList {
+        id: String,
+        params: crate::services::local_snapshot::ListParams,
+    },
     #[serde(rename = "local.snapshot.recheck")]
     LocalSnapshotRecheck {
         id: String,
@@ -588,6 +603,9 @@ impl Request {
             | Self::LocalSnapshotCancel { id, .. }
             | Self::LocalSnapshotInfo { id, .. }
             | Self::LocalSnapshotFiles { id, .. }
+            | Self::LocalSnapshotImage { id, .. }
+            | Self::LocalSnapshotBrowser { id, .. }
+            | Self::LocalSnapshotList { id, .. }
             | Self::LocalSnapshotDiff { id, .. }
             | Self::LocalSnapshotRecheck { id, .. }
             | Self::ReviewProfiles { id, .. }
@@ -666,6 +684,9 @@ impl Request {
             Self::LocalSnapshotCancel { .. } => "local.snapshot.cancel",
             Self::LocalSnapshotInfo { .. } => "local.snapshot.info",
             Self::LocalSnapshotFiles { .. } => "local.snapshot.files",
+            Self::LocalSnapshotImage { .. } => "local.snapshot.image",
+            Self::LocalSnapshotBrowser { .. } => "local.snapshot.browser",
+            Self::LocalSnapshotList { .. } => "local.snapshot.list",
             Self::LocalSnapshotDiff { .. } => "local.snapshot.diff",
             Self::LocalSnapshotRecheck { .. } => "local.snapshot.recheck",
             Self::ReviewProfiles { .. } => "review.profiles",
@@ -951,6 +972,13 @@ impl Request {
             Self::LocalSnapshotFiles { params, .. } => {
                 params.validate().map_err(invalid_request)?
             }
+            Self::LocalSnapshotImage { params, .. } => {
+                params.validate().map_err(invalid_request)?
+            }
+            Self::LocalSnapshotBrowser { params, .. } => {
+                params.validate().map_err(invalid_request)?
+            }
+            Self::LocalSnapshotList { params, .. } => params.validate().map_err(invalid_request)?,
             Self::LocalSnapshotDiff { params, .. } => params.validate().map_err(invalid_request)?,
             Self::LocalSnapshotRecheck { params, .. } => {
                 params.validate().map_err(invalid_request)?
@@ -1343,6 +1371,12 @@ mod tests {
             "valid/response-local-info.json",
             "valid/request-local-files.json",
             "valid/response-local-files.json",
+            "valid/request-local-image.json",
+            "valid/response-local-image.json",
+            "valid/request-local-browser.json",
+            "valid/response-local-browser.json",
+            "valid/request-local-list.json",
+            "valid/response-local-list.json",
             "valid/request-local-diff.json",
             "valid/response-local-diff.json",
             "valid/request-local-recheck.json",
@@ -1409,6 +1443,14 @@ mod tests {
             "invalid/request-local-layers.json",
             "invalid/request-local-nonce.json",
             "invalid/request-local-branch-layers.json",
+            "invalid/request-local-image-path.json",
+            "invalid/request-local-image-continuation.json",
+            "invalid/request-local-image-layer.json",
+            "invalid/request-local-browser-layer.json",
+            "invalid/request-local-browser-missing-layer.json",
+            "invalid/request-local-list-limit.json",
+            "invalid/request-local-list-version.json",
+            "invalid/request-local-list-missing-version.json",
             "invalid/request-local-diff-path.json",
             "invalid/request-review-profiles-path.json",
             "invalid/request-review-profiles-owner.json",

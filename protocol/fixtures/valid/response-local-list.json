@@ -1,0 +1,40 @@
+{
+  "type": "response",
+  "id": "owned",
+  "ok": true,
+  "result": {
+    "request": {
+      "offset": 0,
+      "limit": 32,
+      "catalogVersion": null
+    },
+    "catalogVersion": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+    "snapshots": [
+      {
+        "snapshot": {
+          "source": {
+            "kind": "current"
+          },
+          "repository": {
+            "provider": "github",
+            "workspace": "owned",
+            "repo": "same"
+          },
+          "rootId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "snapshotId": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+        },
+        "createdAt": "1791794152000",
+        "mode": "workingTree",
+        "branch": "owned-branch",
+        "baseSha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "layers": [
+          "staged",
+          "unstaged"
+        ],
+        "fileCount": 2
+      }
+    ],
+    "total": 1,
+    "nextOffset": null
+  }
+}

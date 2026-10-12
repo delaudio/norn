@@ -34,6 +34,7 @@
     "ui:dev": "bun run --cwd ui start",
     "ui:typecheck": "bun run --cwd ui typecheck",
     "ui:test": "bun run --cwd ui test",
+    "ui:workflow": "cargo build --locked --manifest-path src-tauri/Cargo.toml --no-default-features --bin norn-backend --bin norn && bun run ui/scripts/check-local-workflow.tsx",
     "ui:frames:check": "bun run --cwd ui frames:check",
     "ui:storybook": "bun run --cwd ui storybook",
     "ui:build-storybook": "bun run --cwd ui build-storybook",

@@ -1,17 +1,13 @@
 //! Bounded immutable raster cache shared by native terminal and browser previews.
+pub use super::super::raster::ImageSide;
+pub(crate) use super::super::raster::Raster;
+use super::super::raster::{raster_format, validate_raster, MAX_IMAGE_BYTES as MAX_IMAGE};
 use super::*;
 use base64::{engine::general_purpose::STANDARD, Engine};
 use std::sync::atomic::{AtomicUsize, Ordering};
-const MAX_IMAGE: usize = 2 * 1024 * 1024;
 const MAX_CHUNK: usize = 192 * 1024;
 const IMAGE_CACHE_BYTES: usize = 32 * 1024 * 1024;
 const IMAGE_CACHE_COUNT: usize = 32;
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum ImageSide {
-    Old,
-    New,
-}
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ImageParams {
@@ -61,13 +57,6 @@ pub(crate) struct ImagePage {
     pub content_sha256: Option<String>,
     pub width: Option<u32>,
     pub height: Option<u32>,
-}
-pub(crate) struct Raster {
-    pub bytes: Vec<u8>,
-    pub mime: &'static str,
-    pub width: u32,
-    pub height: u32,
-    pub sha256: String,
 }
 #[derive(Clone, PartialEq, Eq)]
 struct ImageKey {
@@ -284,51 +273,6 @@ fn image_page(request: ImageParams, raster: Option<Arc<Raster>>) -> Result<Image
         request,
     })
 }
-fn raster_format(path: &str) -> Result<(&'static str, image::ImageFormat), String> {
-    let extension = path.rsplit('.').next().unwrap_or("").to_ascii_lowercase();
-    match extension.as_str() {
-        "png" => Ok(("image/png", image::ImageFormat::Png)),
-        "jpg" | "jpeg" => Ok(("image/jpeg", image::ImageFormat::Jpeg)),
-        "gif" => Ok(("image/gif", image::ImageFormat::Gif)),
-        "webp" => Ok(("image/webp", image::ImageFormat::WebP)),
-        "bmp" => Ok(("image/bmp", image::ImageFormat::Bmp)),
-        _ => Err("This image format is unavailable for immutable raster preview.".into()),
-    }
-}
-fn validate_raster(path: &str, bytes: Vec<u8>) -> Result<Raster, String> {
-    if bytes.is_empty() || bytes.len() > MAX_IMAGE {
-        return Err("Image exceeds immutable preview limits.".into());
-    }
-    let (mime, expected) = raster_format(path)?;
-    let mut reader = image::ImageReader::new(std::io::Cursor::new(&bytes))
-        .with_guessed_format()
-        .map_err(|_| invalid())?;
-    if reader.format() != Some(expected) {
-        return Err("Image content does not match its file format.".into());
-    }
-    let mut limits = image::Limits::default();
-    limits.max_image_width = Some(8192);
-    limits.max_image_height = Some(8192);
-    limits.max_alloc = Some(40_000_000 * 4 + 16 * 1024 * 1024);
-    reader.limits(limits);
-    let (width, height) = reader.into_dimensions().map_err(|_| invalid())?;
-    if width == 0
-        || height == 0
-        || width > 8192
-        || height > 8192
-        || u64::from(width) * u64::from(height) > 40_000_000
-    {
-        return Err("Image dimensions exceed immutable preview limits.".into());
-    }
-    Ok(Raster {
-        sha256: hash(&bytes),
-        bytes,
-        mime,
-        width,
-        height,
-    })
-}
-
 #[derive(Clone)]
 pub struct BrowserSnapshotSource {
     snapshot: SnapshotRef,

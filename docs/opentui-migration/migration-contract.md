@@ -200,7 +200,8 @@ Current scoped parity evidence: [canonical saved-scope access](./canonical-scope
 shipped under #355 / plan 0053 in PR #356 at `2a7f0fe` after publication PR #354. It preserves
 unconfigured imported PR data and actual saved-run/provider identities. It does
 not mark the complete PR-list, history, native-profile recovery or other #306
-rows shipped. #306 remains open until every retained row has merged verification.
+rows shipped. #306 was closed by the maintainer; retained child workflows still require
+merged verification before cutover.
 
 [Native provider PR reads](./provider-pr-reads.md) are the first bounded #357 /
 plan 0054 delivery, merged in PR #365 at `2f2cd50`. The second bounded delivery,
@@ -216,7 +217,7 @@ confirmation and durable uncertain-write GET recovery
 PR navigation, including bounded Bitbucket UUID-to-slug resolution. These bounded deliveries do not close
 #306 or retire any retained capability. #357 was closed by the maintainer at
 2026-10-11 22:01:23Z; preserve that state while verifying remaining provider
-workflows under #306.
+workflows in the retained child issues.
 
 [Provider review ownership](./provider-review-ownership.md), plan 0058 / PR #369
 (merged at `68c6939`), establishes provider-qualified persisted and runtime review ownership:
@@ -252,5 +253,8 @@ Local immutable source/options/capture/read/recheck IPC is documented in
 [local snapshots](local-snapshots.md). It retains the shipped working-tree and
 committed-only branch collectors, separate layers and durable root/provider
 ownership. Native terminal controls, local review payload/cancel/history and
-Pierre consumers still require the next integration step; local parity remains
-open.
+Pierre consumers use qualified saved evidence. PR377 supplies native controls
+and review/cancel/history. Plan0067 adds pinned raster/Pierre and saved-local
+selection with an owned native workflow gate; it remains conditional on its own
+verified merge. Local reply/fix, global legacy history and the other retained
+workflows remain pending.

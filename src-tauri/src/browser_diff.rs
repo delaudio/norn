@@ -237,7 +237,30 @@ pub struct WebDiffState {
     pub local_snapshot_sha256: Option<String>,
     pub population_failed: bool,
     #[serde(skip)]
-    pub snapshot_source: Option<crate::services::provider_snapshot::BrowserSnapshotSource>,
+    pub snapshot_source: Option<WebDiffSnapshotSource>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum WebDiffSnapshotSource {
+    Provider(crate::services::provider_snapshot::BrowserSnapshotSource),
+    Local(crate::services::local_snapshot::BrowserSnapshotSource),
+}
+impl From<crate::services::provider_snapshot::BrowserSnapshotSource> for WebDiffSnapshotSource {
+    fn from(value: crate::services::provider_snapshot::BrowserSnapshotSource) -> Self {
+        Self::Provider(value)
+    }
+}
+impl WebDiffSnapshotSource {
+    fn raster(
+        &self,
+        path: &str,
+        side: &str,
+    ) -> Result<Option<Arc<crate::services::raster::Raster>>, String> {
+        match self {
+            Self::Provider(source) => source.raster(path, side),
+            Self::Local(source) => source.raster(path, side),
+        }
+    }
 }
 
 pub struct WebDiffServer {
@@ -629,9 +652,6 @@ fn handle_connection(
             if file_path.is_empty() || (side != "old" && side != "new") {
                 return write_empty_response(&mut stream, "400 Bad Request");
             }
-            if !is_raster_preview_path(&file_path) {
-                return write_empty_response(&mut stream, "415 Unsupported Media Type");
-            }
             // Snapshot images read only the immutable source wrapper. Avoid
             // cloning the entire large patch for each raster request.
             let snapshot_source = state
@@ -639,6 +659,14 @@ fn handle_connection(
                 .unwrap_or_else(|poisoned| poisoned.into_inner())
                 .snapshot_source
                 .clone();
+            // Captured raster validation also supports BMP. Keep the legacy
+            // mutable preview adapter's format contract unchanged.
+            if !(is_raster_preview_path(&file_path)
+                || snapshot_source.is_some()
+                    && crate::services::raster::raster_format(&file_path).is_ok())
+            {
+                return write_empty_response(&mut stream, "415 Unsupported Media Type");
+            }
             if let Some(source) = snapshot_source {
                 let raster = source.raster(&file_path, &side);
                 if state
@@ -1299,7 +1327,7 @@ mod tests {
         let state = Arc::new(RwLock::new(WebDiffState {
             diff: Some(patch.into()),
             diffstat: Some(Vec::new()),
-            snapshot_source: Some(source),
+            snapshot_source: Some(source.into()),
             ..WebDiffState::default()
         }));
         let serialized = serde_json::to_value(&*state.read().unwrap()).unwrap();

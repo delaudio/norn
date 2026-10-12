@@ -19,8 +19,27 @@ Git is authoritative. Durable history lives in WORKLOG and plan/done.
   at /private/tmp/norn-local-pinned-consumers on actual377main. Add durable local
   raster before/after captures, authenticated Pierre for one selected saved layer,
   qualified saved-local access and unsafe legacy fallback rejection, then actual
-  owned OpenTUI+Rust subprocess review/navigation/cancel/restart proof. No source
-  implementation yet. No inference of broader retained workflow/cutover parity.
+  owned OpenTUI+Rust subprocess review/navigation/cancel/restart proof. Source
+  implementation is in progress: shared Rust raster validator extracted;
+  local capture format2 stores bounded independent layer/side image bytes, compares
+  raster captures across collection and includes them in live stale recheck.
+  Format1 omits the new field and retains its original identity namespace.
+  Shared no-default all-target checks passed. local.snapshot.image/browser/list
+  are typed IPC routes; terminal preview, explicitly selected browser layer and
+  F7 paged saved-local selector use full source/provider/root/snapshot identity.
+  Owned Rust subprocess test passes after restart and removal of the checkout:
+  list and IPC/browser old/new raster bytes for staged/unstaged are preserved;
+  foreign root, absent layer and unauthenticated HTTP requests are rejected.
+  Local service20/protocol fixtures pass. Final core753+2existingignored,
+  stdio75, root123+tooling/Archgate17/typecheck/lint/build/audit/noGUI,
+  UI228/1433/165native frames pass. Owned native UI+productionRust transport
+  workflow passes including CLI, images, source/base/layers, real stored fake-agent
+  review, explicit finding choice, native cancel and restart without checkout.
+  Three-OS CI lane configured; its runtime proof is pending the actual PR head.
+  Doctor65/11 warnings on supported OpenTUI flexShrink/truncate in SavedLocalPanel
+  are custom-renderer DOM false positives, proven by declarations/native frames;
+  no suppression or installation. Strict Clippy/fmt/CLI/onboarding pass. Source commit/
+  PR/exact-headCI/squash remain pending. Do not infer merged parity yet.
 - #358/#294 remain open. Preserve maintainer-closed#305/#306/#357; fresh306
   timeline closure01:22:44Z had no commit. Its required child work still matters.
 - Fixtures only; no private profiles/credentials/provider writes/actual agents/
