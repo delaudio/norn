@@ -30,7 +30,11 @@ Git is authoritative. Durable history lives in WORKLOG and plan/done.
   preserves the hostile Unicode filename. CI38269494158 reached the Windows
   witness but its initial terminal-handle assertion failed before UI launch.
   Open/retain owned CONIN$/CONOUT$ handles and preserve ConPTY creation
-  handles until client attachment; final-head real console proof still required.
+  handles until client attachment. CI38270637121 then failed before ConPTY:
+  diagnostics prove local review preflight races two background evidence reads.
+  Bound waiting on the existing two-reader pool to20s with cancellation and
+  RAII; two regression tests,767core+2ignored/76stdio/Clippy/workflow/fourPTY
+  pass locally. Final-head real Windows console proof still required.
 - Keep0070 todo until actual verified merge. #359/#294 remain open pending
   editor/fullparity; preserve maintainer305/306/357closures; ADR0020 Accepted
   until fullcutover. No private profiles/credentials/providerwrites/actualagents.

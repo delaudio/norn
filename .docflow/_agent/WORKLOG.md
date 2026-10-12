@@ -1023,3 +1023,26 @@ Plan 0053 completion prepared after implementation `e4264db`, effective only on 
   https://learn.microsoft.com/en-us/windows/console/console-handles
   https://learn.microsoft.com/en-us/windows/console/setstdhandle
   https://learn.microsoft.com/en-us/windows/console/creating-a-pseudoconsole-session
+
+## 2026-10-12 — PR381 bounded local-review preflight backpressure
+
+- Exact25e0a3c845ea9773220893c54f5ef11d6ca8d3c1 CI38270637121
+  passed UI/Linux/macOS. Windows general workflow intermittently failed before
+  ConPTY. Added diagnostics now prove the actual operation error: "Two local
+  evidence requests are already running." The original cancellation failure
+  was not adequately fixed by a fresh receipt; preserve this observed cause.
+- Local review's already-bounded worker now waits at most20s for the existing
+  two-reader pool, checking operation cancellation/shutdown/manager-stop every
+ 10ms. It performs the same fresh snapshot recheck only after owning a permit.
+  No third reader, automatic operation replay or early agent launch is added.
+  RAII releases the permit on every path. Two concurrent regression tests prove
+  waiting/capacity/release, cancellation (also with a free slot), and timeout
+  without leaks. The owned slow-child check allows45s for bounded preflight but
+  still requires a real running agent/start receipt before cancellation.
+- Final local proof observed: core767passed+2existingignored, dev-inclusive
+  noGUI/alltarget check, stdio76, strict allfeature/alltargetClippy, root/UI
+  typecheck, lint, Archgate17, full owned review/cancel/restart workflow and
+  four production macOS PTY cases. Initial full test attempts were denied
+  loopback binds by the sandbox; approved owned-fixture reruns passed entirely.
+- Windows corrected native console supervisor still unobserved. Final actual
+  head CI and verified squash remain required;0070 stays todo, #359 stays open.

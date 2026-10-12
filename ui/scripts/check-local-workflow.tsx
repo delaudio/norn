@@ -132,8 +132,8 @@ const open = async () => {
     await Bun.sleep(10);
     await renderer.renderOnce();
   };
-  const until = async (condition: () => boolean, label: string) => {
-    const deadline = Date.now() + 15_000;
+  const until = async (condition: () => boolean, label: string, timeoutMs = 15_000) => {
+    const deadline = Date.now() + timeoutMs;
     while (!condition() && Date.now() < deadline) await tick();
     assert(
       condition(),
@@ -415,6 +415,9 @@ try {
     await first.until(
       () => first.store.getSnapshot().operation?.state === "running" && agentStarted(),
       "Owned slow child start",
+      // Accepted review preflight may wait up to 20s for background evidence
+      // reads, then recheck its snapshot. Still require a real running child.
+      45_000,
     );
     first.renderer.mockInput.pressKey("x");
     await first.until(

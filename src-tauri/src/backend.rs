@@ -4853,6 +4853,37 @@ impl Drop for LocalReadPermit {
     }
 }
 
+fn local_review_read_wait(
+    reads: &Arc<AtomicUsize>,
+    timeout: Duration,
+    canceled: impl Fn() -> bool,
+) -> Result<LocalReadPermit, ProtocolError> {
+    let deadline = Instant::now() + timeout;
+    loop {
+        if canceled() {
+            return Err(ProtocolError::new(
+                ProtocolErrorCode::Cancelled,
+                "Local review canceled before execution.",
+            ));
+        }
+        if reads
+            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| {
+                (n < 2).then_some(n + 1)
+            })
+            .is_ok()
+        {
+            return Ok(LocalReadPermit(reads.clone()));
+        }
+        if Instant::now() >= deadline {
+            return Err(ProtocolError::new(
+                ProtocolErrorCode::Conflict,
+                "Local evidence is still busy. Wait before starting this review.",
+            ));
+        }
+        thread::sleep(Duration::from_millis(10));
+    }
+}
+
 fn start_captured_local_session(
     params: &crate::services::local_reviews::StartParams,
     manager: &Arc<crate::services::local_snapshot::Manager>,
@@ -4871,17 +4902,10 @@ fn start_captured_local_session(
             "Local review canceled before execution.",
         ));
     }
-    reads
-        .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| {
-            (n < 2).then_some(n + 1)
-        })
-        .map_err(|_| {
-            ProtocolError::new(
-                ProtocolErrorCode::Conflict,
-                "Two local evidence requests are already running.",
-            )
-        })?;
-    let read_permit = LocalReadPermit(reads.clone());
+    // A just-completed review can still be refreshing its files and history.
+    // The already-bounded operation worker waits for the same two-reader pool;
+    // it never adds a third reader or fails merely because UI reads overlap.
+    let read_permit = local_review_read_wait(reads, Duration::from_secs(20), canceled)?;
     let native_cancel = ticket.cancellation();
     let bridge_done = Arc::new(AtomicBool::new(false));
     let bridge = thread::spawn({
@@ -6008,6 +6032,81 @@ fn write_frame(stdout: &mut impl Write, message: ServerMessage) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn local_review_read_wait_preserves_capacity_and_releases_its_permit() {
+        let reads = Arc::new(AtomicUsize::new(2));
+        let (started, waiting) = channel();
+        let (finished, result) = channel();
+        let worker = thread::spawn({
+            let reads = reads.clone();
+            move || {
+                started.send(()).unwrap();
+                finished
+                    .send(local_review_read_wait(
+                        &reads,
+                        Duration::from_secs(2),
+                        || false,
+                    ))
+                    .unwrap();
+            }
+        });
+        waiting.recv().unwrap();
+        assert!(matches!(
+            result.recv_timeout(Duration::from_millis(40)),
+            Err(RecvTimeoutError::Timeout)
+        ));
+        assert_eq!(reads.load(Ordering::SeqCst), 2);
+        reads.fetch_sub(1, Ordering::SeqCst);
+        let permit = result
+            .recv_timeout(Duration::from_secs(1))
+            .unwrap()
+            .unwrap();
+        worker.join().unwrap();
+        assert_eq!(reads.load(Ordering::SeqCst), 2);
+        drop(permit);
+        assert_eq!(reads.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn local_review_read_wait_cancellation_and_timeout_do_not_leak_capacity() {
+        let reads = Arc::new(AtomicUsize::new(2));
+        let canceled = Arc::new(AtomicBool::new(false));
+        let (started, waiting) = channel();
+        let worker = thread::spawn({
+            let reads = reads.clone();
+            let canceled = canceled.clone();
+            move || {
+                started.send(()).unwrap();
+                local_review_read_wait(&reads, Duration::from_secs(2), || {
+                    canceled.load(Ordering::Acquire)
+                })
+            }
+        });
+        waiting.recv().unwrap();
+        canceled.store(true, Ordering::Release);
+        assert_eq!(
+            worker.join().unwrap().err().unwrap().code,
+            ProtocolErrorCode::Cancelled
+        );
+        assert_eq!(reads.load(Ordering::SeqCst), 2);
+        assert_eq!(
+            local_review_read_wait(&reads, Duration::ZERO, || false)
+                .err()
+                .unwrap()
+                .code,
+            ProtocolErrorCode::Conflict
+        );
+        reads.store(0, Ordering::SeqCst);
+        assert_eq!(
+            local_review_read_wait(&reads, Duration::from_secs(2), || true)
+                .err()
+                .unwrap()
+                .code,
+            ProtocolErrorCode::Cancelled
+        );
+        assert_eq!(reads.load(Ordering::SeqCst), 0);
+    }
 
     #[test]
     fn profile_catalog_remote_owner_is_exact_not_a_substring() {
