@@ -11,8 +11,9 @@ Git is authoritative. Durable history lives in WORKLOG and plan/done.
   durable uncertain-write read-only reconciliation; no clone/AI prerequisite.
 - #371 merged3322ff0. #372 verified merged84921b7 on 2026-10-12 at 03:29:22 UTC;
   fixed648e253 CI38198661868 passed both jobs. Rebased onto actual main.
-- Plan0062 native IPC/UI, durable schema19 journal and owned tests implemented;
-  full local gates/frame inspection/audit and exact-head CI/merge pending.
+- Plan0062 prepared fromd503f9b: native IPC/UI and durable schema19 journal;
+  full local gates/frame inspection/audit passed. Ready for exact-head CI and
+  verified PR/squash merge; no completion claim before actual integration.
 - Tests use only owned providers/agents/data; no live provider writes/private
   profiles/releases. Root unrelated `.norn.yaml` never read/copied/staged.
 

@@ -70,11 +70,41 @@ tests. Profile catalog/editor and other #306 parity remain subsequent work.
   internal implementation references must document the latter's missing commit
   CAS parameter rather than invent provider atomicity.
 
-## Status
 
-- Claimed by: default-agent, 2026-10-12, single agent.
-- Branch: `issue-306-provider-approval`.
-- Location: isolated `/private/tmp/norn-provider-approval`.
-- Blockers: implementation/local gates, predecessor verified merge/rebase and
-  exact next-head CI/verified merge before completion.
-- Stopped:
+## Prepared completion receipt
+
+Prepared 2026-10-12 from implementation `d503f9b938b0c095d5eb6e0dab04be421d408f2b`
+on `issue-306-provider-approval`. Effective only after exact-head CI passes and
+verified squash merge into main. This is prepared, not a pre-merge shipped claim.
+
+- Predecessor #372 verified merged at `84921b7cd19eba4d3ed2a07a7b8a4f904f01dd86`
+  after exact648e253 CI38198661868 success. Rebased onto actual squash; audit
+  passed numbering, metadata/status, INDEX, sections, links and main collision.
+  Existing unrelated coverage advisories remain for Accepted0011/0013.
+- Native actor/repository/pin proof, strict generated preview/confirm/status/
+  reconcile IPC, single-use five-minute bounded token and pre-POST durable
+  schema19 journal. GET-only recovery preserves uncertain writes after restart;
+  old GitHub commit evidence is distinguished from current reviewer status, and
+  Bitbucket cannot infer historical commit approval from changed pins.
+- Native list/detail `a` preview, explicit `y`, dismiss, status/reconcile,
+  provider-page recovery and keyboard scroll. UI fences full selection,
+  generations, paste, late responses, expired previews and repeated inputs.
+- Root typecheck, 123 Vitest tests plus tooling, lint/protocol and Archgate17
+  passed. UI typecheck, 190 tests/1,181 assertions and 127 native golden frames
+  passed; final owned input rerun passed9/64assertions. Inspected both providers'
+  wide/narrow preview/uncertainty frames, including compact scrolling.
+- Rust no-default-feature full suite passed725 core tests +2 existing ignored,
+  61 real stdio, 6 CLI, 5 onboarding and 3 binary tests. Final owned journal
+  rerun passed6 tests including consistent SQLite backup after a failed receipt.
+  Strict all-features/all-targets Clippy, fmt, no-default all-target compile and
+  no-GUI active dependency proof passed.
+- ReactDoctor rerun score62; the React complexity finding was fixed by factoring
+  outcome selection. Remaining17 DOM-property warnings are false positives on
+  OpenTUI native `text` props, proved by renderer types/native frames; no rule
+  suppression, dependency installation or unrelated cleanup.
+- Fixtures exercised exact HTTP requests, dropped/slow/malformed/foreign/
+  oversized/redirect/rate/5xx acknowledgment, drift, expiry/replay, alias/owner,
+  corruption/quota, receipt CAS/failure, restart and deletion. No live provider
+  writes, private credentials/profiles, Norn review or public release.
+- This bounded item leaves #306/#294 and ADR0020 open/Accepted. Profile catalog/
+  editor, other parity, native-profile runtime and #307–#309 remain required.
