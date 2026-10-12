@@ -905,3 +905,203 @@ Plan 0053 completion prepared after implementation `e4264db`, effective only on 
 - Keep0069 in todo until actual source squash. #359/#294 remain open for editor
   lifecycle/finalparity and remainingepic. ADR0020 remains Accepted; preserve
   maintainerclosures/rootprivatefile/userstash. No Norn code review/delegation.
+
+## 2026-10-12 — verified380merge, plan0070claim
+
+- PR380 actually MERGEDd623231b16215a8d828764bfdfe48349c6d73254 at12:43:36Z.
+  All5CI38249399379 SUCCESS on exact99b33bdbe73befa2b2ef25be30171f657cb8bea3;
+  real3OS native F8/filter/file/content/diff/blame/find/return PASS. No retry/bypass.
+- Reconcile0069 done only from actual source completion and update parity.
+  Claim0070 editor/real terminal lifecycle before code on actual380main.
+  Rust validated platform adapters and child ownership; native suspend/resume
+  and owned POSIX PTY/Windows ConPTY proof, no protocol stdio as editor terminal.
+- Rootmain ff synced, privatefile/userstash intact. #359/#294 remain open;
+  maintainerclosures preserved, ADR0020 Accepted untilcutover. No delegated
+  agent/Norn code review/privateprofile/live provider writes/releases.
+
+
+## 2026-10-12 — 0070 native editor implementation, pending source merge
+
+- Explicit F8 o/O actions use full provider/root/path context, 30-second one-use
+  authorization and fresh file/integration checks. Native GUI priority/system
+  adapters replace desktop shell interpolation; terminal child never consumes
+  protocol pipes. Owned process groups/Windows jobs, status/cancel, foreground
+  restore and graceful transport shutdown protect the terminal's single reader.
+- Actual owned macOS PTY success/nonzero/Ctrl-C/backend-death tests pass with
+  a compiled editor changing real modes. Native GUI IPC proves both clones,
+  exact Unicode/option-like argv, stale file/root, symlink escape and token
+  binding/replay. Windows ConPTY/witness and Linux native proof remain pending.
+- Root discovery must precede --work-tree pinning; new owned reader test proves
+  nested configured browsing and unchanged strict review-capture root policy.
+- Local UI249/1578,193nativeframes/Storybook, root123+tooling, Rust765+2ignored/
+  76stdio/6CLI/5onboarding/noGUI, Archgate17/audit/Clippy pass including final adapter-test
+  rerun; Doctor17changed/untrackedfiles no diagnostics, score66.
+- Keep0070 todo and #359/#294 open pending all3OS exact-head CI/actualmerge.
+
+
+### PR381 first CI head3fe8a38 — native test dependency correction
+
+- CI38262444809 Linux built the no-GUI binaries and passed the existing owned
+  native workflow; the new adapter library test failed because the unconditional
+  Tauri dev dependency activated GTK/WebKit on the native-only runner.
+- Move Tauri mock support onto its existing optional desktop dependency and
+  include dev edges in the no-GUI verifier. Desktop/all-feature tests retain
+  the test feature; core/editor tests no longer activate Tauri at all.
+- Local exact adapter tests and strict all-feature Clippy pass; cargo tree with
+  normal/build/dev edges reports Tauri absent. Actual3OS terminal proof remains
+  pending the corrected source head. No retry/bypass or premature completion.
+
+- Remaining first-head results: Windows failed by compiling unrelated Unix-only
+  backend integration tests; scope the native adapter test to --lib. macOS
+  reached real terminal smoke but opening raced startup snapshot work. Keep
+  status connecting through initial reads, show busy editor controls and wait
+  for real availability instead of a one-second pause. Own startup regression,
+  UI250/1580,195frames/Storybook and all4 macOS PTY cases pass after correction;
+  retained desktop IPC4 smoke tests and full765core/noGUI-dev-edge gate pass.
+
+- Local general-workflow diagnosis: the retained desktop smoke command built
+  every default-feature binary and overwrote target/debug/norn with a GUI-only
+  build. The owned workflow child48528 then launched the GUI instead of command
+  routing; terminate only that verified child of48494. No profile contents were
+  inspected. Restrict the desktop smoke command to --lib (same four tests), add
+  a 60-second owned CLI probe limit, rebuild the matching no-default pair before
+  rerunning. Make/just recipe names and forwarding remain unchanged.
+
+- Final correction verification: desktop --lib lane retains IPC4 and no longer
+  overwrites CLI artifacts; matched no-default pair/general native workflow
+  passes. UI250/1580,195frames/Storybook, strict Clippy, core765+2ignored and
+  dev-inclusive noGUI gate pass; Doctor18files no diagnostics/score66. Keep plan
+  pending and obtain all5 checks on the corrected head before actual merge.
+
+## 2026-10-12 — PR381 Windows protocol-pipe follow-up
+
+- Exact c6e35f65d24e9324a48b4c6dd8281c24c6e9abdb CI38267198082
+  passed UI and full native Linux/macOS workflows, including four real PTY
+  handoff/restoration cases. Windows failed its existing slow-agent cancellation
+  scenario before the editor steps; ConPTY is still unobserved.
+- Windows exposed an unhandled asynchronous FileSink.write EPIPE during
+  shutdown. Await write/flush/end in order, catch synchronous/asynchronous pipe
+  closure, keep draining output and retain the five-second owned reap fallback.
+  A real owned subprocess closes both protocol handles before exit7; regression
+  test checks the actual reaped exit and idempotent close without unhandled
+  rejection. Ordinary request writes handle asynchronous rejection too.
+- Owned native workflow uses fresh statSync for the slow-agent receipt, awaits
+  backend closes before fixture cleanup and includes operation logs in failure
+  diagnostics. No claim about the original Windows cancellation cause yet;
+  corrected-head CI must supply proof or a more precise failure.
+- Local UI251/1582/47files, typecheck, full owned general workflow and all four
+  production macOS PTY cases pass after transport changes. No Rust code changed.
+  Keep0070 todo, #359 open and require all five actual-head checks before merge.
+
+## 2026-10-12 — PR381 ConPTY fixture argument correction
+
+- Exact ae8750f9f71470cfcd09bb14b4fe70ff830e2c14 CI38268459553
+  passed UI and full Linux/macOS native editor proof. Windows passed its general
+  review/cancellation/restart workflow, three adapter tests and full native GUI
+  IPC authorization/expiry proof, then failed before console launch: PowerShell
+  consumed a bare -- at the OwnedGit function call, exposing --owned ü.txt as
+  a Git option. No production terminal result was observed on Windows.
+- Pass all fixture Git arguments in a named string array, retaining the literal
+  separator and hostile filename. This fixes owned fixture setup; it does not
+  replace or weaken any console/input/mode/death assertion. No Rust/UI source
+  change. New actual-head CI must prove ConPTY and all required jobs.
+
+## 2026-10-12 — PR381 ConPTY supervisor console handles
+
+- Exact0930d9921253d63836382076fe07c1266db27cb6 CI38269494158
+  passed full Linux/macOS native lanes. Windows completed GUI IPC and reached
+  its console driver, but the standalone witness's initial is_terminal assertion
+  failed before production UI launch. This is not Windows editor proof.
+- The owned supervisor now explicitly opens its attached CONIN$/CONOUT$, sets
+  its standard handles and retains them through the UI scenario, keeping native
+  is_terminal/GetConsoleMode and exact restoration assertions. The C# harness
+  retains pseudoconsole creation handles until CreateProcess has attached the
+  client, instead of releasing them before launch. No production change.
+- Primary API references checked: Microsoft console-handles, SetStdHandle and
+  creating-a-pseudoconsole-session documentation. The real Windows runner must
+  prove the corrected harness and all four production lifecycle cases.
+  https://learn.microsoft.com/en-us/windows/console/console-handles
+  https://learn.microsoft.com/en-us/windows/console/setstdhandle
+  https://learn.microsoft.com/en-us/windows/console/creating-a-pseudoconsole-session
+
+## 2026-10-12 — PR381 bounded local-review preflight backpressure
+
+- Exact25e0a3c845ea9773220893c54f5ef11d6ca8d3c1 CI38270637121
+  passed UI/Linux/macOS. Windows general workflow intermittently failed before
+  ConPTY. Added diagnostics now prove the actual operation error: "Two local
+  evidence requests are already running." The original cancellation failure
+  was not adequately fixed by a fresh receipt; preserve this observed cause.
+- Local review's already-bounded worker now waits at most20s for the existing
+  two-reader pool, checking operation cancellation/shutdown/manager-stop every
+ 10ms. It performs the same fresh snapshot recheck only after owning a permit.
+  No third reader, automatic operation replay or early agent launch is added.
+  RAII releases the permit on every path. Two concurrent regression tests prove
+  waiting/capacity/release, cancellation (also with a free slot), and timeout
+  without leaks. The owned slow-child check allows45s for bounded preflight but
+  still requires a real running agent/start receipt before cancellation.
+- Final local proof observed: core767passed+2existingignored, dev-inclusive
+  noGUI/alltarget check, stdio76, strict allfeature/alltargetClippy, root/UI
+  typecheck, lint, Archgate17, full owned review/cancel/restart workflow and
+  four production macOS PTY cases. Initial full test attempts were denied
+  loopback binds by the sandbox; approved owned-fixture reruns passed entirely.
+- Windows corrected native console supervisor still unobserved. Final actual
+  head CI and verified squash remain required;0070 stays todo, #359 stays open.
+
+## 2026-10-12 — PR381 Windows processed input and mode guard
+
+- Exact009077ff0528e228e345b48a8692535390e1faff CI38272600909
+  passed UI and full Linux/macOS lanes. Windows passed native review/cancel,
+  adapter and GUI IPC, then actual ConPTY success and nonzero-editor cases,
+  including literal argv/input, reaping and exact native mode restoration.
+  Ctrl-C case stayed at editor-ready; backend-death was not reached by the
+  previous fail-fast runner. Do not claim four-case Windows acceptance.
+- Rust terminal handoff explicitly enables ENABLE_PROCESSED_INPUT, captures
+  both console modes and restores them in the existing native guard. A raw UI
+  mode must not silently leave Ctrl-C as input data. Original mode values were
+  not recorded in the failed run, so this is a correction to verify, not a
+  proven diagnosis of that failure. The fake editor now requires processed
+  input before intentionally changing its own mode.
+- The test runner executes every owned case and aggregates failures; each case
+  retains its own cleanup and120s deadline. Windows failures print owned mode/
+  receipt/alive facts, and premature UI exit fails immediately except during
+  the explicitly bounded post-exit editor-reap check. No assertion removed.
+- Primary SetConsoleMode documentation checked; local strict allfeatureClippy,
+  UI typecheck/lint/fmt and all four production macOS PTY cases pass. New exact
+  head Windows Ctrl-C/backend-death proof and all five checks remain required.
+  https://learn.microsoft.com/en-us/windows/console/setconsolemode
+
+## 2026-10-12 — PR381 UI console interrupt ownership
+
+- Exact010bf1fbc7a5e64c4cdddeaae61f5d35d933e75b CI38274290427 passes
+  verify/UI/Linux/macOS. Windows native review, GUI IPC and ConPTY success/
+  error pass. Ctrl-C kills the editor and UI (C000013A); backend death returns
+  UI255 instead of the test's guessed1. Four-case acceptance still pending.
+- Add a UI-only fixed kernel32 SetConsoleCtrlHandler binding and reassert its
+  protection before/after renderer suspension. Restore/release once at UI
+  exit, including cleanup failure. Rust engine communication remains stdio;
+  no Rust library, shared engine memory or caller-controlled native symbol.
+- Derive backend-death expected status from the actual owned native process
+  and require the UI's exact exit-cause message. Failure facts include native
+  before/after console modes; all four cases and exact restoration remain.
+- Local253UItests/1588assertions/48files, root/UItypes, lint,195nativeframes,
+  Storybook, Archgate17, audit and four production macOS PTY cases pass.
+  Online Doctor failed npm401; offline registry lookup missed its cache.
+  Existing cached CLI ran directly:25files, no diagnostics; score service
+  unavailable. No credentials/config read or installation/setup changes.
+- Keep0070 todo and359 open until final exact-head five-job proof and actual
+  verified squash. Current Rust767core/76stdio/Clippy proof remains unchanged.
+
+## 2026-10-12 — PR381 known native backend-death cause
+
+- Exactc7360cbb510c307ff5076d03af29ee0078eb21c7 CI38279287792
+  proves Windows ConPTY success/error/interrupt, including restored modes
+  and editor reaping. UI/Linux/macOS jobs pass. Backend-death mismatch255
+  remains; previous failure omitted expected/native status and transcript.
+- Own parent/path verification precedes retained native-handle termination
+  with explicit code73; GetExitCodeProcess must independently observe73.
+  UI must exit73 and report that exact cause. This strengthens causal proof
+  and removes reliance on .NET Kill's unspecified status/cache. Failed exit/
+  cause checks now include the bounded production transcript. No assertion
+  removed; exact console restoration/reaping/all-case execution stay required.
+- Only owned test harness/docs change; production UI/Rust gates unchanged.
+  Native Windows four-case proof still pending;0070 remains todo.

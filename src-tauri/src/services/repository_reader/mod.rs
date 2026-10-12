@@ -1,7 +1,7 @@
 //! Native repository exploration. Source authority is provider/root qualified.
 mod blame;
 mod content;
-mod context;
+pub(crate) mod context;
 mod diff;
 mod find;
 mod git;

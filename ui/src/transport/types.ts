@@ -17,6 +17,16 @@ export interface BackendOperationEvent {
 export interface BackendExit {
   code: number | null;
 }
+/** A validated correlated RPC rejection; the requested action was refused. */
+export class BackendRequestError extends Error {
+  constructor(
+    readonly code: string,
+    message: string,
+  ) {
+    super(message);
+    this.name = "BackendRequestError";
+  }
+}
 
 export interface BackendTransport {
   /** Complete the handshake and resolve with the backend capabilities. */
@@ -27,5 +37,5 @@ export interface BackendTransport {
   onOperationEvent(listener: (event: BackendOperationEvent) => void): () => void;
   /** Subscribe to backend exit; returns an unsubscribe function. */
   onExit(listener: (exit: BackendExit) => void): () => void;
-  close(): void;
+  close(): void | Promise<void>;
 }

@@ -324,14 +324,18 @@ fn root_id(path: &Path) -> Result<String, String> {
     Ok(format!("{:x}", Sha256::digest(bytes)))
 }
 fn git_text(path: &Path, args: &[&str], control: &GitRunControl) -> Result<String, String> {
-    let output = crate::local_review::run_git_bounded_with_control(
-        path,
-        args,
-        None,
-        GIT_METADATA_BYTES,
-        "Local source metadata",
-        control,
-    )
+    let output = if args == ["rev-parse", "--show-toplevel"] {
+        crate::local_review::discover_git_root_bounded(path, control)
+    } else {
+        crate::local_review::run_git_bounded_with_control(
+            path,
+            args,
+            None,
+            GIT_METADATA_BYTES,
+            "Local source metadata",
+            control,
+        )
+    }
     .map_err(|_| invalid())?;
     if !output.status.success() {
         return Err(invalid());
@@ -351,6 +355,30 @@ pub(crate) fn resolve_source(
     source: &Source,
     startup_root: &Path,
     control: &GitRunControl,
+) -> Result<ResolvedSource, String> {
+    resolve_source_policy(source, startup_root, control, false)
+}
+/// Repository browsing/editor compatibility accepts an explicitly configured
+/// subdirectory, proving its enclosing checkout and matching origin. Captured
+/// review sources keep their existing exact-root requirement.
+pub(crate) fn resolve_repository_root(
+    repository: &RepositoryIdentity,
+    control: &GitRunControl,
+) -> Result<ResolvedSource, String> {
+    resolve_source_policy(
+        &Source::Configured {
+            repository: repository.clone(),
+        },
+        Path::new(""),
+        control,
+        true,
+    )
+}
+fn resolve_source_policy(
+    source: &Source,
+    startup_root: &Path,
+    control: &GitRunControl,
+    allow_nested: bool,
 ) -> Result<ResolvedSource, String> {
     source.validate()?;
     control.check()?;
@@ -390,7 +418,7 @@ pub(crate) fn resolve_source(
     )?)
     .canonicalize()
     .map_err(|_| invalid())?;
-    if configured.is_some() && root != input {
+    if configured.is_some() && root != input && (!allow_nested || !input.starts_with(&root)) {
         return Err(
             "The configured checkout must point to the selected Git repository root.".into(),
         );

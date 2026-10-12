@@ -2,7 +2,8 @@
 // backend over stdio and mounts the React shell. The renderer restores the
 // terminal on normal quit, Ctrl+C, backend death and initialization failure.
 
-import { createCliRenderer } from "@opentui/core";
+import { createCliRenderer, RendererControlState } from "@opentui/core";
+import { restoreConsoleInterrupts } from "./app/consoleControl";
 import { ShellStore } from "./app/store";
 import { theme } from "./app/theme";
 import { mountApp } from "./app/ui";
@@ -24,16 +25,34 @@ async function main(): Promise<void> {
   let client: BackendClient | null = null;
   let renderer: Awaited<ReturnType<typeof createCliRenderer>> | null = null;
   let store: ShellStore | null = null;
-  const quit = (code = 0) => {
+  let quitting = false;
+  const quit = (code = 0, message?: string) => {
+    if (quitting) return;
+    quitting = true;
     store?.cancelSyntax();
-    client?.close();
-    renderer?.destroy();
-    process.exit(code);
+    void (async () => {
+      await client?.close();
+      if (renderer?.controlState === RendererControlState.EXPLICIT_SUSPENDED)
+        await new Promise<void>((resolve) => setTimeout(resolve, 150));
+      renderer?.destroy();
+      try {
+        restoreConsoleInterrupts();
+      } catch (error) {
+        console.error(error instanceof Error ? error.message : "Console cleanup failed.");
+        code ||= 1;
+      }
+      if (message) console.error(message);
+      process.exit(code);
+    })();
   };
+  process.on("SIGINT", () => {
+    if (renderer?.controlState !== RendererControlState.EXPLICIT_SUSPENDED) quit(130);
+  });
+  process.on("SIGTERM", () => quit(143));
   try {
     client = new BackendClient(new ProcessBackendTransport());
     renderer = await createCliRenderer({
-      exitOnCtrlC: true,
+      exitOnCtrlC: false,
       backgroundColor: theme.background,
       screenMode: "alternate-screen",
       useMouse: true,
@@ -43,16 +62,25 @@ async function main(): Promise<void> {
     client.onOperationEvent((event) => store?.applyEvent(event));
     client.onExit((exit) => {
       store?.markClosed();
-      if (exit.code !== 0 && exit.code !== null) {
-        console.error(`norn-backend exited with code ${exit.code}.`);
-      }
-      quit(exit.code ?? 0);
+      quit(
+        exit.code ?? 0,
+        exit.code !== 0 && exit.code !== null
+          ? `norn-backend exited with code ${exit.code}.`
+          : undefined,
+      );
     });
     await store.connect(client);
   } catch (error) {
     store?.cancelSyntax();
-    client?.close();
+    await client?.close();
     renderer?.destroy();
+    try {
+      restoreConsoleInterrupts();
+    } catch (cleanupError) {
+      console.error(
+        cleanupError instanceof Error ? cleanupError.message : "Console cleanup failed.",
+      );
+    }
     console.error(error instanceof Error ? error.message : String(error));
     process.exit(1);
   }

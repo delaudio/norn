@@ -1,0 +1,16 @@
+{
+  "type": "request",
+  "id": "editor-status",
+  "method": "repository.editor.status",
+  "params": {
+    "context": {
+      "repository": {
+        "provider": "github",
+        "workspace": "owned",
+        "repo": "editor"
+      },
+      "rootId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "launchId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+  }
+}

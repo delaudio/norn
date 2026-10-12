@@ -53,7 +53,7 @@ impl LocalReviewCancellation {
         self.0.store(true, Ordering::Release);
     }
 
-    fn is_cancelled(&self) -> bool {
+    pub(crate) fn is_cancelled(&self) -> bool {
         self.0.load(Ordering::Acquire)
     }
 }
@@ -1513,6 +1513,13 @@ fn configured_filter_drivers(
 }
 
 fn git_command(repo_path: &Path, control: &GitRunControl) -> Result<Command, String> {
+    git_command_mode(repo_path, control, true)
+}
+fn git_command_mode(
+    repo_path: &Path,
+    control: &GitRunControl,
+    pin_work_tree: bool,
+) -> Result<Command, String> {
     let repo_path = repo_path.canonicalize().map_err(|error| {
         format!(
             "Failed to resolve local repository path {}: {error}",
@@ -1523,10 +1530,11 @@ fn git_command(repo_path: &Path, control: &GitRunControl) -> Result<Command, Str
     work_tree.push(&repo_path);
 
     let mut command = Command::new(trusted_git_path()?);
+    command.arg("-C").arg(&repo_path);
+    if pin_work_tree {
+        command.arg(work_tree);
+    }
     command
-        .arg("-C")
-        .arg(&repo_path)
-        .arg(work_tree)
         .arg("--no-optional-locks")
         .arg("-c")
         .arg("core.fsmonitor=false")
@@ -1567,6 +1575,24 @@ fn git_command(repo_path: &Path, control: &GitRunControl) -> Result<Command, Str
     ] {
         command.env_remove(key);
     }
+    configure_owned_command(&mut command);
+    Ok(command)
+}
+
+/// Discover the actual enclosing checkout before pinning its work tree. The
+/// regular Git runner intentionally pins --work-tree, which would otherwise
+/// make --show-toplevel echo a configured subdirectory rather than Git's root.
+pub(crate) fn discover_git_root_bounded(
+    input: &Path,
+    control: &GitRunControl,
+) -> Result<BoundedGitOutput, String> {
+    control.check()?;
+    let mut command = git_command_mode(input, control, false)?;
+    command.args(["rev-parse", "--show-toplevel"]);
+    run_command_bounded_with_control(&mut command, None, 4096, "Repository root", control)
+}
+
+pub(crate) fn configure_owned_command(command: &mut Command) {
     #[cfg(unix)]
     {
         use std::os::unix::process::CommandExt;
@@ -1578,7 +1604,6 @@ fn git_command(repo_path: &Path, control: &GitRunControl) -> Result<Command, Str
         use windows_sys::Win32::System::Threading::CREATE_SUSPENDED;
         command.creation_flags(CREATE_SUSPENDED);
     }
-    Ok(command)
 }
 
 #[derive(Debug)]
@@ -1731,8 +1756,22 @@ pub(crate) fn run_git_bounded_with_control(
 ) -> Result<BoundedGitOutput, String> {
     control.check()?;
     let mut command = git_command(repo_path, control)?;
+    command.args(args);
+    run_command_bounded_with_control(&mut command, stdin, stdout_limit, description, control)
+}
+
+/// Native services reuse the same bounded streams and owned process-tree
+/// cleanup as Git. Callers supply a trusted executable and literal argv.
+pub(crate) fn run_command_bounded_with_control(
+    command: &mut Command,
+    stdin: Option<&[u8]>,
+    stdout_limit: usize,
+    description: &str,
+    control: &GitRunControl,
+) -> Result<BoundedGitOutput, String> {
+    control.check()?;
+    configure_owned_command(command);
     let mut child = command
-        .args(args)
         .stdin(if stdin.is_some() {
             Stdio::piped()
         } else {
@@ -1925,7 +1964,7 @@ fn poll_bounded_reader(
     }
 }
 
-fn terminate_git_child(child: &mut std::process::Child, process_tree: &GitProcessTree) {
+pub(crate) fn terminate_git_child(child: &mut std::process::Child, process_tree: &GitProcessTree) {
     process_tree.terminate();
     #[cfg(unix)]
     unsafe {
@@ -1936,25 +1975,25 @@ fn terminate_git_child(child: &mut std::process::Child, process_tree: &GitProces
 }
 
 #[cfg(not(windows))]
-struct GitProcessTree;
+pub(crate) struct GitProcessTree;
 
 #[cfg(not(windows))]
 impl GitProcessTree {
-    fn attach_and_resume(_child: &std::process::Child) -> io::Result<Self> {
+    pub(crate) fn attach_and_resume(_child: &std::process::Child) -> io::Result<Self> {
         Ok(Self)
     }
 
-    fn terminate(&self) {}
+    pub(crate) fn terminate(&self) {}
 }
 
 #[cfg(windows)]
-struct GitProcessTree {
+pub(crate) struct GitProcessTree {
     handle: windows_sys::Win32::Foundation::HANDLE,
 }
 
 #[cfg(windows)]
 impl GitProcessTree {
-    fn attach_and_resume(child: &std::process::Child) -> io::Result<Self> {
+    pub(crate) fn attach_and_resume(child: &std::process::Child) -> io::Result<Self> {
         use std::mem::size_of;
         use std::os::windows::io::AsRawHandle;
         use windows_sys::Win32::System::JobObjects::{
@@ -1994,7 +2033,7 @@ impl GitProcessTree {
         Ok(job)
     }
 
-    fn terminate(&self) {
+    pub(crate) fn terminate(&self) {
         unsafe {
             windows_sys::Win32::System::JobObjects::TerminateJobObject(self.handle, 1);
         }

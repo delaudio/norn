@@ -294,6 +294,9 @@ export class ExplorerStore {
             : "tree",
     });
   }
+  editorError(message: string) {
+    this.update({ previewError: message });
+  }
   moveHorizontal(delta: number) {
     const longest = Math.max(
       0,

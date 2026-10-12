@@ -80,7 +80,20 @@ arbitrary explorer finding anchors or provider writes.
 - Location: isolated /private/tmp/norn-repository-explorer-ui on actual379main.
 - Source prepared: native F8 tree/previews/find/Markdown/input/frames and owned
   production backend workflow implemented; local gates recorded in WORKLOG.
-- Blockers: final source PR own exact-head3OS CI and actual verified merge.
-- This item remains todo until its source PR is actually merged; next claim
-  reconciles the completion receipt from observed squash/check evidence.
+- Completed: PR380 actually merged after all five exact-head CI checks passed.
+- Status: completed from observed squash and exact-head check evidence;
+  reconciled into done with following editor claim.
 - Stopped:
+
+## Shipped receipt
+
+- Completion observed only after PR380 actual squash
+  d623231b16215a8d828764bfdfe48349c6d73254 at2026-10-12T12:43:36Z.
+- Claim2095773; source99b33bdbe73befa2b2ef25be30171f657cb8bea3.
+- All five CI38249399379 checks SUCCESS on that exact source: verify, UI and
+  real native OpenTUI/stdio/Rust workflows on Linux/macOS/Windows. No bypass.
+- Local763core+2existingignored/76stdio/6CLI/5onboarding/3binary; root123+tooling,
+  UI240/1531assertions/187frames/Storybook; protocol/typecheck/lint/build,
+  Archgate17/audit/noGUI/strictallfeaturesClippy/fmt PASS. Doctor no diagnostics,66.
+- This actual receipt reconciled in following editor claim, never before merge.
+  #359/#294 remain open for editor and remaining parity; ADR0020 Accepted.

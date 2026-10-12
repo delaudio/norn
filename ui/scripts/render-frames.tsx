@@ -25,6 +25,7 @@ import {
   FakePublicationTransport,
   publicationFixtureScope,
 } from "../src/transport/fakePublicationTransport";
+import { EditorExplorerFixture } from "../test/fixtures/editor-backend";
 import { ExplorerFixture } from "../test/fixtures/explorer-backend";
 import { LocalTransport } from "../test/fixtures/local-backend";
 import { LocalRasterTransport } from "../test/fixtures/local-raster-backend";
@@ -148,7 +149,7 @@ interface Scene {
     store: ShellStore;
     client: BackendClient;
     view?: ReactNode;
-    afterMount?: () => void;
+    afterMount?: (test: Awaited<ReturnType<typeof createTestRenderer>>) => void | Promise<void>;
   }>;
 }
 
@@ -1087,6 +1088,8 @@ const scenes: Scene[] = [
           view: (
             <ExplorerPanel
               store={explorer}
+              client={client}
+              editorAvailable={false}
               width={cols}
               height={cols === 120 ? 30 : 20}
               onClose={() => explorer.dispose()}
@@ -1094,6 +1097,46 @@ const scenes: Scene[] = [
               quit={() => {}}
             />
           ),
+        };
+      },
+    })),
+  ),
+  ...(["launched", "failed", "unavailable", "busy"] as const).flatMap((kind) =>
+    [120, 50].map((cols) => ({
+      id: `explorer-editor-${kind}-${cols}x${cols === 120 ? 30 : 20}`,
+      cols,
+      rows: cols === 120 ? 30 : 20,
+      build: async () => {
+        const fixture = new EditorExplorerFixture();
+        fixture.state = kind === "failed" ? "failed" : "launched";
+        const { client, store, ready } = readyStore(fixture);
+        await ready;
+        const explorer = new ExplorerStore();
+        await explorer.load(client, { provider: "github", workspace: "owned", repo: "same" }, true);
+        await explorer.choose();
+        return {
+          store,
+          client,
+          view: (
+            <ExplorerPanel
+              store={explorer}
+              client={client}
+              editorAvailable={kind !== "unavailable"}
+              editorBusy={kind === "busy"}
+              width={cols}
+              height={cols === 120 ? 30 : 20}
+              onClose={() => explorer.dispose()}
+              onSettings={() => {}}
+              quit={() => {}}
+            />
+          ),
+          afterMount: async (test: Awaited<ReturnType<typeof createTestRenderer>>) => {
+            test.mockInput.pressKey("o");
+            for (let pass = 0; pass < 10; pass++) {
+              await Bun.sleep(0);
+              await test.renderOnce();
+            }
+          },
         };
       },
     })),
@@ -1428,7 +1471,7 @@ for (const scene of scenes) {
     flushSync(() => root.render(renderScene(store, client, view)));
     await test.renderOnce();
     if (afterMount) {
-      afterMount();
+      await afterMount(test);
       await test.renderOnce();
     }
     for (let pass = 0; pass < 3; pass += 1) {

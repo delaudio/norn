@@ -22,4 +22,5 @@ pub(crate) mod local_snapshot;
 pub(crate) mod raster;
 
 pub(crate) mod local_fs;
+pub(crate) mod repository_editor;
 pub(crate) mod repository_reader;

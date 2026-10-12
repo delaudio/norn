@@ -1,0 +1,16 @@
+{
+  "type": "request",
+  "id": "editor-open",
+  "method": "repository.editor.open",
+  "params": {
+    "context": {
+      "repository": {
+        "provider": "github",
+        "workspace": "owned",
+        "repo": "editor"
+      },
+      "rootId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "token": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+  }
+}

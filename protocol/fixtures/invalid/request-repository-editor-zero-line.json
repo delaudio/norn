@@ -1,0 +1,18 @@
+{
+  "type": "request",
+  "id": "invalid-editor",
+  "method": "repository.editor.prepare",
+  "params": {
+    "context": {
+      "repository": {
+        "provider": "github",
+        "workspace": "owned",
+        "repo": "editor"
+      },
+      "rootId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "path": "--literal ü.txt",
+    "line": 0,
+    "mode": "terminal"
+  }
+}

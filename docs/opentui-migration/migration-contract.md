@@ -169,7 +169,7 @@ removal with maintainer decision; `shared` = Rust/native service reused as-is.
 | Menu-bar sync + tray | desktop | `useMenuBarPrSync`, `lib.rs` `setup_menu_bar` | localStorage snapshot | #306 | retire |
 | Native notifications | desktop | `useMenuBarPrSync`, `App.tsx` | localStorage snapshot | #306 | retire |
 | Automatic sync polling | desktop | `useAutomaticSyncPolling` | `config.rs` | #305 | port |
-| Repository explorer (tree/content/blame/diff/find) | desktop | `RepositoryExplorerPanel`, `localRepoService`; bounded native `repository_reader` + typed explorer IPC/client | in-memory | #359 | native readonly API merged PR379/b15d80b with real3OS proof; tree/editor UI follows0069 |
+| Repository explorer (tree/content/blame/diff/find) | desktop | `RepositoryExplorerPanel`, `localRepoService`; bounded native `repository_reader` + typed explorer IPC/client | in-memory | #359 | native API PR379/b15d80b and F8 tree/previews/Markdown/blame/find PR380/d623231 merged with real3OS proof; editor follows0070 |
 | Branch/worktree operations | desktop | `RepositoryBranchesPanel`, `localRepoService` | local git | #306 | port |
 | Review history panel | desktop | `ReviewHistoryPanel` | Rust review store | #306 | port |
 | Analytics: closed-PR metrics, review effectiveness | desktop | `OverviewPanel`, `ClosedPrAnalyticsPanel`, `ReviewEffectivenessDashboard` | Rust review store | #306 | port |
@@ -179,8 +179,8 @@ removal with maintainer decision; `shared` = Rust/native service reused as-is.
 | Jira/Notion context in AI payload | desktop | `useReviewContext`, `jira.ts` | keychain tokens | #303 | port |
 | Clipboard copy | both | `tui/terminal.rs` OSC52, `lib/clipboard.ts` | none | #302 | port |
 | Shortcuts help / theme | desktop | `ShortcutsDialog`, `useTheme` | localStorage | #305 | port |
-| Find in repository | desktop | `RepositoryExplorerPanel`; native selected-file/diff find with original UTF-16 positions | in-memory | #359 | selected-preview API merged PR379/b15d80b; native presentation follows0069 |
-| External file open | desktop | `localRepoService` `open_repository_file_external` | none | #306 | port |
+| Find in repository | desktop | `RepositoryExplorerPanel`; native selected-file/diff find with original UTF-8 byte and UTF-16 positions | in-memory | #359 | native byte-jump/highlight/result paging merged PR380/d623231 with real3OS F8 proof |
+| External file open | desktop | `localRepoService` `open_repository_file_external` | none | #359 | native editor prepared0070 with owned GUI IPC and macOS PTY success/error/interrupt/death proof; all3OS CI/merge pending |
 | Tray + menu-bar review trigger | desktop | `App.runBackgroundMenuReview`, `backgroundReviewStart` | Rust review store | #306 | retire |
 | Readiness preflight / `--skip-readiness` / `--current-repo` | TUI | `tui/mod.rs` | `config.rs` | #299 | port |
 | Headless CLI/service | CLI | `cli.rs`, `headless_review.rs`, `self_hosted_service.rs` | Rust stores | n/a | preserve |

@@ -7039,6 +7039,257 @@
           ]
         }
       }
+    },
+    "RepositoryEditorMode": {
+      "enum": [
+        "graphical",
+        "terminal"
+      ]
+    },
+    "RepositoryEditorState": {
+      "enum": [
+        "starting",
+        "launched",
+        "running",
+        "exited",
+        "failed",
+        "canceled"
+      ]
+    },
+    "RepositoryEditorPrepareParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "context",
+        "path",
+        "line",
+        "mode"
+      ],
+      "properties": {
+        "context": {
+          "$ref": "#/definitions/RepositoryExploreContext"
+        },
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096,
+          "pattern": "^(?!/)(?![\\s\\S]*\\u0000)(?![\\s\\S]*(?:^|/)\\.{1,2}(?:/|$))(?![\\s\\S]*//)(?![\\s\\S]*/$)[\\s\\S]+$"
+        },
+        "line": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 10000000
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "mode": {
+          "$ref": "#/definitions/RepositoryEditorMode"
+        }
+      }
+    },
+    "RepositoryEditorOpenParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "context",
+        "token"
+      ],
+      "properties": {
+        "context": {
+          "$ref": "#/definitions/RepositoryExploreContext"
+        },
+        "token": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      }
+    },
+    "RepositoryEditorStatusParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "context",
+        "launchId"
+      ],
+      "properties": {
+        "context": {
+          "$ref": "#/definitions/RepositoryExploreContext"
+        },
+        "launchId": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      }
+    },
+    "RepositoryEditorPrepared": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "request",
+        "token",
+        "integration",
+        "expiresInMs",
+        "message"
+      ],
+      "properties": {
+        "request": {
+          "$ref": "#/definitions/RepositoryEditorPrepareParams"
+        },
+        "token": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "integration": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "expiresInMs": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 30000
+        },
+        "message": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2048
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "RepositoryEditor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "launchId",
+        "context",
+        "path",
+        "line",
+        "mode",
+        "state",
+        "integration",
+        "exitCode",
+        "message"
+      ],
+      "properties": {
+        "launchId": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "context": {
+          "$ref": "#/definitions/RepositoryExploreContext"
+        },
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096,
+          "pattern": "^(?!/)(?![\\s\\S]*\\u0000)(?![\\s\\S]*(?:^|/)\\.{1,2}(?:/|$))(?![\\s\\S]*//)(?![\\s\\S]*/$)[\\s\\S]+$"
+        },
+        "line": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 10000000
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "mode": {
+          "$ref": "#/definitions/RepositoryEditorMode"
+        },
+        "state": {
+          "$ref": "#/definitions/RepositoryEditorState"
+        },
+        "integration": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "exitCode": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": -2147483648,
+              "maximum": 2147483647
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "message": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2048
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "RepositoryEditorOpened": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "request",
+        "editor"
+      ],
+      "properties": {
+        "request": {
+          "$ref": "#/definitions/RepositoryEditorOpenParams"
+        },
+        "editor": {
+          "$ref": "#/definitions/RepositoryEditor"
+        }
+      }
+    },
+    "RepositoryEditorStatus": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "request",
+        "editor"
+      ],
+      "properties": {
+        "request": {
+          "$ref": "#/definitions/RepositoryEditorStatusParams"
+        },
+        "editor": {
+          "$ref": "#/definitions/RepositoryEditor"
+        }
+      }
     }
   },
   "oneOf": [
@@ -9093,6 +9344,102 @@
               "$ref": "#/definitions/RepositoryExploreFindParams"
             }
           }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "type": {
+              "const": "request"
+            },
+            "id": {
+              "$ref": "#/definitions/RequestId"
+            },
+            "method": {
+              "const": "repository.editor.prepare"
+            },
+            "params": {
+              "$ref": "#/definitions/RepositoryEditorPrepareParams"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "type": {
+              "const": "request"
+            },
+            "id": {
+              "$ref": "#/definitions/RequestId"
+            },
+            "method": {
+              "const": "repository.editor.open"
+            },
+            "params": {
+              "$ref": "#/definitions/RepositoryEditorOpenParams"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "type": {
+              "const": "request"
+            },
+            "id": {
+              "$ref": "#/definitions/RequestId"
+            },
+            "method": {
+              "const": "repository.editor.status"
+            },
+            "params": {
+              "$ref": "#/definitions/RepositoryEditorStatusParams"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "type": {
+              "const": "request"
+            },
+            "id": {
+              "$ref": "#/definitions/RequestId"
+            },
+            "method": {
+              "const": "repository.editor.cancel"
+            },
+            "params": {
+              "$ref": "#/definitions/RepositoryEditorStatusParams"
+            }
+          }
         }
       ]
     },
@@ -9288,6 +9635,15 @@
             },
             {
               "$ref": "#/definitions/RepositoryExploreFindPage"
+            },
+            {
+              "$ref": "#/definitions/RepositoryEditorPrepared"
+            },
+            {
+              "$ref": "#/definitions/RepositoryEditorOpened"
+            },
+            {
+              "$ref": "#/definitions/RepositoryEditorStatus"
             }
           ]
         }

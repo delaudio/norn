@@ -1,12 +1,11 @@
-use std::fs;
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::Serialize;
 
 use crate::config::{self, ReviewProvider};
-use crate::local_repo::{configured_repo_path, find_in_path, git_origin_matches};
+use crate::local_repo::{configured_repo_path, git_origin_matches};
 
 #[derive(Serialize, Debug, Clone, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -322,106 +321,6 @@ fn configured_readonly_repo(workspace: &str, repo: &str) -> Result<PathBuf, Stri
         .map_err(|_| "The selected local checkout is unavailable.".into())
 }
 
-fn validate_repo_relative_path(path: &str) -> Result<(), String> {
-    let candidate = Path::new(path);
-    if candidate.is_absolute() {
-        return Err("Repository file path must be relative.".to_string());
-    }
-    if path.trim().is_empty() {
-        return Err("Repository file path is required.".to_string());
-    }
-    if candidate.components().any(|component| {
-        matches!(
-            component,
-            Component::ParentDir | Component::RootDir | Component::Prefix(_)
-        )
-    }) {
-        return Err("Repository file path cannot escape the repository.".to_string());
-    }
-    Ok(())
-}
-
-fn safe_repo_file_path(repo_path: &Path, path: &str) -> Result<PathBuf, String> {
-    validate_repo_relative_path(path)?;
-    let full_path = repo_path.join(path);
-    let canonical_repo = repo_path
-        .canonicalize()
-        .map_err(|e| format!("Failed to resolve repository path: {e}"))?;
-    let canonical_file = full_path
-        .canonicalize()
-        .map_err(|e| format!("Failed to resolve repository file path: {e}"))?;
-    if !canonical_file.starts_with(&canonical_repo) {
-        return Err("Repository file path cannot escape the repository.".to_string());
-    }
-    Ok(canonical_file)
-}
-
-fn editor_file_arg(file_path: &Path, line: Option<u32>, include_column: bool) -> String {
-    let path = file_path.to_string_lossy();
-    match line.filter(|line| *line > 0) {
-        Some(line) if include_column => format!("{path}:{line}:1"),
-        Some(line) => format!("{path}:{line}"),
-        None => path.to_string(),
-    }
-}
-
-fn external_editor_command(file_path: &Path, line: Option<u32>) -> Option<(PathBuf, Vec<String>)> {
-    if let Some(zed) = find_in_path("zed") {
-        return Some((zed, vec![editor_file_arg(file_path, line, true)]));
-    }
-    if let Some(cursor) = find_in_path("cursor") {
-        return Some((
-            cursor,
-            vec!["-g".to_string(), editor_file_arg(file_path, line, false)],
-        ));
-    }
-    if let Some(code) = find_in_path("code") {
-        return Some((
-            code,
-            vec!["-g".to_string(), editor_file_arg(file_path, line, false)],
-        ));
-    }
-    None
-}
-
-fn spawn_command(program: &Path, args: &[String]) -> Result<(), String> {
-    Command::new(program)
-        .args(args)
-        .spawn()
-        .map(|_| ())
-        .map_err(|e| format!("Failed to open external editor: {e}"))
-}
-
-fn open_with_system(file_path: &Path) -> Result<(), String> {
-    #[cfg(target_os = "macos")]
-    {
-        Command::new("/usr/bin/open")
-            .arg(file_path)
-            .spawn()
-            .map(|_| ())
-            .map_err(|e| format!("Failed to open file: {e}"))
-    }
-
-    #[cfg(target_os = "windows")]
-    {
-        let file_path = file_path.to_string_lossy().to_string();
-        return Command::new("cmd")
-            .args(["/C", "start", "", &file_path])
-            .spawn()
-            .map(|_| ())
-            .map_err(|e| format!("Failed to open file: {e}"));
-    }
-
-    #[cfg(all(unix, not(target_os = "macos")))]
-    {
-        Command::new("xdg-open")
-            .arg(file_path)
-            .spawn()
-            .map(|_| ())
-            .map_err(|e| format!("Failed to open file: {e}"))
-    }
-}
-
 fn fetch_repo(repo_path: &Path) -> Result<(), String> {
     run_git_checked(repo_path, &["fetch", "--prune", "origin"])?;
     Ok(())
@@ -510,18 +409,24 @@ pub fn open_repository_file_external(
     path: String,
     line: Option<u32>,
 ) -> Result<(), String> {
-    let repo_path = configured_repo(&workspace, &repo)?;
-    let file_path = safe_repo_file_path(&repo_path, &path)?;
-    let metadata = fs::metadata(&file_path).map_err(|e| format!("Failed to read file: {e}"))?;
-    if !metadata.is_file() {
-        return Err("Repository path is not a file.".to_string());
+    let matches: Vec<_> = config::load()
+        .repos
+        .into_iter()
+        .filter(|entry| entry.workspace == workspace && entry.repo == repo)
+        .collect();
+    if matches.len() != 1 {
+        return Err("Select one configured repository for this provider.".into());
     }
-
-    if let Some((program, args)) = external_editor_command(&file_path, line) {
-        return spawn_command(&program, &args);
-    }
-
-    open_with_system(&file_path)
+    let entry = &matches[0];
+    crate::services::repository_editor::open_graphical(
+        crate::services::bitbucket::workspace_prs::RepositoryIdentity {
+            provider: entry.provider,
+            workspace,
+            repo,
+        },
+        path,
+        line.filter(|value| *value > 0),
+    )
 }
 
 #[tauri::command]
@@ -589,13 +494,13 @@ pub fn stash_repository(
 #[cfg(test)]
 mod tests {
     use std::fs;
-    use std::path::{Path, PathBuf};
+    use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     use super::{
-        editor_file_arg, local_branch_for_remote, parse_commit_messages,
-        parse_git_blame_line_porcelain, parse_git_status_porcelain_z, run_git_checked, stash_repo,
-        validate_repo_relative_path, RepositoryFileStatus, GIT_SHOW_MESSAGE_MARKER,
+        local_branch_for_remote, parse_commit_messages, parse_git_blame_line_porcelain,
+        parse_git_status_porcelain_z, run_git_checked, stash_repo, RepositoryFileStatus,
+        GIT_SHOW_MESSAGE_MARKER,
     };
 
     fn temp_git_repo(name: &str) -> PathBuf {
@@ -623,14 +528,6 @@ mod tests {
         );
         assert_eq!(local_branch_for_remote("main"), None);
         assert_eq!(local_branch_for_remote("upstream/main"), None);
-    }
-
-    #[test]
-    fn validates_repository_relative_paths() {
-        assert!(validate_repo_relative_path("src/App.tsx").is_ok());
-        assert!(validate_repo_relative_path("../secrets").is_err());
-        assert!(validate_repo_relative_path("/tmp/secrets").is_err());
-        assert!(validate_repo_relative_path("").is_err());
     }
 
     #[test]
@@ -725,24 +622,6 @@ filename src/lib/format.ts
                 "Add formatter\n\nUse shared formatting.".to_string(),
                 "Fix locale copy\n\nKeep labels concise.".to_string(),
             ]
-        );
-    }
-
-    #[test]
-    fn builds_external_editor_file_position_argument() {
-        let file_path = Path::new("/tmp/project/src/App.tsx");
-
-        assert_eq!(
-            editor_file_arg(file_path, Some(42), true),
-            "/tmp/project/src/App.tsx:42:1"
-        );
-        assert_eq!(
-            editor_file_arg(file_path, Some(42), false),
-            "/tmp/project/src/App.tsx:42"
-        );
-        assert_eq!(
-            editor_file_arg(file_path, None, true),
-            "/tmp/project/src/App.tsx"
         );
     }
 }

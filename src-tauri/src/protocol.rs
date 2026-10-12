@@ -451,6 +451,26 @@ pub enum Request {
         id: String,
         params: crate::services::repository_reader::FindParams,
     },
+    #[serde(rename = "repository.editor.prepare")]
+    RepositoryEditorPrepare {
+        id: String,
+        params: crate::services::repository_editor::PrepareParams,
+    },
+    #[serde(rename = "repository.editor.open")]
+    RepositoryEditorOpen {
+        id: String,
+        params: crate::services::repository_editor::OpenParams,
+    },
+    #[serde(rename = "repository.editor.status")]
+    RepositoryEditorStatus {
+        id: String,
+        params: crate::services::repository_editor::StatusParams,
+    },
+    #[serde(rename = "repository.editor.cancel")]
+    RepositoryEditorCancel {
+        id: String,
+        params: crate::services::repository_editor::StatusParams,
+    },
     #[serde(rename = "local.options")]
     LocalOptions {
         id: String,
@@ -634,6 +654,10 @@ impl Request {
             | Self::RepositoryExploreDiff { id, .. }
             | Self::RepositoryExploreBlame { id, .. }
             | Self::RepositoryExploreFind { id, .. }
+            | Self::RepositoryEditorPrepare { id, .. }
+            | Self::RepositoryEditorOpen { id, .. }
+            | Self::RepositoryEditorStatus { id, .. }
+            | Self::RepositoryEditorCancel { id, .. }
             | Self::LocalOptions { id, .. }
             | Self::LocalSnapshot { id, .. }
             | Self::LocalSnapshotCancel { id, .. }
@@ -721,6 +745,10 @@ impl Request {
             Self::RepositoryExploreDiff { .. } => "repository.explore.diff",
             Self::RepositoryExploreBlame { .. } => "repository.explore.blame",
             Self::RepositoryExploreFind { .. } => "repository.explore.find",
+            Self::RepositoryEditorPrepare { .. } => "repository.editor.prepare",
+            Self::RepositoryEditorOpen { .. } => "repository.editor.open",
+            Self::RepositoryEditorStatus { .. } => "repository.editor.status",
+            Self::RepositoryEditorCancel { .. } => "repository.editor.cancel",
             Self::LocalOptions { .. } => "local.options",
             Self::LocalSnapshot { .. } => "local.snapshot",
             Self::LocalSnapshotCancel { .. } => "local.snapshot.cancel",
@@ -1021,6 +1049,16 @@ impl Request {
                 params.validate().map_err(invalid_request)?
             }
             Self::RepositoryExploreFind { params, .. } => {
+                params.validate().map_err(invalid_request)?
+            }
+            Self::RepositoryEditorPrepare { params, .. } => {
+                params.validate().map_err(invalid_request)?
+            }
+            Self::RepositoryEditorOpen { params, .. } => {
+                params.validate().map_err(invalid_request)?
+            }
+            Self::RepositoryEditorStatus { params, .. }
+            | Self::RepositoryEditorCancel { params, .. } => {
                 params.validate().map_err(invalid_request)?
             }
             Self::LocalOptions { params, .. } => params.validate().map_err(invalid_request)?,
@@ -1403,6 +1441,14 @@ mod tests {
             "valid/response-repository-explore-diff.json",
             "valid/request-repository-explore-blame.json",
             "valid/response-repository-explore-blame.json",
+            "valid/request-repository-editor-prepare.json",
+            "valid/response-repository-editor-prepare.json",
+            "valid/request-repository-editor-open.json",
+            "valid/response-repository-editor-open.json",
+            "valid/request-repository-editor-status.json",
+            "valid/response-repository-editor-status.json",
+            "valid/request-repository-editor-cancel.json",
+            "valid/response-repository-editor-cancel.json",
             "valid/request-repository-explore-find.json",
             "valid/response-repository-explore-find.json",
             "valid/ready.json",
@@ -1493,6 +1539,12 @@ mod tests {
             "invalid/request-repository-explore-unknown-root.json",
             "invalid/request-repository-explore-oversize-page.json",
             "invalid/request-repository-explore-unknown-search.json",
+            "invalid/request-repository-editor-program.json",
+            "invalid/request-repository-editor-unsafe-path.json",
+            "invalid/request-repository-editor-zero-line.json",
+            "invalid/request-repository-editor-unknown-root.json",
+            "invalid/request-repository-editor-guess-token.json",
+            "invalid/request-repository-editor-pid.json",
             "invalid/request-repository-explore-unpinned.json",
             "invalid/error-code.json",
             "invalid/missing-id.json",

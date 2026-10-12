@@ -1,6 +1,7 @@
 // Real OpenTUI input/rendering + production stdio transport + no-default Rust.
 // Every repository, settings file, stored run and agent belongs to this process.
 import assert from "node:assert/strict";
+import { statSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { delimiter, dirname, join, resolve } from "node:path";
@@ -131,8 +132,8 @@ const open = async () => {
     await Bun.sleep(10);
     await renderer.renderOnce();
   };
-  const until = async (condition: () => boolean, label: string) => {
-    const deadline = Date.now() + 15_000;
+  const until = async (condition: () => boolean, label: string, timeoutMs = 15_000) => {
+    const deadline = Date.now() + timeoutMs;
     while (!condition() && Date.now() < deadline) await tick();
     assert(
       condition(),
@@ -140,6 +141,7 @@ const open = async () => {
         error: store.getSnapshot().error,
         notice: store.getSnapshot().notice,
         operation: store.getSnapshot().operation?.state,
+        operationLogs: store.getSnapshot().operation?.logs,
         focus: store.getSnapshot().focus,
         layers: store.getSnapshot().findingLayers,
         profile: store.getSnapshot().profileOpen,
@@ -169,7 +171,7 @@ const open = async () => {
         ]);
       } finally {
         if (timer) clearTimeout(timer);
-        client.close();
+        await client.close();
         clients.delete(client);
         renderer.renderer.destroy();
       }
@@ -190,7 +192,7 @@ try {
       "--allow-provider-diff",
       "--json",
     ],
-    { cwd: repo, env, stdout: "pipe", stderr: "pipe" },
+    { cwd: repo, env, stdout: "pipe", stderr: "pipe", timeout: 60_000 },
   );
   assert.equal(cliReview.exitCode, 0, cliReview.stderr.toString());
   assert.equal(JSON.parse(cliReview.stdout.toString()).status, "succeeded");
@@ -403,11 +405,19 @@ try {
     await rm(join(agent, "started"));
     await rm(join(agent, "completed"));
     first.renderer.mockInput.pressEnter();
+    const agentStarted = () => {
+      try {
+        return statSync(join(agent, "started")).size > 0;
+      } catch {
+        return false;
+      }
+    };
     await first.until(
-      () =>
-        first.store.getSnapshot().operation?.state === "running" &&
-        Bun.file(join(agent, "started")).size > 0,
+      () => first.store.getSnapshot().operation?.state === "running" && agentStarted(),
       "Owned slow child start",
+      // Accepted review preflight may wait up to 20s for background evidence
+      // reads, then recheck its snapshot. Still require a real running child.
+      45_000,
     );
     first.renderer.mockInput.pressKey("x");
     await first.until(
@@ -465,6 +475,6 @@ try {
   throw error;
 } finally {
   process.chdir(original);
-  for (const client of clients) client.close();
+  await Promise.all([...clients].map((client) => client.close()));
   await removeOwnedRoot();
 }

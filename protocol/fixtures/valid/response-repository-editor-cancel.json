@@ -1,0 +1,36 @@
+{
+  "type": "response",
+  "id": "editor-cancel",
+  "ok": true,
+  "result": {
+    "request": {
+      "context": {
+        "repository": {
+          "provider": "github",
+          "workspace": "owned",
+          "repo": "editor"
+        },
+        "rootId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "launchId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    },
+    "editor": {
+      "context": {
+        "repository": {
+          "provider": "github",
+          "workspace": "owned",
+          "repo": "editor"
+        },
+        "rootId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "path": "--literal ü.txt",
+      "line": 7,
+      "mode": "terminal",
+      "launchId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "integration": "nvim",
+      "state": "canceled",
+      "exitCode": null,
+      "message": "The terminal editor was stopped."
+    }
+  }
+}

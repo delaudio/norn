@@ -195,6 +195,7 @@ export interface ShellSnapshot {
   providerOpen: boolean;
   explorerOpen: boolean;
   explorerReads: boolean;
+  editorAvailable: boolean;
   providerReads: boolean;
   providerExternalBrowser: boolean;
   providerApproval: boolean;
@@ -282,6 +283,7 @@ const INITIAL: ShellSnapshot = {
   providerOpen: false,
   explorerOpen: false,
   explorerReads: false,
+  editorAvailable: false,
   providerReads: false,
   providerExternalBrowser: false,
   providerApproval: false,
@@ -1407,7 +1409,6 @@ export class ShellStore {
           : Promise.resolve([]),
       ]);
       this.update({
-        status: "ready",
         serverVersion: ready.serverVersion,
         repositories,
         selected: 0,
@@ -1424,6 +1425,7 @@ export class ShellStore {
         explorerReads:
           ready.capabilities.includes("repository-explorer-reads") &&
           ready.capabilities.includes("repository-explorer-windowed-find"),
+        editorAvailable: ready.capabilities.includes("repository-editor"),
         providerExternalBrowser: ready.capabilities.includes("provider-external-browser"),
         providerApproval: ready.capabilities.includes("provider-pr-approval"),
         providerSnapshots: ready.capabilities.includes("provider-snapshot-preview"),
@@ -1445,6 +1447,7 @@ export class ShellStore {
         await this.openLocalComparison(client, { kind: "current" });
         await this.applyLocalComparison(client);
       } else await this.loadSnapshot(client, this.state.generation);
+      if (this.getSnapshot().status !== "closed") this.update({ status: "ready" });
     } catch (error) {
       this.update({ status: "error", error: message(error), diffLoading: false });
     }

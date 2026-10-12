@@ -1,0 +1,17 @@
+{
+  "type": "request",
+  "id": "invalid-editor",
+  "method": "repository.editor.open",
+  "params": {
+    "context": {
+      "repository": {
+        "provider": "github",
+        "workspace": "owned",
+        "repo": "editor"
+      },
+      "rootId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "absolutePath": "/outside"
+    },
+    "token": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+  }
+}

@@ -13,6 +13,23 @@ const target = {
   repo: "payments",
 } as TargetIdentity;
 
+test("closed native protocol pipes are reaped without an unhandled write rejection", async () => {
+  const script = fileURLToPath(new URL("./fixtures/closed-pipes-backend.ts", import.meta.url));
+  chmodSync(script, 0o755);
+  const transport = new ProcessBackendTransport(script);
+  const exited = new Promise<number | null>((resolve) =>
+    transport.onExit((exit) => resolve(exit.code)),
+  );
+  try {
+    expect((await transport.start()).serverVersion).toBe("closed-pipes-fixture");
+    expect(await exited).toBe(7);
+    await transport.close();
+    await transport.close();
+  } finally {
+    await transport.close();
+  }
+});
+
 test("fake transport handshakes, lists repositories and streams review events", async () => {
   const client = new BackendClient(
     new FakeBackendTransport({
