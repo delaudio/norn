@@ -234,6 +234,8 @@ function useShellInput(
       void store.cycleLocalBase(client);
     } else if (key.sequence === "H") {
       void store.loadJobs(client);
+    } else if (key.sequence === "M") {
+      void store.loadClosedMetrics(client);
     } else if (key.name === "b") {
       void store.openBrowser(client);
     } else if (key.name === "y") {

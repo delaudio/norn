@@ -38,6 +38,7 @@ import { setTheme } from "./theme";
 import type {
   BackendClient,
   ChangedFile,
+  ClosedPrMetric,
   FindingSummary,
   FixPreview,
   FixState,
@@ -225,6 +226,7 @@ export interface ShellSnapshot {
   selectedFinding: number;
   history: ReviewRunSummary[];
   jobs: ReviewJobSummary[];
+  closedMetrics: ClosedPrMetric[];
   threads: ReviewThreadSummary[];
   selectedThread: number;
   conversationOpen: boolean;
@@ -323,6 +325,7 @@ const INITIAL: ShellSnapshot = {
   selectedFinding: 0,
   history: [],
   jobs: [],
+  closedMetrics: [],
   threads: [],
   selectedThread: 0,
   conversationOpen: false,
@@ -3045,6 +3048,26 @@ export class ShellStore {
           jobs.length === 0
             ? "No review history."
             : `Review history: ${jobs.length} job(s). Latest ${latest?.status ?? ""} ${latest?.workspace ?? ""}/${latest?.repo ?? ""}#${latest?.prId ?? ""}`,
+      });
+    } catch (error) {
+      this.update({ error: message(error) });
+    }
+  }
+
+  /// Load bounded closed-PR analytics computed in Rust.
+  async loadClosedMetrics(client: BackendClient): Promise<void> {
+    try {
+      const closedMetrics = await client.reviewClosedMetrics();
+      const highOrCritical = closedMetrics.reduce(
+        (total, metric) => total + metric.risk.highOrCriticalFindings,
+        0,
+      );
+      this.update({
+        closedMetrics,
+        notice:
+          closedMetrics.length === 0
+            ? "No closed-PR analytics yet."
+            : `Closed PRs: ${closedMetrics.length} · high/critical findings: ${highOrCritical}`,
       });
     } catch (error) {
       this.update({ error: message(error) });

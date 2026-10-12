@@ -1607,6 +1607,13 @@ fn dispatch(request: Request, backend: &Backend) -> bool {
             };
             false
         }
+        Request::ReviewClosedMetrics { .. } => {
+            match review_closed_metrics_response() {
+                Ok(value) => backend.respond(&id, value),
+                Err(error) => backend.fail(&id, error),
+            };
+            false
+        }
         Request::ReviewJobs { params, .. } => {
             match review_jobs_response(&params) {
                 Ok(value) => backend.respond(&id, value),
@@ -2151,6 +2158,22 @@ fn provider_matches(kind: ProviderKind) -> config::ReviewProvider {
         ProviderKind::Github => config::ReviewProvider::Github,
         ProviderKind::Bitbucket => config::ReviewProvider::Bitbucket,
     }
+}
+
+/// Bounded closed-PR analytics computed in Rust, newest sync first.
+fn review_closed_metrics_response() -> Result<serde_json::Value, ProtocolError> {
+    let metrics = crate::review_storage::list_closed_pr_metrics().map_err(|error| {
+        ProtocolError::new(
+            ProtocolErrorCode::Internal,
+            format!("closed metrics: {error}"),
+        )
+    })?;
+    let metrics = metrics
+        .into_iter()
+        .take(100)
+        .map(|metric| serde_json::to_value(metric).unwrap_or(serde_json::Value::Null))
+        .collect::<Vec<_>>();
+    Ok(json!({ "metrics": metrics }))
 }
 
 /// Bounded global review history from stored jobs, newest first.

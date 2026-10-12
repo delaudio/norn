@@ -1013,3 +1013,44 @@ test("loads the bounded global review history", async () => {
   expect(store.getSnapshot().jobs).toHaveLength(1);
   expect(store.getSnapshot().notice).toContain("Review history");
 });
+
+test("loads bounded closed-PR analytics", async () => {
+  const store = new ShellStore();
+  const client = new BackendClient(
+    new FakeBackendTransport({
+      repositories,
+      closedMetrics: [
+        {
+          workspace: "acme",
+          repo: "payments",
+          prId: 1,
+          title: "Title",
+          authorDisplayName: "Author",
+          authorAccountId: null,
+          state: "MERGED",
+          sourceBranch: "feature/x",
+          destinationBranch: "main",
+          createdOn: "",
+          updatedOn: "",
+          additions: 1,
+          deletions: 0,
+          filesChanged: 1,
+          diffstatCached: true,
+          risk: {
+            hasAiReview: true,
+            impact: "high",
+            totalFindings: 2,
+            highOrCriticalFindings: 1,
+            severityCounts: [],
+            categoryCounts: [],
+          },
+          syncedAt: "",
+        },
+      ],
+    }),
+  );
+  await store.connect(client);
+  await store.loadClosedMetrics(client);
+  expect(store.getSnapshot().closedMetrics).toHaveLength(1);
+  expect(store.getSnapshot().notice).toContain("Closed PRs");
+});
