@@ -11,9 +11,11 @@ Git is authoritative. Durable history lives in WORKLOG and plan/done.
 - PR #371 fixed head `78ca5d07949fe12303b618eca2affbe849787545`: UI passed,
   verify CI38197325446 passed. #371 verified merged at
   `3322ff050c8d7c6bc115c01c9341cb0594cb4730`, 2026-10-12 03:00:52Z.
-  Rebase this isolated work onto actual squash before PR.
+  This work is rebased onto actual squash; number/INDEX/link audit passed.
 - State: explicit full-scope native provider PR external browser action; prepare
-  here, integrate only after verified #371 merge, actual-squash rebase and audit.
+  here; local gates pass: root123, UI181/1117/119frames, Rust713+two
+  ignored/60stdio/six CLI/five onboarding/three bin, strict Clippy/fmt/no-GUI/
+  protocol/Archgate17/audit. Preparing PR/receipt; exact next-head CI required.
 - Root unrelated `.norn.yaml` must never be read/copied/staged.
 
 ## Remaining work

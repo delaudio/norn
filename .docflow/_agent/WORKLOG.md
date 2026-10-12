@@ -559,3 +559,23 @@ Plan 0053 completion prepared after implementation `e4264db`, effective only on 
   Bitbucket UUID aliases require bounded native metadata resolution.
 - No Norn review/provider writes/private profiles/releases. Integrate only after
   verified #371 merge, actual squash rebase/audit, local gates and exact next CI.
+
+## 2026-10-12 — implement native external provider browser plan0061
+
+- #371 verified squash merge `3322ff050c8d7c6bc115c01c9341cb0594cb4730`,
+  03:00:52Z after exact78ca5d0 CI38197325446 both passed. Plan0061 rebased onto
+  actual squash. Main checkout synced to that baseline; user file untouched.
+- Full-scope strict provider.browser bridge, canonical native URLs, bounded
+  authenticated Bitbucket UUID aliases, existing launcher/read gates, shutdown
+  fencing and native b input implemented. No UI URL/native shell interpolation.
+- Owned HTTP/real stdio prove both-provider offline slug routes/UUID/path/origin,
+  disabled launcher and responsive control. UI DTO/input/paste/late/dispose tests
+  and two new disabled-opener frames pass.
+- Local gate: root123+tooling/typecheck/lint/protocol; UI181/1117 assertions/
+  typecheck/119frames; Rust713 core+two existing ignored/60stdio/six CLI/five
+  onboarding/three bin, strict all-feature/all-target Clippy/fmt, all-target
+  no-GUI, Archgate17/audit. React Doctor reports no changed-file issues,
+  aggregate score62; no native prop rules suppressed.
+- Remaining explicit PR approval/profile catalog/editor/full parity/recovery/
+  platform/install/cutover unwaived. No Norn review/live provider writes/private
+  data/releases. Exact next-head CI and verified PR squash merge still required.
