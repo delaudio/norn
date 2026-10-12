@@ -3020,6 +3020,7 @@ impl TuiApp {
                 local_preview_oid: snapshot.preview_oid.clone(),
                 local_snapshot_sha256: Some(snapshot.snapshot_sha256.clone()),
                 population_failed: false,
+                snapshot_source: None,
             });
         }
         let pr = self.pull_requests.get(self.selected_pr)?;
@@ -3060,6 +3061,7 @@ impl TuiApp {
             local_preview_oid: Default::default(),
             local_snapshot_sha256: None,
             population_failed: false,
+            snapshot_source: None,
         })
     }
 

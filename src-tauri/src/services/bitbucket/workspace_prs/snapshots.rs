@@ -13,6 +13,7 @@ impl Api {
         let pr_url = format!("{}/{}", self.collection(), params.pr_id);
         let (before, _) = self.get(&pr_url, started)?;
         let (detail, _) = parse_metadata(self.repository.provider, &before, params.pr_id)?;
+        let source_repository = snapshot_source_repository(&before, self.repository.provider)?;
         let head = snapshot::full_sha(detail.source_commit_hash.as_deref().ok_or_else(error)?)?;
         let destination = snapshot::full_sha(
             detail
@@ -60,17 +61,7 @@ impl Api {
             ReviewProvider::Bitbucket => {
                 // Source repository is native authenticated PR metadata, not a
                 // client URL. A fork comparison remains on the fixed API origin.
-                let source = before
-                    .pointer("/source/repository/full_name")
-                    .and_then(Value::as_str)
-                    .ok_or_else(error)?;
-                let (workspace, repo) = source.split_once('/').ok_or_else(error)?;
-                let source = RepositoryIdentity {
-                    provider: ReviewProvider::Bitbucket,
-                    workspace: workspace.into(),
-                    repo: repo.into(),
-                };
-                source.validate()?;
+                let source = source_repository.as_ref().ok_or_else(error)?;
                 let origin = format!(
                     "{}/repositories/{}/{}",
                     self.root,
@@ -178,6 +169,9 @@ impl Api {
         let (after, _) = self.get(&pr_url, started)?;
         let (after_detail, _) = parse_metadata(self.repository.provider, &after, params.pr_id)?;
         validate_stable_pull_request_snapshot(&detail, &after_detail)?;
+        if snapshot_source_repository(&after, self.repository.provider)? != source_repository {
+            return Err(error());
+        }
         if self.repository.provider == ReviewProvider::Github
             && before.get("changed_files") != after.get("changed_files")
         {
@@ -200,6 +194,7 @@ impl Api {
             patch,
             expected_count,
             expected_files,
+            source_repository,
         })
     }
 }
@@ -588,4 +583,34 @@ pub(crate) fn snapshot_sections(patch: &str) -> Result<Vec<Section>, String> {
         }
     }
     Ok(sections)
+}
+
+fn snapshot_source_repository(
+    value: &Value,
+    provider: ReviewProvider,
+) -> Result<Option<RepositoryIdentity>, String> {
+    let pointer = if provider == ReviewProvider::Github {
+        "/head/repo/full_name"
+    } else {
+        "/source/repository/full_name"
+    };
+    let Some(name) = value.pointer(pointer).filter(|v| !v.is_null()) else {
+        return if provider == ReviewProvider::Github {
+            Ok(None)
+        } else {
+            Err(error())
+        };
+    };
+    let (workspace, repo) = name
+        .as_str()
+        .ok_or_else(error)?
+        .split_once('/')
+        .ok_or_else(error)?;
+    let source = RepositoryIdentity {
+        provider,
+        workspace: workspace.into(),
+        repo: repo.into(),
+    };
+    source.validate()?;
+    Ok(Some(source))
 }

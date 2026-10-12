@@ -875,7 +875,41 @@ async function providerScene(kind: "list" | "detail" | "empty" | "error" | "load
   };
 }
 
+async function providerPreviewScene(kind: "github" | "bitbucket" | "saved" | "error" | "image") {
+  const transport = new FakeProviderTransport();
+  transport.images = kind === "image";
+  const { client, store, ready } = readyStore(transport);
+  await ready;
+  if (kind === "error") transport.fault = "snapshot";
+  await store.selectProviderPr(
+    providerFixtureRepositories[kind === "bitbucket" ? 1 : 0]!,
+    kind === "saved" ? 7 : 8,
+    "Owned native preview",
+    "OPEN",
+  );
+  if (kind === "image") {
+    store.cycleFocus();
+    store.move(1);
+    for (let i = 0; i < 10; i++) await Bun.sleep(0);
+  }
+  return { client, store };
+}
+
 const scenes: Scene[] = [
+  ...(["github", "bitbucket", "saved", "error", "image"] as const).flatMap((kind) => [
+    {
+      id: `shell-provider-preview-${kind}-120x30`,
+      cols: 120,
+      rows: 30,
+      build: () => providerPreviewScene(kind),
+    },
+    {
+      id: `shell-provider-preview-${kind}-50x15`,
+      cols: 50,
+      rows: 15,
+      build: () => providerPreviewScene(kind),
+    },
+  ]),
   ...(["list", "detail", "empty", "error", "loading", "identity"] as const).flatMap((kind) => [
     { id: `shell-provider-${kind}-120x30`, cols: 120, rows: 30, build: () => providerScene(kind) },
     { id: `shell-provider-${kind}-50x15`, cols: 50, rows: 15, build: () => providerScene(kind) },

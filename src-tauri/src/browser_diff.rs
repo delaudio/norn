@@ -1,3 +1,5 @@
+#[cfg(unix)]
+use std::process::Command;
 use std::{
     collections::BTreeMap,
     collections::HashMap,
@@ -5,7 +7,6 @@ use std::{
     io::{Read, Write},
     net::{TcpListener, TcpStream},
     path::{Path, PathBuf},
-    process::{Command, ExitStatus},
     sync::{
         atomic::{AtomicBool, AtomicUsize, Ordering},
         Arc, Mutex, RwLock,
@@ -235,6 +236,8 @@ pub struct WebDiffState {
     #[serde(skip)]
     pub local_snapshot_sha256: Option<String>,
     pub population_failed: bool,
+    #[serde(skip)]
+    pub snapshot_source: Option<crate::services::provider_snapshot::BrowserSnapshotSource>,
 }
 
 pub struct WebDiffServer {
@@ -333,7 +336,8 @@ impl WebDiffServer {
                 || lock.target_branch != next.target_branch
                 || lock.base_sha != next.base_sha
                 || lock.local_preview_oid != next.local_preview_oid
-                || lock.local_snapshot_sha256 != next.local_snapshot_sha256;
+                || lock.local_snapshot_sha256 != next.local_snapshot_sha256
+                || lock.snapshot_source != next.snapshot_source;
             if !content_changed && next.diffstat.is_none() {
                 next.diffstat = lock.diffstat.clone();
             }
@@ -397,28 +401,118 @@ impl Drop for WebDiffServer {
 }
 
 pub fn open_browser_url(url: &str) -> Result<(), String> {
+    let parsed = reqwest::Url::parse(url).map_err(|_| "Invalid browser URL.".to_string())?;
+    if !matches!(parsed.scheme(), "http" | "https")
+        || parsed.host_str().is_none()
+        || !parsed.username().is_empty()
+        || parsed.password().is_some()
+        || url.chars().any(char::is_control)
+    {
+        return Err("Invalid browser URL.".into());
+    }
     #[cfg(target_os = "macos")]
     {
-        browser_open_result(Command::new("open").arg(url).status())
+        spawn_browser_opener(Command::new("open").arg(url))
     }
-
     #[cfg(target_os = "linux")]
     {
-        browser_open_result(Command::new("xdg-open").arg(url).status())
+        spawn_browser_opener(Command::new("xdg-open").arg(url))
     }
-
     #[cfg(target_os = "windows")]
     {
-        browser_open_result(Command::new("cmd").args(["/c", "start", url]).status())
+        open_windows_browser(url)
     }
-
     #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
     {
-        Err("Unsupported operating system for opening browser".to_string())
+        Err("Unsupported operating system for opening browser".into())
     }
 }
 
-fn browser_open_result(result: std::io::Result<ExitStatus>) -> Result<(), String> {
+// A launcher may remain alive for as long as the browser. Keep a bounded owner
+// and reap it without blocking the protocol or killing the user's browser.
+#[cfg(unix)]
+fn spawn_browser_opener(command: &mut Command) -> Result<(), String> {
+    use std::{
+        process::{Child, Stdio},
+        sync::OnceLock,
+    };
+    static CHILDREN: OnceLock<Arc<Mutex<Vec<Child>>>> = OnceLock::new();
+    let children = CHILDREN.get_or_init(|| {
+        let children = Arc::new(Mutex::new(Vec::<Child>::new()));
+        let owner = children.clone();
+        thread::spawn(move || loop {
+            if let Ok(mut children) = owner.lock() {
+                children.retain_mut(|child| !matches!(child.try_wait(), Ok(Some(_))));
+            }
+            thread::sleep(Duration::from_millis(100));
+        });
+        children
+    });
+    let mut children = children
+        .lock()
+        .map_err(|_| "Browser launcher lock is unavailable.".to_string())?;
+    if children.len() >= 16 {
+        return Err("Too many browser launch requests are still running.".into());
+    }
+    let child = command
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(|error| format!("Failed to request browser launch: {error}"))?;
+    children.push(child);
+    Ok(())
+}
+
+#[cfg(target_os = "windows")]
+fn open_windows_browser(url: &str) -> Result<(), String> {
+    use std::{ffi::c_void, ptr};
+    #[link(name = "shell32")]
+    extern "system" {
+        fn ShellExecuteW(
+            hwnd: *mut c_void,
+            operation: *const u16,
+            file: *const u16,
+            parameters: *const u16,
+            directory: *const u16,
+            show: i32,
+        ) -> *mut c_void;
+    }
+    #[link(name = "ole32")]
+    extern "system" {
+        fn CoInitializeEx(reserved: *mut c_void, flags: u32) -> i32;
+        fn CoUninitialize();
+    }
+    let file: Vec<u16> = url.encode_utf16().chain(Some(0)).collect();
+    let verb: Vec<u16> = "open".encode_utf16().chain(Some(0)).collect();
+    // Native shell dispatch treats the URL as a document, never a command line.
+    // All pointers are valid, terminated buffers or null for optional fields.
+    unsafe {
+        let initialized = CoInitializeEx(ptr::null_mut(), 2);
+        if initialized < 0 && initialized != -2147417850 {
+            return Err("Browser shell initialization failed.".into());
+        }
+        let result = ShellExecuteW(
+            ptr::null_mut(),
+            verb.as_ptr(),
+            file.as_ptr(),
+            ptr::null(),
+            ptr::null(),
+            1,
+        ) as isize;
+        if initialized >= 0 {
+            CoUninitialize();
+        }
+        if result > 32 {
+            Ok(())
+        } else {
+            Err(format!("Browser launch request failed ({result})."))
+        }
+    }
+}
+
+#[cfg(test)]
+fn browser_open_result(result: std::io::Result<std::process::ExitStatus>) -> Result<(), String> {
     let status = result.map_err(|error| format!("Failed to open browser: {error}"))?;
     if status.success() {
         Ok(())
@@ -537,6 +631,44 @@ fn handle_connection(
             }
             if !is_raster_preview_path(&file_path) {
                 return write_empty_response(&mut stream, "415 Unsupported Media Type");
+            }
+            // Snapshot images read only the immutable source wrapper. Avoid
+            // cloning the entire large patch for each raster request.
+            let snapshot_source = state
+                .read()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .snapshot_source
+                .clone();
+            if let Some(source) = snapshot_source {
+                let raster = source.raster(&file_path, &side);
+                if state
+                    .read()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner())
+                    .snapshot_source
+                    .as_ref()
+                    != Some(&source)
+                {
+                    return write_empty_response(&mut stream, "409 Conflict");
+                }
+                return match raster {
+                    Ok(Some(raster)) => write_response(
+                        &mut stream,
+                        "200 OK",
+                        raster.mime,
+                        "no-store",
+                        &raster.bytes,
+                        head_only,
+                    ),
+                    Ok(None) => write_empty_response(&mut stream, "404 Not Found"),
+                    Err(error) => write_response(
+                        &mut stream,
+                        "404 Not Found",
+                        "application/json; charset=utf-8",
+                        "no-store",
+                        serde_json::json!({"error":error}).to_string().as_bytes(),
+                        head_only,
+                    ),
+                };
             }
             let initial_state = state
                 .read()
@@ -924,6 +1056,7 @@ fn same_pull_request(current: &WebDiffState, snapshot: &WebDiffState) -> bool {
         && current.repo == snapshot.repo
         && current.pr_id == snapshot.pr_id
         && current.base_sha == snapshot.base_sha
+        && current.snapshot_source == snapshot.snapshot_source
         && current.local_preview_oid == snapshot.local_preview_oid
         && current.local_snapshot_sha256 == snapshot.local_snapshot_sha256
 }
@@ -1074,11 +1207,143 @@ mod tests {
     fn browser_open_result_rejects_nonzero_exit_status() {
         use std::os::unix::process::ExitStatusExt;
 
-        assert!(browser_open_result(Ok(ExitStatus::from_raw(0))).is_ok());
-        let error = browser_open_result(Ok(ExitStatus::from_raw(7 << 8)))
+        assert!(browser_open_result(Ok(std::process::ExitStatus::from_raw(0))).is_ok());
+        let error = browser_open_result(Ok(std::process::ExitStatus::from_raw(7 << 8)))
             .expect_err("non-zero opener status should fail");
         assert!(error.contains("Failed to open browser"));
         assert!(error.contains('7'));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn opener_is_nonblocking_and_invalid_urls_never_launch() {
+        let start = std::time::Instant::now();
+        spawn_browser_opener(Command::new("/bin/sh").args([
+            "-c",
+            "printf 'owned stdout noise'; printf 'owned stderr noise' >&2; sleep 1",
+        ]))
+        .unwrap();
+        assert!(start.elapsed() < Duration::from_millis(500));
+        for url in [
+            "file:///private/test",
+            "javascript:alert(1)",
+            "https://user:secret@example.test",
+            "https://example.test/\n",
+        ] {
+            assert!(open_browser_url(url).is_err());
+        }
+    }
+
+    #[test]
+    fn authenticated_snapshot_images_use_cached_bytes_and_never_mutable_provider_preview() {
+        use crate::services::{
+            bitbucket::workspace_prs::{DetailParams, RepositoryIdentity},
+            provider_snapshot::{BrowserSnapshotSource, Capture, ImageParams, ImageSide, Manager},
+        };
+        let manager = Arc::new(Manager::default());
+        let patch = "diff --git a/old.png b/picture.png\nsimilarity index 100%\nrename from old.png\nrename to picture.png\n";
+        let info = manager
+            .insert(Capture {
+                request: DetailParams {
+                    repository: RepositoryIdentity {
+                        provider: ReviewProvider::Github,
+                        workspace: "Owned".into(),
+                        repo: "Repo".into(),
+                    },
+                    pr_id: 7,
+                },
+                title: "Owned immutable preview".into(),
+                source_branch: "feature".into(),
+                destination_branch: "main".into(),
+                head_sha: "a".repeat(40),
+                destination_sha: "b".repeat(40),
+                base_sha: "c".repeat(40),
+                patch: patch.into(),
+                expected_count: 1,
+                expected_files: None,
+                source_repository: None,
+            })
+            .unwrap();
+        let mut raw = std::io::Cursor::new(Vec::new());
+        image::DynamicImage::new_rgba8(2, 3)
+            .write_to(&mut raw, image::ImageFormat::Png)
+            .unwrap();
+        let raw = raw.into_inner();
+        manager
+            .cache_owned_image(
+                &ImageParams {
+                    snapshot: info.snapshot.clone(),
+                    path: "picture.png".into(),
+                    side: ImageSide::New,
+                    offset: 0,
+                    max_bytes: 196608,
+                    content_sha256: None,
+                },
+                raw.clone(),
+            )
+            .unwrap();
+        manager
+            .cache_owned_image(
+                &ImageParams {
+                    snapshot: info.snapshot.clone(),
+                    path: "picture.png".into(),
+                    side: ImageSide::Old,
+                    offset: 0,
+                    max_bytes: 196608,
+                    content_sha256: None,
+                },
+                raw.clone(),
+            )
+            .unwrap();
+        let source = BrowserSnapshotSource::new(info.snapshot, manager);
+        let state = Arc::new(RwLock::new(WebDiffState {
+            diff: Some(patch.into()),
+            diffstat: Some(Vec::new()),
+            snapshot_source: Some(source),
+            ..WebDiffState::default()
+        }));
+        let serialized = serde_json::to_value(&*state.read().unwrap()).unwrap();
+        assert!(serialized.get("snapshotSource").is_none());
+        let server = WebDiffServer::start(state.clone()).unwrap();
+        let client = reqwest::blocking::Client::builder()
+            .timeout(Duration::from_secs(3))
+            .build()
+            .unwrap();
+        let result = client
+            .get(format!(
+                "{}api/file-preview?path=picture.png&side=new",
+                server.url()
+            ))
+            .send()
+            .unwrap();
+        assert_eq!(result.status(), reqwest::StatusCode::OK);
+        assert_eq!(result.headers()["content-type"], "image/png");
+        assert!(!result.headers().contains_key("access-control-allow-origin"));
+        assert_eq!(result.bytes().unwrap().as_ref(), raw);
+        let old_image = client
+            .get(format!(
+                "{}api/file-preview?path=old.png&side=old",
+                server.url()
+            ))
+            .send()
+            .unwrap();
+        assert_eq!(old_image.status(), reqwest::StatusCode::OK);
+        assert_eq!(old_image.bytes().unwrap().as_ref(), raw);
+        let missing = client
+            .get(format!(
+                "{}api/file-preview?path=other.png&side=new",
+                server.url()
+            ))
+            .send()
+            .unwrap();
+        assert_eq!(missing.status(), reqwest::StatusCode::NOT_FOUND);
+        let old = state.read().unwrap().clone();
+        let mut next = old.clone();
+        next.snapshot_source = None;
+        assert!(!same_pull_request(&next, &old));
+        server.update_pr(next);
+        assert_eq!(state.read().unwrap().version, old.version + 1);
+        assert!(state.read().unwrap().snapshot_source.is_none());
     }
 
     #[test]
@@ -1321,6 +1586,7 @@ mod tests {
             local_preview_oid: Default::default(),
             local_snapshot_sha256: None,
             population_failed: false,
+            snapshot_source: None,
         });
 
         let lock = state.read().unwrap();
@@ -1487,6 +1753,7 @@ mod tests {
             local_preview_oid: Default::default(),
             local_snapshot_sha256: None,
             population_failed: false,
+            snapshot_source: None,
         });
         let initial_version = state.read().unwrap().version;
         server.update_pr(WebDiffState {
@@ -1506,6 +1773,7 @@ mod tests {
             local_preview_oid: Default::default(),
             local_snapshot_sha256: None,
             population_failed: false,
+            snapshot_source: None,
         });
 
         assert_eq!(state.read().unwrap().version, initial_version + 1);
@@ -1600,6 +1868,7 @@ mod tests {
             pr_id: 7,
             pr_title: "Retry".to_string(),
             population_failed: false,
+            snapshot_source: None,
             ..WebDiffState::default()
         });
 

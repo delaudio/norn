@@ -1,0 +1,21 @@
+{
+  "type": "response",
+  "id": "image",
+  "ok": true,
+  "result": {
+    "request": {
+      "snapshot": {
+        "repository": {
+          "provider": "github",
+          "workspace": "Owner",
+          "repo": "Repo"
+        },
+        "prId": 7,
+        "snapshotId": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      }
+    },
+    "url": "http://127.0.0.1:1234/session/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/",
+    "launchRequested": false,
+    "launchError": null
+  }
+}

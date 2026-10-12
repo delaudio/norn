@@ -1,0 +1,31 @@
+{
+  "type": "response",
+  "id": "image",
+  "ok": true,
+  "result": {
+    "request": {
+      "snapshot": {
+        "repository": {
+          "provider": "github",
+          "workspace": "Owner",
+          "repo": "Repo"
+        },
+        "prId": 7,
+        "snapshotId": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      },
+      "path": "picture.png",
+      "side": "new",
+      "offset": 0,
+      "maxBytes": 196608,
+      "contentSha256": null
+    },
+    "available": true,
+    "mimeType": "image/png",
+    "size": 74,
+    "dataBase64": "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAEUlEQVR4nGOoCLD5D8IMMAYARXwIDRVgxqcAAAAASUVORK5CYII=",
+    "nextOffset": null,
+    "contentSha256": "9b989767650fb202cdd54e90aba6cb7ad3691b4a8f2ee7ef3fef434ae8d200a9",
+    "width": 2,
+    "height": 2
+  }
+}

@@ -11,11 +11,14 @@ import type {
   ProviderPrDetailParams,
   ProviderPrListParams,
   ProviderPrPage,
+  ProviderSnapshotBrowserResult,
   ProviderSnapshotDiffPage,
   ProviderSnapshotDiffParams,
   ProviderSnapshotFile,
   ProviderSnapshotFilesPage,
   ProviderSnapshotFilesParams,
+  ProviderSnapshotImagePage,
+  ProviderSnapshotImageParams,
   ProviderSnapshotInfo,
   ProviderSnapshotRef,
   PrRepositoryIdentity,
@@ -65,7 +68,13 @@ export interface DiffFileResult {
   truncated: boolean;
 }
 
-export type ChangedFileStatus = "added" | "modified" | "deleted" | "renamed" | "untracked";
+export type ChangedFileStatus =
+  | "added"
+  | "modified"
+  | "deleted"
+  | "renamed"
+  | "copied"
+  | "untracked";
 
 export interface ChangedFile {
   path: string;
@@ -432,6 +441,67 @@ export class BackendClient {
     if (Buffer.byteLength(patch) !== total || Buffer.from(actual).toString("hex") !== hash)
       throw new Error("Provider snapshot diff hash mismatch.");
     return patch;
+  }
+  async providerSnapshotBrowser(
+    snapshot: ProviderSnapshotRef,
+    current: () => boolean = () => true,
+  ): Promise<ProviderSnapshotBrowserResult> {
+    const result = await this.providerRead<ProviderSnapshotBrowserResult>(
+      "provider.snapshot.browser",
+      { snapshot },
+      "ProviderSnapshotBrowserParams",
+      "ProviderSnapshotBrowserResult",
+      current,
+    );
+    const url = new URL(result.url);
+    if (
+      url.port === "" ||
+      Number(url.port) > 65535 ||
+      (!result.launchRequested && result.launchError !== null)
+    )
+      throw new Error("Invalid immutable browser launch response.");
+    return result;
+  }
+  async providerSnapshotImage(
+    snapshot: ProviderSnapshotRef,
+    path: string,
+    side: "old" | "new",
+    current: () => boolean = () => true,
+  ): Promise<FilePreview> {
+    if (!snapshotPath(path)) throw new Error("Invalid provider snapshot path.");
+    return this.loadRaster(path, side, current, async (offset, contentSha256) => {
+      const params: ProviderSnapshotImageParams = {
+        snapshot,
+        path,
+        side,
+        offset,
+        maxBytes: 192 * 1024,
+        contentSha256,
+      };
+      const page = await this.providerRead<ProviderSnapshotImagePage>(
+        "provider.snapshot.image",
+        params,
+        "ProviderSnapshotImageParams",
+        "ProviderSnapshotImagePage",
+        current,
+      );
+      if (
+        (!page.available &&
+          (page.size !== 0 ||
+            page.dataBase64 !== "" ||
+            page.mimeType !== "" ||
+            page.nextOffset !== null ||
+            page.contentSha256 !== null ||
+            page.width !== null ||
+            page.height !== null)) ||
+        (page.available &&
+          !["image/png", "image/jpeg", "image/gif", "image/webp", "image/bmp"].includes(
+            page.mimeType,
+          ))
+      )
+        throw new Error("Invalid immutable image availability or format.");
+      return { ...page, path, side, offset };
+    });
   }
   async workspaceScopes(current: () => boolean = () => true): Promise<WorkspaceScope[]> {
     const scopes: WorkspaceScope[] = [];
@@ -924,20 +994,32 @@ export class BackendClient {
     side: "old" | "new" = "new",
     current: () => boolean = () => true,
   ): Promise<FilePreview> {
-    const chunks: Uint8Array[] = [];
-    let offset = 0;
-    let contentSha256: string | null = null;
-    let first: FilePreview | null = null;
-    for (let index = 0; index < 12; index++) {
-      if (!current()) throw new Error("Image selection changed.");
-      const result = await this.transport.request("file.preview", {
+    return this.loadRaster(path, side, current, (offset, contentSha256) =>
+      this.transport.request("file.preview", {
         target,
         path,
         side,
         offset,
         maxBytes: 192 * 1024,
         ...(contentSha256 ? { contentSha256 } : {}),
-      });
+      }),
+    );
+  }
+
+  private async loadRaster(
+    path: string,
+    side: "old" | "new",
+    current: () => boolean,
+    read: (offset: number, hash: string | null) => Promise<Record<string, unknown>>,
+  ): Promise<FilePreview> {
+    const chunks: Uint8Array[] = [];
+    let offset = 0;
+    let contentSha256: string | null = null;
+    let first: FilePreview | null = null;
+    for (let index = 0; index < 12; index++) {
+      if (!current()) throw new Error("Image selection changed.");
+      const result = await read(offset, contentSha256);
+      if (!current()) throw new Error("Image selection changed.");
       if (result.path !== path || result.side !== side || typeof result.available !== "boolean")
         throw new Error("Image response does not match its requested side.");
       if (!result.available) return result as unknown as FilePreview;
@@ -989,6 +1071,7 @@ export class BackendClient {
         }
         if (new Bun.CryptoHasher("sha256").update(combined).digest("hex") !== contentSha256)
           throw new Error("Image content did not match its approved version.");
+        if (!current()) throw new Error("Image selection changed.");
         return { ...first, dataBase64: Buffer.from(combined).toString("base64") };
       }
       if (result.nextOffset !== offset)

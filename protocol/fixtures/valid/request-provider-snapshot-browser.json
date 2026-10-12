@@ -1,0 +1,16 @@
+{
+  "type": "request",
+  "id": "image",
+  "method": "provider.snapshot.browser",
+  "params": {
+    "snapshot": {
+      "repository": {
+        "provider": "github",
+        "workspace": "Owner",
+        "repo": "Repo"
+      },
+      "prId": 7,
+      "snapshotId": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+    }
+  }
+}

@@ -66,8 +66,10 @@ test("native F2 opens grouped PRs, filters, pages, detail and full-scope saved w
     renderer.mockInput.pressKey(" ");
     await settle();
     expect(store.getSnapshot().providerOpen).toBe(false);
-    expect(store.getSnapshot().error).toContain("No stored reviewed range");
-    expect(store.getSnapshot().files).toEqual([]);
+    expect(store.getSnapshot().error).toBeNull();
+    expect(store.getSnapshot().files.map((file) => file.path)).toEqual(["readme.ts"]);
+    expect(store.getSnapshot().providerPreview).toBe(true);
+    expect(store.getSnapshot().diff?.text).toContain("github PR 8 世界");
     expect(transport.calls.filter((call) => call.method === "diff.file")).toHaveLength(0);
     expect(store.getSnapshot().picker[store.getSnapshot().selectedPicker]).toMatchObject({
       provider: "github",

@@ -42,6 +42,65 @@ class SnapshotTransport extends FakeBackendTransport {
     return this.answer(method, params);
   }
 }
+
+test("immutable image chunks verify scope, hash, metadata, missing sides and stale generation", async () => {
+  const bytes = Buffer.from("owned immutable raster bytes");
+  const sha = new Bun.CryptoHasher("sha256").update(bytes).digest("hex");
+  for (const fault of ["none", "scope", "hash", "mime", "length", "absent", "stale"]) {
+    let current = true;
+    const transport = new SnapshotTransport((_method, request) => {
+      const offset = Number(request.offset);
+      const end = Math.min(offset + 8, bytes.length);
+      if (fault === "stale") current = false;
+      return {
+        request: fault === "scope" ? { ...request, snapshot: { ...snapshot, prId: 8 } } : request,
+        available: fault !== "absent",
+        mimeType: fault === "absent" ? "" : fault === "mime" ? "text/html" : "image/png",
+        size: fault === "absent" ? 0 : bytes.length,
+        dataBase64: fault === "absent" ? "" : bytes.subarray(offset, end).toString("base64"),
+        nextOffset:
+          fault === "absent"
+            ? null
+            : fault === "length"
+              ? end + 1
+              : end < bytes.length
+                ? end
+                : null,
+        contentSha256: fault === "absent" ? null : fault === "hash" ? "f".repeat(64) : sha,
+        width: fault === "absent" ? null : 2,
+        height: fault === "absent" ? null : 3,
+      };
+    });
+    const result = new BackendClient(transport).providerSnapshotImage(
+      snapshot,
+      "picture.png",
+      "new",
+      () => current,
+    );
+    if (fault === "none") {
+      expect((await result).dataBase64).toBe(bytes.toString("base64"));
+      expect(transport.calls).toHaveLength(4);
+      expect(transport.calls.slice(1).every((call) => call.params.contentSha256 === sha)).toBe(
+        true,
+      );
+    } else if (fault === "absent") expect((await result).available).toBe(false);
+    else await expect(result).rejects.toThrow();
+  }
+});
+
+test("immutable browser links reject wrong scope, nonloopback URLs and dishonest launch responses", async () => {
+  for (const fault of ["none", "scope", "host", "port", "token", "launch"]) {
+    const transport = new SnapshotTransport((_method, request) => ({
+      request: fault === "scope" ? { snapshot: { ...snapshot, prId: 8 } } : request,
+      url: `http://${fault === "host" ? "example.test" : "127.0.0.1"}:${fault === "port" ? 65536 : 1234}/session/${fault === "token" ? "bad" : "a".repeat(64)}/`,
+      launchRequested: false,
+      launchError: fault === "launch" ? "failure" : null,
+    }));
+    const result = new BackendClient(transport).providerSnapshotBrowser(snapshot);
+    if (fault === "none") expect((await result).launchRequested).toBe(false);
+    else await expect(result).rejects.toThrow();
+  }
+});
 test("snapshot metadata keeps destination and merge base distinct and checks exact handle scope", async () => {
   for (const fault of ["none", "provider", "pr", "sha", "unknown"]) {
     const transport = new SnapshotTransport(() => {

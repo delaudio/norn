@@ -351,3 +351,32 @@ Plan 0053 completion prepared after implementation `e4264db`, effective only on 
 - Read official GH trees/blobs/contents and BB commit-file metadata docs. Raw GH
   contents can dereference symlinks; use verified regular Git blob semantics.
 - ADR 0020 remains Accepted; no cutover/profile/platform/install proof waived.
+
+
+## 2026-10-12 — plan 0057 native provider preview, local gate complete
+
+- Fresh PR selection consumes immutable provider snapshots before AI; saved
+  runs remain selected until explicit F3, F5 refreshes, return restores findings
+  and conversations. Scope/handle/generation/EOF fences prevent stale evidence;
+  local-only reserved IDs never issue provider reads. Settings retain pins.
+- Native fork image acquisition uses verified regular Git trees/blobs (GH) or
+  exact commit-file metadata/raw (BB), bounded raster cache/chunks/hash/TTL and
+  the shared two-provider-read gate. Pierre uses the same evidence; rename old
+  path translation is exercised against actual cached before/after bytes.
+- Browser launcher stdio is null, Unix child ownership/reaping bounded and
+  asynchronous, Windows URL dispatch native without cmd interpolation. Native
+  acknowledgment does not claim display success; owned tests never launch the
+  user's browser or use private credentials/profile data.
+- Local root 123 tests plus tooling/typecheck/lint/protocol pass; UI 172 tests/
+  1057 assertions/115 frames, ten new and 105 unchanged; Rust 697 core with two
+  existing ignored/53 stdio/six isolated CLI/five onboarding/three bin tests;
+  strict all-feature/all-target Clippy/fmt/no-GUI, Archgate 12/12 and docflow
+  metadata/INDEX/sections/links/main-number audit pass. Existing 0011/0013
+  coverage and ARCH007 length advisories unchanged. React Doctor 64/100, three
+  native OpenTUI property false positives confirmed from renderer props/types,
+  no errors/complexity/suppression. No Norn code review.
+- Fresh GitHub events correct previous stale tracking: maintainer closed #357
+  at 2026-10-11 22:01:23Z, with no associated commit. Preserve closure; review
+  start using exact evidence and explicit approval/external provider browsing
+  still require #306 retained-parity verification. #358–#364/#306–#309/#294 open.
+- Preparing feature commit and PR; this entry is not a merge/shipping claim.

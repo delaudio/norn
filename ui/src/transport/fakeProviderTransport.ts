@@ -2,6 +2,7 @@
 import type {
   ProviderPrListParams,
   ProviderPrSummary,
+  ProviderSnapshotRef,
   PrRepositoryIdentity,
 } from "../../../src/protocol/generated/protocol";
 import { FakeBackendTransport } from "./fakeTransport";
@@ -40,8 +41,14 @@ export function providerFixturePr(
 export class FakeProviderTransport extends FakeBackendTransport {
   readonly calls: Array<{ method: string; params: Record<string, unknown> }> = [];
   gate: Promise<void> | null = null;
-  fault: "list" | "detail" | "user" | null = null;
+  fault: "list" | "detail" | "user" | "snapshot" | null = null;
+  private snapshotCounter = 0;
+  private snapshots = new Map<
+    string,
+    { snapshot: ProviderSnapshotRef; patch: string; images: boolean }
+  >();
   empty = false;
+  images = false;
   activeReads = 0;
   maxReads = 0;
   constructor() {
@@ -60,7 +67,15 @@ export class FakeProviderTransport extends FakeBackendTransport {
   }
   async start() {
     const ready = await super.start();
-    return { ...ready, capabilities: [...ready.capabilities, "provider-pr-reads"] };
+    return {
+      ...ready,
+      capabilities: [
+        ...ready.capabilities,
+        "provider-pr-reads",
+        "provider-snapshots",
+        "provider-snapshot-preview",
+      ],
+    };
   }
   async request(method: string, params: Record<string, unknown>): Promise<Record<string, unknown>> {
     this.calls.push({ method, params: structuredClone(params) });
@@ -76,6 +91,121 @@ export class FakeProviderTransport extends FakeBackendTransport {
     this.maxReads = Math.max(this.maxReads, this.activeReads);
     try {
       if (this.gate) await this.gate;
+      if (method === "provider.snapshot") {
+        if (this.fault === "snapshot") throw new Error("Synthetic pinned snapshot unavailable.");
+        const repository = params.repository as PrRepositoryIdentity;
+        const snapshot = {
+          repository,
+          prId: Number(params.prId),
+          snapshotId: (++this.snapshotCounter).toString(16).padStart(64, "0"),
+        };
+        const patch = `diff --git a/readme.ts b/readme.ts\n--- a/readme.ts\n+++ b/readme.ts\n@@ -1 +1 @@\n-old\n+${repository.provider} PR ${snapshot.prId} 世界\n`;
+        this.snapshots.set(snapshot.snapshotId, { snapshot, patch, images: this.images });
+        return {
+          request: params,
+          snapshot,
+          title: `${repository.provider} preview #${snapshot.prId}`,
+          sourceBranch: "feature",
+          destinationBranch: "main",
+          headSha: "a".repeat(40),
+          destinationSha: "b".repeat(40),
+          baseSha: "c".repeat(40),
+          patchSha256: new Bun.CryptoHasher("sha256")
+            .update(
+              patch +
+                (this.images
+                  ? "diff --git a/old.png b/picture.png\nsimilarity index 100%\nrename from old.png\nrename to picture.png\n"
+                  : ""),
+            )
+            .digest("hex"),
+          fileCount: this.images ? 2 : 1,
+          patchBytes:
+            Buffer.byteLength(patch) +
+            (this.images
+              ? Buffer.byteLength(
+                  "diff --git a/old.png b/picture.png\nsimilarity index 100%\nrename from old.png\nrename to picture.png\n",
+                )
+              : 0),
+          expiresAt: 1900000000000,
+        };
+      }
+      if (method.startsWith("provider.snapshot.")) {
+        const snapshot = params.snapshot as ProviderSnapshotRef;
+        const cached = this.snapshots.get(snapshot.snapshotId);
+        if (!cached || JSON.stringify(cached.snapshot) !== JSON.stringify(snapshot))
+          throw new Error("Synthetic snapshot expired or belongs to another PR.");
+        if (method === "provider.snapshot.files")
+          return {
+            request: params,
+            files: [
+              {
+                path: "readme.ts",
+                oldPath: null,
+                status: "modified",
+                additions: 1,
+                deletions: 1,
+                binary: false,
+              },
+              ...(cached.images
+                ? [
+                    {
+                      path: "picture.png",
+                      oldPath: "old.png",
+                      status: "renamed",
+                      additions: 0,
+                      deletions: 0,
+                      binary: true,
+                    },
+                  ]
+                : []),
+            ],
+            total: cached.images ? 2 : 1,
+            nextOffset: null,
+          };
+        if (method === "provider.snapshot.diff") {
+          const patch =
+            params.path === "picture.png" && cached.images
+              ? "diff --git a/old.png b/picture.png\nsimilarity index 100%\nrename from old.png\nrename to picture.png\n"
+              : cached.patch;
+          return {
+            request: params,
+            text: patch,
+            totalBytes: Buffer.byteLength(patch),
+            contentSha256: new Bun.CryptoHasher("sha256").update(patch).digest("hex"),
+            nextOffset: null,
+          };
+        }
+        if (
+          method === "provider.snapshot.image" &&
+          cached.images &&
+          params.path === "picture.png"
+        ) {
+          const data =
+            params.side === "old"
+              ? "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAEUlEQVR4nGOoCLD5D8IMMAYARXwIDRVgxqcAAAAASUVORK5CYII="
+              : "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAEUlEQVR4nGPQyOv5D8IMMAYAR3AIhdwoG5cAAAAASUVORK5CYII=";
+          const bytes = Buffer.from(data, "base64");
+          return {
+            request: params,
+            available: true,
+            mimeType: "image/png",
+            size: bytes.length,
+            dataBase64: data,
+            nextOffset: null,
+            contentSha256: new Bun.CryptoHasher("sha256").update(bytes).digest("hex"),
+            width: 2,
+            height: 2,
+          };
+        }
+        if (method === "provider.snapshot.browser")
+          return {
+            request: params,
+            url: `http://127.0.0.1:1234/session/${"a".repeat(64)}/`,
+            launchRequested: false,
+            launchError: null,
+          };
+        throw new Error("Synthetic image path is not in this snapshot.");
+      }
       const repository = params.repository as PrRepositoryIdentity;
       if (method === "provider.user") {
         if (this.fault === "user") throw new Error("Synthetic identity unavailable.");

@@ -14,7 +14,9 @@ Preserve saved-run selection and make entering/refreshing a live preview explici
 Authenticated Pierre and image reads must use the same immutable evidence, with
 bounded native acquisition or explicit unavailable errors. No AI or provider/Git
 mutation occurs in this delivery. Review-start and explicit approve/external
-provider browser remain subsequent #357 work; do not close #357 prematurely.
+provider browser remain subsequent retained-parity work under #306. The
+maintainer closed #357 on 2026-10-11 at 22:01:23Z; preserve that state. Closure
+does not replace verification of the retained workflows.
 
 ## Exit Criteria
 
