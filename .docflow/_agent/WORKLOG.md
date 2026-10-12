@@ -1046,3 +1046,26 @@ Plan 0053 completion prepared after implementation `e4264db`, effective only on 
   loopback binds by the sandbox; approved owned-fixture reruns passed entirely.
 - Windows corrected native console supervisor still unobserved. Final actual
   head CI and verified squash remain required;0070 stays todo, #359 stays open.
+
+## 2026-10-12 — PR381 Windows processed input and mode guard
+
+- Exact009077ff0528e228e345b48a8692535390e1faff CI38272600909
+  passed UI and full Linux/macOS lanes. Windows passed native review/cancel,
+  adapter and GUI IPC, then actual ConPTY success and nonzero-editor cases,
+  including literal argv/input, reaping and exact native mode restoration.
+  Ctrl-C case stayed at editor-ready; backend-death was not reached by the
+  previous fail-fast runner. Do not claim four-case Windows acceptance.
+- Rust terminal handoff explicitly enables ENABLE_PROCESSED_INPUT, captures
+  both console modes and restores them in the existing native guard. A raw UI
+  mode must not silently leave Ctrl-C as input data. Original mode values were
+  not recorded in the failed run, so this is a correction to verify, not a
+  proven diagnosis of that failure. The fake editor now requires processed
+  input before intentionally changing its own mode.
+- The test runner executes every owned case and aggregates failures; each case
+  retains its own cleanup and120s deadline. Windows failures print owned mode/
+  receipt/alive facts, and premature UI exit fails immediately except during
+  the explicitly bounded post-exit editor-reap check. No assertion removed.
+- Primary SetConsoleMode documentation checked; local strict allfeatureClippy,
+  UI typecheck/lint/fmt and all four production macOS PTY cases pass. New exact
+  head Windows Ctrl-C/backend-death proof and all five checks remain required.
+  https://learn.microsoft.com/en-us/windows/console/setconsolemode

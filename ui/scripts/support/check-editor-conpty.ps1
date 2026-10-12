@@ -37,9 +37,21 @@ try {
   $Environment=@{PATH=($Editors+';'+[IO.Path]::GetDirectoryName($Git)+';'+$env:SystemRoot+'\System32;'+$env:SystemRoot);SystemRoot=$env:SystemRoot;WINDIR=$env:WINDIR;TEMP=$Root;TMP=$Root;TERM='xterm-256color';NORN_BACKEND_BIN=$Backend;NORN_BACKEND_REPO_PATH=$Repo;NORN_CONFIG_DIR=$Config;NORN_DATA_DIR=(Join-Path $Root 'workspace');NORN_REVIEW_DATA_DIR=(Join-Path $Root 'reviews');NORN_OWNED_EDITOR_DIR=$Editors;VISUAL=$Editor;GIT_CONFIG_NOSYSTEM='1';GIT_CONFIG_GLOBAL='NUL';NORN_BROWSER_OPEN='0'}
   $Block=($Environment.Keys|Sort-Object|ForEach-Object {$_+'='+$Environment[$_]}) -join "`0"
   $Session=[OwnedConPty]::new($Witness,('"'+$Bun+'" run src/main.ts'),(Join-Path $ProjectRoot 'ui'),($Block+"`0`0"))
-  function AwaitOwned([scriptblock]$Condition,[string]$Label) {
+  function AwaitOwned([scriptblock]$Condition,[string]$Label,[bool]$AllowExited=$false) {
     $Deadline=[DateTime]::UtcNow.AddSeconds(25)
-    while (!( & $Condition )) {if([DateTime]::UtcNow -gt $Deadline){throw ($Label+"`n"+$Session.Output)};Start-Sleep -Milliseconds 25}
+    while (!( & $Condition )) {
+      if([DateTime]::UtcNow -gt $Deadline -or (!$AllowExited -and $Session.ExitCode -ne -1)) {
+        $Facts=@{witnessExit=$Session.ExitCode}
+        $ModesFile=Join-Path $Editors 'changed-modes.txt'
+        if(Test-Path $ModesFile){$Facts.editorModes=[IO.File]::ReadAllText($ModesFile)}
+        $PidFile=Join-Path $Editors 'editor.pid'
+        if(Test-Path $PidFile){$Facts.editorAlive=[bool](Get-Process -Id ([uint32][IO.File]::ReadAllText($PidFile)) -ErrorAction SilentlyContinue)}
+        $InputFile=Join-Path $Editors 'input.txt'
+        if(Test-Path $InputFile){$Facts.editorInputHex=[Convert]::ToHexString([IO.File]::ReadAllBytes($InputFile))}
+        throw ($Label+"`n"+($Facts|ConvertTo-Json -Compress)+"`n"+$Session.Output)
+      }
+      Start-Sleep -Milliseconds 25
+    }
   }
   AwaitOwned { $Session.Output.Contains('F8') } 'Production workspace did not render'
   $Session.Send("`e[19~")
@@ -71,7 +83,7 @@ try {
   $Expected=if($Case -eq 'backend-death'){1}else{0}
   # Bun reports native Windows forced termination as 1.
   if ($Session.ExitCode -ne $Expected) {throw ('Unexpected UI exit '+$Session.ExitCode)}
-  AwaitOwned { !(Get-Process -Id $EditorPid -ErrorAction SilentlyContinue) } 'Owned editor remained orphaned'
+  AwaitOwned { !(Get-Process -Id $EditorPid -ErrorAction SilentlyContinue) } 'Owned editor remained orphaned' $true
   $Modes=[IO.File]::ReadAllLines((Join-Path $Editors 'console-modes.txt'))
   if($Modes.Count -ne 2 -or $Modes[0] -ne $Modes[1]){throw 'Native console modes were not restored'}
   Write-Output ('PASS '+$Case+': production OpenTUI, literal argv, real ConPTY input, editor cleanup and native mode restoration')

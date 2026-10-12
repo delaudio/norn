@@ -34,7 +34,11 @@ Git is authoritative. Durable history lives in WORKLOG and plan/done.
   diagnostics prove local review preflight races two background evidence reads.
   Bound waiting on the existing two-reader pool to20s with cancellation and
   RAII; two regression tests,767core+2ignored/76stdio/Clippy/workflow/fourPTY
-  pass locally. Final-head real Windows console proof still required.
+  pass locally. CI38272600909 proves real Windows ConPTY success/failure with
+  exact native modes, but Ctrl-C stalls before UI resume. Explicit processed
+  input plus saved input/output mode guard now prepared; all-case aggregation
+  and owned failure receipts retain every assertion. Four-case Windows proof
+  and all five checks on the final head still required.
 - Keep0070 todo until actual verified merge. #359/#294 remain open pending
   editor/fullparity; preserve maintainer305/306/357closures; ADR0020 Accepted
   until fullcutover. No private profiles/credentials/providerwrites/actualagents.

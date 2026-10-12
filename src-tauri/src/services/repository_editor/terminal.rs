@@ -13,6 +13,10 @@ pub(super) struct Terminal {
     previous_group: i32,
     #[cfg(windows)]
     attached: bool,
+    #[cfg(windows)]
+    input_mode: u32,
+    #[cfg(windows)]
+    output_mode: u32,
 }
 
 #[cfg(unix)]
@@ -64,7 +68,8 @@ impl Terminal {
         {
             use std::os::windows::io::AsRawHandle;
             use windows_sys::Win32::System::Console::{
-                AttachConsole, GetConsoleMode, SetConsoleCtrlHandler, ATTACH_PARENT_PROCESS,
+                AttachConsole, GetConsoleMode, SetConsoleCtrlHandler, SetConsoleMode,
+                ATTACH_PARENT_PROCESS, ENABLE_PROCESSED_INPUT,
             };
             let mut attached = false;
             if File::options()
@@ -89,21 +94,41 @@ impl Terminal {
                     .write(true)
                     .open("CONOUT$")
                     .map_err(|_| invalid())?;
-                let mut mode = 0;
-                if unsafe { GetConsoleMode(input.as_raw_handle().cast(), &mut mode) } == 0
-                    || unsafe { GetConsoleMode(output.as_raw_handle().cast(), &mut mode) } == 0
+                let mut input_mode = 0;
+                let mut output_mode = 0;
+                if unsafe { GetConsoleMode(input.as_raw_handle().cast(), &mut input_mode) } == 0
+                    || unsafe { GetConsoleMode(output.as_raw_handle().cast(), &mut output_mode) }
+                        == 0
+                {
+                    return Err(invalid());
+                }
+                // A renderer's raw-input mode can leave Ctrl-C as an ordinary
+                // byte even after suspension. Interactive children start with
+                // native signal processing; they may choose their own raw mode.
+                // Preserve both original modes for the owning handoff guard.
+                if unsafe {
+                    SetConsoleMode(
+                        input.as_raw_handle().cast(),
+                        input_mode | ENABLE_PROCESSED_INPUT,
+                    )
+                } == 0
                 {
                     return Err(invalid());
                 }
                 // The private child restores its own console controls. The
                 // protocol host never handles the editor's broadcast Ctrl-C.
                 if unsafe { SetConsoleCtrlHandler(None, 1) } == 0 {
+                    unsafe {
+                        SetConsoleMode(input.as_raw_handle().cast(), input_mode);
+                    }
                     return Err(invalid());
                 }
                 Ok(Self {
                     input,
                     output,
                     attached,
+                    input_mode,
+                    output_mode,
                 })
             })();
             if handles.is_err() && attached {
@@ -147,10 +172,18 @@ impl Terminal {
             let _ = foreground(self.input.as_raw_fd(), self.previous_group);
         }
         #[cfg(windows)]
-        unsafe {
-            windows_sys::Win32::System::Console::SetConsoleCtrlHandler(None, 0);
-            if self.attached {
-                windows_sys::Win32::System::Console::FreeConsole();
+        {
+            use std::os::windows::io::AsRawHandle;
+            use windows_sys::Win32::System::Console::{
+                FreeConsole, SetConsoleCtrlHandler, SetConsoleMode,
+            };
+            unsafe {
+                SetConsoleMode(self.input.as_raw_handle().cast(), self.input_mode);
+                SetConsoleMode(self.output.as_raw_handle().cast(), self.output_mode);
+                SetConsoleCtrlHandler(None, 0);
+                if self.attached {
+                    FreeConsole();
+                }
             }
         }
     }

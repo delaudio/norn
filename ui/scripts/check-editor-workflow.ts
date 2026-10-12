@@ -12,6 +12,7 @@ assert(
     ? "PowerShell 7 is required for owned ConPTY tests"
     : "Python 3 is required for owned PTY tests",
 );
+const failures: unknown[] = [];
 for (const scenario of ["success", "failure", "interrupt", "backend-death"]) {
   const command: string[] = windows
     ? [
@@ -40,7 +41,10 @@ for (const scenario of ["success", "failure", "interrupt", "backend-death"]) {
       0,
       `Owned ${windows ? "ConPTY" : "PTY"} case failed: ${scenario}`,
     );
+  } catch (error) {
+    failures.push(error);
   } finally {
     clearTimeout(deadline);
   }
 }
+if (failures.length) throw new AggregateError(failures, "Owned terminal lifecycle cases failed");

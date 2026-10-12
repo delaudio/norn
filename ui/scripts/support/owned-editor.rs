@@ -69,6 +69,11 @@ fn main() {
         let handle = GetStdHandle(-10i32 as u32);
         let mut before = 0;
         assert_ne!(GetConsoleMode(handle, &mut before), 0);
+        assert_ne!(
+            before & 1,
+            0,
+            "Terminal handoff did not enable native Ctrl-C processing"
+        );
         let changed = before ^ 4;
         assert_ne!(SetConsoleMode(handle, changed), 0);
         let mut after = 0;
