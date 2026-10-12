@@ -85,5 +85,7 @@ resolution. Keep existing review prompts/drafts and provider identity intact.
   typechecks,211actualcomponentframes/Storybook, Archgate/audit pass. All3OS exact-head CI,
   actual PR/merge remain pending; actual hook-drift proof passes.
 - No delegation, Norn code review, real provider writes or private profiles.
-- Keep todo until actual verified PR merge.
+- Shipped: PR #382 squash-merged as `49a4867` on 2026-10-12 after all five
+  exact-head required jobs passed (verify, ui, native-workflow on macOS, Ubuntu
+  and Windows).
 - Stopped:

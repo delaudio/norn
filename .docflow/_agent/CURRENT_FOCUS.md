@@ -38,6 +38,10 @@ Git is authoritative. Durable history lives in WORKLOG and plan/done.
 
 ## Remaining work
 
+- PR382 actually MERGED as 49a4867 on 2026-10-12 after all five exact-head jobs
+  passed (verify, ui, native-workflow macOS/Ubuntu/Windows). 0071 moved to
+  plan/done/2026-10-12-native-repository-operations.md; #360 reconciled in the
+  parity matrix and ready to close. Next: #361.
 -360approvedbranch/worktree;361globalhistory/legacy;362resolvedreferences;
  363polling/help;364actual3OS native frozen-profile recovery;307hardening;
  308installedmatchedpair/upgrade/rollback;309cutover.
