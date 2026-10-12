@@ -15,9 +15,8 @@ unsaved drafts. Surface syncing/error status in the shell.
 
 GitHub issue: #363 (epic #294 step 12/15).
 
-Out of scope (tracked): the offline timer fencing proofs on fake clocks, the
-full keyboard help catalogue, and background operation completion/recovery
-panels.
+Out of scope (tracked): the offline timer fencing proofs on fake clocks and
+background operation completion/recovery panels.
 
 ## Exit Criteria
 
@@ -25,6 +24,8 @@ panels.
   as off; unit-tested.
 - The shell schedules refresh from the configured interval, and `refresh`
   updates the global history without touching the selection or drafts.
+- `?` opens a keyboard-help overlay built from a single binding catalogue that
+  matches the real handlers; `Esc`/`q`/`?` closes it.
 - `pnpm run lint/typecheck/test`, `cargo clippy -D warnings`, `cargo test`, the
   `ui` job and `archgate check` pass.
 

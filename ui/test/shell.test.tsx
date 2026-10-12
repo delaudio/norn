@@ -599,3 +599,19 @@ test("native search paste never executes shortcuts and navigates offscreen match
     renderer.renderer.destroy();
   }
 });
+
+test("? opens the keyboard help overlay and Esc closes it", async () => {
+  const app = await mount(100, 30);
+  try {
+    app.renderer.mockInput.pressKey("?");
+    await app.renderer.renderOnce();
+    expect(app.renderer.captureCharFrame()).toContain("Keyboard shortcuts");
+    app.renderer.mockInput.pressKey("?");
+    await app.renderer.renderOnce();
+    expect(app.renderer.captureCharFrame()).not.toContain("Keyboard shortcuts");
+  } finally {
+    app.cleanup();
+    app.ui.unmount();
+    app.renderer.renderer.destroy();
+  }
+});
