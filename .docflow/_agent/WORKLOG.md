@@ -865,3 +865,18 @@ Plan 0053 completion prepared after implementation `e4264db`, effective only on 
   could imply premature completion despite conditional wording. No move or
   workaround performed. Safer flow: retain0068 in todo for the source PR, then
   reconcile actual merge proof and move only after verified integration.
+
+
+## 2026-10-12 — verified379merge, plan0069claim
+
+- PR379 actually MERGEDb15d80bf2c2f275e22c68a100fd1ca2124c4542d at11:48:19Z.
+  Five CI38243490575 checks SUCCESS on766fa6c084f24079580eacf0fa91cf948f37838c;
+  actual native Linux/macOS/Windows explorer reads +review/cancel/restart PASS.
+  Source48271cf and pending-evidence766fa6c preserved; no retry/bypass.
+- Reconcile0068 only now, after actual source completion; no pre-merge move or
+  workaround of automatic rejection. Rootmain ff synced; privatefile/stash intact.
+- Claim0069 before code in isolated issue-359-native-explorer-ui onactual379:
+  paged native tree, bounded previews, complete blame/find presentation, escaped
+  controls, generation/focus/return and qualified shipped clone fallback. Editor
+  lifecycle remains explicit follow-up before359closure. #359/#294 open;
+  maintainer305/306/357closures preserved; ADR0020 stays Accepted untilcutover.

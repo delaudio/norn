@@ -79,26 +79,27 @@ slice does not close #359 before its native tree/find/editor UI proof is merged.
 - Claimed by: default-agent, 2026-10-12, single writer.
 - Branch: issue-359-native-repository-readers.
 - Location: isolated /private/tmp/norn-native-repository-readers on actual378main.
-- Blockers: own exact-final-head CI and actual verified squash merge; implementation/local gates pass.
+- Blockers: none; source PR379 actually verified and merged.
 - Stopped:
 
-## Pending integration evidence — not shipped
+## Verified completion receipt
 
-This plan remains in todo until actual verified integration. It becomes
-complete only when the PR's
-exact final head passes all required CI, including the actual Linux/macOS/
-Windows native workflow, and that head is squash-merged to currentmain.
+- Source48271cfefd0beb9374dc71775fccf513f1846346; final
+  766fa6c084f24079580eacf0fa91cf948f37838c.
+- PR379 https://github.com/delaudio/norn/pull/379 actually MERGED
+  b15d80bf2c2f275e22c68a100fd1ca2124c4542d at2026-10-12T11:48:19Z.
+- All five CI38243490575 jobs SUCCESS on that exact finalhead: verify/UI and
+  actual native OpenTUI/production-transport/Rust workflows Linux/macOS/Windows.
+  No bypass/retry needed. Rootmain fast-forward synced; private file/stash intact.
+- Local PASS:763core+2existingignored/76stdio/6CLI/5onboarding/3binary;
+  retained desktop Rust adapters7; root123+tooling/typecheck/lint/build,
+  Archgate17/protocol/audit/noGUI; UI232/1454/165nativeframes/typecheck/Storybook;
+  strictallfeaturesClippy/fmt; Doctor100/noissues on changed transport files.
+- Single bounded native readonly source/transport slice shipped. #359/#294
+  remain open for tree/find/editor UI and actual external-editor lifecycle.
+  ADR0020 stays Accepted until verified finalcutover. Maintainer closures intact.
+- Pre-merge todo-to-done was rejected by automatic approval review; no move or
+  workaround happened. This reconciliation occurs only after actual verified
+  merge, satisfying the completion criterion with independently checked proof.
 
-- Source commit: `48271cfefd0beb9374dc71775fccf513f1846346`.
-- Base: actual PR378 squash8cdd00768eba9b162dd08d6b15717188e77dd455.
-- Local PASS:763core+2existingignored,76stdio,6CLI,5onboarding,3binary;
-  root123+tooling/typecheck/lint/build/Archgate17/protocol/audit/noGUI;
-  UI232/1454/165nativeframes/typecheck/Storybook; strictallfeaturesClippy/fmt.
-  Doctor100/noissues on changed transport files. Actual owned macOS native
-  workflow PASS including all six explorer reads plus review/cancel/restart.
-- Native source/data/stricttransport slice complete locally. #359/#294 remain
-  open until retained native tree/find/editor navigation and actual owned
-  external-editor lifecycle proof are separately implemented and merged.
-- ADR0020 remains Accepted until full verified cutover; no new ADR number/status.
-
-Implemented source: `48271cfefd0beb9374dc71775fccf513f1846346` (effective after exact-head CI and actual verified squash).
+Shipped commit: b15d80bf2c2f275e22c68a100fd1ca2124c4542d (PR379).
