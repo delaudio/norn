@@ -340,6 +340,22 @@ export type RequestId = string;
  * Identity of the review target a request or event applies to.
  */
 export type TargetIdentity = ProviderTarget | LocalTarget;
+export type ReviewStartParams = {
+  target: TargetIdentity;
+  profile?: string | null;
+  snapshot?: ProviderSnapshotRef | null;
+};
+export type PrRepositoryIdentity =
+  | {
+      provider: "github";
+      workspace: string;
+      repo: string;
+    }
+  | {
+      provider: "bitbucket";
+      workspace: string;
+      repo: string;
+    };
 export type FilePreviewParams = {
   target: TargetIdentity;
   path: string;
@@ -397,17 +413,6 @@ export type ScopeReadParams = {
   limit?: number;
   inventoryVersion?: string | null;
 };
-export type PrRepositoryIdentity =
-  | {
-      provider: "github";
-      workspace: string;
-      repo: string;
-    }
-  | {
-      provider: "bitbucket";
-      workspace: string;
-      repo: string;
-    };
 export type ProviderSnapshotImageParams = {
   snapshot: ProviderSnapshotRef;
   path: string;
@@ -521,9 +526,10 @@ export interface LocalTarget {
   kind: "local";
   localSnapshotSha256: string;
 }
-export interface ReviewStartParams {
-  target: TargetIdentity;
-  profile?: string | null;
+export interface ProviderSnapshotRef {
+  repository: PrRepositoryIdentity;
+  prId: number;
+  snapshotId: string;
 }
 export interface OperationControlParams {
   operationId?: string;
@@ -830,11 +836,6 @@ export interface ProviderSnapshotFilesParams {
   offset: number;
   limit: number;
 }
-export interface ProviderSnapshotRef {
-  repository: PrRepositoryIdentity;
-  prId: number;
-  snapshotId: string;
-}
 export interface ProviderSnapshotDiffParams {
   snapshot: ProviderSnapshotRef;
   path: string;
@@ -914,6 +915,7 @@ export interface RepoSummary {
 export interface ReviewFilesResult {
   target: TargetIdentity;
   files: ChangedFile[];
+  providerSnapshot?: ProviderSnapshotInfo;
 }
 export interface ChangedFile {
   path: string;
@@ -921,6 +923,20 @@ export interface ChangedFile {
   additions: number;
   deletions: number;
   oldPath?: string | null;
+}
+export interface ProviderSnapshotInfo {
+  request: ProviderPrDetailParams;
+  snapshot: ProviderSnapshotRef;
+  title: string;
+  sourceBranch: string;
+  destinationBranch: string;
+  headSha: string;
+  destinationSha: string;
+  baseSha: string;
+  patchSha256: string;
+  fileCount: number;
+  patchBytes: number;
+  expiresAt: number;
 }
 export interface ReviewFindingsResult {
   target: TargetIdentity;
@@ -1443,20 +1459,6 @@ export interface ProviderCurrentUser {
   repository: PrRepositoryIdentity;
   accountId: string;
   displayName: string;
-}
-export interface ProviderSnapshotInfo {
-  request: ProviderPrDetailParams;
-  snapshot: ProviderSnapshotRef;
-  title: string;
-  sourceBranch: string;
-  destinationBranch: string;
-  headSha: string;
-  destinationSha: string;
-  baseSha: string;
-  patchSha256: string;
-  fileCount: number;
-  patchBytes: number;
-  expiresAt: number;
 }
 export interface ProviderSnapshotFilesPage {
   request: ProviderSnapshotFilesParams;

@@ -54,7 +54,9 @@ approval/external provider browsing and broader history/cutover remain separate.
 
 ## Dependencies
 
-- Plan0059 / PR #370 qualified native engine (exact-head CI pending at claim).
+- Plan0059 / PR #370 qualified native engine: verified squash merge
+  `a529463b523f7e8039068ccc59fe9243baba0e36`, CI38193561843 on final
+  `bc7c2ca69c5b41de7012d4561805aba1878a389d`.
 - Existing immutable snapshot manager/provider capture, shared prompt/policy,
   scoped storage/session and approved filesystem boundaries.
 

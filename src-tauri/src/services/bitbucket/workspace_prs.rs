@@ -1147,6 +1147,126 @@ mod tests {
         }
     }
     #[test]
+    fn review_start_rechecks_owned_provider_metadata_without_recapturing_patch() {
+        use crate::services::provider_snapshot::Manager;
+        for provider in [ReviewProvider::Github, ReviewProvider::Bitbucket] {
+            for fault in [
+                "none",
+                "head",
+                "destination",
+                "title",
+                "source-branch",
+                "destination-branch",
+                "fork",
+                "count",
+            ] {
+                if provider == ReviewProvider::Bitbucket && fault == "count" {
+                    continue;
+                }
+                let reads = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+                let metadata_reads = reads.clone();
+                let server = Server::new(move |path, _| {
+                    if path.contains("/compare/") && !path.contains('?') || path.contains("/diff/")
+                    {
+                        return (
+                            200,
+                            String::new(),
+                            "diff --git a/x b/x\n--- a/x\n+++ b/x\n@@ -1 +1 @@\n-old\n+new\n"
+                                .into(),
+                        );
+                    }
+                    let value = if path.contains("/compare/") {
+                        json!({"base_commit":{"sha":"b".repeat(40)},"merge_base_commit":{"sha":"c".repeat(40)}})
+                    } else if path.contains("/merge-base/") {
+                        json!({"hash":"c".repeat(40)})
+                    } else if path.contains("/diffstat/") {
+                        json!({"page":1,"values":[{"status":"modified","old":{"path":"x"},"new":{"path":"x"},"lines_added":1,"lines_removed":1}]})
+                    } else {
+                        let recheck = metadata_reads.fetch_add(1, Ordering::SeqCst) >= 2;
+                        let mut value = if provider == ReviewProvider::Github {
+                            gh(7, false, "open")
+                        } else {
+                            bb(7, false)
+                        };
+                        let source = if provider == ReviewProvider::Github {
+                            "head"
+                        } else {
+                            "source"
+                        };
+                        let destination = if provider == ReviewProvider::Github {
+                            "base"
+                        } else {
+                            "destination"
+                        };
+                        value[source]["repo"] = json!({"full_name":"ForkOwner/ForkRepo"});
+                        if provider == ReviewProvider::Bitbucket {
+                            value[source]["repository"] = json!({"full_name":"ForkOwner/ForkRepo"});
+                        }
+                        value["changed_files"] = json!(1);
+                        if recheck {
+                            match fault {
+                                "head" | "destination" => {
+                                    let side = if fault == "head" { source } else { destination };
+                                    if provider == ReviewProvider::Github {
+                                        value[side]["sha"] = json!("d".repeat(40));
+                                    } else {
+                                        value[side]["commit"]["hash"] = json!("d".repeat(40));
+                                    }
+                                }
+                                "source-branch" | "destination-branch" => {
+                                    let side = if fault == "source-branch" {
+                                        source
+                                    } else {
+                                        destination
+                                    };
+                                    if provider == ReviewProvider::Github {
+                                        value[side]["ref"] = json!("changed");
+                                    } else {
+                                        value[side]["branch"]["name"] = json!("changed");
+                                    }
+                                }
+                                "title" => value["title"] = json!("Changed title"),
+                                "fork" => {
+                                    let field = if provider == ReviewProvider::Github {
+                                        "repo"
+                                    } else {
+                                        "repository"
+                                    };
+                                    value[source][field]["full_name"] = json!("Other/Repo");
+                                }
+                                "count" => value["changed_files"] = json!(2),
+                                _ => {}
+                            }
+                        }
+                        value
+                    };
+                    (200, String::new(), value.to_string())
+                });
+                let api = server.api(provider);
+                let manager = Manager::default();
+                let info = manager
+                    .insert(
+                        api.capture(DetailParams {
+                            repository: identity(provider),
+                            pr_id: 7,
+                        })
+                        .unwrap(),
+                    )
+                    .unwrap();
+                let before = server.requests.lock().unwrap().len();
+                let result = api.recheck_snapshot(&manager.get(&info.snapshot).unwrap());
+                assert_eq!(
+                    result.is_ok(),
+                    fault == "none",
+                    "{provider:?} {fault}: {result:?}"
+                );
+                assert_eq!(server.requests.lock().unwrap().len(), before + 1);
+                assert_eq!(reads.load(Ordering::SeqCst), 3);
+            }
+        }
+    }
+
+    #[test]
     fn snapshots_reject_changed_metadata_partial_inventory_redirects_and_rate_limits() {
         use crate::services::provider_snapshot::Manager;
         const PATCH: &str = "diff --git a/x b/x\nold mode 100644\nnew mode 100755\n";

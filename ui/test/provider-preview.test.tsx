@@ -215,3 +215,41 @@ test("canonical local-only saved scopes never become provider previews or issue 
     client.close();
   }
 });
+
+test("preview review start carries exact capture plus explicit profile when supported", async () => {
+  class EvidenceTransport extends FakeProviderTransport {
+    async start() {
+      const ready = await super.start();
+      return { ...ready, capabilities: [...ready.capabilities, "provider-evidence-reviews"] };
+    }
+    async request(method: string, params: Record<string, unknown>) {
+      if (method === "review.start") {
+        this.calls.push({ method, params: structuredClone(params) });
+        return { operationId: "exact-capture-operation", state: "accepted", sequence: 0 };
+      }
+      return super.request(method, params);
+    }
+  }
+  const transport = new EvidenceTransport();
+  const client = new BackendClient(transport);
+  const store = new ShellStore();
+  try {
+    await store.connect(client);
+    await store.selectProviderPr(providerFixtureRepositories[1]!, 8, "Owned", "OPEN");
+    const captured = store.getSnapshot().liveSnapshot!.snapshot;
+    store.beginReviewProfile();
+    store.appendReplyText("security");
+    store.submitReviewProfile();
+    expect(store.getSnapshot().selectedReviewProfile).toBe("security");
+    await store.startReview(client);
+    expect(transport.calls.find((call) => call.method === "review.start")?.params).toEqual({
+      target: { kind: "provider", ...captured.repository, prId: captured.prId },
+      profile: "security", snapshot: captured,
+    });
+    store.beginReply();
+    expect(store.getSnapshot().composing).toBe(false);
+  } finally {
+    store.cancelSyntax();
+    client.close();
+  }
+});

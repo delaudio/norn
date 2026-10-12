@@ -9,8 +9,10 @@ Git is authoritative. Durable history lives in WORKLOG and plan/done.
 - Branch: `issue-306-provider-evidence-start`, isolated worktree
   `/private/tmp/norn-provider-evidence-start`; plan0060 claimed before code.
 - Base: #370 final head `789bd0347eed8b56bdc6ef79ca9f50c1966dc5e2`;
-  CI38192754060 pending. Keep that head fixed. Verify/merge #370 first,
-  rebase onto actual squash baseline and audit before opening/integrating here.
+  predecessor #370 subsequently verified merged at `a529463b523f7e8039068ccc59fe9243baba0e36`
+  after exact final-head `bc7c2ca` CI38193561843 passed. The first CI failure was
+  an owned clone missing local Git identity; all58 stdio also pass with personal/
+  system Git config disabled. Rebase onto actual squash and audit before PR.
 - State: durable exact provider evidence, no-clone review start and saved restart
   files/diff/images/Pierre/reply integration. UI profile/source/generation fences.
 - Predecessor local gate: root123+tooling/UI172/1057 assertions/115frames,

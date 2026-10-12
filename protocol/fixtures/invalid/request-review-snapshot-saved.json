@@ -1,0 +1,24 @@
+{
+  "type": "request",
+  "id": "snapshot-review",
+  "method": "review.start",
+  "params": {
+    "target": {
+      "kind": "provider",
+      "provider": "github",
+      "workspace": "Owner",
+      "repo": "Repo",
+      "prId": 7,
+      "runId": "saved-run"
+    },
+    "snapshot": {
+      "repository": {
+        "provider": "github",
+        "workspace": "Owner",
+        "repo": "Repo"
+      },
+      "prId": 7,
+      "snapshotId": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+    }
+  }
+}

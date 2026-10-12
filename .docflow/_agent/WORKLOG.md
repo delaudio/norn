@@ -516,3 +516,17 @@ Plan 0053 completion prepared after implementation `e4264db`, effective only on 
   saved/restarted readers and replies with optional explicit clone.
 - Verify/merge #370, rebase onto actual squash and audit before next PR.
   No Norn review, provider writes, private credentials/profiles or release.
+
+## 2026-10-12 — verified predecessor merge during durable evidence integration
+
+- #370 final `bc7c2ca69c5b41de7012d4561805aba1878a389d` passed both
+  CI38193561843 jobs. Verified squash merge at
+  `a529463b523f7e8039068ccc59fe9243baba0e36`, 02:06:45Z. Earlier failure
+  was owned second-clone Git identity; declared synthetic local identity and
+  verified all58 stdio without global/system Git config before repush.
+- Durable evidence work remains isolated/unmerged. SQLite schema18 separates
+  exact raw patch from versioned bounded metadata, content-addresses full scope/
+  provenance and pins, and follows its native owning row via cascading FK.
+  Initial owned tests pass deduplication/restart/hash/cross-scope rejection and
+  consistent backup/cascade cleanup. Connecting saved readers/replies and UI.
+- No shipped/full parity claim; rebase/audit and all final gates still required.

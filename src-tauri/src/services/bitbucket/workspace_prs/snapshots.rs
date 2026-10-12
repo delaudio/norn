@@ -4,6 +4,40 @@ use super::*;
 use crate::services::provider_snapshot::{self as snapshot, Capture, Section, SnapshotFile};
 
 impl Api {
+    pub(crate) fn recheck_snapshot(&self, data: &snapshot::SnapshotData) -> Result<(), String> {
+        let info = &data.info;
+        info.request.validate()?;
+        if info.request.repository != self.repository {
+            return Err(error());
+        }
+        let (current, _) = self.get(
+            &format!("{}/{}", self.collection(), info.request.pr_id),
+            Instant::now(),
+        )?;
+        let (detail, _) = parse_metadata(self.repository.provider, &current, info.request.pr_id)?;
+        let head = snapshot::full_sha(detail.source_commit_hash.as_deref().ok_or_else(error)?)?;
+        let destination = snapshot::full_sha(
+            detail
+                .destination_commit_hash
+                .as_deref()
+                .ok_or_else(error)?,
+        )?;
+        if head != info.head_sha
+            || destination != info.destination_sha
+            || detail.source_branch != info.source_branch
+            || detail.destination_branch != info.destination_branch
+            || detail.title != info.title
+            || snapshot_source_repository(&current, self.repository.provider)?.as_ref()
+                != data.source_repository()
+            || (self.repository.provider == ReviewProvider::Github
+                && current.get("changed_files").and_then(Value::as_u64)
+                    != Some(info.file_count as u64))
+        {
+            return Err("The pull request changed after this preview. Refresh explicitly before starting a review.".into());
+        }
+        Ok(())
+    }
+
     pub(crate) fn capture(&self, params: DetailParams) -> Result<Capture, String> {
         params.validate()?;
         if params.repository != self.repository {

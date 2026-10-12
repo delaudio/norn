@@ -104,7 +104,8 @@ function useShellInput(
       if (key.name === "escape") {
         store.cancelReply();
       } else if (key.name === "return") {
-        if (store.getSnapshot().composerKind === "commit") void store.previewCommit(client);
+        if (store.getSnapshot().composerKind === "profile") store.submitReviewProfile();
+        else if (store.getSnapshot().composerKind === "commit") void store.previewCommit(client);
         else void store.submitReply(client);
       } else if (key.name === "backspace") {
         store.backspaceReply();
@@ -120,6 +121,8 @@ function useShellInput(
       store.toggleProvider();
     } else if (key.name === "f3") {
       void store.toggleProviderPreview();
+    } else if (key.name === "f6") {
+      store.beginReviewProfile();
     } else if (key.name === "f5") {
       void store.toggleProviderPreview(true);
     } else if (key.name === "tab") {
@@ -1394,7 +1397,7 @@ export function Shell({ store, client, quit }: ShellProps) {
       {state.composing ? (
         <box height={1} flexShrink={0} paddingX={1} backgroundColor={theme.panel}>
           <text fg={theme.primary} wrapMode="none" truncate>
-            {`${state.composerKind === "commit" ? "Commit" : "Reply"} › ${state.composerText}`}
+            {`${state.composerKind === "profile" ? "Profile (empty = default)" : state.composerKind === "commit" ? "Commit" : "Reply"} › ${state.composerText}`}
           </text>
         </box>
       ) : null}

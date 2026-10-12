@@ -1136,6 +1136,161 @@ fn native_provider_rows_survive_restart_and_never_borrow_foreign_reviews() {
 
 #[cfg(unix)]
 #[test]
+fn durable_provider_evidence_survives_restart_and_replies_without_clone_or_current_pr() {
+    fn request(backend: &mut Backend, id: &str, method: &str, params: Value) -> Value {
+        backend.send(json!({"type":"request","id":id,"method":method,"params":params}));
+        backend.wait_for(|value| value["id"] == id, Duration::from_secs(15))
+    }
+    use norn_lib::{ProviderReviewScope as Scope, SavedReviewProvider as ReviewProvider};
+    use sha2::{Digest, Sha256};
+    for (name, provider) in [
+        ("github", ReviewProvider::Github),
+        ("bitbucket", ReviewProvider::Bitbucket),
+    ] {
+        let mut fixture = FixFixture::new("#!/bin/sh\nexit 99\n");
+        let cwd = tempfile::tempdir().unwrap();
+        let input = fixture._agent.path().join("reply-input");
+        std::fs::write(fixture._agent.path().join("fake-agent"), format!(
+            "#!/bin/sh\ncat > '{}'\nprintf '%s\\n' '{{\"result\":\"Durable owned reply complete.\",\"session_id\":\"owned-session\"}}'\n", input.display())).unwrap();
+        let patch = "diff --git a/owned.txt b/owned.txt\n--- a/owned.txt\n+++ b/owned.txt\n@@ -1 +1 @@\n-old owned evidence\n+exact saved evidence 世界\n";
+        let metadata = json!({"formatVersion":1,"capture":{
+            "request":{"repository":{"provider":name,"workspace":"fixture","repo":"demo"},"prId":9},
+            "title":"Exact saved PR", "sourceBranch":"feature","destinationBranch":"main",
+            "headSha":"a".repeat(40),"destinationSha":"b".repeat(40),"baseSha":"c".repeat(40),
+            "expectedCount":1,"expectedFiles":null,"sourceRepository":null
+        }})
+        .to_string();
+        let mut hash = Sha256::new();
+        hash.update(b"norn-provider-evidence-v1");
+        hash.update((metadata.len() as u64).to_be_bytes());
+        hash.update(metadata.as_bytes());
+        hash.update((patch.len() as u64).to_be_bytes());
+        hash.update(patch.as_bytes());
+        let id = format!("{:x}", hash.finalize());
+        let scope = Scope {
+            provider,
+            workspace: "fixture".into(),
+            repo: "demo".into(),
+            pr_id: 9,
+        };
+        let connection =
+            rusqlite::Connection::open(fixture._data.path().join("norn.sqlite3")).unwrap();
+        let legacy: String = connection
+            .query_row(
+                "SELECT store_json FROM ai_review_stores WHERE review_key='fixture_demo_9'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let mut owned: Value = serde_json::from_str(&legacy).unwrap();
+        owned["threads"][0]["claudeSessionId"] = Value::Null;
+        let run = &mut owned["reviewRuns"][0];
+        run["id"] = json!("durable-run");
+        run["provider"] = json!(name);
+        run["reviewedBaseSha"] = json!("b".repeat(40));
+        run["reviewedDiffBaseSha"] = json!("c".repeat(40));
+        run["reviewedHeadSha"] = json!("a".repeat(40));
+        run["providerEvidenceId"] = json!(id);
+        run["destinationBranch"] = json!("main");
+        connection.execute("INSERT INTO ai_review_stores(review_key,workspace,repo,pr_id,store_json,created_at,updated_at) VALUES (?1,'fixture','demo',9,?2,'1','2')",rusqlite::params![scope.key(),owned.to_string()]).unwrap();
+        connection.execute("INSERT INTO provider_review_evidence(evidence_id,scope_key,metadata_json,patch,created_at) VALUES (?1,?2,?3,?4,'1')",rusqlite::params![id,scope.key(),metadata,patch.as_bytes()]).unwrap();
+        std::fs::write(
+            fixture._config.path().join("settings.json"),
+            json!({"repos":[],"defaultDiffView":"unified","theme":"dark"}).to_string(),
+        )
+        .unwrap();
+        fixture.target["provider"] = json!(name);
+        fixture.target["runId"] = json!("durable-run");
+        fixture.backend = Backend::spawn_env(
+            cwd.path(),
+            &[
+                ("NORN_CONFIG_DIR", fixture._config.path().to_str().unwrap()),
+                (
+                    "NORN_REVIEW_DATA_DIR",
+                    fixture._data.path().to_str().unwrap(),
+                ),
+                (
+                    "NORN_REVIEW_AGENT_BIN",
+                    fixture._agent.path().join("fake-agent").to_str().unwrap(),
+                ),
+                ("NORN_REVIEW_ENGINE", "real"),
+            ],
+        );
+        fixture.backend.handshake();
+        let files = request(
+            &mut fixture.backend,
+            "files",
+            "review.files",
+            json!({"target":fixture.target}),
+        );
+        assert_eq!(files["ok"], true, "{name}: {files}");
+        let info = &files["result"]["providerSnapshot"];
+        assert_eq!(info["baseSha"], "c".repeat(40));
+        assert_eq!(info["destinationSha"], "b".repeat(40));
+        let diff = request(
+            &mut fixture.backend,
+            "diff",
+            "provider.snapshot.diff",
+            json!({"snapshot":info["snapshot"],"path":"owned.txt","offset":0}),
+        );
+        assert_eq!(diff["result"]["text"], patch, "{name}: {diff}");
+        let reply = request(
+            &mut fixture.backend,
+            "reply",
+            "review.reply",
+            json!({"target":fixture.target,"message":"Explain this saved evidence."}),
+        );
+        assert_eq!(reply["ok"], true, "{reply}");
+        let terminal = fixture.terminal(reply["result"]["operationId"].as_str().unwrap());
+        assert_eq!(
+            terminal["event"]["state"], "succeeded",
+            "{name}: {terminal}"
+        );
+        let captured = std::fs::read_to_string(&input).unwrap();
+        assert!(captured.contains(patch));
+        assert!(captured.contains("Exact saved PR"));
+        let saved: String = connection
+            .query_row(
+                "SELECT store_json FROM ai_review_stores WHERE review_key=?1",
+                [scope.key()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let saved: Value = serde_json::from_str(&saved).unwrap();
+        assert!(saved["reviewRuns"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|run| run["turnKind"] == "reply"
+                && run["providerEvidenceId"] == id
+                && run["reviewedBaseSha"] == "b".repeat(40)
+                && run["reviewedDiffBaseSha"] == "c".repeat(40)));
+        let unchanged: String = connection
+            .query_row(
+                "SELECT store_json FROM ai_review_stores WHERE review_key='fixture_demo_9'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(unchanged, legacy);
+        connection
+            .execute(
+                "UPDATE provider_review_evidence SET patch=?1 WHERE evidence_id=?2",
+                rusqlite::params![b"corrupt".as_slice(), id],
+            )
+            .unwrap();
+        let corrupt = request(
+            &mut fixture.backend,
+            "corrupt",
+            "review.files",
+            json!({"target":fixture.target}),
+        );
+        assert_eq!(corrupt["ok"], false, "{corrupt}");
+    }
+}
+
+#[cfg(unix)]
+#[test]
 fn native_agent_handoff_accepts_owned_context_and_rejects_ambiguous_conversations() {
     use norn_lib::{ProviderReviewScope as Scope, SavedReviewProvider as ReviewProvider};
     for scenario in [
