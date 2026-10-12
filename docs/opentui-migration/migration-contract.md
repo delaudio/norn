@@ -215,13 +215,18 @@ provider browsing remain required. These bounded deliveries do not close
 2026-10-11 22:01:23Z; preserve that state while verifying remaining provider
 workflows under #306.
 
-[Provider review ownership](./provider-review-ownership.md), plan 0058, establishes provider-qualified persisted and runtime review ownership:
+[Provider review ownership](./provider-review-ownership.md), plan 0058 / PR #369
+(merged at `68c6939`), establishes provider-qualified persisted and runtime review ownership:
 new scoped rows coexist with proven legacy runs, without copying old runs into
 another mutable owner. Native readers and transactional publication resolve
 actual provider/run provenance; ambiguous or foreign conversations are not used
 as resume context. This foundation does not enable review-start from a fresh
 preview. That integration must pass exact evidence, profile, cancellation,
-reply/fix and approval verification before retained review parity is complete.
+reply/fix and approval verification before retained review parity is complete. Plan 0059 connects native scoped initial/reply execution,
+explicit profile resolution, isolated agents and scoped approved filesystem
+operations. It preserves legacy run ownership and distinct approval/diff pins.
+Fresh-preview review start still awaits durable cached-evidence integration;
+this delivery does not close the full parity row.
 
 - **First vertical slice (#301):** real file → diff → finding through the Rust
   backend and the OpenTUI client, measured on a large diff. Material

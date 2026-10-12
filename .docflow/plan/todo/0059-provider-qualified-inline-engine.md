@@ -49,7 +49,8 @@ once this engine seam is verified. Fresh preview Enter remains unavailable here.
 
 ## Dependencies
 
-- Plan 0058 / PR #369 provider storage/session foundation (CI pending at claim).
+- Plan 0058 / PR #369 provider storage/session foundation: merged at
+  `68c69399cc879b29873846a65fd7c79ad42baee9` after exact-head CI38190456486.
 - Existing shared pipeline, prompt/reference and approved filesystem seams.
 - Subsequent durable cached-evidence start before fresh provider review parity.
 
@@ -58,5 +59,5 @@ once this engine seam is verified. Fresh preview Enter remains unavailable here.
 - Claimed by: default-agent, 2026-10-12, `issue-306-provider-inline-engine`.
 - Location: isolated `/private/tmp/norn-provider-inline-engine` worktree based
   on final PR #369 head `0e828f7c0eb6a02579a4450eb2fce974605a567e`.
-- Blockers: implementation/gates and verified predecessor merge before PR.
+- Blockers: final gates, rebase/collision audit and verified merge of this work.
 - Stopped:

@@ -8,11 +8,12 @@ Git is authoritative. Durable history lives in WORKLOG and plan/done.
   no Norn review, per maintainer instruction. Single-agent implementation.
 - Branch: `issue-306-provider-inline-engine`, isolated worktree
   `/private/tmp/norn-provider-inline-engine`; plan0059 claimed before code.
-- Base: final #369 head `0e828f7`; predecessor CI 38190456486 running. Do not
-  open/integrate this PR until #369 exact-head verification and squash merge;
-  rebase onto actual merged baseline and audit number collisions first.
-- State: explicit scoped native inline execution/profile/reply/fix integration.
-  Fresh-preview review start stays unavailable until durable cached evidence.
+- Predecessor #369 merged at `68c69399cc879b29873846a65fd7c79ad42baee9`
+  after exact final-head CI38190456486 passed both jobs, 2026-10-12 01:22:43Z.
+- State: native context/profile/initial/reply/fix integration implemented;
+  completing owned regression gates, then rebase onto the actual squash
+  baseline and audit before opening the next PR.
+- Fresh-preview review start stays unavailable until durable cached evidence.
 - #369 local gate: 705 core+two ignored/55 stdio/six CLI/five onboarding/three
   bin, root123/UI172+1057asserts/115frames, strict Clippy/fmt/no-GUI/Archgate/audit.
 - Root unrelated untracked `.norn.yaml` must never be read/copied/staged.

@@ -718,7 +718,18 @@ impl Request {
                     ));
                 }
             }
-            Self::ReviewStart { params, .. } => params.target.validate()?,
+            Self::ReviewStart { params, .. } => {
+                params.target.validate()?;
+                if params.profile.as_ref().is_some_and(|profile| {
+                    profile.is_empty()
+                        || profile.chars().count() > 128
+                        || profile.starts_with(' ')
+                        || profile.ends_with(' ')
+                        || profile.chars().any(char::is_control)
+                }) {
+                    return Err(invalid_request("A profile name between 1 and 128 characters without control characters or surrounding spaces is required."));
+                }
+            }
             Self::ReviewCommitPreview { params, .. } => {
                 params.target.validate()?;
                 if params.message.trim().is_empty() || params.message.chars().count() > 4096 {

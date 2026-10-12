@@ -459,3 +459,19 @@ Plan 0053 completion prepared after implementation `e4264db`, effective only on 
   shared core. No fresh-preview activation until durable evidence integration.
 - Sequential PR integration remains mandatory: verify/merge369 first, rebase
   isolated branch onto actual squash baseline, audit, then open next PR.
+
+## 2026-10-12 — provider-qualified execution implementation and predecessor merge
+
+- Verified #369 exact head `0e828f7` against successful UI/verify CI38190456486;
+  squash merged at `68c69399cc879b29873846a65fd7c79ad42baee9`, 01:22:43Z.
+- Implemented explicit native provider/clone context, isolated initial/reply
+  execution, proved conversation inheritance without legacy run copies,
+  bounded review.start profile handoff, mandatory analyzer checkout fences,
+  distinct optional diff-base pins and scoped approved filesystem state.
+- Owned real stdio tests cover native/legacy conversation inheritance,
+  ambiguous provenance, explicit/default/unknown profiles on both providers,
+  canonical clone selection and clean pinned mandatory evidence. Adding final
+  concurrent cancellation proof before final gate/PR; no shipped claim yet.
+- No Norn review, live provider writes, private data/profiles or public releases.
+  Fresh-preview activation and the remaining parity/hardening/package/cutover
+  tasks remain outstanding. Single agent, authorized sequential PR integration.
