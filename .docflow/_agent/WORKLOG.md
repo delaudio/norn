@@ -383,3 +383,15 @@ Plan 0053 completion prepared after implementation `e4264db`, effective only on 
 
 - Prepared plan 0057 receipt for feature `8f7c5cbdc914098a3b109991056e20486b129543`; effective only
   after exact-head CI and verified squash merge. ADR/epic completion not claimed.
+
+## 2026-10-12 — PR #368 shipped; claim plan 0058 review scope foundation
+
+- PR #368 squash merged at `1f9b3d3e0d491c2321817e21bd6f1944194665df`
+  after exact `af7f523dae68366f774400d4bddfb08dbfe25e0b` UI and verify success;
+  CI 38186484683, verify 12m58s. Plan 0057 prepared receipt is now effective.
+- Claimed 0058 on `issue-306-provider-review-scope` before code. Existing PR
+  storage/session keys omit provider; establish explicit native ownership before
+  cached evidence starts create new runs. Preserve legacy rows/contracts and
+  resolve transactional publication against actual owning provenance.
+- #357 maintainer closure remains preserved; retained work tracked by #306.
+  ADR 0020/full epic/platform/profile/install completion not claimed.
