@@ -24,7 +24,10 @@ Git is authoritative. Durable history lives in WORKLOG and plan/done.
   desktopIPC4 and owned general workflow pass. CI38267198082 proves actual
   Linux/macOS editor PTY cases; Windows slow-agent gate fails before ConPTY.
   Await asynchronous pipe writes/shutdown and add real closed-pipe regression;
-  local UI251/1582 and four PTY cases pass, new exact-head CI still required.
+  local UI251/1582 and four PTY cases pass. CI38268459553 then proves
+  Windows review/cancel/restart, three adapters and GUI IPC. ConPTY setup
+  failed because PowerShell consumed a bare Git -- separator; named argv array
+  preserves the hostile Unicode filename. New final-head console proof required.
 - Keep0070 todo until actual verified merge. #359/#294 remain open pending
   editor/fullparity; preserve maintainer305/306/357closures; ADR0020 Accepted
   until fullcutover. No private profiles/credentials/providerwrites/actualagents.

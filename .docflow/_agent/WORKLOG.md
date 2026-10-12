@@ -992,3 +992,16 @@ Plan 0053 completion prepared after implementation `e4264db`, effective only on 
 - Local UI251/1582/47files, typecheck, full owned general workflow and all four
   production macOS PTY cases pass after transport changes. No Rust code changed.
   Keep0070 todo, #359 open and require all five actual-head checks before merge.
+
+## 2026-10-12 — PR381 ConPTY fixture argument correction
+
+- Exact ae8750f9f71470cfcd09bb14b4fe70ff830e2c14 CI38268459553
+  passed UI and full Linux/macOS native editor proof. Windows passed its general
+  review/cancellation/restart workflow, three adapter tests and full native GUI
+  IPC authorization/expiry proof, then failed before console launch: PowerShell
+  consumed a bare -- at the OwnedGit function call, exposing --owned ü.txt as
+  a Git option. No production terminal result was observed on Windows.
+- Pass all fixture Git arguments in a named string array, retaining the literal
+  separator and hostile filename. This fixes owned fixture setup; it does not
+  replace or weaken any console/input/mode/death assertion. No Rust/UI source
+  change. New actual-head CI must prove ConPTY and all required jobs.

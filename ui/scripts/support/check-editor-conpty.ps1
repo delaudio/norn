@@ -16,12 +16,21 @@ try {
   & $Rustc --edition=2021 (Join-Path $ProjectRoot 'ui/scripts/support/owned-console-witness.rs') -o $Witness
   if ($LASTEXITCODE -ne 0) { throw 'Owned console witness compilation failed' }
   $env:GIT_CONFIG_GLOBAL='NUL';$env:GIT_CONFIG_NOSYSTEM='1'
-  function OwnedGit { & $Git -C $Repo @args; if ($LASTEXITCODE -ne 0) {throw 'Owned Git setup failed'} }
-  OwnedGit init -q;OwnedGit config user.name 'Owned Editor';OwnedGit config user.email 'owned@example.invalid'
-  OwnedGit remote add origin 'https://github.com/owned/editor.git'
+  function OwnedGit {
+    param([Parameter(Mandatory=$true)][string[]]$GitArgs)
+    & $Git -C $Repo @GitArgs
+    if ($LASTEXITCODE -ne 0) {throw 'Owned Git setup failed'}
+  }
+  # Pass literal argv through a named array. A bare `--` at a PowerShell
+  # function call is syntax and disappears before it reaches native Git.
+  OwnedGit -GitArgs @('init','-q')
+  OwnedGit -GitArgs @('config','user.name','Owned Editor')
+  OwnedGit -GitArgs @('config','user.email','owned@example.invalid')
+  OwnedGit -GitArgs @('remote','add','origin','https://github.com/owned/editor.git')
   $Source=Join-Path $Repo '--owned ü.txt'
   [IO.File]::WriteAllText($Source,"owned line one`nsecond line`n",[Text.UTF8Encoding]::new($false))
-  OwnedGit add -- '--owned ü.txt';OwnedGit -c commit.gpgsign=false commit -qm 'owned base'
+  OwnedGit -GitArgs @('add','--','--owned ü.txt')
+  OwnedGit -GitArgs @('-c','commit.gpgsign=false','commit','-qm','owned base')
   $Settings=@{aiProvider='claude';repos=@(@{provider='github';workspace='owned';repo='editor';localPath=$Repo});defaultDiffView='unified';theme='dark'}|ConvertTo-Json -Depth 5
   [IO.File]::WriteAllText((Join-Path $Config 'settings.json'),$Settings,[Text.UTF8Encoding]::new($false))
   # Deliberately bounded environment: no personal config/profile or credentials.
