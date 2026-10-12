@@ -73,7 +73,7 @@ file editing is part of retained repository/editor integration in #359.
   onto the actual squash; main numbering/metadata/link audit passed.
 - Root typecheck,123 Vitest tests plus tooling, lint (0 errors/3 existing infos),
   generated protocol and Archgate17 checks passed.
-- UI typecheck,197 tests/1,225 assertions and135 native frame fixtures passed.
+- UI typecheck,197 tests/1,226 assertions and135 native frame fixtures passed.
   Eight new frames cover catalog/base/error/loading at120x30/50x18; owned
   native input also proves full128-character wide Unicode names at50x18.
 - Rust no-default full suite passed732 core tests +2 existing ignored,62 real
@@ -105,3 +105,11 @@ file editing is part of retained repository/editor integration in #359.
   suffix, foreign host and nested path; the full Rust gate and integration
   gate passed again. Supersedes the prior bd9a511 CI head; final CI must verify
   the new fixed head after this receipt.
+
+- CI38205433114 e0a1cce UI failed one inherited F2 timing assertion: patch/hash
+  completion was assumed after eight zero-duration render turns. Fix
+  `e3c14a52464b010e5e744d8149da4828ea44fc40` adds an owned delayed patch read
+  and bounded wait on actual exact-content completion, preserving error/scope/
+  no-write assertions. Owned4inputtests/42assertions, fullUI197/1226 and135frame
+  check passed; root integration gate/Archgate17/audit passed again. A new final
+  fixed-head CI run is required; no merge from the failed or superseded head.
