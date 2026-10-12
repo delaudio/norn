@@ -60,11 +60,41 @@ approval/external provider browsing and broader history/cutover remain separate.
 - Existing immutable snapshot manager/provider capture, shared prompt/policy,
   scoped storage/session and approved filesystem boundaries.
 
-## Status
 
-- Claimed by: default-agent, 2026-10-12, `issue-306-provider-evidence-start`.
-- Location: isolated `/private/tmp/norn-provider-evidence-start`, based on fixed
-  PR #370 head `789bd0347eed8b56bdc6ef79ca9f50c1966dc5e2`, subsequently rebased
-  onto verified main squash `a529463b523f7e8039068ccc59fe9243baba0e36`.
-- Blockers: final gates/receipt/PR exact-head CI and verified merge.
-- Stopped:
+## Prepared completion receipt
+
+Prepared 2026-10-12 from implementation commit
+`402c889` on `issue-306-provider-evidence-start`. This becomes a completion
+record only after exact-head CI passes and verified squash merge into main.
+
+- Actual predecessor squash `a529463b523f7e8039068ccc59fe9243baba0e36` is the
+  branch baseline. Rebased and audited ADR/plan numbering/INDEX/links; no collision.
+- Criteria 1/4/5: owned storage dedup/hash/corruption/provider isolation,
+  parent cascade/legacy retention and consistent-backup tests; saved-run distinct
+  destination/diff-base pins; real stdio GitHub/Bitbucket restart/files/patch/reply
+  without clone/current PR. Raw legacy row bytes remain unchanged. Missing or
+  corrupt native evidence does not invoke legacy/current checkout fallback.
+- Criteria 2/3/7: owned HTTP both-provider metadata recheck rejects head,
+  destination, title, branches/fork and GitHub count changes with exactly one
+  GET/no diff recapture; cache ownership/missing handle/cancel/shutdown fences
+  before agent. Real shared initial pipeline with owned fake CLI proves exact
+  raw patch, durable actual run association and no-clone isolated execution.
+  Existing snapshot expiry/bounds/framing and native policy/cancel tests pass.
+- Criterion 6: strict generated DTO/source/profile tests and UI generation
+  fences; native F6 explicit/default/cancel/paste behavior at 120 and 50 columns.
+  Added two profile scenes, 117 native frames verified including changed F6 help.
+  Named/default profile semantics retain shared Rust policy validation; unknown
+  explicit profile is an error. Catalog/editor parity remains retained #306 work.
+- Local gate: root typecheck/123 tests plus tooling/lint/protocol; UI typecheck,
+  177 tests/1088 assertions/117 frames; Rust 712 core plus two existing ignored,
+  59 stdio/six CLI/five onboarding/three bin; strict all-feature/all-target Clippy,
+  fmt, all-target core/no-GUI, Archgate17 and docflow audit. React Doctor reports
+  no changed-file issues, existing score64. No suppressed native prop rules.
+- New schema18 requires a compatible binary on restore; packaging rollback
+  remains a required #308 owned-backup/runtime gate. Evidence quota-full errors
+  do not silently evict saved runs. Broader history/recovery, explicit PR
+  approval/external browsing, catalog/editor/platform/install/cutover remain.
+- No Norn reviews, live provider writes, private profile/data or releases.
+  ADR0020 remains Accepted; this change does not close #306 or epic #294.
+
+Shipped implementation commit (conditional on verified PR merge): `402c889`.
