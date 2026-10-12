@@ -6,21 +6,16 @@ Git is authoritative. Durable history lives in WORKLOG and plan/done.
 
 - Goal: finish epic #294 through verified sequential PR/squash merges; no Norn
   review per maintainer instruction. Single agent, no delegation.
-- Branch: `issue-306-provider-evidence-start`, isolated worktree
-  `/private/tmp/norn-provider-evidence-start`; plan0060 claimed before code.
-- Base: #370 final head `789bd0347eed8b56bdc6ef79ca9f50c1966dc5e2`;
-  predecessor #370 subsequently verified merged at `a529463b523f7e8039068ccc59fe9243baba0e36`
-  after exact final-head `bc7c2ca` CI38193561843 passed. The first CI failure was
-  an owned clone missing local Git identity; all58 stdio also pass with personal/
-  system Git config disabled. Rebased onto the actual squash baseline; collision
-  audit passed. Local gates pass: root123, UI177/1088/117frames, Rust712+two
-  ignored/59stdio/six CLI/five onboarding/three bin, strict Clippy/fmt/no-GUI/
-  protocol/Archgate17. Preparing receipt/PR; exact-head CI/merge required.
-- State: durable exact provider evidence, no-clone review start and saved restart
-  files/diff/images/Pierre/reply integration. UI profile/source/generation fences.
-- Predecessor local gate: root123+tooling/UI172/1057 assertions/115frames,
-  Rust706+two ignored/58stdio/six CLI/five onboarding/three bin, strict Clippy,
-  fmt/protocol/no-GUI/Archgate/audit.
+- Branch: `issue-306-provider-external-browser`, isolated worktree
+  `/private/tmp/norn-provider-external-browser`; plan0061 claimed before code.
+- PR #371 fixed head `78ca5d07949fe12303b618eca2affbe849787545`: UI passed,
+  verify CI38197325446 passed. #371 verified merged at
+  `3322ff050c8d7c6bc115c01c9341cb0594cb4730`, 2026-10-12 03:00:52Z.
+  This work is rebased onto actual squash; number/INDEX/link audit passed.
+- State: explicit full-scope native provider PR external browser action; prepare
+  here; local gates pass: root123, UI181/1117/119frames, Rust713+two
+  ignored/60stdio/six CLI/five onboarding/three bin, strict Clippy/fmt/no-GUI/
+  protocol/Archgate17/audit. Preparing PR/receipt; exact next-head CI required.
 - Root unrelated `.norn.yaml` must never be read/copied/staged.
 
 ## Remaining work

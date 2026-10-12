@@ -4164,6 +4164,43 @@
           }
         }
       ]
+    },
+    "ProviderBrowserResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "request",
+        "repository",
+        "url",
+        "launchRequested",
+        "launchError"
+      ],
+      "properties": {
+        "request": {
+          "$ref": "#/definitions/ProviderPrDetailParams"
+        },
+        "repository": {
+          "$ref": "#/definitions/PrRepositoryIdentity"
+        },
+        "url": {
+          "type": "string",
+          "maxLength": 2048
+        },
+        "launchRequested": {
+          "type": "boolean"
+        },
+        "launchError": {
+          "anyOf": [
+            {
+              "type": "string",
+              "maxLength": 4096
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
     }
   },
   "oneOf": [
@@ -5546,6 +5583,30 @@
               "$ref": "#/definitions/ProviderSnapshotBrowserParams"
             }
           }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "type": {
+              "const": "request"
+            },
+            "id": {
+              "$ref": "#/definitions/RequestId"
+            },
+            "method": {
+              "const": "provider.browser"
+            },
+            "params": {
+              "$ref": "#/definitions/ProviderPrDetailParams"
+            }
+          }
         }
       ]
     },
@@ -5663,6 +5724,9 @@
             },
             {
               "$ref": "#/definitions/ProviderSnapshotBrowserResult"
+            },
+            {
+              "$ref": "#/definitions/ProviderBrowserResult"
             }
           ]
         }

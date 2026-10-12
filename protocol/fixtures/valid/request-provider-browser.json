@@ -1,0 +1,13 @@
+{
+  "type": "request",
+  "id": "provider-browser",
+  "method": "provider.browser",
+  "params": {
+    "repository": {
+      "provider": "github",
+      "workspace": "Owned",
+      "repo": "Repo"
+    },
+    "prId": 7
+  }
+}

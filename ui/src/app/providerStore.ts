@@ -59,6 +59,7 @@ export interface ProviderSnapshot {
   detailKey: string | null;
   detailOpen: boolean;
   detailLoading: boolean;
+  browserOpening: boolean;
   detailError: string | null;
   error: string | null;
   notice: string | null;
@@ -80,6 +81,7 @@ const initial = (): ProviderSnapshot => ({
   detailKey: null,
   detailOpen: false,
   detailLoading: false,
+  browserOpening: false,
   detailError: null,
   error: null,
   notice: null,
@@ -454,7 +456,10 @@ export class ProviderStore {
     const rows = this.rows();
     if (!rows.length) return;
     const index = (this.selectedIndex() + delta + rows.length) % rows.length;
-    this.update({ selected: rows[index]!.key });
+    this.update({
+      selected: rows[index]!.key,
+      ...(this.state.browserOpening ? { notice: null } : {}),
+    });
   }
   cycleFocus() {
     const fields: ProviderFocus[] = ["repository", "state", "author", "query", "list"];
@@ -547,6 +552,32 @@ export class ProviderStore {
     });
     this.schedulePage(client, group.repository, group.nextPage, group.nextPage, this.generation);
   }
+  async openBrowser(client: BackendClient): Promise<void> {
+    const row = this.selectedRow();
+    if (row?.kind !== "pr" || this.state.browserOpening) return;
+    const generation = this.generation;
+    const current = () => generation === this.generation && this.state.selected === row.key;
+    this.update({ browserOpening: true, notice: "Requesting the provider PR page…" });
+    try {
+      const result = await client.providerBrowser(
+        { repository: row.group.repository, prId: row.pr.id },
+        current,
+      );
+      if (current())
+        this.update({
+          notice: result.launchError
+            ? `Provider browser unavailable: ${result.launchError}`
+            : result.launchRequested
+              ? "Provider PR page requested. Check your browser."
+              : "Provider browser launching is disabled; use copy URL instead.",
+        });
+    } catch (error) {
+      if (current()) this.update({ notice: message(error) });
+    } finally {
+      if (generation === this.generation) this.update({ browserOpening: false });
+    }
+  }
+
   showDetail(client: BackendClient) {
     const row = this.selectedRow();
     if (row?.kind !== "pr") return;

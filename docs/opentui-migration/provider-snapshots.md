@@ -3,8 +3,8 @@
 Internal evidence for #357 / plans 0056–0057. PR #367 supplies immutable
 snapshots and the typed bridge. Plan 0057 connects native terminal and Pierre
 previews; plan 0060 connects exact-evidence review start and durable saved
-readers/replies. Explicit approval and native external provider browsing remain
-retained work under #306.
+readers/replies. Explicit approval remains retained work under #306; plan0061 supplies native
+external provider PR navigation separately from these diff previews.
 No saved review run is created by a snapshot read.
 
 ## Evidence boundary

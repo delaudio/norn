@@ -148,6 +148,48 @@ pub struct Api {
     repository: RepositoryIdentity,
     root: String,
 }
+pub(crate) fn needs_browser_alias(repository: &RepositoryIdentity) -> bool {
+    repository.provider == ReviewProvider::Bitbucket
+        && (braced_uuid(&repository.workspace) || braced_uuid(&repository.repo))
+}
+
+pub(crate) fn browser_url(
+    params: &DetailParams,
+    resolved: &RepositoryIdentity,
+) -> Result<String, String> {
+    params.validate()?;
+    resolved.validate()?;
+    if resolved.provider != params.repository.provider
+        || braced_uuid(&resolved.workspace)
+        || braced_uuid(&resolved.repo)
+        || (!braced_uuid(&params.repository.workspace)
+            && !params
+                .repository
+                .workspace
+                .eq_ignore_ascii_case(&resolved.workspace))
+        || (!braced_uuid(&params.repository.repo)
+            && !params.repository.repo.eq_ignore_ascii_case(&resolved.repo))
+    {
+        return Err(error());
+    }
+    Ok(format!(
+        "https://{}/{}/{}/{}/{}",
+        if resolved.provider == ReviewProvider::Github {
+            "github.com"
+        } else {
+            "bitbucket.org"
+        },
+        encode_path_segment(&resolved.workspace),
+        encode_path_segment(&resolved.repo),
+        if resolved.provider == ReviewProvider::Github {
+            "pull"
+        } else {
+            "pull-requests"
+        },
+        params.pr_id
+    ))
+}
+
 fn error() -> String {
     "The provider PR response could not be verified. Refresh explicitly after checking provider availability.".into()
 }
@@ -482,6 +524,48 @@ impl Api {
             next_page: next,
         })
     }
+    pub(crate) fn browser_repository(
+        &self,
+        params: &DetailParams,
+    ) -> Result<RepositoryIdentity, String> {
+        params.validate()?;
+        if params.repository != self.repository {
+            return Err(error());
+        }
+        if !needs_browser_alias(&self.repository) {
+            return Ok(self.repository.clone());
+        }
+        let (metadata, _) = self.get(&self.base(), Instant::now())?;
+        if braced_uuid(&self.repository.repo)
+            && metadata
+                .get("uuid")
+                .and_then(Value::as_str)
+                .is_none_or(|uuid| !uuid.eq_ignore_ascii_case(&self.repository.repo))
+        {
+            return Err(error());
+        }
+        if braced_uuid(&self.repository.workspace)
+            && metadata
+                .pointer("/workspace/uuid")
+                .and_then(Value::as_str)
+                .is_none_or(|uuid| !uuid.eq_ignore_ascii_case(&self.repository.workspace))
+        {
+            return Err(error());
+        }
+        let (workspace, repo) = metadata
+            .get("full_name")
+            .and_then(Value::as_str)
+            .and_then(|name| name.split_once('/'))
+            .ok_or_else(error)?;
+        let resolved = RepositoryIdentity {
+            provider: self.repository.provider,
+            workspace: workspace.into(),
+            repo: repo.into(),
+        };
+        browser_url(params, &resolved)?;
+        Ok(resolved)
+    }
+
     pub fn user(&self) -> Result<CurrentUser, String> {
         let (value, _) = self.get(&format!("{}/user", self.root), Instant::now())?;
         let (account_id, display_name) = if self.repository.provider == ReviewProvider::Github {
@@ -817,6 +901,73 @@ mod tests {
     }
     fn bb(id: u32, draft: bool) -> Value {
         json!({"id":id,"title":format!("Change {id}"),"state":"OPEN","draft":draft,"author":{"account_id":"bb-author","display_name":"Author"},"source":{"branch":{"name":"feature"},"commit":{"hash":"a".repeat(40)}},"destination":{"branch":{"name":"main"},"commit":{"hash":"b".repeat(40)}}})
+    }
+
+    #[test]
+    fn native_provider_browser_urls_and_uuid_aliases_preserve_origin_and_identity() {
+        for provider in [ReviewProvider::Github, ReviewProvider::Bitbucket] {
+            let server = Server::new(|_, _| panic!("ordinary browser URL acquired provider data"));
+            let params = DetailParams {
+                repository: identity(provider),
+                pr_id: 7,
+            };
+            let resolved = server.api(provider).browser_repository(&params).unwrap();
+            let url = browser_url(&params, &resolved).unwrap();
+            assert_eq!(
+                url,
+                format!(
+                    "https://{}/Owner/Repo/{}/7",
+                    if provider == ReviewProvider::Github {
+                        "github.com"
+                    } else {
+                        "bitbucket.org"
+                    },
+                    if provider == ReviewProvider::Github {
+                        "pull"
+                    } else {
+                        "pull-requests"
+                    }
+                )
+            );
+            assert!(server.requests.lock().unwrap().is_empty());
+            let mut foreign = resolved;
+            foreign.repo = "Other".into();
+            assert!(browser_url(&params, &foreign).is_err());
+        }
+        let owner = "{11111111-1111-1111-1111-111111111111}";
+        let repo = "{22222222-2222-2222-2222-222222222222}";
+        for fault in ["none", "owner", "repo", "path", "host", "redirect"] {
+            let server = Server::new(move |_, _| {
+                if fault == "redirect" {
+                    return (
+                        302,
+                        "Location: http://127.0.0.1:1/private\r\n".into(),
+                        String::new(),
+                    );
+                }
+                (200,String::new(),json!({"uuid":if fault=="repo"{owner}else{repo},"workspace":{"uuid":if fault=="owner"{repo}else{owner}},"full_name":if fault=="path"{"Owned/../Repo"}else if fault=="host"{"https://evil.test/x"}else{"ActualWorkspace/ActualRepo"},"links":{"html":{"href":"https://evil.test/private"}}}).to_string())
+            });
+            let mut api = server.api(ReviewProvider::Bitbucket);
+            api.repository = RepositoryIdentity {
+                provider: ReviewProvider::Bitbucket,
+                workspace: owner.into(),
+                repo: repo.into(),
+            };
+            let params = DetailParams {
+                repository: api.repository.clone(),
+                pr_id: 7,
+            };
+            let result = api.browser_repository(&params);
+            if fault == "none" {
+                assert_eq!(
+                    browser_url(&params, &result.unwrap()).unwrap(),
+                    "https://bitbucket.org/ActualWorkspace/ActualRepo/pull-requests/7"
+                );
+            } else {
+                assert!(result.is_err(), "{fault}");
+            }
+            assert_eq!(server.requests.lock().unwrap().len(), 1);
+        }
     }
 
     #[test]

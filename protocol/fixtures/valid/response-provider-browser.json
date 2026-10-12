@@ -1,0 +1,23 @@
+{
+  "type": "response",
+  "id": "provider-browser",
+  "ok": true,
+  "result": {
+    "request": {
+      "repository": {
+        "provider": "github",
+        "workspace": "Owned",
+        "repo": "Repo"
+      },
+      "prId": 7
+    },
+    "repository": {
+      "provider": "github",
+      "workspace": "Owned",
+      "repo": "Repo"
+    },
+    "url": "https://github.com/Owned/Repo/pull/7",
+    "launchRequested": false,
+    "launchError": null
+  }
+}

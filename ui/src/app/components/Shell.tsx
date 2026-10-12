@@ -1184,6 +1184,7 @@ export function Shell({ store, client, quit }: ShellProps) {
   if (state.providerOpen)
     return (
       <ProviderPanel
+        browserAvailable={state.providerExternalBrowser}
         store={providers}
         client={client}
         onClose={() => store.toggleProvider()}

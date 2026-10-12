@@ -6,6 +6,7 @@ import type {
   DraftStageParams,
   DraftStageResult,
   DraftTarget,
+  ProviderBrowserResult,
   ProviderCurrentUser,
   ProviderPrDetail,
   ProviderPrDetailParams,
@@ -294,6 +295,36 @@ export class BackendClient {
       return page;
     });
   }
+  providerBrowser(
+    params: ProviderPrDetailParams,
+    current: () => boolean = () => true,
+  ): Promise<ProviderBrowserResult> {
+    return this.providerRead<ProviderBrowserResult>(
+      "provider.browser",
+      { ...params },
+      "ProviderPrDetailParams",
+      "ProviderBrowserResult",
+      current,
+    ).then((result) => {
+      const resolved = result.repository;
+      const original = params.repository;
+      const uuid = (value: string) => value.startsWith("{");
+      if (
+        resolved.provider !== original.provider ||
+        uuid(resolved.workspace) ||
+        uuid(resolved.repo) ||
+        (!uuid(original.workspace) &&
+          original.workspace.toLowerCase() !== resolved.workspace.toLowerCase()) ||
+        (!uuid(original.repo) && original.repo.toLowerCase() !== resolved.repo.toLowerCase())
+      )
+        throw new Error("Provider browser identity could not be verified.");
+      const expected = `https://${resolved.provider === "github" ? "github.com" : "bitbucket.org"}/${encodeURIComponent(resolved.workspace)}/${encodeURIComponent(resolved.repo)}/${resolved.provider === "github" ? "pull" : "pull-requests"}/${params.prId}`;
+      if (result.url !== expected || (!result.launchRequested && result.launchError !== null))
+        throw new Error("Provider browser launch response could not be verified.");
+      return result;
+    });
+  }
+
   providerPrDetail(
     params: ProviderPrDetailParams,
     current: () => boolean = () => true,
