@@ -226,6 +226,10 @@ export interface ShellSnapshot {
   selectedFinding: number;
   history: ReviewRunSummary[];
   jobs: ReviewJobSummary[];
+  syncIntervalSeconds: number | null;
+  syncing: boolean;
+  lastSyncAt: number | null;
+  syncError: string | null;
   closedMetrics: ClosedPrMetric[];
   threads: ReviewThreadSummary[];
   selectedThread: number;
@@ -325,6 +329,10 @@ const INITIAL: ShellSnapshot = {
   selectedFinding: 0,
   history: [],
   jobs: [],
+  syncIntervalSeconds: null,
+  syncing: false,
+  lastSyncAt: null,
+  syncError: null,
   closedMetrics: [],
   threads: [],
   selectedThread: 0,
@@ -1440,7 +1448,10 @@ export class ShellStore {
       if (ready.capabilities.includes("settings")) {
         const snapshot = await client.settings();
         setTheme(snapshot.settings.theme);
-        this.update({ diffMode: snapshot.settings.defaultDiffView });
+        this.update({
+          diffMode: snapshot.settings.defaultDiffView,
+          syncIntervalSeconds: snapshot.settings.automaticSyncIntervalSeconds ?? null,
+        });
       }
       if (ready.capabilities.includes("workspace-readiness")) {
         try {
@@ -3034,6 +3045,26 @@ export class ShellStore {
       }
     } catch (error) {
       if (fix.generation === this.state.generation) this.update({ error: message(error) });
+    }
+  }
+
+  /// Bounded read-only refresh: updates repository status without touching the
+  /// selected target, files, findings or unsaved drafts. At most one runs at a
+  /// time.
+  async refresh(client: BackendClient): Promise<void> {
+    if (this.state.syncing) {
+      return;
+    }
+    this.update({ syncing: true });
+    try {
+      const { jobs } = await client.reviewJobs({ limit: 50 });
+      if (this.state.status !== "closed") {
+        this.update({ jobs, lastSyncAt: Date.now(), syncError: null });
+      }
+    } catch (error) {
+      this.update({ syncError: message(error) });
+    } finally {
+      this.update({ syncing: false });
     }
   }
 

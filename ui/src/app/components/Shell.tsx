@@ -33,6 +33,7 @@ import {
   type ShellStore,
   visibleFindings,
 } from "../store";
+import { syncIntervalMs } from "../syncSchedule";
 import type { DiffSyntax } from "../syntaxTypes";
 import { theme } from "../theme";
 import { WorkspaceStore } from "../workspaceStore";
@@ -1038,6 +1039,15 @@ function WorkspaceStatus({ state }: { state: ShellSnapshot }) {
           {state.notice}
         </text>
       ) : null}
+      {state.syncError ? (
+        <text fg={theme.warning} height={1} wrapMode="none" truncate>
+          {`Sync error: ${state.syncError}`}
+        </text>
+      ) : state.syncing ? (
+        <text fg={theme.muted} height={1} wrapMode="none">
+          {"Syncing…"}
+        </text>
+      ) : null}
       {state.operation ? (
         <box flexDirection="column" flexShrink={0} paddingX={1} backgroundColor={theme.panel}>
           <text fg={theme.secondary} height={1} wrapMode="none" truncate>
@@ -1066,6 +1076,18 @@ function WorkspaceStatus({ state }: { state: ShellSnapshot }) {
 
 export function Shell({ store, client, quit }: ShellProps) {
   const state = useSyncExternalStore(store.subscribe, store.getSnapshot);
+  const syncMs = syncIntervalMs(state.syncIntervalSeconds);
+  useEffect(() => {
+    if (syncMs === null) {
+      return;
+    }
+    // At most one refresh runs at a time (guarded in the store); the timer is
+    // cleared on interval/settings change, disconnect and unmount.
+    const id = setInterval(() => {
+      void store.refresh(client);
+    }, syncMs);
+    return () => clearInterval(id);
+  }, [syncMs, store, client]);
   const providers = useMemo(() => new ProviderStore(), []);
   const explorer = useMemo(() => new ExplorerStore(), []);
   const explorerEntry = state.picker[state.selectedPicker];

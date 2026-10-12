@@ -1054,3 +1054,46 @@ test("loads bounded closed-PR analytics", async () => {
   expect(store.getSnapshot().closedMetrics).toHaveLength(1);
   expect(store.getSnapshot().notice).toContain("Closed PRs");
 });
+
+test("refresh updates jobs without resetting the selection", async () => {
+  const store = new ShellStore();
+  const client = new BackendClient(
+    new FakeBackendTransport({
+      repositories,
+      jobs: [
+        {
+          id: "job-1",
+          workspace: "acme",
+          repo: "payments",
+          prId: 42,
+          prTitle: "Title",
+          sourceBranch: "feature/x",
+          destinationBranch: "main",
+          status: "succeeded",
+          trigger: "manual",
+          threadId: null,
+          error: null,
+          createdAt: "2026-01-01T00:00:00Z",
+          startedAt: null,
+          finishedAt: null,
+        },
+      ],
+    }),
+  );
+  await store.connect(client);
+  const selectedBefore = store.getSnapshot().selectedPicker;
+  await store.refresh(client);
+  expect(store.getSnapshot().jobs).toHaveLength(1);
+  expect(store.getSnapshot().lastSyncAt).not.toBeNull();
+  expect(store.getSnapshot().syncing).toBe(false);
+  expect(store.getSnapshot().selectedPicker).toBe(selectedBefore);
+});
+
+test("refresh clears the syncing flag when the connection is closed", async () => {
+  const store = new ShellStore();
+  const client = new BackendClient(new FakeBackendTransport({ repositories, jobs: [] }));
+  await store.connect(client);
+  store.markClosed();
+  await store.refresh(client);
+  expect(store.getSnapshot().syncing).toBe(false);
+});
