@@ -395,3 +395,26 @@ Plan 0053 completion prepared after implementation `e4264db`, effective only on 
   resolve transactional publication against actual owning provenance.
 - #357 maintainer closure remains preserved; retained work tracked by #306.
   ADR 0020/full epic/platform/profile/install completion not claimed.
+
+## 2026-10-12 — plan 0058 provider ownership foundation, local gate complete
+
+- Native provider/length-framed repository/PR keys isolate saved rows and runtime
+  lookup/cancellation. Library exposes explicit native helpers; legacy CLI/Tauri
+  storage/session formats remain unchanged. New preview starts stay unavailable.
+- Native reads combine only proven legacy and owned native runs, reject foreign
+  or duplicate ownership, and omit ambiguous/unproved legacy conversations.
+  Native conversation updates do not duplicate legacy mutable run ownership.
+- Backend discovery/output/history/findings/reply/fix evidence readers, finding
+  staging and publication source signatures use scoped projections. Confirmed
+  finding publication resolves exactly one owning row inside the write lock;
+  full SQL/JSON scope and feedback provider checked. Legacy byte preservation,
+  corrupt scope and two-provider stdio restart exercised in owned fixtures.
+- Root typecheck/123 tests plus tooling/lint/protocol, UI typecheck/172 tests/
+  1057 asserts/115 unchanged frames, Rust 704 core plus two existing ignored/
+  54 stdio/six CLI/five onboarding/three bin tests, fmt/strict all-feature/all-
+  target Clippy/no-GUI, Archgate 12/12 and docflow audit pass. Final targeted
+  transaction/publication tests rerun after SQL scope predicate change. No React
+  changes, no Norn review, real credentials/provider writes or profile reads.
+- Two existing stdio stale-target expectations initially failed after projection;
+  foreign explicit IDs now retain targetStale without exposing foreign payload.
+- No #306/epic/ADR completion or exact-evidence review-start delivery claimed.

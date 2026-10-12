@@ -59,6 +59,14 @@ pub use review_storage::{
     REVIEW_CONTENT_RETENTION_DAYS, REVIEW_JOB_RETENTION_DAYS,
 };
 pub use services::bitbucket::{publish_review_finding_native, reconcile_review_findings_native};
+pub use services::review::{
+    cancel_provider_inline_review_native, get_provider_ai_review_run_state_native,
+    ReviewProvider as SavedReviewProvider,
+};
+pub use services::review_scope::{
+    load as load_provider_review_store, save as save_provider_review_store,
+    Scope as ProviderReviewScope,
+};
 
 #[cfg(feature = "desktop")]
 use commands::{bitbucket, context, repositories, review};

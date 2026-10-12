@@ -207,13 +207,21 @@ plan 0054 delivery, merged in PR #365 at `2f2cd50`. The second bounded delivery,
 [native provider browsing](./native-pr-browser.md), supplies repository/author/state
 filters, per-repository pages and metadata/reviewers in plan 0055 (PR #366).
 [Immutable provider snapshots](./provider-snapshots.md), plan 0056 / PR #367,
-provide complete pinned evidence. Plan 0057 connects native pre-review file/diff,
+provide complete pinned evidence. Plan 0057 / PR #368 (merged at `1f9b3d3`) connects native pre-review file/diff,
 fork image and authenticated Pierre previews while preserving actual saved runs.
 Review-start from the exact cached evidence, explicit PR approval and external
 provider browsing remain required. These bounded deliveries do not close
 #306 or retire any retained capability. #357 was closed by the maintainer at
 2026-10-11 22:01:23Z; preserve that state while verifying remaining provider
 workflows under #306.
+
+[Provider review ownership](./provider-review-ownership.md), plan 0058, establishes provider-qualified persisted and runtime review ownership:
+new scoped rows coexist with proven legacy runs, without copying old runs into
+another mutable owner. Native readers and transactional publication resolve
+actual provider/run provenance; ambiguous or foreign conversations are not used
+as resume context. This foundation does not enable review-start from a fresh
+preview. That integration must pass exact evidence, profile, cancellation,
+reply/fix and approval verification before retained review parity is complete.
 
 - **First vertical slice (#301):** real file → diff → finding through the Rust
   backend and the OpenTUI client, measured on a large diff. Material

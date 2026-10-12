@@ -230,18 +230,43 @@ pub(crate) fn prepare(params: PrepareParams) -> Result<Preparation, ProtocolErro
             "Cannot read this PR's saved drafts. Preserve the source before repairing it.",
         )
     })?;
-    let store = review::load_ai_review_store_native(workspace, repo, *pr_id)
-        .map_err(|_| fail(ProtocolErrorCode::Internal, "Cannot load the saved review."))?
-        .ok_or_else(|| {
-            fail(
-                ProtocolErrorCode::NotFound,
-                "The selected review is unavailable.",
-            )
-        })?;
-    let mut runs = store.review_runs.iter().filter(|run| run.id == *run_id);
-    let run = runs.next().ok_or_else(|| {
+    let store = super::review_scope::load(&super::review_scope::Scope {
+        provider: match provider {
+            ProviderKind::Github => review::ReviewProvider::Github,
+            ProviderKind::Bitbucket => review::ReviewProvider::Bitbucket,
+        },
+        workspace: workspace.clone(),
+        repo: repo.clone(),
+        pr_id: *pr_id,
+    })
+    .map_err(|_| fail(ProtocolErrorCode::Internal, "Cannot load the saved review."))?
+    .ok_or_else(|| {
         fail(
             ProtocolErrorCode::NotFound,
+            "The selected review is unavailable.",
+        )
+    })?;
+    let mut runs = store.review_runs.iter().filter(|run| run.id == *run_id);
+    let run = runs.next().ok_or_else(|| {
+        let mismatch = super::review_scope::foreign_run_exists(
+            &super::review_scope::Scope {
+                provider: match provider {
+                    ProviderKind::Github => review::ReviewProvider::Github,
+                    ProviderKind::Bitbucket => review::ReviewProvider::Bitbucket,
+                },
+                workspace: workspace.clone(),
+                repo: repo.clone(),
+                pr_id: *pr_id,
+            },
+            run_id,
+        )
+        .unwrap_or(false);
+        fail(
+            if mismatch {
+                ProtocolErrorCode::TargetStale
+            } else {
+                ProtocolErrorCode::NotFound
+            },
             "The pinned review run is unavailable.",
         )
     })?;

@@ -588,11 +588,15 @@ fn source_signature(comment: &ApprovedComment, allow_published: bool) -> Result<
     let Some(reference) = &comment.finding_ref else {
         return Ok(String::new());
     };
-    let store = review::load_ai_review_store_native(
-        &comment.scope.workspace,
-        &comment.scope.repo,
-        comment.scope.pr_id,
-    )?
+    let store = super::review_scope::load(&super::review_scope::Scope {
+        provider: match comment.scope.provider {
+            crate::config::ReviewProvider::Github => review::ReviewProvider::Github,
+            crate::config::ReviewProvider::Bitbucket => review::ReviewProvider::Bitbucket,
+        },
+        workspace: comment.scope.workspace.clone(),
+        repo: comment.scope.repo.clone(),
+        pr_id: comment.scope.pr_id,
+    })?
     .ok_or("The saved review is unavailable.")?;
     let runs = store
         .review_runs

@@ -1019,6 +1019,123 @@ fn review_output_is_exact_bounded_and_pinned_to_provider_and_run() {
 
 #[cfg(unix)]
 #[test]
+fn native_provider_rows_survive_restart_and_never_borrow_foreign_reviews() {
+    use norn_lib::{ProviderReviewScope as Scope, SavedReviewProvider as ReviewProvider};
+    let mut fixture = FixFixture::new("#!/bin/sh\nexit 99\n");
+    let connection = rusqlite::Connection::open(fixture._data.path().join("norn.sqlite3")).unwrap();
+    let legacy: String = connection
+        .query_row(
+            "SELECT store_json FROM ai_review_stores WHERE review_key='fixture_demo_9'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    for (provider, name) in [
+        (ReviewProvider::Github, "github"),
+        (ReviewProvider::Bitbucket, "bitbucket"),
+    ] {
+        let scope = Scope {
+            provider,
+            workspace: "fixture".into(),
+            repo: "demo".into(),
+            pr_id: 9,
+        };
+        let mut store: Value = serde_json::from_str(&legacy).unwrap();
+        store["reviewRuns"][0]["provider"] = json!(name);
+        store["reviewRuns"][0]["id"] = json!(format!("run-{name}"));
+        store["reviewRuns"][0]["createdAt"] = json!("100");
+        store["reviewRuns"][0]["summaryMarkdown"] = json!(format!("Owned {name} output"));
+        store["threads"][0]["title"] = json!(format!("Owned {name} conversation"));
+        store["threads"][0]["messages"][0]["content"] = json!(format!("Owned {name} message"));
+        connection.execute("INSERT INTO ai_review_stores(review_key,workspace,repo,pr_id,store_json,created_at,updated_at) VALUES (?1,'fixture','demo',9,?2,'100','100')",rusqlite::params![scope.key(),store.to_string()]).unwrap();
+    }
+    let request = |backend: &mut Backend, id: &str, method: &str, params: Value| {
+        backend.send(json!({"type":"request","id":id,"method":method,"params":params}));
+        backend.wait_for(|value| value["id"] == id, Duration::from_secs(10))
+    };
+    for restart in 0..2 {
+        if restart == 1 {
+            fixture.backend = Backend::spawn_env(
+                fixture.repo.path(),
+                &[
+                    ("NORN_CONFIG_DIR", fixture._config.path().to_str().unwrap()),
+                    (
+                        "NORN_REVIEW_DATA_DIR",
+                        fixture._data.path().to_str().unwrap(),
+                    ),
+                ],
+            );
+            fixture.backend.handshake();
+        }
+        let targets = request(&mut fixture.backend, "targets", "review.targets", json!({}));
+        for name in ["github", "bitbucket"] {
+            let target = json!({"kind":"provider","provider":name,"workspace":"fixture","repo":"demo","prId":9,"runId":format!("run-{name}")});
+            assert!(
+                targets["result"]["targets"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|entry| entry["provider"] == name
+                        && entry["runId"] == format!("run-{name}")
+                        && entry["title"] == format!("Owned {name} conversation")),
+                "{targets}"
+            );
+            let output = request(
+                &mut fixture.backend,
+                "output",
+                "review.output",
+                json!({"target":target}),
+            );
+            assert_eq!(
+                output["result"]["text"],
+                format!("Owned {name} output"),
+                "{output}"
+            );
+            let threads = request(
+                &mut fixture.backend,
+                "threads",
+                "review.threads",
+                json!({"target":target}),
+            );
+            assert!(threads["ok"].as_bool().unwrap(), "{threads}");
+            assert!(!threads.to_string().contains("private-resume"));
+            let history = request(
+                &mut fixture.backend,
+                "history",
+                "review.history",
+                json!({"target":target}),
+            );
+            assert_eq!(history["ok"], true, "{history}");
+            let foreign = if name == "github" {
+                "bitbucket"
+            } else {
+                "github"
+            };
+            let mut wrong = target;
+            wrong["runId"] = json!(format!("run-{foreign}"));
+            assert_eq!(
+                request(
+                    &mut fixture.backend,
+                    "foreign",
+                    "review.output",
+                    json!({"target":wrong})
+                )["error"]["code"],
+                "targetStale"
+            );
+        }
+        let unchanged: String = connection
+            .query_row(
+                "SELECT store_json FROM ai_review_stores WHERE review_key='fixture_demo_9'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(unchanged, legacy);
+    }
+}
+
+#[cfg(unix)]
+#[test]
 fn finding_drafts_bind_previews_persist_across_restart_and_preserve_edited_duplicates() {
     let mut fixture = FixFixture::new("#!/bin/sh\nprintf unexpected > \"$0.executed\"\nexit 99\n");
     fixture.backend = Backend::spawn_env(
