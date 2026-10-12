@@ -25,7 +25,11 @@ Git is authoritative. Durable history lives in WORKLOG and plan/done.
   native3OS exact-head CI and actual merge remain required.
 - PR382 open on source5a4ccaa; firstCI38292751534 UI SUCCESS but Windows
   build fails ownedString/&str after platform normalization. Narrow borrowing
-  correction prepared; all5checks must rerun on its actual new head.
+  correctionf2861a5 passes all5CI38293524038, including3OS native tests.
+- Final UI correction prepared: readable long approvals via passiveCtrl-D/U,
+  viewport reset, actualview frame slot and positive component/tail assertions.
+ 211actualframes/UI259/typechecks/Storybook/lint/Doctor pass; new exact-head
+ 5checks pending. No merge yet.
 - Rootmain synced actual381. Never read/copy/stage unrelated untracked.norn.yaml;
   preserve user stash5f69c995c9b79fc163b60955cbe73987d346086a.
 - Keep0071 todo until actual verified merge;360/294 remain open. Preserve

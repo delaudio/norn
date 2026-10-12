@@ -13,6 +13,7 @@ for (const [width, height] of [
     const fixture = new RepositoryOperationsFixture(),
       client = new BackendClient(fixture),
       store = new ShellStore();
+    if (width === 50) fixture.summary = `${"x".repeat(1200)} TARGET-END`;
     await store.connect(client);
     const before = store.getSnapshot();
     const renderer = await createTestRenderer({ width, height });
@@ -35,6 +36,15 @@ for (const [width, height] of [
       await renderer.mockInput.pasteBracketedText("y\nf\np\ns\n");
       await settle();
       expect(fixture.operationCalls.some((call) => call.method.endsWith(".apply"))).toBe(false);
+      if (width === 50) {
+        expect(renderer.captureCharFrame()).not.toContain("TARGET-END");
+        for (let page = 0; page < 4; page++) {
+          renderer.mockInput.pressKey("d", { ctrl: true });
+          await settle();
+        }
+        expect(renderer.captureCharFrame()).toContain("TARGET-END");
+        expect(fixture.operationCalls.some((call) => call.method.endsWith(".apply"))).toBe(false);
+      }
       renderer.mockInput.pressKey("y");
       await settle();
       expect(fixture.operationCalls.filter((call) => call.method.endsWith(".apply"))).toHaveLength(

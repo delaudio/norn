@@ -13,6 +13,7 @@ export class RepositoryOperationsFixture extends ExplorerFixture {
   hold = false;
   malformed = false;
   expiresInMs = 30000;
+  summary = "Checkout existing local branch main at the verified commit.";
   waitList: Promise<void> | null = null;
   checkout(repository: PrRepositoryIdentity): RepositoryOperationCheckout {
     return {
@@ -70,7 +71,7 @@ export class RepositoryOperationsFixture extends ExplorerFixture {
         token: "c".repeat(64),
         expiresInMs: this.expiresInMs,
         before: this.checkout((params.context as RepositoryOperation["context"]).repository),
-        summary: "Checkout existing local branch main at the verified commit.",
+        summary: this.summary,
         warnings: ["Configured Git helpers run only after approval."],
       };
       return { ...this.prepared };

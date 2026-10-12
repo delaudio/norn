@@ -1,5 +1,6 @@
+import type { ScrollBoxRenderable } from "@opentui/core";
 import { useKeyboard, usePaste } from "@opentui/react";
-import { useSyncExternalStore } from "react";
+import { useRef, useSyncExternalStore } from "react";
 import { explorerLabel } from "../explorerStore";
 import type { RepositoryOperationsStore } from "../repositoryOperationsStore";
 import { theme } from "../theme";
@@ -18,6 +19,8 @@ export function RepositoryOperationsPanel({
   quit: () => void;
 }) {
   const state = useSyncExternalStore(store.subscribe, store.getSnapshot);
+  const details = useRef<ScrollBoxRenderable | null>(null);
+
   useKeyboard((key) => {
     if (key.defaultPrevented) return;
     key.preventDefault();
@@ -25,6 +28,16 @@ export function RepositoryOperationsPanel({
     if (key.ctrl && key.name === "c") {
       if (state.busy) void store.cancel();
       else quit();
+      return;
+    }
+    if (
+      key.ctrl &&
+      !key.meta &&
+      !key.super &&
+      !key.option &&
+      (key.name === "d" || key.name === "u")
+    ) {
+      details.current?.scrollBy((key.name === "d" ? 1 : -1) * Math.max(1, height - 6));
       return;
     }
     if (key.ctrl || key.meta || key.super || key.option) return;
@@ -85,7 +98,17 @@ export function RepositoryOperationsPanel({
           ? `${checkout.dirty ? "Local changes" : "Clean"} · ${checkout.conflicted ? "conflicts" : "no conflicts"} · ${checkout.pending ? "Git operation pending" : "no pending Git operation"} · upstream ${explorerLabel(checkout.upstream ?? "none")}`
           : "Working state unavailable · configure a valid local clone"}
       </text>
-      <scrollbox flexGrow={1} minHeight={0}>
+      <scrollbox
+        key={JSON.stringify([
+          state.prepared?.token,
+          state.operation?.operationId,
+          state.offset,
+          state.cursor,
+        ])}
+        ref={details}
+        flexGrow={1}
+        minHeight={0}
+      >
         {state.loading ? <text>Reading verified repository state…</text> : null}
         {state.prepared ? (
           <>
@@ -150,7 +173,7 @@ export function RepositoryOperationsPanel({
           : "Enter preview checkout · f fetch · p pull · s stash"}
       </text>
       <text height={1} fg={theme.muted} truncate>
-        r refresh · b/Esc files · q quit · review drafts stay intact
+        Ctrl-D/U details · r refresh · b/Esc files · q quit
       </text>
     </box>
   );

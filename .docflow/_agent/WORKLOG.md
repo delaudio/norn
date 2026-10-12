@@ -1159,3 +1159,21 @@ Plan 0053 completion prepared after implementation `e4264db`, effective only on 
 - Actual owned post-checkout-hook drift proof and bounded stale branch paging
   pass. Plan0071/360 stay pending until all5 checks pass on the new exact head
   and an actual verified squash merge. No Norn review or delegation.
+
+## 2026-10-12 — PR382 complete keyboard approval and actual component frames
+
+- Correctedheadf2861a5 passes all5CI38293524038 jobs, including actual
+  Windows/Linux/macOS native Git and terminal-editor workflows. No merge yet.
+- Reproduced a50-column long-approval defect with native keyboard input:
+  the target tail could not be read. Ctrl-D/U now scrolls details in preview,
+  progress and recovery; it never approves/writes. Scope/action/selection
+  changes remount the details viewport, restoring its initial position.
+- Corrected the new frame scene builder's unusednode property to the renderer's
+  actualview slot. Positive BRANCHES/target-tail assertions now prevent a
+  default-shell image from masquerading as a repository component scene.
+-211actualnativeframes include wide/narrow long-approval proof; targeted input
+  covers complete target reading, inert paste and separate explicit approval.
+  Final UI259/1620assertions, typechecks,211frames, Storybook, lint and
+  Doctor pass (2maintainability warnings; no rendering-ref error).
+- Keep0071/360todo and require all5checks on the final updated PR head before
+  any merge. ADR0020Accepted; no delegation/Norn review/private profiles.

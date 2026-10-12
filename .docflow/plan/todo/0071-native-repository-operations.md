@@ -82,7 +82,7 @@ resolution. Keep existing review prompts/drafts and provider identity intact.
 - Implementation prepared after claim725bacc: Rust manager and five typed
   stdio methods, native branch panel, lifecycle/input/frame/owned native proof.
 - Local core772+2ignored/noGUI, stdio76, UI259, root123, strictClippy,
-  typechecks,209frames/Storybook, Archgate/audit pass. All3OS exact-head CI,
+  typechecks,211actualcomponentframes/Storybook, Archgate/audit pass. All3OS exact-head CI,
   actual PR/merge remain pending; actual hook-drift proof passes.
 - No delegation, Norn code review, real provider writes or private profiles.
 - Keep todo until actual verified PR merge.

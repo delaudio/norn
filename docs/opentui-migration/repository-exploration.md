@@ -118,7 +118,8 @@ The native explorer opens branch operations with `b`. It lists configured clone
 state and bounded pages of local/remote references. Enter previews checkout;
 `f`, `p` and `s` preview fetch, fast-forward pull and include-untracked stash.
 A separate `y` press approves a single-use preview that expires after30seconds.
-Pasted text never approves an operation. Each approval binds the full provider,
+Pasted text never approves an operation. `Ctrl-D/U` scrolls the complete
+approval or recovery details, including long branch descriptions. Each approval binds the full provider,
 repository, canonical clone, reference, checkout bytes and effective Git config.
 
 The Rust service preserves existing local branch commits when selecting an

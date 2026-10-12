@@ -393,3 +393,7 @@ export const RepositoryBusy: Story = { args: { frameId: "repository-operations-b
 export const RepositoryRecovery: Story = {
   args: { frameId: "repository-operations-uncertain-50x20" },
 };
+
+export const CompactLongRepositoryApproval: Story = {
+  args: { frameId: "repository-operations-long-preview-50x20" },
+};
