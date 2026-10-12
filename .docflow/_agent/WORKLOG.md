@@ -1090,3 +1090,18 @@ Plan 0053 completion prepared after implementation `e4264db`, effective only on 
   unavailable. No credentials/config read or installation/setup changes.
 - Keep0070 todo and359 open until final exact-head five-job proof and actual
   verified squash. Current Rust767core/76stdio/Clippy proof remains unchanged.
+
+## 2026-10-12 — PR381 known native backend-death cause
+
+- Exactc7360cbb510c307ff5076d03af29ee0078eb21c7 CI38279287792
+  proves Windows ConPTY success/error/interrupt, including restored modes
+  and editor reaping. UI/Linux/macOS jobs pass. Backend-death mismatch255
+  remains; previous failure omitted expected/native status and transcript.
+- Own parent/path verification precedes retained native-handle termination
+  with explicit code73; GetExitCodeProcess must independently observe73.
+  UI must exit73 and report that exact cause. This strengthens causal proof
+  and removes reliance on .NET Kill's unspecified status/cache. Failed exit/
+  cause checks now include the bounded production transcript. No assertion
+  removed; exact console restoration/reaping/all-case execution stay required.
+- Only owned test harness/docs change; production UI/Rust gates unchanged.
+  Native Windows four-case proof still pending;0070 remains todo.

@@ -43,8 +43,10 @@ Git is authoritative. Durable history lives in WORKLOG and plan/done.
   engine communication stays stdio. Death proof derives the actual owned
   native exit and checks its reported cause. Local UI253/1588,195frames,
   Storybook and all four macOS PTY cases pass; cached Doctor25files has no
-  diagnostics (score service unavailable). Four-case Windows proof and all
-  five checks on the final head still required.
+  diagnostics (score service unavailable). CI38279287792 proves Windows Ctrl-C restoration too. Backend-death
+  mismatch now uses retained native handle, explicit73 and independent
+  GetExitCodeProcess73 proof plus exact UI exit/cause assertions. Four-case
+  Windows proof and all five checks on the final head still required.
 - Keep0070 todo until actual verified merge. #359/#294 remain open pending
   editor/fullparity; preserve maintainer305/306/357closures; ADR0020 Accepted
   until fullcutover. No private profiles/credentials/providerwrites/actualagents.

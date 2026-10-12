@@ -50,6 +50,17 @@ public sealed class OwnedConPty : IDisposable {
             throw new IOException("Owned process is no longer present");
         } finally {CloseHandle(snapshot);}
     }
+    // Caller verifies the owned backend's parent and executable first. Retain
+    // its native handle and inject a known exit cause rather than depending on
+    // .NET Process.Kill's platform-specific exit status/Process cache.
+    public static uint TerminateOwned(Process owned,uint exitCode) {
+        IntPtr handle=owned.Handle;
+        Check(TerminateProcess(handle,exitCode),"owned backend termination");
+        Check(owned.WaitForExit(5000),"owned backend wait");
+        uint actual;Check(GetExitCodeProcess(handle,out actual),"owned backend native exit");
+        Check(actual==exitCode,"owned backend exit cause");
+        return actual;
+    }
     public OwnedConPty(string executable,string arguments,string cwd,string environmentBlock) {
         IntPtr pseudoInput=IntPtr.Zero,pseudoOutput=IntPtr.Zero,attributes=IntPtr.Zero,environment=IntPtr.Zero;
         bool attributesReady=false;

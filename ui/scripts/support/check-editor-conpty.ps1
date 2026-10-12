@@ -73,12 +73,9 @@ try {
     $WrapperPid=[OwnedConPty]::Parent($EditorPid);$BackendPid=[OwnedConPty]::Parent($WrapperPid)
     $Process=Get-Process -Id $BackendPid
     if ([OwnedConPty]::Parent($BackendPid) -ne $UiPid -or $Process.Path -ne $Backend) {throw 'Death test does not own this backend'}
-    $Process.Kill()
-    if(!$Process.WaitForExit(5000)){throw 'Owned backend did not terminate'}
-    $BackendExit=$Process.ExitCode
-    # Bun's process.exit preserves the low exit-status byte. Derive it from
-    # this actual owned native process, rather than guessing Kill's status.
-    $Expected=$BackendExit -band 255
+    $BackendExit=[OwnedConPty]::TerminateOwned($Process,73)
+    $Expected=$BackendExit
+    Write-Output ('Owned backend native exit: '+$BackendExit)
   } else {
     if ($Case -eq 'interrupt') {$Session.Send([string][char]3)}
     elseif ($Case -eq 'failure') {$Session.Send("fail`r`n")}
@@ -88,8 +85,8 @@ try {
     $Session.Send('q')
   }
   AwaitOwned { $Session.ExitCode -ne -1 } 'Production UI did not quit'
-  if ($Session.ExitCode -ne $Expected) {throw ('Unexpected UI exit '+$Session.ExitCode)}
-  if($Case -eq 'backend-death' -and !$Session.Output.Contains('norn-backend exited with code '+$BackendExit+'.')){throw 'UI did not report the actual backend exit cause'}
+  if ($Session.ExitCode -ne $Expected) {throw ('Unexpected UI exit '+$Session.ExitCode+'; expected '+$Expected+"`n"+$Session.Output)}
+  if($Case -eq 'backend-death' -and !$Session.Output.Contains('norn-backend exited with code '+$BackendExit+'.')){throw ('UI did not report the actual backend exit cause '+$BackendExit+"`n"+$Session.Output)}
   AwaitOwned { !(Get-Process -Id $EditorPid -ErrorAction SilentlyContinue) } 'Owned editor remained orphaned' $true
   $Modes=[IO.File]::ReadAllLines((Join-Path $Editors 'console-modes.txt'))
   if($Modes.Count -ne 2 -or $Modes[0] -ne $Modes[1]){throw 'Native console modes were not restored'}
