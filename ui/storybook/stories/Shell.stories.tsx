@@ -173,3 +173,34 @@ export const ProviderIdentity: Story = { args: { frameId: "shell-provider-identi
 export const ProviderIdentityCompact: Story = {
   args: { frameId: "shell-provider-identity-50x15" },
 };
+
+export const ProviderPreviewGithub120x30: Story = {
+  args: { frameId: "shell-provider-preview-github-120x30" },
+};
+export const ProviderPreviewGithub50x15: Story = {
+  args: { frameId: "shell-provider-preview-github-50x15" },
+};
+export const ProviderPreviewBitbucket120x30: Story = {
+  args: { frameId: "shell-provider-preview-bitbucket-120x30" },
+};
+export const ProviderPreviewBitbucket50x15: Story = {
+  args: { frameId: "shell-provider-preview-bitbucket-50x15" },
+};
+export const ProviderPreviewSaved120x30: Story = {
+  args: { frameId: "shell-provider-preview-saved-120x30" },
+};
+export const ProviderPreviewSaved50x15: Story = {
+  args: { frameId: "shell-provider-preview-saved-50x15" },
+};
+export const ProviderPreviewError120x30: Story = {
+  args: { frameId: "shell-provider-preview-error-120x30" },
+};
+export const ProviderPreviewError50x15: Story = {
+  args: { frameId: "shell-provider-preview-error-50x15" },
+};
+export const ProviderPreviewImage120x30: Story = {
+  args: { frameId: "shell-provider-preview-image-120x30" },
+};
+export const ProviderPreviewImage50x15: Story = {
+  args: { frameId: "shell-provider-preview-image-50x15" },
+};

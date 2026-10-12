@@ -322,6 +322,18 @@ export type Request =
       id: RequestId;
       method: "provider.snapshot.diff";
       params: ProviderSnapshotDiffParams;
+    }
+  | {
+      type: "request";
+      id: RequestId;
+      method: "provider.snapshot.image";
+      params: ProviderSnapshotImageParams;
+    }
+  | {
+      type: "request";
+      id: RequestId;
+      method: "provider.snapshot.browser";
+      params: ProviderSnapshotBrowserParams;
     };
 export type RequestId = string;
 /**
@@ -396,6 +408,14 @@ export type PrRepositoryIdentity =
       workspace: string;
       repo: string;
     };
+export type ProviderSnapshotImageParams = {
+  snapshot: ProviderSnapshotRef;
+  path: string;
+  side: "old" | "new";
+  offset: number;
+  maxBytes: number;
+  contentSha256: string | null;
+};
 export type OperationState = "accepted" | "running" | "succeeded" | "failed" | "cancelled";
 export type ErrorCode =
   | "invalidRequest"
@@ -440,6 +460,17 @@ export type WorkspaceValue =
 export type PublicationMode = "inline" | "file" | "general";
 export type PublicationState =
   "writing" | "uncertain" | "rejected" | "published" | "publishedSnapshotChanged" | "publishedUnverified";
+export type ProviderSnapshotImagePage = {
+  request: ProviderSnapshotImageParams;
+  mimeType: string;
+  size: number;
+  dataBase64: string;
+  available: boolean;
+  nextOffset: number | null;
+  contentSha256: string | null;
+  width: number | null;
+  height: number | null;
+};
 export type OperationEvent =
   | {
       kind: "progress";
@@ -809,6 +840,9 @@ export interface ProviderSnapshotDiffParams {
   path: string;
   offset: number;
 }
+export interface ProviderSnapshotBrowserParams {
+  snapshot: ProviderSnapshotRef;
+}
 export interface ResponseOk {
   type: "response";
   id: RequestId;
@@ -842,7 +876,9 @@ export interface ResponseOk {
     | ProviderCurrentUser
     | ProviderSnapshotInfo
     | ProviderSnapshotFilesPage
-    | ProviderSnapshotDiffPage;
+    | ProviderSnapshotDiffPage
+    | ProviderSnapshotImagePage
+    | ProviderSnapshotBrowserResult;
 }
 export interface DiffFileResult {
   target: TargetIdentity;
@@ -1445,6 +1481,12 @@ export interface ProviderSnapshotDiffPage {
   totalBytes: number;
   contentSha256: string;
   nextOffset: number | null;
+}
+export interface ProviderSnapshotBrowserResult {
+  request: ProviderSnapshotBrowserParams;
+  url: string;
+  launchRequested: boolean;
+  launchError: string | null;
 }
 export interface ResponseError {
   type: "response";

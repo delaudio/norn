@@ -89,6 +89,16 @@ fn snapshot_cache_requests_fail_without_credentials_and_control_remains_responsi
             json!({"snapshot":snapshot,"offset":0,"limit":100}),
         ),
         (
+            "cache-image",
+            "provider.snapshot.image",
+            json!({"snapshot":snapshot,"path":"owned.png","side":"new","offset":0,"maxBytes":196608,"contentSha256":null}),
+        ),
+        (
+            "cache-browser",
+            "provider.snapshot.browser",
+            json!({"snapshot":snapshot}),
+        ),
+        (
             "cache-diff",
             "provider.snapshot.diff",
             json!({"snapshot":snapshot,"path":"owned.rs","offset":0}),

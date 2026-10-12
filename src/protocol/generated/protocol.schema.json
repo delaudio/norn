@@ -3875,6 +3875,238 @@
           ]
         }
       }
+    },
+    "ProviderSnapshotBrowserParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "snapshot"
+      ],
+      "properties": {
+        "snapshot": {
+          "$ref": "#/definitions/ProviderSnapshotRef"
+        }
+      }
+    },
+    "ProviderSnapshotBrowserResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "request",
+        "url",
+        "launchRequested",
+        "launchError"
+      ],
+      "properties": {
+        "request": {
+          "$ref": "#/definitions/ProviderSnapshotBrowserParams"
+        },
+        "url": {
+          "type": "string",
+          "maxLength": 256,
+          "pattern": "^http://127\\.0\\.0\\.1:[1-9][0-9]{0,4}/session/[0-9a-f]{64}/$"
+        },
+        "launchRequested": {
+          "type": "boolean"
+        },
+        "launchError": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 4096
+        }
+      }
+    },
+    "ProviderSnapshotImagePage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "request",
+        "mimeType",
+        "size",
+        "dataBase64",
+        "available",
+        "nextOffset",
+        "contentSha256",
+        "width",
+        "height"
+      ],
+      "properties": {
+        "request": {
+          "$ref": "#/definitions/ProviderSnapshotImageParams"
+        },
+        "mimeType": {
+          "type": "string"
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 2097152
+        },
+        "dataBase64": {
+          "type": "string",
+          "maxLength": 262144
+        },
+        "available": {
+          "type": "boolean"
+        },
+        "nextOffset": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 2097152
+        },
+        "contentSha256": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "width": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1,
+          "maximum": 8192
+        },
+        "height": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1,
+          "maximum": 8192
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "available": {
+                "const": true
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "size": {
+                "minimum": 1
+              },
+              "contentSha256": {
+                "type": "string"
+              },
+              "width": {
+                "type": "integer"
+              },
+              "height": {
+                "type": "integer"
+              },
+              "mimeType": {
+                "enum": [
+                  "image/png",
+                  "image/jpeg",
+                  "image/gif",
+                  "image/webp",
+                  "image/bmp"
+                ]
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "size": {
+                "const": 0
+              },
+              "dataBase64": {
+                "const": ""
+              },
+              "mimeType": {
+                "const": ""
+              },
+              "nextOffset": {
+                "type": "null"
+              },
+              "contentSha256": {
+                "type": "null"
+              },
+              "width": {
+                "type": "null"
+              },
+              "height": {
+                "type": "null"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "ProviderSnapshotImageParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "snapshot",
+        "path",
+        "side",
+        "offset",
+        "maxBytes",
+        "contentSha256"
+      ],
+      "properties": {
+        "snapshot": {
+          "$ref": "#/definitions/ProviderSnapshotRef"
+        },
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096
+        },
+        "side": {
+          "enum": [
+            "old",
+            "new"
+          ]
+        },
+        "offset": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 2097152
+        },
+        "maxBytes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 196608
+        },
+        "contentSha256": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "offset": {
+                "minimum": 1
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "contentSha256": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      ]
     }
   },
   "oneOf": [
@@ -5209,6 +5441,54 @@
               "$ref": "#/definitions/ProviderSnapshotDiffParams"
             }
           }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "type": {
+              "const": "request"
+            },
+            "id": {
+              "$ref": "#/definitions/RequestId"
+            },
+            "method": {
+              "const": "provider.snapshot.image"
+            },
+            "params": {
+              "$ref": "#/definitions/ProviderSnapshotImageParams"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "type": {
+              "const": "request"
+            },
+            "id": {
+              "$ref": "#/definitions/RequestId"
+            },
+            "method": {
+              "const": "provider.snapshot.browser"
+            },
+            "params": {
+              "$ref": "#/definitions/ProviderSnapshotBrowserParams"
+            }
+          }
         }
       ]
     },
@@ -5320,6 +5600,12 @@
             },
             {
               "$ref": "#/definitions/ProviderSnapshotDiffPage"
+            },
+            {
+              "$ref": "#/definitions/ProviderSnapshotImagePage"
+            },
+            {
+              "$ref": "#/definitions/ProviderSnapshotBrowserResult"
             }
           ]
         }

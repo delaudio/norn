@@ -156,6 +156,7 @@ pub fn run() -> Result<(), i32> {
         move || writer_loop(control_receiver, event_receiver, shutdown)
     });
 
+    let active_provider_reads = Arc::new(AtomicUsize::new(0));
     let backend = Backend {
         control,
         events,
@@ -168,8 +169,11 @@ pub fn run() -> Result<(), i32> {
         active_previews: Arc::new(AtomicUsize::new(0)),
         active_settings: Arc::new(AtomicUsize::new(0)),
         active_workspace: Arc::new(AtomicUsize::new(0)),
-        active_provider_reads: Arc::new(AtomicUsize::new(0)),
-        provider_snapshots: Arc::new(crate::services::provider_snapshot::Manager::default()),
+        active_provider_reads: active_provider_reads.clone(),
+        provider_snapshots: Arc::new(crate::services::provider_snapshot::Manager::with_runtime(
+            active_provider_reads,
+            Arc::new(AtomicBool::new(false)),
+        )),
         active_publication: Arc::new(AtomicUsize::new(0)),
         active_publication_reads: Arc::new(AtomicUsize::new(0)),
         publication: Arc::new(crate::services::draft_publication::Manager::new(
@@ -189,6 +193,7 @@ pub fn run() -> Result<(), i32> {
             "workspace-scopes".to_string(),
             "provider-pr-reads".to_string(),
             "provider-snapshots".to_string(),
+            "provider-snapshot-preview".to_string(),
             "draft-staging".to_string(),
             "draft-publication".to_string(),
             "remote-comments".to_string(),
@@ -202,6 +207,7 @@ pub fn run() -> Result<(), i32> {
     }));
 
     read_loop(&mut reader, &backend);
+    backend.provider_snapshots.stop();
 
     if let Ok(operations) = backend.operations.lock() {
         for operation in operations.values() {
@@ -879,7 +885,7 @@ fn dispatch(request: Request, backend: &Backend) -> bool {
             };
             false
         }
-        Request::FilePreview { params, .. } => {
+        Request::FilePreview { .. } | Request::ProviderSnapshotImage { .. } => {
             if backend
                 .active_previews
                 .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |current| {
@@ -898,13 +904,45 @@ fn dispatch(request: Request, backend: &Backend) -> bool {
             }
             let control = backend.control.clone();
             let counter = ActiveCounter(backend.active_previews.clone());
+            let snapshots = backend.provider_snapshots.clone();
+            let shutdown = backend.shutdown.clone();
             thread::spawn(move || {
-                file_preview_response(&control, &id, params);
+                match request {
+                    Request::FilePreview { params, .. } => {
+                        file_preview_response(&control, &id, params)
+                    }
+                    Request::ProviderSnapshotImage { params, .. } => {
+                        let result = if shutdown.load(Ordering::SeqCst) {
+                            Err("Image preview canceled during shutdown.".to_string())
+                        } else {
+                            snapshots.image(params).map(|value| json!(value))
+                        };
+                        let response = match result {
+                            Ok(value) => Response {
+                                id,
+                                ok: true,
+                                result: Some(value),
+                                error: None,
+                            },
+                            Err(message) => Response {
+                                id,
+                                ok: false,
+                                result: None,
+                                error: Some(ProtocolError::new(
+                                    ProtocolErrorCode::Conflict,
+                                    message,
+                                )),
+                            },
+                        };
+                        let _ = control.send(ServerMessage::Response(response));
+                    }
+                    _ => unreachable!(),
+                }
                 counter.decrement();
             });
             false
         }
-        Request::BrowserOpen { params, .. } => {
+        Request::BrowserOpen { .. } | Request::ProviderSnapshotBrowser { .. } => {
             if backend
                 .active_browser
                 .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |current| {
@@ -924,8 +962,40 @@ fn dispatch(request: Request, backend: &Backend) -> bool {
             let control = backend.control.clone();
             let browser = Arc::clone(&backend.browser);
             let counter = ActiveCounter(backend.active_browser.clone());
+            let snapshots = backend.provider_snapshots.clone();
+            let shutdown = backend.shutdown.clone();
             thread::spawn(move || {
-                browser_open_response(&control, &browser, &id, params.target);
+                match request {
+                    Request::BrowserOpen { params, .. } => {
+                        browser_open_response(&control, &browser, &id, params.target)
+                    }
+                    Request::ProviderSnapshotBrowser { params, .. } => {
+                        let result = if shutdown.load(Ordering::SeqCst) {
+                            Err("Browser preview canceled during shutdown.".into())
+                        } else {
+                            snapshot_browser_open(&browser, &snapshots, params)
+                        };
+                        let response = match result {
+                            Ok(value) => Response {
+                                id,
+                                ok: true,
+                                result: Some(value),
+                                error: None,
+                            },
+                            Err(message) => Response {
+                                id,
+                                ok: false,
+                                result: None,
+                                error: Some(ProtocolError::new(
+                                    ProtocolErrorCode::Conflict,
+                                    message,
+                                )),
+                            },
+                        };
+                        let _ = control.send(ServerMessage::Response(response));
+                    }
+                    _ => unreachable!(),
+                }
                 counter.decrement();
             });
             false
@@ -1496,37 +1566,13 @@ fn browser_open_response(
             return;
         }
     };
-    let mut guard = match browser.lock() {
-        Ok(guard) => guard,
-        Err(_) => {
-            fail(ProtocolError::new(
-                ProtocolErrorCode::Internal,
-                "browser server lock poisoned",
-            ));
+    let url = match browser_server_url(browser, state) {
+        Ok(url) => url,
+        Err(message) => {
+            fail(ProtocolError::new(ProtocolErrorCode::Internal, message));
             return;
         }
     };
-    let url = match guard.as_mut() {
-        Some(server) => {
-            server.update_pr(state);
-            server.url()
-        }
-        None => {
-            let shared = Arc::new(RwLock::new(state));
-            match WebDiffServer::start(shared) {
-                Ok(server) => {
-                    let url = server.url();
-                    *guard = Some(server);
-                    url
-                }
-                Err(error) => {
-                    fail(ProtocolError::new(ProtocolErrorCode::Internal, error));
-                    return;
-                }
-            }
-        }
-    };
-    drop(guard);
     if std::env::var("NORN_BROWSER_OPEN")
         .map(|value| value != "0")
         .unwrap_or(true)
@@ -1534,6 +1580,76 @@ fn browser_open_response(
         let _ = open_browser_url(&url);
     }
     respond(json!({ "url": url }));
+}
+
+fn browser_server_url(
+    browser: &Arc<Mutex<Option<WebDiffServer>>>,
+    state: WebDiffState,
+) -> Result<String, String> {
+    let mut guard = browser
+        .lock()
+        .map_err(|_| "Browser server lock is unavailable.".to_string())?;
+    match guard.as_mut() {
+        Some(server) => {
+            server.update_pr(state);
+            Ok(server.url())
+        }
+        None => {
+            let server = WebDiffServer::start(Arc::new(RwLock::new(state)))?;
+            let url = server.url();
+            *guard = Some(server);
+            Ok(url)
+        }
+    }
+}
+
+fn snapshot_browser_state(
+    snapshots: &Arc<crate::services::provider_snapshot::Manager>,
+    params: &crate::services::provider_snapshot::BrowserParams,
+) -> Result<WebDiffState, String> {
+    params.validate()?;
+    let data = snapshots.get(&params.snapshot)?;
+    let files = snapshots.inventory(&params.snapshot)?;
+    let metadata: Vec<_> = files.iter().map(|file| json!(file)).collect();
+    Ok(WebDiffState {
+        provider: Some(params.snapshot.repository.provider),
+        workspace: params.snapshot.repository.workspace.clone(),
+        repo: params.snapshot.repository.repo.clone(),
+        pr_id: params.snapshot.pr_id,
+        pr_title: data.info.title.clone(),
+        source_branch: data.info.source_branch.clone(),
+        target_branch: data.info.destination_branch.clone(),
+        base_sha: Some(data.info.base_sha.clone()),
+        diff: Some(data.patch.clone()),
+        diffstat: Some(diffstat_from_files(&metadata)),
+        snapshot_source: Some(
+            crate::services::provider_snapshot::BrowserSnapshotSource::new(
+                params.snapshot.clone(),
+                snapshots.clone(),
+            ),
+        ),
+        ..WebDiffState::default()
+    })
+}
+
+fn snapshot_browser_open(
+    browser: &Arc<Mutex<Option<WebDiffServer>>>,
+    snapshots: &Arc<crate::services::provider_snapshot::Manager>,
+    params: crate::services::provider_snapshot::BrowserParams,
+) -> Result<serde_json::Value, String> {
+    let state = snapshot_browser_state(snapshots, &params)?;
+    let url = browser_server_url(browser, state)?;
+    let launch_requested = std::env::var("NORN_BROWSER_OPEN")
+        .map(|value| value != "0")
+        .unwrap_or(true);
+    let launch_error = if launch_requested {
+        open_browser_url(&url).err()
+    } else {
+        None
+    };
+    Ok(
+        json!({ "request": params, "url": url, "launchRequested": launch_requested, "launchError": launch_error }),
+    )
 }
 
 /// Build the browser-viewer state for a target from the local checkout, reusing
@@ -1696,11 +1812,12 @@ fn diffstat_from_files(
                 "added" | "untracked" => "added",
                 "deleted" => "removed",
                 "renamed" => "renamed",
+                "copied" => "copied",
                 _ => "modified",
             };
             let (old_path, new_path) = match status {
                 "removed" => (old.or_else(|| Some(path.clone())), None),
-                "renamed" => (old, Some(path.clone())),
+                "renamed" | "copied" => (old, Some(path.clone())),
                 _ => (None, Some(path.clone())),
             };
             crate::services::bitbucket::DiffstatEntry {
@@ -4218,6 +4335,65 @@ fn write_frame(stdout: &mut impl Write, message: ServerMessage) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn native_snapshot_browser_preserves_exact_evidence_without_local_checkout_or_run() {
+        use crate::config::ReviewProvider;
+        use crate::services::{
+            bitbucket::workspace_prs::{DetailParams, RepositoryIdentity},
+            provider_snapshot::{BrowserParams, Capture, Manager},
+        };
+        for provider in [ReviewProvider::Github, ReviewProvider::Bitbucket] {
+            let manager = Arc::new(Manager::default());
+            let patch = "diff --git a/old.png b/new.png\nsimilarity index 100%\nrename from old.png\nrename to new.png\n";
+            let info = manager
+                .insert(Capture {
+                    request: DetailParams {
+                        repository: RepositoryIdentity {
+                            provider,
+                            workspace: "Owned".into(),
+                            repo: "Repo".into(),
+                        },
+                        pr_id: 7,
+                    },
+                    title: "Owned preview".into(),
+                    source_branch: "feature".into(),
+                    destination_branch: "main".into(),
+                    head_sha: "a".repeat(40),
+                    destination_sha: "b".repeat(40),
+                    base_sha: "c".repeat(40),
+                    patch: patch.into(),
+                    expected_count: 1,
+                    expected_files: None,
+                    source_repository: None,
+                })
+                .unwrap();
+            let state = snapshot_browser_state(
+                &manager,
+                &BrowserParams {
+                    snapshot: info.snapshot.clone(),
+                },
+            )
+            .unwrap();
+            assert_eq!(state.provider, Some(provider));
+            assert_eq!(state.pr_id, 7);
+            assert_eq!(state.diff.as_deref(), Some(patch));
+            assert_eq!(state.base_sha.as_deref(), Some("c".repeat(40).as_str()));
+            let files = state.diffstat.unwrap();
+            assert_eq!(files.len(), 1);
+            assert_eq!(files[0].old_path.as_deref(), Some("old.png"));
+            assert_eq!(files[0].new_path.as_deref(), Some("new.png"));
+            assert!(state.snapshot_source.is_some());
+            assert!(!state.population_failed);
+            assert!(snapshot_browser_state(
+                &Arc::new(Manager::default()),
+                &BrowserParams {
+                    snapshot: info.snapshot
+                }
+            )
+            .is_err());
+        }
+    }
 
     #[test]
     fn fix_approvals_expire_and_cannot_cross_targets_or_be_replayed() {

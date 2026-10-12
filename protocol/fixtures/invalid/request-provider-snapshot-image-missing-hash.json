@@ -1,0 +1,20 @@
+{
+  "type": "request",
+  "id": "image",
+  "method": "provider.snapshot.image",
+  "params": {
+    "snapshot": {
+      "repository": {
+        "provider": "github",
+        "workspace": "Owner",
+        "repo": "Repo"
+      },
+      "prId": 7,
+      "snapshotId": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+    },
+    "path": "picture.png",
+    "side": "new",
+    "offset": 0,
+    "maxBytes": 196608
+  }
+}

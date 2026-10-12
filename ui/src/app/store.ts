@@ -1,5 +1,6 @@
 import type {
   DraftTarget,
+  ProviderSnapshotInfo,
   PrRepositoryIdentity,
   WorkspaceScope,
   WorkspaceSettings,
@@ -154,6 +155,10 @@ export interface ShellSnapshot {
   findingStage: { target: DraftTarget; findingId: string } | null;
   providerOpen: boolean;
   providerReads: boolean;
+  providerSnapshots: boolean;
+  providerPreview: boolean;
+  liveSnapshot: ProviderSnapshotInfo | null;
+  snapshotLoading: boolean;
   settingsOpen: boolean;
   dataOpen: boolean;
   status: ShellStatus;
@@ -213,6 +218,10 @@ const INITIAL: ShellSnapshot = {
   findingStage: null,
   providerOpen: false,
   providerReads: false,
+  providerSnapshots: false,
+  providerPreview: false,
+  liveSnapshot: null,
+  snapshotLoading: false,
   settingsOpen: false,
   dataOpen: false,
   status: "idle",
@@ -483,6 +492,17 @@ export class ShellStore {
   private copyPending = false;
   async copyReviewOutput(client: BackendClient, copy: (text: string) => boolean): Promise<void> {
     if (this.copyPending) return;
+    if (this.state.providerPreview) {
+      const diff = this.state.diff;
+      this.update({
+        notice: diff
+          ? copy(diff.text)
+            ? "PR diff sent through the terminal clipboard. Paste to verify."
+            : "Terminal clipboard is unavailable; nothing was copied."
+          : "Load a verified PR diff before copying.",
+      });
+      return;
+    }
     const target = this.activeTarget();
     if (target?.kind !== "provider" || !target.prId) {
       this.update({ notice: "Select a stored pull-request review to copy its output." });
@@ -599,7 +619,13 @@ export class ShellStore {
   /// The active backend target for the selected picker entry.
   private activeTarget(): TargetIdentity | null {
     const entry = this.state.picker[this.state.selectedPicker];
-    return entry ? pickerTargetIdentity(entry) : null;
+    if (!entry) return null;
+    const target = pickerTargetIdentity(entry);
+    if (this.state.providerPreview && target.kind === "provider") {
+      const { runId: _run, ...preview } = target;
+      return preview;
+    }
+    return target;
   }
 
   toggleData(): void {
@@ -763,6 +789,7 @@ export class ShellStore {
   async applySettings(client: BackendClient, settings: WorkspaceSettings): Promise<void> {
     const generation = this.state.generation;
     const target = this.activeTarget();
+    const selectedEntry = this.state.picker[this.state.selectedPicker];
     const [repositories, targets, readiness, scopes] = await Promise.all([
       client.repositories(),
       client.reviewTargets(),
@@ -772,7 +799,22 @@ export class ShellStore {
     if (generation !== this.state.generation || this.state.status === "closed") return;
     setTheme(settings.theme);
     const picker = this.mergeRemote(buildPicker(repositories, targets, scopes));
-    const selected = picker.findIndex((entry) => sameTarget(pickerTargetIdentity(entry), target));
+    const selected = picker.findIndex((entry) =>
+      this.state.providerPreview && selectedEntry
+        ? this.pickerScope(entry) === this.pickerScope(selectedEntry)
+        : sameTarget(pickerTargetIdentity(entry), target),
+    );
+    if (this.state.providerPreview && selected >= 0 && selectedEntry) {
+      picker[selected] = { ...picker[selected]!, runId: selectedEntry.runId };
+      this.update({
+        repositories,
+        picker,
+        selectedPicker: selected,
+        diffMode: settings.defaultDiffView,
+        readiness,
+      });
+      return;
+    }
     this.update({ repositories, picker, diffMode: settings.defaultDiffView, readiness });
     await this.selectPicker(Math.max(0, selected));
   }
@@ -808,6 +850,7 @@ export class ShellStore {
         selected: 0,
         picker: this.mergeRemote(buildPicker(repositories, targets, scopes)),
         providerReads: ready.capabilities.includes("provider-pr-reads"),
+        providerSnapshots: ready.capabilities.includes("provider-snapshot-preview"),
         selectedPicker: 0,
         generation: this.state.generation + 1,
         files: [],
@@ -829,8 +872,13 @@ export class ShellStore {
 
   /// Load the changed-file and finding snapshot for the selected target.
   async loadSnapshot(client: BackendClient, generation: number): Promise<void> {
+    if (this.state.status === "closed") return;
     const target = this.activeTarget();
     if (!target) {
+      return;
+    }
+    if (this.state.providerPreview) {
+      await this.loadProviderPreview(client, generation, target);
       return;
     }
     // The two requests are independent and both get a rejection handler
@@ -913,11 +961,99 @@ export class ShellStore {
     void this.loadPreview(client);
   }
 
+  private async loadProviderPreview(
+    client: BackendClient,
+    generation: number,
+    target: TargetIdentity,
+  ): Promise<void> {
+    if (target.kind !== "provider" || !target.prId) return;
+    const current = () =>
+      generation === this.state.generation &&
+      this.state.status !== "closed" &&
+      this.state.providerPreview &&
+      sameTarget(this.activeTarget(), target);
+    this.update({
+      snapshotLoading: true,
+      liveSnapshot: null,
+      files: [],
+      findings: [],
+      threads: [],
+      history: [],
+      diff: null,
+      preview: null,
+      error: null,
+    });
+    try {
+      const info = await client.providerSnapshot(
+        {
+          repository: { provider: target.provider, workspace: target.workspace, repo: target.repo },
+          prId: target.prId,
+        },
+        current,
+      );
+      const inventory = await client.providerSnapshotInventory(info, current);
+      if (!current()) return;
+      const files: ChangedFile[] = inventory.map((file) => ({
+        path: file.path,
+        oldPath: file.oldPath,
+        status: file.status,
+        additions: file.additions,
+        deletions: file.deletions,
+      }));
+      this.update({
+        liveSnapshot: info,
+        files,
+        selectedFile: 0,
+        snapshotLoading: false,
+        notice: null,
+      });
+      await this.loadDiff(client);
+      if (current()) void this.loadPreview(client);
+    } catch (error) {
+      if (current())
+        this.update({
+          snapshotLoading: false,
+          liveSnapshot: null,
+          files: [],
+          diff: null,
+          preview: null,
+          error: message(error),
+        });
+    }
+  }
+
+  async toggleProviderPreview(refresh = false): Promise<void> {
+    const entry = this.state.picker[this.state.selectedPicker];
+    if (
+      entry?.kind !== "review" ||
+      !entry.prId ||
+      entry.prId >= 0x80000000 ||
+      !this.state.providerSnapshots
+    ) {
+      this.update({ notice: "Select a provider PR to preview its current revision." });
+      return;
+    }
+    if (
+      this.state.composing ||
+      this.state.fixPreview ||
+      this.state.fixPreviewLoading ||
+      this.requestInFlight() ||
+      (this.state.operation && ["accepted", "running"].includes(this.state.operation.state))
+    ) {
+      this.update({
+        notice: "Finish the current operation, editor or approval before changing evidence.",
+      });
+      return;
+    }
+    const preview = refresh || !this.state.providerPreview || !entry.runId;
+    await this.selectPicker(this.state.selectedPicker, undefined, preview);
+  }
+
   async selectRepository(selected: number): Promise<void> {
     await this.selectPicker(selected, selected);
   }
 
-  async selectPicker(selectedPicker: number, selected?: number): Promise<void> {
+  async selectPicker(selectedPicker: number, selected?: number, preview?: boolean): Promise<void> {
     this.cancelSyntax();
     this.clearSearch();
     const generation = this.state.generation + 1;
@@ -929,7 +1065,15 @@ export class ShellStore {
         ? this.state.findingStage
         : null;
     this.update({
-      findingStage,
+      findingStage: preview ? null : findingStage,
+      providerPreview:
+        this.state.providerSnapshots &&
+        nextEntry?.kind === "review" &&
+        !!nextEntry.prId &&
+        nextEntry.prId < 0x80000000 &&
+        (preview ?? !nextEntry.runId),
+      liveSnapshot: null,
+      snapshotLoading: false,
       selectedPicker,
       selected: selected ?? this.state.selected,
       generation,
@@ -1017,8 +1161,26 @@ export class ShellStore {
     this.diffInFlight = true;
     this.update({ diffLoading: true, diffError: null });
     try {
-      const result = await client.diffFile(target, file.path, { oldPath: file.oldPath });
-      if (request === this.diffRequest && generation === this.state.generation) {
+      const snapshot = this.state.liveSnapshot;
+      const result = this.state.providerPreview
+        ? {
+            path: file.path,
+            diff: await client.providerSnapshotPatch(
+              snapshot!.snapshot,
+              file.path,
+              () =>
+                request === this.diffRequest &&
+                generation === this.state.generation &&
+                this.state.status !== "closed",
+            ),
+            truncated: false,
+          }
+        : await client.diffFile(target, file.path, { oldPath: file.oldPath });
+      if (
+        request === this.diffRequest &&
+        generation === this.state.generation &&
+        this.state.status !== "closed"
+      ) {
         if (
           (this.state.searchOpen || this.state.searchQuery) &&
           (this.state.diff?.path !== result.path || this.state.diff.text !== result.diff)
@@ -1045,7 +1207,11 @@ export class ShellStore {
         }
       }
     } catch (error) {
-      if (request === this.diffRequest && generation === this.state.generation) {
+      if (
+        request === this.diffRequest &&
+        generation === this.state.generation &&
+        this.state.status !== "closed"
+      ) {
         this.update({ diffLoading: false, diff: null, diffError: message(error) });
       }
     } finally {
@@ -1250,6 +1416,10 @@ export class ShellStore {
   }
 
   async startReview(client: BackendClient): Promise<void> {
+    if (this.state.providerPreview) {
+      this.update({ notice: "Starting a review from this PR preview is not available yet." });
+      return;
+    }
     const target = this.activeTarget();
     if (!target || this.requestInFlight()) {
       return;
@@ -1505,6 +1675,7 @@ export class ShellStore {
     const current = () =>
       request === this.previewRequest &&
       generation === this.state.generation &&
+      this.state.status !== "closed" &&
       this.state.files[this.state.selectedFile]?.path === file.path;
     const comparison: ImageComparisonView = {
       path: file.path,
@@ -1519,7 +1690,10 @@ export class ShellStore {
       const field = side === "old" ? "before" : "after";
       const errorField = side === "old" ? "beforeError" : "afterError";
       try {
-        const result = await client.filePreview(target, file.path, side, current);
+        const snapshot = this.state.liveSnapshot;
+        const result = this.state.providerPreview
+          ? await client.providerSnapshotImage(snapshot!.snapshot, file.path, side, current)
+          : await client.filePreview(target, file.path, side, current);
         if (current()) {
           this.update({ preview: { ...this.state.preview!, [field]: result, [errorField]: null } });
         }
@@ -1541,6 +1715,10 @@ export class ShellStore {
   }
 
   beginReply(): void {
+    if (this.state.providerPreview) {
+      this.update({ notice: "Return to the saved review with F3 before replying." });
+      return;
+    }
     if (this.replying) {
       return;
     }
@@ -1647,6 +1825,7 @@ export class ShellStore {
   }
 
   private loadedConversationSelected(): boolean {
+    if (this.state.providerPreview) return false;
     return (
       this.state.focus !== "threads" ||
       this.state.threads[this.state.selectedThread]?.latestRunId ===
@@ -1827,9 +2006,20 @@ export class ShellStore {
     }
     const generation = this.state.generation;
     try {
-      const result = await client.browserOpen(target);
+      if (this.state.providerPreview && !this.state.liveSnapshot)
+        throw new Error("Wait for a verified PR preview before opening its browser diff.");
+      const result = this.state.providerPreview
+        ? await client.providerSnapshotBrowser(
+            this.state.liveSnapshot!.snapshot,
+            () => generation === this.state.generation,
+          )
+        : await client.browserOpen(target);
       if (generation === this.state.generation) {
-        this.update({ notice: `Browser diff: ${result.url}` });
+        const launch =
+          "launchError" in result && result.launchError
+            ? ` · Launch failed: ${result.launchError}`
+            : "";
+        this.update({ notice: `Browser diff: ${result.url}${launch}` });
       }
     } catch (error) {
       if (generation === this.state.generation) {

@@ -1,4 +1,5 @@
 //! Bounded provider reads for the terminal workspace (ADR 0020, #357).
+mod images;
 mod snapshots;
 use super::*;
 use reqwest::{blocking::Client, redirect::Policy, Url};
@@ -136,6 +137,7 @@ pub struct CurrentUser {
     pub account_id: String,
     pub display_name: String,
 }
+#[derive(Clone)]
 enum Auth {
     Github(String),
     Bitbucket(Credentials),
@@ -703,6 +705,14 @@ mod tests {
         fn new(
             handler: impl Fn(&str, &str) -> (u16, String, String) + Send + Sync + 'static,
         ) -> Self {
+            Self::new_bytes(move |path, request| {
+                let (status, headers, body) = handler(path, request);
+                (status, headers, body.into_bytes())
+            })
+        }
+        fn new_bytes(
+            handler: impl Fn(&str, &str) -> (u16, String, Vec<u8>) + Send + Sync + 'static,
+        ) -> Self {
             let listener = TcpListener::bind("127.0.0.1:0").unwrap();
             let root = format!("http://{}", listener.local_addr().unwrap());
             listener.set_nonblocking(true).unwrap();
@@ -742,8 +752,9 @@ mod tests {
                                 let path = first.split_whitespace().nth(1).unwrap();
                                 seen.lock().unwrap().push(path.into());
                                 let (status, headers, body) = handler(path, &request);
-                                let response = format!("HTTP/1.1 {status} Fixture\r\nConnection: close\r\nContent-Length: {}\r\n{headers}\r\n{body}", body.len());
+                                let response = format!("HTTP/1.1 {status} Fixture\r\nConnection: close\r\nContent-Length: {}\r\n{headers}\r\n", body.len());
                                 let _ = stream.write_all(response.as_bytes());
+                                let _ = stream.write_all(&body);
                             }));
                         }
                         Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
@@ -1091,6 +1102,7 @@ mod tests {
                 } else if provider == ReviewProvider::Github {
                     let mut value = gh(7, false, "open");
                     value["changed_files"] = json!(1);
+                    value["head"]["repo"] = json!({"full_name":"ForkOwner/ForkRepo"});
                     value
                 } else {
                     let mut value = bb(7, false);
@@ -1106,6 +1118,10 @@ mod tests {
                     pr_id: 7,
                 })
                 .unwrap();
+            assert_eq!(
+                capture.source_repository.as_ref().unwrap().workspace,
+                "ForkOwner"
+            );
             let info = Manager::default().insert(capture).unwrap();
             assert_eq!(info.base_sha, "c".repeat(40));
             assert_eq!(info.destination_sha, "b".repeat(40));
@@ -1136,6 +1152,7 @@ mod tests {
         const PATCH: &str = "diff --git a/x b/x\nold mode 100644\nnew mode 100755\n";
         for fault in [
             "head",
+            "source",
             "destination",
             "count",
             "truncated",
@@ -1162,6 +1179,7 @@ mod tests {
                 } else {
                     let second = seen.fetch_add(1, Ordering::SeqCst) > 0;
                     let mut value = gh(7, false, "open");
+                    value["head"]["repo"] = json!({"full_name": if second && fault == "source" { "Other/Repo" } else { "ForkOwner/ForkRepo" }});
                     value["changed_files"] = json!(if fault == "truncated" { 2 } else { 1 });
                     if second && fault == "head" {
                         value["head"]["sha"] = json!("d".repeat(40));
@@ -1354,5 +1372,177 @@ mod tests {
         assert!(response.starts_with("HTTP/1.1 200"));
         assert!(response.ends_with("owned response"));
         assert_eq!(*server.requests.lock().unwrap(), vec!["/owned".to_string()]);
+    }
+    #[test]
+    fn immutable_images_use_verified_fork_git_objects_and_commit_file_metadata() {
+        use sha2::Digest;
+        let bytes = vec![137, 80, 78, 71, 0, 255, 128, 10];
+        let mut object = sha1::Sha1::new();
+        object.update(format!("blob {}\0", bytes.len()).as_bytes());
+        object.update(&bytes);
+        let blob = format!("{:x}", object.finalize());
+        for provider in [ReviewProvider::Github, ReviewProvider::Bitbucket] {
+            let raw = bytes.clone();
+            let sha = blob.clone();
+            let server = Server::new_bytes(move |path, request| {
+                assert!(path.starts_with(if provider == ReviewProvider::Github {
+                    "/repos/Fork/Source/"
+                } else {
+                    "/repositories/Fork/Source/"
+                }));
+                if path.contains("/git/blobs/") || path.ends_with("/dir/a%20b.png") {
+                    if provider == ReviewProvider::Github {
+                        assert!(request
+                            .to_lowercase()
+                            .contains("accept: application/vnd.github.raw+json"));
+                    }
+                    return (200, String::new(), raw.clone());
+                }
+                let value = if path.contains("/git/commits/") {
+                    json!({"sha":"a".repeat(40),"tree":{"sha":"c".repeat(40)}})
+                } else if path.ends_with(&format!("/git/trees/{}", "c".repeat(40))) {
+                    json!({"sha":"c".repeat(40),"truncated":false,"tree":[{"path":"dir","type":"tree","mode":"040000","sha":"d".repeat(40)}]})
+                } else if path.contains("/git/trees/") {
+                    json!({"sha":"d".repeat(40),"truncated":false,"tree":[{"path":"a b.png","type":"blob","mode":"100644","sha":sha,"size":raw.len()}]})
+                } else {
+                    assert!(path.ends_with("/dir/a%20b.png?format=meta"));
+                    json!({"type":"commit_file","path":"dir/a b.png","commit":{"hash":"a".repeat(40)},"size":raw.len(),"attributes":["binary"]})
+                };
+                (200, String::new(), value.to_string().into_bytes())
+            });
+            let source = RepositoryIdentity {
+                provider,
+                workspace: "Fork".into(),
+                repo: "Source".into(),
+            };
+            assert_eq!(
+                server
+                    .api(provider)
+                    .immutable_image(&source, &"a".repeat(40), "dir/a b.png")
+                    .unwrap(),
+                bytes
+            );
+            let requests = server.requests.lock().unwrap();
+            assert_eq!(
+                requests.len(),
+                if provider == ReviewProvider::Github {
+                    4
+                } else {
+                    2
+                }
+            );
+            assert!(!requests.iter().any(|path| path.contains("recursive")
+                || path.contains("contents")
+                || path.contains("pullrequests")
+                || path.contains("pulls")));
+        }
+    }
+
+    #[test]
+    fn immutable_images_reject_links_submodules_unverified_pins_partial_trees_and_redirects() {
+        for provider in [ReviewProvider::Github, ReviewProvider::Bitbucket] {
+            for fault in [
+                "link",
+                "submodule",
+                "commit",
+                "path",
+                "size",
+                "truncated",
+                "duplicate",
+                "tree",
+                "format",
+                "hash",
+                "redirect",
+                "rate",
+                "missing",
+                "body",
+            ] {
+                if provider == ReviewProvider::Bitbucket
+                    && matches!(fault, "truncated" | "duplicate" | "hash")
+                {
+                    continue;
+                }
+                let server = Server::new_bytes(move |path, _| {
+                    if fault == "redirect" {
+                        return (
+                            302,
+                            "Location: http://127.0.0.1:1/private\r\n".into(),
+                            Vec::new(),
+                        );
+                    }
+                    if fault == "rate" {
+                        return (429, "Retry-After: 60\r\n".into(), Vec::new());
+                    }
+                    if fault == "missing" {
+                        return (404, String::new(), Vec::new());
+                    }
+                    if path.contains("/git/blobs/")
+                        || (provider == ReviewProvider::Bitbucket && !path.contains("?format=meta"))
+                    {
+                        return (
+                            200,
+                            String::new(),
+                            if fault == "body" {
+                                vec![0; 2 * 1024 * 1024 + 1]
+                            } else {
+                                vec![0, 1]
+                            },
+                        );
+                    }
+                    let value = if path.contains("/git/commits/") {
+                        json!({"sha":if fault == "commit" { "b".repeat(40) } else { "a".repeat(40) },"tree":{"sha":"c".repeat(40)}})
+                    } else if path.contains("/git/trees/") {
+                        let entry = json!({"path":if fault == "path" { "other.png" } else { "a.png" },"type":if fault == "submodule" { "commit" } else { "blob" },"mode":if fault == "link" { "120000" } else if fault == "submodule" { "160000" } else { "100644" },"sha":if fault == "format" { "d".repeat(64) } else { "d".repeat(40) },"size":if fault == "size" { 2097153 } else { 2 }});
+                        json!({"sha":if fault == "tree" { "e".repeat(40) } else { "c".repeat(40) },"truncated":fault == "truncated","tree":if fault == "duplicate" { vec![entry.clone(), entry] } else { vec![entry] }})
+                    } else {
+                        json!({"type":if fault == "tree" { "commit_directory" } else { "commit_file" },"path":if fault == "path" { "other.png" } else { "a.png" },"commit":{"hash":if fault == "commit" { "b".repeat(40) } else { "a".repeat(40) }},"size":if fault == "size" { 2097153 } else { 2 },"attributes":[if fault == "link" { "link" } else if fault == "submodule" { "subrepository" } else if fault == "format" { "unknown" } else { "binary" }]})
+                    };
+                    (200, String::new(), value.to_string().into_bytes())
+                });
+                assert!(
+                    server
+                        .api(provider)
+                        .immutable_image(&identity(provider), &"a".repeat(40), "a.png")
+                        .is_err(),
+                    "{provider:?}/{fault}"
+                );
+                let requests = server.requests.lock().unwrap();
+                if matches!(
+                    fault,
+                    "link"
+                        | "submodule"
+                        | "commit"
+                        | "path"
+                        | "size"
+                        | "tree"
+                        | "format"
+                        | "redirect"
+                        | "rate"
+                        | "missing"
+                ) {
+                    assert!(!requests.iter().any(|path| path.contains("/git/blobs/")
+                        || provider == ReviewProvider::Bitbucket
+                            && !path.contains("?format=meta")));
+                }
+            }
+        }
+        let server = Server::new(|_, _| panic!("invalid image request reached HTTP"));
+        let api = server.api(ReviewProvider::Github);
+        for path in ["../x.png", "/x.png", "a\\b.png", "C:/x.png", "a//b.png"] {
+            assert!(api
+                .immutable_image(&identity(ReviewProvider::Github), &"a".repeat(40), path)
+                .is_err());
+        }
+        assert!(api
+            .immutable_image(
+                &identity(ReviewProvider::Bitbucket),
+                &"a".repeat(40),
+                "x.png"
+            )
+            .is_err());
+        assert!(api
+            .immutable_image(&identity(ReviewProvider::Github), "main", "x.png")
+            .is_err());
+        assert!(server.requests.lock().unwrap().is_empty());
     }
 }

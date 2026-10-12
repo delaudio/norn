@@ -1,8 +1,9 @@
 # Immutable provider snapshots
 
-Internal evidence for #357 / plan 0056. This delivery supplies the native
-snapshot and typed client bridge; terminal preview, review-start integration,
-explicit approval and native external browsing remain subsequent #357 work.
+Internal evidence for #357 / plans 0056–0057. PR #367 supplies immutable
+snapshots and the typed bridge. Plan 0057 connects native terminal and Pierre
+previews; review-start integration, explicit approval and native external
+provider browsing remain subsequent #357 work.
 No saved review run is created by a snapshot read.
 
 ## Evidence boundary
@@ -98,3 +99,69 @@ native profile recovery, platform GUI runtime or packaging/cutover completion.
 - [GitHub compare commits](https://docs.github.com/en/rest/commits/commits#compare-two-commits)
 - [Bitbucket comparisons and merge base](https://developer.atlassian.com/cloud/bitbucket/rest/api-group-commits/)
 - [Bitbucket PR diff redirects](https://developer.atlassian.com/cloud/bitbucket/rest/api-group-pullrequests/)
+
+
+## Native preview integration (plan 0057)
+
+A fresh provider PR opens an immutable preview without creating or selecting a
+review run. Existing saved reviews retain their actual run until F3 explicitly
+switches to current provider evidence; F3 returns to that saved run. F5 requests
+a new snapshot, clears prior evidence and exposes acquisition failures. Settings
+refresh retains the current pinned preview rather than silently refreshing its
+PR. Native status labels distinguish saved runs, loading, verified preview and
+unavailable evidence; head, merge base and destination pins remain distinct.
+
+The preview runs through existing file navigation, diff modes, syntax and search.
+Inventory, patches and images are fenced by provider/repository/PR/opaque handle
+and selection generation. Findings, threads and their anchors are cleared in a
+current preview and restored from the saved run on return. Agent replies and
+mutations cannot borrow the saved run while displaying a newer diff. Starting
+AI from the cached evidence is a separate required delivery; Enter currently
+reports that limitation. Clipboard copies the verified selected preview diff.
+
+`provider.snapshot.image` validates the complete cached handle and allowlisted
+path/side before touching credentials. It preserves fork source repository
+provenance for head bytes and uses the destination repository for merge-base
+bytes. GitHub resolves the actual immutable commit to bounded nonrecursive Git
+trees, permits regular-file modes only, and verifies the raw Git blob's object
+hash. The Contents API is deliberately avoided because it can dereference
+symlinks. Bitbucket checks commit-file metadata, exact path/commit/size and
+regular attributes, then reads the fixed revision endpoint. Neither adapter
+follows download URLs, symlinks/submodules or redirects, including LFS media
+redirects. Missing revisions, permissions and unsupported data fail explicitly.
+No local clone, working-tree replacement or automatic fetch is required.
+
+Raster bytes are capped at 2 MiB and checked against PNG/JPEG/GIF/WebP/BMP magic,
+8192-pixel dimensions and 40M pixels. A separate 32 MiB/32-entry LRU cache cannot
+outlive the evidence snapshot. Chunk transfers are at most 192 KiB, echo the
+complete typed request, require the cached SHA-256 for continuation, and verify
+assembled byte count and digest in the UI. Eviction or restart during transfer
+fails rather than re-fetching midstream. Cache misses share the provider's two
+native read slots with PR queries; cache hits and missing add/delete sides need
+no provider call. Snapshot identity is checked again after acquisition.
+
+`provider.snapshot.browser` supplies the exact cached patch and inventory to the
+existing loopback/token/CSP/assets server. Its skipped native source wrapper
+routes raster requests to the same cache and rechecks source identity before
+responding. It never invokes the mutable PR image endpoint. Browser launch
+returns a request acknowledgment and any launch error; it does not claim the
+page was displayed. Unix launchers have null standard streams and one bounded
+child owner/reaper, so an opener cannot corrupt stdio or hold a protocol response.
+Windows uses native URL/document shell dispatch, without command interpolation.
+
+Owned tests cover both adapters, fork/rename pins, malformed/partial/redirected
+provider responses, hash/chunk/cache bounds, missing sides, expiry/restart and
+shutdown, authenticated native browser bytes and delayed UI selection. Real
+OpenTUI inputs exercise F3/F5 at 120 and 50 columns. Ten additional deterministic
+Storybook frames cover both providers, saved runs, failed acquisition and image
+comparison; the previous 105 frames remain identical. This evidence does not
+complete #306 or waive native recovery/platform/install/cutover gates. The
+maintainer closed #357 on 2026-10-11 at 22:01:23Z; remaining provider workflow
+verification continues under #306 without reopening the issue.
+
+Native API references: [GitHub commits](https://docs.github.com/en/rest/git/commits#get-a-commit),
+[trees](https://docs.github.com/en/rest/git/trees#get-a-tree),
+[blobs](https://docs.github.com/en/rest/git/blobs#get-a-blob),
+[contents/symlinks](https://docs.github.com/en/rest/repos/contents#get-repository-content),
+[Bitbucket source metadata](https://developer.atlassian.com/cloud/bitbucket/rest/api-group-source/),
+and [Windows shell dispatch](https://learn.microsoft.com/en-us/windows/win32/api/shellapi/nf-shellapi-shellexecutew).

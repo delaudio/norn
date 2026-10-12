@@ -1,5 +1,9 @@
 //! Immutable transient provider evidence, independent of saved review run IDs.
+mod images;
 use super::bitbucket::workspace_prs::{DetailParams, RepositoryIdentity};
+#[cfg(test)]
+pub use images::ImageSide;
+pub use images::{BrowserSnapshotSource, ImageParams};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
@@ -65,6 +69,16 @@ impl SnapshotRef {
 }
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct BrowserParams {
+    pub snapshot: SnapshotRef,
+}
+impl BrowserParams {
+    pub fn validate(&self) -> Result<(), String> {
+        self.snapshot.validate()
+    }
+}
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct FilesParams {
     pub snapshot: SnapshotRef,
     pub offset: usize,
@@ -116,6 +130,7 @@ pub(crate) struct Capture {
     pub patch: String,
     pub expected_count: usize,
     pub expected_files: Option<Vec<SnapshotFile>>,
+    pub source_repository: Option<RepositoryIdentity>,
 }
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -153,6 +168,7 @@ pub(crate) struct DiffPage {
 pub(crate) struct SnapshotData {
     pub info: SnapshotInfo,
     pub patch: String,
+    source_repository: Option<RepositoryIdentity>,
     files: Vec<Section>,
     bytes: usize,
     created: Instant,
@@ -173,6 +189,9 @@ pub(crate) struct Manager {
     maximum: usize,
     count: usize,
     ttl: Duration,
+    images: images::RasterCache,
+    remote_gate: Arc<std::sync::atomic::AtomicUsize>,
+    shutdown: Arc<std::sync::atomic::AtomicBool>,
 }
 impl Default for Manager {
     fn default() -> Self {
@@ -181,6 +200,9 @@ impl Default for Manager {
             maximum: CACHE_BYTES,
             count: CACHE_COUNT,
             ttl: TTL,
+            images: images::RasterCache::default(),
+            remote_gate: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+            shutdown: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         }
     }
 }
@@ -188,11 +210,21 @@ fn hash(bytes: &[u8]) -> String {
     format!("{:x}", Sha256::digest(bytes))
 }
 impl Manager {
+    pub(crate) fn stop(&self) {
+        self.shutdown
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+    }
     fn prune(&self, entries: &mut VecDeque<Arc<SnapshotData>>) {
         entries.retain(|entry| entry.created.elapsed() < self.ttl);
     }
     pub fn insert(&self, capture: Capture) -> Result<SnapshotInfo, String> {
         capture.request.validate()?;
+        if let Some(source) = &capture.source_repository {
+            source.validate()?;
+            if source.provider != capture.request.repository.provider {
+                return Err(invalid());
+            }
+        }
         let head_sha = full_sha(&capture.head_sha)?;
         let base_sha = full_sha(&capture.base_sha)?;
         let destination_sha = full_sha(&capture.destination_sha)?;
@@ -251,7 +283,14 @@ impl Manager {
         if inventory_bytes > PATCH_BYTES {
             return Err(invalid());
         }
-        let bytes = inventory_bytes + capture.patch.len();
+        let source_bytes = capture
+            .source_repository
+            .as_ref()
+            .map(serde_json::to_vec)
+            .transpose()
+            .map_err(|_| invalid())?
+            .map_or(0, |bytes| bytes.len());
+        let bytes = inventory_bytes + capture.patch.len() + source_bytes;
         if bytes > self.maximum {
             return Err("Provider snapshot exceeds the evidence cache limit.".into());
         }
@@ -283,6 +322,7 @@ impl Manager {
         let data = Arc::new(SnapshotData {
             info: info.clone(),
             patch: capture.patch,
+            source_repository: capture.source_repository,
             files,
             bytes,
             created: Instant::now(),
@@ -299,12 +339,23 @@ impl Manager {
     }
     pub fn get(&self, snapshot: &SnapshotRef) -> Result<Arc<SnapshotData>, String> {
         snapshot.validate()?;
+        if self.shutdown.load(std::sync::atomic::Ordering::SeqCst) {
+            return Err("Provider snapshot canceled during shutdown.".into());
+        }
         let mut entries = self.entries.lock().map_err(|_| invalid())?;
         self.prune(&mut entries);
         let index = entries.iter().position(|entry| entry.info.snapshot == *snapshot).ok_or_else(|| "This provider snapshot is expired or unavailable. Refresh the PR preview explicitly.".to_string())?;
         let data = entries.remove(index).ok_or_else(invalid)?;
         entries.push_back(data.clone());
         Ok(data)
+    }
+    pub(crate) fn inventory(&self, snapshot: &SnapshotRef) -> Result<Vec<SnapshotFile>, String> {
+        let data = self.get(snapshot)?;
+        Ok(data
+            .files
+            .iter()
+            .map(|section| section.file.clone())
+            .collect())
     }
     pub fn files(&self, request: FilesParams) -> Result<FilesPage, String> {
         request.validate()?;
@@ -394,6 +445,7 @@ mod tests {
             base_sha: "c".repeat(40),
             patch: PATCH.into(),
             expected_count: 5,
+            source_repository: None,
             expected_files: None,
         }
     }

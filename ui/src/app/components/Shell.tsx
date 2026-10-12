@@ -118,6 +118,10 @@ function useShellInput(
       quit();
     } else if (key.name === "f2") {
       store.toggleProvider();
+    } else if (key.name === "f3") {
+      void store.toggleProviderPreview();
+    } else if (key.name === "f5") {
+      void store.toggleProviderPreview(true);
     } else if (key.name === "tab") {
       store.cycleFocus();
     } else if (key.name === "down" || key.name === "j" || key.name === "up" || key.name === "k") {
@@ -872,10 +876,48 @@ function findingOptions(state: ShellSnapshot): ListOption[] {
       }));
 }
 
+function ProviderEvidenceStatus({ state }: { state: ShellSnapshot }) {
+  const entry = state.picker[state.selectedPicker];
+  if (
+    !state.providerSnapshots ||
+    entry?.kind !== "review" ||
+    !entry.prId ||
+    entry.prId >= 0x80000000
+  )
+    return null;
+  let label = entry.runId ? `Saved review · ${entry.runId}` : "Saved PR data";
+  if (state.providerPreview) {
+    label = "PR preview · unavailable";
+    if (state.snapshotLoading) label = "PR preview · loading immutable revision";
+    else if (state.liveSnapshot)
+      label = `PR preview · head ${state.liveSnapshot.headSha.slice(0, 12)}`;
+  }
+  const action = state.providerPreview && entry.runId ? "saved review" : "current PR";
+  return (
+    <box flexDirection="column" flexShrink={0}>
+      <text fg={theme.secondary} height={1} wrapMode="none" truncate>
+        {label}
+      </text>
+      {state.providerPreview && state.liveSnapshot ? (
+        <text fg={theme.muted} height={1} wrapMode="none" truncate>
+          {`base ${state.liveSnapshot.baseSha.slice(0, 12)} · dest ${state.liveSnapshot.destinationSha.slice(0, 12)}`}
+        </text>
+      ) : null}
+      <text
+        fg={theme.muted}
+        height={1}
+        wrapMode="none"
+        truncate
+      >{`F3 ${action} · F5 refresh PR · b browser diff`}</text>
+    </box>
+  );
+}
+
 function WorkspaceStatus({ state }: { state: ShellSnapshot }) {
   const selectedFinding = visibleFindings(state)[state.selectedFinding];
   return (
     <>
+      <ProviderEvidenceStatus state={state} />
       {state.error ? (
         <text fg={theme.error} height={1} wrapMode="none">
           Error: {state.error}
