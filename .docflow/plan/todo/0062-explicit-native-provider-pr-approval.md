@@ -61,8 +61,9 @@ tests. Profile catalog/editor and other #306 parity remain subsequent work.
 
 ## Dependencies
 
-- PR #372 fixed head `648e253e0dc7c6aca078ae6a7394e4629aa9ed15`, CI38198661868:
-  UI passed, verify running. No merged claim; rebase required after actual merge.
+- PR #372 verified merged on 2026-10-12 at 03:29:22 UTC; squash
+  `84921b7cd19eba4d3ed2a07a7b8a4f904f01dd86`. CI38198661868 passed both jobs
+  for fixed head `648e253e0dc7c6aca078ae6a7394e4629aa9ed15`. Rebased onto the actual squash.
 - Native provider browser/read gates, generated protocol, qualified native owner
   storage and existing explicit publication/recovery practices.
 - Official GitHub review commit_id/APPROVE API and Bitbucket approve endpoint;

@@ -1,4 +1,6 @@
 import type {
+  ProviderApprovalPreview,
+  ProviderApprovalResult,
   ProviderCurrentUser,
   ProviderPrDetail,
   ProviderPrListParams,
@@ -60,6 +62,12 @@ export interface ProviderSnapshot {
   detailOpen: boolean;
   detailLoading: boolean;
   browserOpening: boolean;
+  approvalOpen: boolean;
+  approvalBusy: boolean;
+  approvalSending: boolean;
+  approvalPreview: ProviderApprovalPreview | null;
+  approvalResult: ProviderApprovalResult | null;
+  approvalError: string | null;
   detailError: string | null;
   error: string | null;
   notice: string | null;
@@ -82,6 +90,12 @@ const initial = (): ProviderSnapshot => ({
   detailOpen: false,
   detailLoading: false,
   browserOpening: false,
+  approvalOpen: false,
+  approvalBusy: false,
+  approvalSending: false,
+  approvalPreview: null,
+  approvalResult: null,
+  approvalError: null,
   detailError: null,
   error: null,
   notice: null,
@@ -95,6 +109,7 @@ export class ProviderStore {
   private state = initial();
   private generation = 0;
   private detailGeneration = 0;
+  private approvalGeneration = 0;
   private active = 0;
   private queue: Task[] = [];
   private bytes = new Map<string, number>();
@@ -256,6 +271,7 @@ export class ProviderStore {
     }
   }
   refresh(client: BackendClient, preservePages = true) {
+    this.clearApproval();
     const previous = new Map(
       this.state.groups.map((group) => [repositoryKey(group.repository), group]),
     );
@@ -453,6 +469,7 @@ export class ProviderStore {
     }
   }
   move(delta: number) {
+    this.clearApproval();
     const rows = this.rows();
     if (!rows.length) return;
     const index = (this.selectedIndex() + delta + rows.length) % rows.length;
@@ -552,6 +569,123 @@ export class ProviderStore {
     });
     this.schedulePage(client, group.repository, group.nextPage, group.nextPage, this.generation);
   }
+  private clearApproval() {
+    this.approvalGeneration++;
+    this.update({
+      approvalOpen: false,
+      approvalBusy: false,
+      approvalSending: false,
+      approvalPreview: null,
+      approvalResult: null,
+      approvalError: null,
+    });
+  }
+  closeApproval() {
+    if (this.state.approvalSending) {
+      this.update({
+        approvalError:
+          "Approval is being sent. Inspect its result; closing cannot undo a provider write.",
+      });
+      return;
+    }
+    this.clearApproval();
+  }
+  async previewApproval(client: BackendClient) {
+    const row = this.selectedRow();
+    if (row?.kind !== "pr" || this.state.approvalBusy) return;
+    const generation = this.generation;
+    const approval = ++this.approvalGeneration;
+    const current = () =>
+      generation === this.generation &&
+      approval === this.approvalGeneration &&
+      this.state.selected === row.key;
+    this.update({
+      approvalOpen: true,
+      approvalBusy: true,
+      approvalSending: false,
+      approvalPreview: null,
+      approvalResult: null,
+      approvalError: null,
+    });
+    try {
+      const preview = await client.providerApprovalPreview(
+        { repository: row.group.repository, prId: row.pr.id },
+        current,
+      );
+      if (current()) this.update({ approvalPreview: preview });
+    } catch (error) {
+      if (current()) this.update({ approvalError: message(error) });
+    } finally {
+      if (current()) this.update({ approvalBusy: false });
+    }
+  }
+  async confirmApproval(client: BackendClient) {
+    const preview = this.state.approvalPreview;
+    if (
+      !this.state.approvalOpen ||
+      this.state.approvalBusy ||
+      !preview?.approvalId ||
+      !preview.expiresAt
+    )
+      return;
+    if (Date.now() / 1000 >= preview.expiresAt) {
+      this.update({
+        approvalPreview: { ...preview, approvalId: null, expiresAt: null },
+        approvalError: "Preview expired. Close and refresh before confirming.",
+      });
+      return;
+    }
+    const generation = this.generation,
+      approval = this.approvalGeneration,
+      selected = this.state.selected;
+    const current = () =>
+      generation === this.generation &&
+      approval === this.approvalGeneration &&
+      selected === this.state.selected;
+    // Consume in UI before awaiting, independently of native single-use enforcement.
+    this.update({
+      approvalPreview: { ...preview, approvalId: null, expiresAt: null },
+      approvalBusy: true,
+      approvalSending: true,
+      approvalError: null,
+    });
+    try {
+      const result = await client.providerApprovalConfirm(
+        { request: preview.request, approvalId: preview.approvalId },
+        current,
+      );
+      if (current()) this.update({ approvalResult: result });
+    } catch (error) {
+      if (current())
+        this.update({ approvalError: `${message(error)} Check status before sending again.` });
+    } finally {
+      if (current()) this.update({ approvalBusy: false, approvalSending: false });
+    }
+  }
+  async approvalStatus(client: BackendClient, reconcile: boolean) {
+    const row = this.selectedRow();
+    if (row?.kind !== "pr" || !this.state.approvalOpen || this.state.approvalBusy) return;
+    const generation = this.generation,
+      approval = this.approvalGeneration;
+    const current = () =>
+      generation === this.generation &&
+      approval === this.approvalGeneration &&
+      row.key === this.state.selected;
+    this.update({ approvalBusy: true, approvalPreview: null, approvalError: null });
+    try {
+      const result = await client.providerApprovalStatus(
+        { repository: row.group.repository, prId: row.pr.id },
+        reconcile,
+        current,
+      );
+      if (current()) this.update({ approvalResult: result });
+    } catch (error) {
+      if (current()) this.update({ approvalError: message(error) });
+    } finally {
+      if (current()) this.update({ approvalBusy: false });
+    }
+  }
+
   async openBrowser(client: BackendClient): Promise<void> {
     const row = this.selectedRow();
     if (row?.kind !== "pr" || this.state.browserOpening) return;

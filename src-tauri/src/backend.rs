@@ -108,6 +108,8 @@ struct Backend {
     active_publication: Arc<AtomicUsize>,
     active_publication_reads: Arc<AtomicUsize>,
     publication: Arc<crate::services::draft_publication::Manager>,
+    provider_approval: Arc<crate::services::provider_approval::Manager>,
+    active_approval: Arc<AtomicUsize>,
     browser: Arc<Mutex<Option<WebDiffServer>>>,
     fix_approvals: Arc<Mutex<HashMap<String, FixApproval>>>,
 }
@@ -178,9 +180,13 @@ pub fn run() -> Result<(), i32> {
         active_workspace: Arc::new(AtomicUsize::new(0)),
         active_provider_reads: active_provider_reads.clone(),
         provider_snapshots: Arc::new(crate::services::provider_snapshot::Manager::with_runtime(
-            active_provider_reads,
+            active_provider_reads.clone(),
             Arc::new(AtomicBool::new(false)),
         )),
+        provider_approval: Arc::new(crate::services::provider_approval::Manager::new(
+            shutdown.clone(),
+        )),
+        active_approval: Arc::new(AtomicUsize::new(0)),
         active_publication: Arc::new(AtomicUsize::new(0)),
         active_publication_reads: Arc::new(AtomicUsize::new(0)),
         publication: Arc::new(crate::services::draft_publication::Manager::new(
@@ -202,6 +208,7 @@ pub fn run() -> Result<(), i32> {
             "provider-snapshots".to_string(),
             "provider-evidence-reviews".to_string(),
             "provider-external-browser".to_string(),
+            "provider-pr-approval".to_string(),
             "provider-snapshot-preview".to_string(),
             "draft-staging".to_string(),
             "draft-publication".to_string(),
@@ -361,6 +368,81 @@ fn dispatch(request: Request, backend: &Backend) -> bool {
                     );
                 }
             }
+            false
+        }
+        Request::ProviderApprovalPreview { .. }
+        | Request::ProviderApprovalConfirm { .. }
+        | Request::ProviderApprovalStatus { .. }
+        | Request::ProviderApprovalReconcile { .. } => {
+            let active = backend.active_approval.clone();
+            if active
+                .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| {
+                    (n < 1).then_some(n + 1)
+                })
+                .is_err()
+            {
+                backend.fail(
+                    &id,
+                    ProtocolError::new(
+                        ProtocolErrorCode::Conflict,
+                        "An approval request is in progress. Inspect its result before retrying.",
+                    ),
+                );
+                return false;
+            }
+            let reads = backend.active_provider_reads.clone();
+            if reads
+                .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| {
+                    (n < 2).then_some(n + 1)
+                })
+                .is_err()
+            {
+                active.fetch_sub(1, Ordering::SeqCst);
+                backend.fail(
+                    &id,
+                    ProtocolError::new(
+                        ProtocolErrorCode::Conflict,
+                        "Two provider reads are in progress; wait before inspecting approval.",
+                    ),
+                );
+                return false;
+            }
+            let manager = backend.provider_approval.clone();
+            let control = backend.control.clone();
+            thread::spawn(move || {
+                let result = match request {
+                    Request::ProviderApprovalPreview { params, .. } => {
+                        manager.preview(params).map(|v| json!(v))
+                    }
+                    Request::ProviderApprovalConfirm { params, .. } => {
+                        manager.confirm(params).map(|v| json!(v))
+                    }
+                    Request::ProviderApprovalStatus { params, .. } => {
+                        manager.status(params, false).map(|v| json!(v))
+                    }
+                    Request::ProviderApprovalReconcile { params, .. } => {
+                        manager.status(params, true).map(|v| json!(v))
+                    }
+                    _ => unreachable!(),
+                };
+                reads.fetch_sub(1, Ordering::SeqCst);
+                active.fetch_sub(1, Ordering::SeqCst);
+                let response = match result {
+                    Ok(value) => Response {
+                        id,
+                        ok: true,
+                        result: Some(value),
+                        error: None,
+                    },
+                    Err(message) => Response {
+                        id,
+                        ok: false,
+                        result: None,
+                        error: Some(ProtocolError::new(ProtocolErrorCode::Conflict, message)),
+                    },
+                };
+                let _ = control.send(ServerMessage::Response(response));
+            });
             false
         }
         Request::PublicationPrepare { .. }

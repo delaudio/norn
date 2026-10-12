@@ -241,6 +241,26 @@ pub enum Request {
         id: String,
         params: crate::services::bitbucket::workspace_prs::ListParams,
     },
+    #[serde(rename = "provider.approval.preview")]
+    ProviderApprovalPreview {
+        id: String,
+        params: crate::services::bitbucket::workspace_prs::DetailParams,
+    },
+    #[serde(rename = "provider.approval.confirm")]
+    ProviderApprovalConfirm {
+        id: String,
+        params: crate::services::provider_approval::ConfirmParams,
+    },
+    #[serde(rename = "provider.approval.status")]
+    ProviderApprovalStatus {
+        id: String,
+        params: crate::services::bitbucket::workspace_prs::DetailParams,
+    },
+    #[serde(rename = "provider.approval.reconcile")]
+    ProviderApprovalReconcile {
+        id: String,
+        params: crate::services::bitbucket::workspace_prs::DetailParams,
+    },
     #[serde(rename = "provider.browser")]
     ProviderBrowser {
         id: String,
@@ -479,6 +499,10 @@ impl Request {
             | Self::ProviderSnapshotFiles { id, .. }
             | Self::ProviderSnapshotDiff { id, .. }
             | Self::ProviderPrs { id, .. }
+            | Self::ProviderApprovalPreview { id, .. }
+            | Self::ProviderApprovalConfirm { id, .. }
+            | Self::ProviderApprovalStatus { id, .. }
+            | Self::ProviderApprovalReconcile { id, .. }
             | Self::ProviderBrowser { id, .. }
             | Self::ProviderPrDetail { id, .. }
             | Self::ProviderUser { id, .. }
@@ -539,6 +563,10 @@ impl Request {
             Self::ProviderSnapshotFiles { .. } => "provider.snapshot.files",
             Self::ProviderSnapshotDiff { .. } => "provider.snapshot.diff",
             Self::ProviderPrs { .. } => "provider.prs",
+            Self::ProviderApprovalPreview { .. } => "provider.approval.preview",
+            Self::ProviderApprovalConfirm { .. } => "provider.approval.confirm",
+            Self::ProviderApprovalStatus { .. } => "provider.approval.status",
+            Self::ProviderApprovalReconcile { .. } => "provider.approval.reconcile",
             Self::ProviderBrowser { .. } => "provider.browser",
             Self::ProviderPrDetail { .. } => "provider.pr.detail",
             Self::ProviderUser { .. } => "provider.user",
@@ -646,7 +674,14 @@ impl Request {
                 params.validate().map_err(invalid_request)?
             }
             Self::ProviderPrs { params, .. } => params.validate().map_err(invalid_request)?,
-            Self::ProviderBrowser { params, .. } | Self::ProviderPrDetail { params, .. } => {
+            Self::ProviderApprovalConfirm { params, .. } => {
+                params.validate().map_err(invalid_request)?
+            }
+            Self::ProviderApprovalPreview { params, .. }
+            | Self::ProviderApprovalStatus { params, .. }
+            | Self::ProviderApprovalReconcile { params, .. }
+            | Self::ProviderBrowser { params, .. }
+            | Self::ProviderPrDetail { params, .. } => {
                 params.validate().map_err(invalid_request)?
             }
             Self::ProviderUser { params, .. } => {
@@ -1161,6 +1196,12 @@ mod tests {
             "valid/response-provider-snapshot-diff.json",
             "valid/request-provider-prs.json",
             "valid/request-provider-browser.json",
+            "valid/request-provider-approval-preview.json",
+            "valid/request-provider-approval-confirm.json",
+            "valid/request-provider-approval-status.json",
+            "valid/request-provider-approval-reconcile.json",
+            "valid/response-provider-approval-preview.json",
+            "valid/response-provider-approval-uncertain.json",
             "valid/response-provider-browser.json",
             "valid/request-provider-pr-detail.json",
             "valid/request-provider-pr-uuid.json",
@@ -1207,6 +1248,9 @@ mod tests {
             "invalid/request-provider-pr-local-id.json",
             "invalid/request-provider-browser-local-id.json",
             "invalid/request-provider-browser-url.json",
+            "invalid/request-provider-approval-token.json",
+            "invalid/request-provider-approval-scope.json",
+            "invalid/request-provider-approval-assertion.json",
             "invalid/request-workspace-unpinned-page.json",
             "invalid/request-workspace-empty-version.json",
         ] {

@@ -114,6 +114,7 @@ impl Api {
         head: &str,
         metadata: &Value,
         started: Instant,
+        historical: bool,
     ) -> Result<bool, String> {
         if self.repository.provider == ReviewProvider::Bitbucket {
             let participants = metadata
@@ -178,11 +179,19 @@ impl Api {
                 ) {
                     return Err(error());
                 }
-                if principal == actor.account_id
-                    && review.get("commit_id").and_then(Value::as_str) == Some(head)
-                    && matches!(state, "APPROVED" | "CHANGES_REQUESTED" | "DISMISSED")
-                {
-                    latest = Some(state == "APPROVED");
+                if matches!(state, "APPROVED" | "CHANGES_REQUESTED" | "DISMISSED") {
+                    let commit = crate::services::provider_snapshot::full_sha(
+                        review
+                            .get("commit_id")
+                            .and_then(Value::as_str)
+                            .ok_or_else(error)?,
+                    )?;
+                    if principal == actor.account_id && (!historical || commit == head) {
+                        // Current status follows the latest decisive actor review,
+                        // including changes requested on another revision. Historical
+                        // recovery can prove only the explicitly stored old head.
+                        latest = Some(state == "APPROVED" && commit == head);
+                    }
                 }
             }
             let next = github_next(link.as_deref())?;
@@ -220,7 +229,7 @@ impl Api {
                 .as_deref()
                 .ok_or_else(error)?,
         )?;
-        let approved = self.approved_reviewer(params, &actor, &head, &before, started)?;
+        let approved = self.approved_reviewer(params, &actor, &head, &before, started, false)?;
         let proof = Proof {
             request: params.clone(),
             repository_id: self.approval_repository_id(&before)?,
@@ -257,6 +266,33 @@ impl Api {
             return Err("The PR changed while reading its approval preview. Refresh explicitly before approving.".into());
         }
         Ok(proof)
+    }
+    pub(crate) fn approval_observed(
+        &self,
+        expected: &Proof,
+        current: &Proof,
+        started: Instant,
+    ) -> Result<bool, String> {
+        if expected.request != current.request
+            || expected.repository_id != current.repository_id
+            || expected.actor.account_id != current.actor.account_id
+        {
+            return Err(error());
+        }
+        if self.repository.provider == ReviewProvider::Bitbucket {
+            return Ok(expected.same_preview(current) && current.already_approved);
+        }
+        if expected.head_sha == current.head_sha {
+            return Ok(current.already_approved);
+        }
+        self.approved_reviewer(
+            &expected.request,
+            &expected.actor,
+            &expected.head_sha,
+            &Value::Null,
+            started,
+            true,
+        )
     }
     pub(crate) fn post_approval(&self, proof: &Proof, started: Instant) -> WriteOutcome {
         if proof.validate().is_err() || proof.request.repository != self.repository {
@@ -356,5 +392,405 @@ impl Api {
             }
         }
         WriteOutcome::Approved(remote)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::{
+        io::Write,
+        net::TcpListener,
+        sync::{
+            atomic::{AtomicBool, AtomicUsize, Ordering},
+            Arc, Mutex,
+        },
+        thread,
+    };
+    const REPO_UUID: &str = "{11111111-1111-4111-8111-111111111111}";
+    fn repository(provider: ReviewProvider) -> RepositoryIdentity {
+        RepositoryIdentity {
+            provider,
+            workspace: "Owned".into(),
+            repo: "Review".into(),
+        }
+    }
+    fn metadata(provider: ReviewProvider, approved: bool) -> Value {
+        if provider == ReviewProvider::Github {
+            json!({"number":7,"title":"Owned change","body":"Owned description","state":"open","draft":false,"user":{"login":"owned-author"},"head":{"ref":"feature","sha":"a".repeat(40),"repo":{"full_name":"Fork/Review"}},"base":{"ref":"main","sha":"b".repeat(40),"repo":{"id":99,"full_name":"Owned/Review"}},"requested_reviewers":[]})
+        } else {
+            json!({"id":7,"title":"Owned change","state":"OPEN","draft":false,"author":{"account_id":"owned-author","display_name":"Owned author"},"source":{"branch":{"name":"feature"},"commit":{"hash":"a".repeat(40)},"repository":{"full_name":"Fork/Review"}},"destination":{"branch":{"name":"main"},"commit":{"hash":"b".repeat(40)},"repository":{"uuid":REPO_UUID,"full_name":"Owned/Review"}},"participants":[{"user":{"account_id":"stable-actor","display_name":"Owned reviewer"},"role":"REVIEWER","approved":approved}]})
+        }
+    }
+    type RecordedRequest = (String, String, Vec<u8>);
+    struct Server {
+        root: String,
+        stopped: Arc<AtomicBool>,
+        join: Option<thread::JoinHandle<()>>,
+        requests: Arc<Mutex<Vec<RecordedRequest>>>,
+        posts: Arc<AtomicUsize>,
+        metadata: Arc<Mutex<Value>>,
+        reviews: Arc<Mutex<Option<Value>>>,
+    }
+    impl Server {
+        fn new(provider: ReviewProvider, fault: &'static str) -> Self {
+            let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+            listener.set_nonblocking(true).unwrap();
+            let root = format!("http://{}", listener.local_addr().unwrap());
+            let stopped = Arc::new(AtomicBool::new(false));
+            let stop = stopped.clone();
+            let requests = Arc::new(Mutex::new(Vec::new()));
+            let seen = requests.clone();
+            let posts = Arc::new(AtomicUsize::new(0));
+            let writes = posts.clone();
+            let metadata = Arc::new(Mutex::new(metadata(provider, false)));
+            let current = metadata.clone();
+            let reviews = Arc::new(Mutex::new(None));
+            let history = reviews.clone();
+            let join = thread::spawn(move || {
+                while !stop.load(Ordering::SeqCst) {
+                    let Ok((mut stream, _)) = listener.accept() else {
+                        thread::sleep(Duration::from_millis(2));
+                        continue;
+                    };
+                    stream.set_nonblocking(false).unwrap();
+                    stream
+                        .set_read_timeout(Some(Duration::from_secs(1)))
+                        .unwrap();
+                    let mut bytes = Vec::new();
+                    let mut chunk = [0u8; 2048];
+                    let header_end = loop {
+                        assert!(bytes.len() < 16384);
+                        let n = stream.read(&mut chunk).unwrap();
+                        if n == 0 {
+                            break None;
+                        };
+                        bytes.extend_from_slice(&chunk[..n]);
+                        if let Some(end) = bytes.windows(4).position(|b| b == b"\r\n\r\n") {
+                            break Some(end + 4);
+                        }
+                    };
+                    let Some(end) = header_end else { continue };
+                    let headers = String::from_utf8(bytes[..end].to_vec()).unwrap();
+                    let length = headers
+                        .lines()
+                        .find_map(|line| {
+                            line.split_once(':')
+                                .filter(|(name, _)| name.eq_ignore_ascii_case("content-length"))
+                                .map(|(_, v)| v.trim().parse::<usize>().unwrap())
+                        })
+                        .unwrap_or(0);
+                    assert!(length <= 65536);
+                    while bytes.len() < end + length {
+                        let n = stream.read(&mut chunk).unwrap();
+                        assert!(n > 0);
+                        bytes.extend_from_slice(&chunk[..n]);
+                    }
+                    let first = headers.lines().next().unwrap();
+                    let mut parts = first.split_whitespace();
+                    let method = parts.next().unwrap();
+                    let path = parts.next().unwrap();
+                    let body = bytes[end..end + length].to_vec();
+                    assert!(headers.to_ascii_lowercase().contains("authorization:"));
+                    seen.lock()
+                        .unwrap()
+                        .push((method.into(), path.into(), body.clone()));
+                    let (status, extra, response) = if method == "POST" {
+                        writes.fetch_add(1, Ordering::SeqCst);
+                        if provider == ReviewProvider::Github {
+                            assert!(path.ends_with("/pulls/7/reviews"));
+                            assert_eq!(
+                                serde_json::from_slice::<Value>(&body).unwrap(),
+                                json!({"event":"APPROVE","commit_id":"a".repeat(40)})
+                            );
+                        } else {
+                            assert!(path.ends_with("/pullrequests/7/approve"));
+                            assert!(body.is_empty());
+                            current.lock().unwrap()["participants"][0]["approved"] = json!(true);
+                        }
+                        if fault == "drop" {
+                            continue;
+                        }
+                        if fault == "slow" {
+                            thread::sleep(Duration::from_millis(150));
+                        }
+                        let mut ack = if provider == ReviewProvider::Github {
+                            json!({"id":55,"user":{"id":42},"state":"APPROVED","commit_id":"a".repeat(40)})
+                        } else {
+                            json!({"user":{"account_id":"stable-actor"},"approved":true})
+                        };
+                        if fault == "actor" {
+                            if provider == ReviewProvider::Github {
+                                ack["user"]["id"] = json!(43)
+                            } else {
+                                ack["user"]["account_id"] = json!("foreign")
+                            }
+                        }
+                        if fault == "pin" {
+                            ack["commit_id"] = json!("c".repeat(40));
+                            if provider == ReviewProvider::Bitbucket {
+                                current.lock().unwrap()["source"]["commit"]["hash"] =
+                                    json!("c".repeat(40));
+                            }
+                        }
+                        match fault {
+                            "malformed" => (200, String::new(), "invalid-json".into()),
+                            "oversize" => (200, String::new(), "x".repeat(BODY_BYTES + 1)),
+                            "redirect" => (
+                                302,
+                                "Location: https://example.invalid/unsafe\r\n".into(),
+                                String::new(),
+                            ),
+                            "rejected" => (403, String::new(), String::new()),
+                            "rate" => (429, String::new(), String::new()),
+                            "server" => (500, String::new(), String::new()),
+                            _ => (200, String::new(), ack.to_string()),
+                        }
+                    } else {
+                        assert_eq!(method, "GET");
+                        let value = if path == "/user" {
+                            if provider == ReviewProvider::Github {
+                                json!({"id":42,"login":"owned-login","name":"Owned reviewer"})
+                            } else {
+                                json!({"account_id":"stable-actor","display_name":"Owned reviewer"})
+                            }
+                        } else if path.contains("/reviews?") {
+                            if let Some(value) = history.lock().unwrap().clone() {
+                                value
+                            } else if writes.load(Ordering::SeqCst) > 0 {
+                                json!([{"id":55,"user":{"id":42},"state":"APPROVED","commit_id":"a".repeat(40)}])
+                            } else {
+                                json!([])
+                            }
+                        } else {
+                            current.lock().unwrap().clone()
+                        };
+                        (200, String::new(), value.to_string())
+                    };
+                    let response_header=format!("HTTP/1.1 {status} Fixture\r\nConnection: close\r\nContent-Length: {}\r\n{extra}\r\n",response.len());
+                    let _ = stream.write_all(response_header.as_bytes());
+                    let _ = stream.write_all(response.as_bytes());
+                }
+            });
+            Self {
+                root,
+                stopped,
+                join: Some(join),
+                requests,
+                posts,
+                metadata,
+                reviews,
+            }
+        }
+        fn api(&self, provider: ReviewProvider) -> Api {
+            let auth = if provider == ReviewProvider::Github {
+                Auth::Github("owned-token".into())
+            } else {
+                Auth::Bitbucket(Credentials {
+                    username: "owned-user".into(),
+                    token: "owned-token".into(),
+                })
+            };
+            let mut api = Api::with_auth(repository(provider), auth).unwrap();
+            api.root = self.root.clone();
+            api
+        }
+    }
+    impl Drop for Server {
+        fn drop(&mut self) {
+            self.stopped.store(true, Ordering::SeqCst);
+            self.join.take().unwrap().join().unwrap();
+        }
+    }
+    #[test]
+    fn both_native_adapters_pin_actor_repo_and_exact_approval_request() {
+        for provider in [ReviewProvider::Github, ReviewProvider::Bitbucket] {
+            let server = Server::new(provider, "");
+            let api = server.api(provider);
+            let request = DetailParams {
+                repository: repository(provider),
+                pr_id: 7,
+            };
+            let proof = api.approval_proof(&request, Instant::now()).unwrap();
+            assert_eq!(
+                proof.actor.account_id,
+                if provider == ReviewProvider::Github {
+                    "42"
+                } else {
+                    "stable-actor"
+                }
+            );
+            assert_eq!(
+                proof.repository_id,
+                if provider == ReviewProvider::Github {
+                    "99"
+                } else {
+                    REPO_UUID
+                }
+            );
+            assert!(!proof.already_approved);
+            assert!(matches!(
+                api.post_approval(&proof, Instant::now()),
+                WriteOutcome::Approved(_)
+            ));
+            assert_eq!(server.posts.load(Ordering::SeqCst), 1);
+            assert!(
+                api.approval_proof(&request, Instant::now())
+                    .unwrap()
+                    .already_approved
+            );
+            assert!(server
+                .requests
+                .lock()
+                .unwrap()
+                .iter()
+                .all(|(method, _, _)| matches!(method.as_str(), "GET" | "POST")));
+        }
+    }
+    #[test]
+    fn accepted_write_dropped_malformed_foreign_redirect_and_oversize_ack_stay_uncertain_without_retry(
+    ) {
+        for provider in [ReviewProvider::Github, ReviewProvider::Bitbucket] {
+            for fault in [
+                "drop",
+                "malformed",
+                "actor",
+                "pin",
+                "redirect",
+                "oversize",
+                "server",
+            ] {
+                let server = Server::new(provider, fault);
+                let api = server.api(provider);
+                let request = DetailParams {
+                    repository: repository(provider),
+                    pr_id: 7,
+                };
+                let proof = api.approval_proof(&request, Instant::now()).unwrap();
+                assert_eq!(
+                    api.post_approval(&proof, Instant::now()),
+                    WriteOutcome::Uncertain,
+                    "{provider:?} {fault}"
+                );
+                assert_eq!(server.posts.load(Ordering::SeqCst), 1);
+            }
+        }
+    }
+    #[test]
+    fn definitive_rejection_total_budget_and_slow_ack_are_distinguished() {
+        for provider in [ReviewProvider::Github, ReviewProvider::Bitbucket] {
+            for fault in ["rejected", "rate", "slow"] {
+                let server = Server::new(provider, fault);
+                let api = server.api(provider);
+                let proof = api
+                    .approval_proof(
+                        &DetailParams {
+                            repository: repository(provider),
+                            pr_id: 7,
+                        },
+                        Instant::now(),
+                    )
+                    .unwrap();
+                assert_eq!(
+                    api.post_approval(&proof, Instant::now() - Duration::from_secs(21)),
+                    WriteOutcome::Rejected
+                );
+                assert_eq!(server.posts.load(Ordering::SeqCst), 0);
+                let started = if fault == "slow" {
+                    Instant::now() - Duration::from_millis(19950)
+                } else {
+                    Instant::now()
+                };
+                let expected = if fault == "slow" {
+                    WriteOutcome::Uncertain
+                } else {
+                    WriteOutcome::Rejected
+                };
+                assert_eq!(api.post_approval(&proof, started), expected);
+                assert_eq!(server.posts.load(Ordering::SeqCst), 1);
+            }
+        }
+    }
+    #[test]
+    fn latest_actor_review_controls_current_approval_and_malformed_decisive_commits_fail() {
+        let server = Server::new(ReviewProvider::Github, "");
+        let api = server.api(ReviewProvider::Github);
+        let request = DetailParams {
+            repository: repository(ReviewProvider::Github),
+            pr_id: 7,
+        };
+        let approved =
+            json!({"id":1,"user":{"id":42},"state":"APPROVED","commit_id":"a".repeat(40)});
+        let changes =
+            json!({"id":2,"user":{"id":42},"state":"CHANGES_REQUESTED","commit_id":"c".repeat(40)});
+        *server.reviews.lock().unwrap() = Some(json!([approved, changes]));
+        assert!(
+            !api.approval_proof(&request, Instant::now())
+                .unwrap()
+                .already_approved
+        );
+        *server.reviews.lock().unwrap() = Some(
+            json!([{"id":1,"user":{"id":42},"state":"APPROVED","commit_id":"a".repeat(40)},{"id":2,"user":{"id":42},"state":"DISMISSED","commit_id":null}]),
+        );
+        assert!(api.approval_proof(&request, Instant::now()).is_err());
+        assert_eq!(server.posts.load(Ordering::SeqCst), 0);
+    }
+    #[test]
+    fn historical_github_receipt_is_read_only_and_bitbucket_changed_pins_remain_unproved() {
+        for provider in [ReviewProvider::Github, ReviewProvider::Bitbucket] {
+            let server = Server::new(provider, "");
+            let api = server.api(provider);
+            let request = DetailParams {
+                repository: repository(provider),
+                pr_id: 7,
+            };
+            let proof = api.approval_proof(&request, Instant::now()).unwrap();
+            assert!(matches!(
+                api.post_approval(&proof, Instant::now()),
+                WriteOutcome::Approved(_)
+            ));
+            if provider == ReviewProvider::Github {
+                server.metadata.lock().unwrap()["head"]["sha"] = json!("c".repeat(40));
+            } else {
+                server.metadata.lock().unwrap()["source"]["commit"]["hash"] = json!("c".repeat(40));
+            }
+            let current = api.approval_proof(&request, Instant::now()).unwrap();
+            assert_ne!(proof.head_sha, current.head_sha);
+            assert_eq!(
+                api.approval_observed(&proof, &current, Instant::now())
+                    .unwrap(),
+                provider == ReviewProvider::Github
+            );
+            assert_eq!(server.posts.load(Ordering::SeqCst), 1);
+        }
+    }
+    #[test]
+    fn native_metadata_identity_and_bitbucket_historical_pin_drift_are_not_inferred() {
+        for provider in [ReviewProvider::Github, ReviewProvider::Bitbucket] {
+            let server = Server::new(provider, "");
+            let api = server.api(provider);
+            let request = DetailParams {
+                repository: repository(provider),
+                pr_id: 7,
+            };
+            let proof = api.approval_proof(&request, Instant::now()).unwrap();
+            if provider == ReviewProvider::Github {
+                server.metadata.lock().unwrap()["base"]["repo"]["full_name"] =
+                    json!("Other/Review");
+            } else {
+                server.metadata.lock().unwrap()["destination"]["repository"]["full_name"] =
+                    json!("Other/Review");
+            }
+            assert!(api.approval_proof(&request, Instant::now()).is_err());
+            assert_eq!(server.posts.load(Ordering::SeqCst), 0);
+            let mut current = proof.clone();
+            current.head_sha = "c".repeat(40);
+            current.already_approved = true;
+            if provider == ReviewProvider::Bitbucket {
+                assert!(!api
+                    .approval_observed(&proof, &current, Instant::now())
+                    .unwrap());
+            }
+        }
     }
 }

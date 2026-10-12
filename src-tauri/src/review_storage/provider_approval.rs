@@ -24,7 +24,11 @@ fn state_name(state: State) -> &'static str {
 }
 pub(crate) fn pending(proof: &Proof) -> Result<Option<Entry>, String> {
     proof.validate()?;
-    pending_from(&publication_database()?, proof)
+    let entry = pending_from(&publication_database()?, proof)?;
+    if entry.is_some() {
+        crate::services::review_scope::load_owned(&proof.scope())?.ok_or_else(invalid)?;
+    }
+    Ok(entry)
 }
 fn pending_from(connection: &Connection, proof: &Proof) -> Result<Option<Entry>, String> {
     // Proved immutable provider/repo/principal identity blocks unresolved writes
@@ -49,7 +53,8 @@ fn pending_from(connection: &Connection, proof: &Proof) -> Result<Option<Entry>,
     Ok(Some(entry))
 }
 fn read(connection: &Connection, scope: &Scope, identity: &str) -> Result<Option<Entry>, String> {
-    let row:Option<(String,Option<String>,String,String,String,u32,String)>=connection.query_row(
+    type JournalRow = (String, Option<String>, String, String, String, u32, String);
+    let row:Option<JournalRow>=connection.query_row(
         "SELECT scope_key,CASE WHEN scope_key=?2 AND length(CAST(entry_json AS BLOB))<=65536 THEN entry_json ELSE NULL END,provider,repository_id,actor_id,pr_id,state FROM provider_pr_approvals WHERE identity_key=?1",
         params![identity,scope.key()],|row| Ok((row.get(0)?,row.get(1)?,row.get(2)?,row.get(3)?,row.get(4)?,row.get(5)?,row.get(6)?))
     ).optional().map_err(|_|invalid())?;
@@ -140,6 +145,9 @@ pub(crate) fn finish(
     remote_review_id: Option<String>,
     now: u64,
 ) -> Result<Entry, String> {
+    if state == State::Writing {
+        return Err(invalid());
+    }
     let mut connection = publication_database()?;
     let tx = connection
         .transaction_with_behavior(TransactionBehavior::Immediate)

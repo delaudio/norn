@@ -6,6 +6,9 @@ import type {
   DraftStageParams,
   DraftStageResult,
   DraftTarget,
+  ProviderApprovalConfirmParams,
+  ProviderApprovalPreview,
+  ProviderApprovalResult,
   ProviderBrowserResult,
   ProviderCurrentUser,
   ProviderPrDetail,
@@ -248,7 +251,7 @@ export class BackendClient {
     if (!current()) throw new Error("Provider selection changed.");
     if (!validPublicationDTO(requestType, params))
       throw new Error("Invalid provider read parameters.");
-    const result = await this.transport.request(method, params);
+    const result = await this.transport.request(method, { ...params });
     if (!current()) throw new Error("Provider selection changed.");
     if (
       Buffer.byteLength(JSON.stringify(result)) > 512 * 1024 ||
@@ -295,6 +298,92 @@ export class BackendClient {
       return page;
     });
   }
+  private async approvalRequest<T extends ProviderApprovalPreview | ProviderApprovalResult>(
+    method: string,
+    params: ProviderPrDetailParams | ProviderApprovalConfirmParams,
+    resultType: string,
+    current: () => boolean,
+  ): Promise<T> {
+    if (!current()) throw new Error("Provider selection changed.");
+    const confirm = "approvalId" in params;
+    if (
+      !validPublicationDTO(
+        confirm ? "ProviderApprovalConfirmParams" : "ProviderPrDetailParams",
+        params,
+      )
+    )
+      throw new Error("Invalid approval parameters.");
+    const value = await this.transport.request(method, { ...params });
+    if (!current())
+      throw new Error("Provider selection changed. Check approval status before sending again.");
+    if (
+      Buffer.byteLength(JSON.stringify(value)) > 128 * 1024 ||
+      !validPublicationDTO(resultType, value)
+    )
+      throw new Error("Invalid approval response. Check provider status before sending again.");
+    const result = value as unknown as T;
+    const expected = confirm ? params.request : params;
+    const same = (request: ProviderPrDetailParams) =>
+      request.prId === expected.prId &&
+      request.repository.provider === expected.repository.provider &&
+      request.repository.workspace === expected.repository.workspace &&
+      request.repository.repo === expected.repository.repo;
+    if (
+      !same(result.request) ||
+      !same(result.proof.request) ||
+      result.proof.headSha.length !== result.proof.destinationSha.length ||
+      (result.proof.sourceRepository &&
+        result.proof.sourceRepository.provider !== expected.repository.provider) ||
+      (result.entry &&
+        (!same(result.entry.proof.request) ||
+          result.entry.proof.repositoryId !== result.proof.repositoryId ||
+          result.entry.proof.actor.accountId !== result.proof.actor.accountId))
+    )
+      throw new Error("Approval response belongs to another PR or reviewer.");
+    if (
+      "approvalId" in result &&
+      ((result.approvalId === null) !== (result.expiresAt === null) ||
+        (result.approvalId !== null &&
+          (result.proof.state !== "OPEN" ||
+            result.proof.draft ||
+            result.proof.alreadyApproved ||
+            (result.entry !== null && result.entry.state !== "rejected"))))
+    )
+      throw new Error("Approval preview cannot be confirmed.");
+    return result;
+  }
+  providerApprovalPreview(params: ProviderPrDetailParams, current: () => boolean = () => true) {
+    return this.approvalRequest<ProviderApprovalPreview>(
+      "provider.approval.preview",
+      params,
+      "ProviderApprovalPreview",
+      current,
+    );
+  }
+  providerApprovalConfirm(
+    params: ProviderApprovalConfirmParams,
+    current: () => boolean = () => true,
+  ) {
+    return this.approvalRequest<ProviderApprovalResult>(
+      "provider.approval.confirm",
+      params,
+      "ProviderApprovalResult",
+      current,
+    );
+  }
+  providerApprovalStatus(
+    params: ProviderPrDetailParams,
+    reconcile = false,
+    current: () => boolean = () => true,
+  ) {
+    return this.approvalRequest<ProviderApprovalResult>(
+      reconcile ? "provider.approval.reconcile" : "provider.approval.status",
+      params,
+      "ProviderApprovalResult",
+      current,
+    );
+  }
+
   providerBrowser(
     params: ProviderPrDetailParams,
     current: () => boolean = () => true,
@@ -717,7 +806,7 @@ export class BackendClient {
     scope?: PublicationScope,
   ): Promise<T> {
     if (!validPublicationDTO(requestType, params)) throw new Error("Invalid publication request.");
-    const result = await this.transport.request(method, params);
+    const result = await this.transport.request(method, { ...params });
     if (
       !validPublicationDTO(resultType, result) ||
       (scope && !samePublicationScope(result.scope as PublicationScope, scope))

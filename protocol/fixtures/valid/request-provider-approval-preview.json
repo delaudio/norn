@@ -1,0 +1,13 @@
+{
+  "type": "request",
+  "id": "approval",
+  "method": "provider.approval.preview",
+  "params": {
+    "repository": {
+      "provider": "github",
+      "workspace": "owned",
+      "repo": "review"
+    },
+    "prId": 7
+  }
+}

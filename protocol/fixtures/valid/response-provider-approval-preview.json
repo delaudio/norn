@@ -1,0 +1,42 @@
+{
+  "type": "response",
+  "id": "approval",
+  "ok": true,
+  "result": {
+    "request": {
+      "repository": {
+        "provider": "github",
+        "workspace": "owned",
+        "repo": "review"
+      },
+      "prId": 7
+    },
+    "proof": {
+      "request": {
+        "repository": {
+          "provider": "github",
+          "workspace": "owned",
+          "repo": "review"
+        },
+        "prId": 7
+      },
+      "repositoryId": "99",
+      "actor": {
+        "accountId": "42",
+        "displayName": "Owned reviewer"
+      },
+      "title": "Owned change",
+      "headSha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "destinationSha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "sourceBranch": "feature",
+      "destinationBranch": "main",
+      "sourceRepository": null,
+      "state": "OPEN",
+      "draft": false,
+      "alreadyApproved": false
+    },
+    "approvalId": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "expiresAt": 1900000000,
+    "entry": null
+  }
+}

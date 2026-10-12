@@ -156,6 +156,7 @@ export interface ShellSnapshot {
   providerOpen: boolean;
   providerReads: boolean;
   providerExternalBrowser: boolean;
+  providerApproval: boolean;
   providerSnapshots: boolean;
   providerPreview: boolean;
   providerEvidenceReviews: boolean;
@@ -222,6 +223,7 @@ const INITIAL: ShellSnapshot = {
   providerOpen: false,
   providerReads: false,
   providerExternalBrowser: false,
+  providerApproval: false,
   providerSnapshots: false,
   providerPreview: false,
   providerEvidenceReviews: false,
@@ -857,6 +859,7 @@ export class ShellStore {
         picker: this.mergeRemote(buildPicker(repositories, targets, scopes)),
         providerReads: ready.capabilities.includes("provider-pr-reads"),
         providerExternalBrowser: ready.capabilities.includes("provider-external-browser"),
+        providerApproval: ready.capabilities.includes("provider-pr-approval"),
         providerSnapshots: ready.capabilities.includes("provider-snapshot-preview"),
         providerEvidenceReviews: ready.capabilities.includes("provider-evidence-reviews"),
         selectedPicker: 0,
