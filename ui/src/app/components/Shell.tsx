@@ -20,6 +20,7 @@ import { DataStore } from "../dataStore";
 import { DiffScrollPositions } from "../diffScrollPositions";
 import { DraftStagingStore } from "../draftStagingStore";
 import { DraftStore } from "../draftStore";
+import { ExplorerStore } from "../explorerStore";
 import { imageProtocol } from "../imageProtocol";
 import { ProviderStore } from "../providerStore";
 import { PublicationStore } from "../publicationStore";
@@ -39,6 +40,7 @@ import { ConversationPanel } from "./ConversationPanel";
 import { DataPanel } from "./DataPanel";
 import { DraftPanel } from "./DraftPanel";
 import { DraftStagingPanel } from "./DraftStagingPanel";
+import { ExplorerPanel } from "./ExplorerPanel";
 import { FixPanel } from "./FixPanel";
 import { LocalComparisonPanel } from "./LocalComparisonPanel";
 import { ProviderPanel } from "./ProviderPanel";
@@ -68,6 +70,7 @@ function useShellInput(
     if (
       key.defaultPrevented ||
       store.getSnapshot().providerOpen ||
+      store.getSnapshot().explorerOpen ||
       store.getSnapshot().settingsOpen ||
       store.getSnapshot().dataOpen ||
       store.getSnapshot().workspaceOpen ||
@@ -170,6 +173,8 @@ function useShellInput(
       void store.openLocalComparison(client);
     } else if (key.name === "f6") {
       void store.openReviewProfiles(client);
+    } else if (key.name === "f8") {
+      store.toggleExplorer();
     } else if (key.name === "f7") {
       void store.openSavedLocal(client);
     } else if (key.name === "f5") {
@@ -250,6 +255,7 @@ function useShellInput(
   usePaste((event) => {
     if (
       store.getSnapshot().providerOpen ||
+      store.getSnapshot().explorerOpen ||
       store.getSnapshot().settingsOpen ||
       store.getSnapshot().dataOpen ||
       store.getSnapshot().workspaceOpen ||
@@ -1057,6 +1063,31 @@ function WorkspaceStatus({ state }: { state: ShellSnapshot }) {
 export function Shell({ store, client, quit }: ShellProps) {
   const state = useSyncExternalStore(store.subscribe, store.getSnapshot);
   const providers = useMemo(() => new ProviderStore(), []);
+  const explorer = useMemo(() => new ExplorerStore(), []);
+  const explorerEntry = state.picker[state.selectedPicker];
+  const explorerProvider = explorerEntry?.provider;
+  const explorerWorkspace = explorerEntry?.workspace;
+  const explorerRepository = explorerEntry?.repo;
+  useEffect(() => {
+    if (!state.explorerOpen) return;
+    void explorer.load(
+      client,
+      explorerProvider && explorerWorkspace && explorerRepository
+        ? { provider: explorerProvider, workspace: explorerWorkspace, repo: explorerRepository }
+        : null,
+      state.explorerReads,
+    );
+    return () => explorer.dispose();
+  }, [
+    explorer,
+    client,
+    state.explorerOpen,
+    state.explorerReads,
+    explorerProvider,
+    explorerWorkspace,
+    explorerRepository,
+  ]);
+
   useEffect(() => {
     if (!state.providerOpen) return;
     const snapshot = store.getSnapshot();
@@ -1275,6 +1306,20 @@ export function Shell({ store, client, quit }: ShellProps) {
               selectedIndex: state.selectedFinding,
             };
 
+  if (state.explorerOpen)
+    return (
+      <ExplorerPanel
+        store={explorer}
+        width={width}
+        height={height}
+        onClose={() => store.toggleExplorer()}
+        onSettings={() => {
+          store.toggleExplorer();
+          store.toggleSettings();
+        }}
+        quit={quit}
+      />
+    );
   if (state.savedLocal)
     return <SavedLocalPanel form={state.savedLocal} width={width} height={height} />;
   if (state.localForm)
@@ -1523,8 +1568,8 @@ export function Shell({ store, client, quit }: ShellProps) {
           {state.fixPreview
             ? "y approve · Esc/n dismiss · ↑/↓ scroll effects"
             : wide
-              ? "F2 PRs · F4 local · F7 saved · F6 profile · q quit · Tab pane · j/k move · i stage finding · d drafts · w refs · m settings · n prompt/viewed · s split · e expand · a fix · r reply · t threads · v chat · f filter · g group · x cancel · u sync · o conflicts · c commit · p push"
-              : "F2 PRs  F4 local  F7 saved  F6 profile  j/k  ←/→  s  e  Tab  m settings  n prompt  i stage  d drafts  w refs  q"}
+              ? "F2 PRs · F4 local · F7 saved · F8 files · F6 profile · q quit · Tab pane · j/k move · i stage finding · d drafts · w refs · m settings · n prompt/viewed · s split · e expand · a fix · r reply · t threads · v chat · f filter · g group · x cancel · u sync · o conflicts · c commit · p push"
+              : "F2 PRs  F4 local  F7 saved  F8 files  F6 profile  j/k  ←/→  s  e  Tab  m settings  n prompt  i stage  d drafts  w refs  q"}
         </text>
       </box>
     </box>

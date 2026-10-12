@@ -163,6 +163,8 @@ fn find_maps_unicode_expansion_and_utf16_and_nonoverlapping_pages() {
     assert_eq!(
         page[0],
         find::Match {
+            start_byte: 12,
+            end_byte: 16,
             start_utf16: 9,
             end_utf16: 13,
             line: 2,

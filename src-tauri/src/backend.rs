@@ -230,6 +230,7 @@ pub fn run() -> Result<(), i32> {
             "auth".to_string(),
             "repository".to_string(),
             "repository-explorer-reads".to_string(),
+            "repository-explorer-windowed-find".to_string(),
             "diff".to_string(),
             "review".to_string(),
             "review-profile-catalog".to_string(),

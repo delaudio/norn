@@ -25,7 +25,9 @@
         "startUtf16": 0,
         "endUtf16": 5,
         "line": 1,
-        "columnUtf16": 0
+        "columnUtf16": 0,
+        "startByte": 0,
+        "endByte": 5
       }
     ],
     "nextOffset": null

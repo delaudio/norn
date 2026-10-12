@@ -35,6 +35,8 @@ impl FindParams {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct Match {
+    pub start_byte: usize,
+    pub end_byte: usize,
     pub start_utf16: usize,
     pub end_utf16: usize,
     pub line: usize,
@@ -67,7 +69,8 @@ pub(crate) fn matches(
     // Unicode lowercase can expand a character; never return a mid-character
     // position or count UTF-8 bytes as JavaScript string indices.
     let mut chars = text.chars().peekable();
-    let (mut lowered, mut utf16, mut line, mut column) = (0usize, 0usize, 1usize, 0usize);
+    let (mut lowered, mut utf16, mut line, mut column, mut byte_offset) =
+        (0usize, 0usize, 1usize, 0usize, 0usize);
     for (start, _) in lower.match_indices(&needle) {
         control.check()?;
         total += 1;
@@ -82,6 +85,7 @@ pub(crate) fn matches(
             chars.next();
             lowered += width;
             utf16 += ch.len_utf16();
+            byte_offset += ch.len_utf8();
             if ch == '\n' {
                 line += 1;
                 column = 0;
@@ -91,6 +95,7 @@ pub(crate) fn matches(
         }
         let (start_utf16, start_line, start_column) = (utf16, line, column);
         let mut end_utf16 = utf16;
+        let mut end_byte = byte_offset;
         let mut end_lower = lowered;
         for ch in chars.clone() {
             if end_lower >= start + needle.len() {
@@ -98,8 +103,11 @@ pub(crate) fn matches(
             }
             end_lower += ch.to_lowercase().map(char::len_utf8).sum::<usize>();
             end_utf16 += ch.len_utf16();
+            end_byte += ch.len_utf8();
         }
         selected.push(Match {
+            start_byte: byte_offset,
+            end_byte,
             start_utf16,
             end_utf16,
             line: start_line,

@@ -6963,7 +6963,9 @@
         "startUtf16",
         "endUtf16",
         "line",
-        "columnUtf16"
+        "columnUtf16",
+        "startByte",
+        "endByte"
       ],
       "properties": {
         "startUtf16": {
@@ -6984,6 +6986,16 @@
         "columnUtf16": {
           "type": "integer",
           "minimum": 0,
+          "maximum": 8388608
+        },
+        "startByte": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 8388608
+        },
+        "endByte": {
+          "type": "integer",
+          "minimum": 1,
           "maximum": 8388608
         }
       }

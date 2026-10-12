@@ -22,12 +22,11 @@ arbitrary explorer finding anchors or provider writes.
   returns to the preserved review target/scroll/finding/thread selection. Busy,
   unconfigured/moved clone, malformed/stale and empty states are visible and
   recoverable by refresh/settings, not guessed alternate sources.
-- Preserve the shipped configured clone-directory fallback deliberately: the
-  first readonly API requires explicit localPath, while the retained desktop
-  adapter still accepts its proven configured fallback. Extend only explorer
-  source resolution to a fully provider-qualified unique fallback whose Git
-  root/origin are reverified; never guess a different provider/current clone,
-  weaken immutable local review's explicit source policy or rewrite settings.
+- Baseline verification: configured_repo_path uses only trimmed explicit
+  localPath; it has no clone-directory discovery fallback. Preserve that real
+  configured-path meaning and do not add guessed discovery. Any legitimate
+  nested configured path handling must retain full canonical Git root/origin
+  proof without weakening saved review's explicit source policy.
 - Bounded32-row paged tree, expandable folder groups, explicit all/changed and
   trimmed lowercase path filter; preserve unchanged, rename old source, deleted,
   untracked and conflict statuses. Clip tree/preview independently at narrow
@@ -79,5 +78,9 @@ arbitrary explorer finding anchors or provider writes.
 - Claimed by: default-agent,2026-10-12, single writer after verified379merge.
 - Branch: issue-359-native-explorer-ui.
 - Location: isolated /private/tmp/norn-repository-explorer-ui on actual379main.
-- Blockers: implementation/local gates/own exactheadCI/actualverifiedmerge.
+- Source prepared: native F8 tree/previews/find/Markdown/input/frames and owned
+  production backend workflow implemented; local gates recorded in WORKLOG.
+- Blockers: final source PR own exact-head3OS CI and actual verified merge.
+- This item remains todo until its source PR is actually merged; next claim
+  reconciles the completion receipt from observed squash/check evidence.
 - Stopped:

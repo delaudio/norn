@@ -295,3 +295,57 @@ export const UnsupportedCapturedLocalImage: Story = {
 export const CompactUnsupportedCapturedLocalImage: Story = {
   args: { frameId: "shell-local-image-unsupported-50x18" },
 };
+
+export const RepositoryExplorerTree: Story = { args: { frameId: "explorer-tree-120x30" } };
+
+export const CompactRepositoryExplorerTree: Story = { args: { frameId: "explorer-tree-50x20" } };
+
+export const RepositoryExplorerContent: Story = { args: { frameId: "explorer-content-120x30" } };
+
+export const CompactRepositoryExplorerContent: Story = {
+  args: { frameId: "explorer-content-50x20" },
+};
+
+export const RepositoryExplorerDiff: Story = { args: { frameId: "explorer-diff-120x30" } };
+
+export const CompactRepositoryExplorerDiff: Story = { args: { frameId: "explorer-diff-50x20" } };
+
+export const RepositoryExplorerBlame: Story = { args: { frameId: "explorer-blame-120x30" } };
+
+export const CompactRepositoryExplorerBlame: Story = { args: { frameId: "explorer-blame-50x20" } };
+
+export const RepositoryExplorerMarkdown: Story = { args: { frameId: "explorer-markdown-120x30" } };
+
+export const CompactRepositoryExplorerMarkdown: Story = {
+  args: { frameId: "explorer-markdown-50x20" },
+};
+
+export const RepositoryExplorerFind: Story = { args: { frameId: "explorer-find-120x30" } };
+
+export const CompactRepositoryExplorerFind: Story = { args: { frameId: "explorer-find-50x20" } };
+
+export const RepositoryExplorerBinary: Story = { args: { frameId: "explorer-binary-120x30" } };
+
+export const CompactRepositoryExplorerBinary: Story = {
+  args: { frameId: "explorer-binary-50x20" },
+};
+
+export const RepositoryExplorerDeleted: Story = { args: { frameId: "explorer-deleted-120x30" } };
+
+export const CompactRepositoryExplorerDeleted: Story = {
+  args: { frameId: "explorer-deleted-50x20" },
+};
+
+export const RepositoryExplorerEmpty: Story = { args: { frameId: "explorer-empty-120x30" } };
+
+export const CompactRepositoryExplorerEmpty: Story = { args: { frameId: "explorer-empty-50x20" } };
+
+export const RepositoryExplorerError: Story = { args: { frameId: "explorer-error-120x30" } };
+
+export const CompactRepositoryExplorerError: Story = { args: { frameId: "explorer-error-50x20" } };
+
+export const RepositoryExplorerLoading: Story = { args: { frameId: "explorer-loading-120x30" } };
+
+export const CompactRepositoryExplorerLoading: Story = {
+  args: { frameId: "explorer-loading-50x20" },
+};

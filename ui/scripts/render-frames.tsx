@@ -1,6 +1,7 @@
 import { DataPanel } from "../src/app/components/DataPanel";
 import { DraftPanel } from "../src/app/components/DraftPanel";
 import { DraftStagingPanel } from "../src/app/components/DraftStagingPanel";
+import { ExplorerPanel } from "../src/app/components/ExplorerPanel";
 import { ProviderPanel } from "../src/app/components/ProviderPanel";
 import { PublicationPanel } from "../src/app/components/PublicationPanel";
 import { ReferencePanel } from "../src/app/components/ReferencePanel";
@@ -9,6 +10,7 @@ import { WorkspacePanel } from "../src/app/components/WorkspacePanel";
 import { DataStore } from "../src/app/dataStore";
 import { DraftStagingStore } from "../src/app/draftStagingStore";
 import { DraftStore } from "../src/app/draftStore";
+import { ExplorerStore, treeRows } from "../src/app/explorerStore";
 import { ProviderStore } from "../src/app/providerStore";
 import { PublicationStore } from "../src/app/publicationStore";
 import { ReferenceStore } from "../src/app/referenceStore";
@@ -23,6 +25,7 @@ import {
   FakePublicationTransport,
   publicationFixtureScope,
 } from "../src/transport/fakePublicationTransport";
+import { ExplorerFixture } from "../test/fixtures/explorer-backend";
 import { LocalTransport } from "../test/fixtures/local-backend";
 import { LocalRasterTransport } from "../test/fixtures/local-raster-backend";
 import { SavedTransport } from "../test/fixtures/saved-local-backend";
@@ -36,7 +39,7 @@ import { SavedTransport } from "../test/fixtures/saved-local-backend";
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { pathToFileURL } from "node:url";
-import { type RGBA, TextAttributes } from "@opentui/core";
+import { getTreeSitterClient, type RGBA, TextAttributes } from "@opentui/core";
 import { createTestRenderer } from "@opentui/core/testing";
 import { createRoot, flushSync } from "@opentui/react";
 import type { ReactNode } from "react";
@@ -1019,6 +1022,82 @@ async function savedLocalScene(kind: "list" | "next" | "empty" | "loading" | "er
   return { client, store };
 }
 const scenes: Scene[] = [
+  ...(
+    [
+      "tree",
+      "content",
+      "diff",
+      "blame",
+      "markdown",
+      "find",
+      "binary",
+      "deleted",
+      "empty",
+      "error",
+      "loading",
+    ] as const
+  ).flatMap((kind) =>
+    [120, 50].map((cols) => ({
+      id: `explorer-${kind}-${cols}x${cols === 120 ? 30 : 20}`,
+      cols,
+      rows: cols === 120 ? 30 : 20,
+      build: async () => {
+        const fixture = new ExplorerFixture();
+        const { client, store, ready } = readyStore(fixture);
+        await ready;
+        const explorer = new ExplorerStore();
+        if (kind === "empty") fixture.files = [];
+        if (kind === "loading")
+          fixture.nextGate = {
+            method: "repository.explore.info",
+            wait: new Promise<void>(() => {}),
+          };
+        const loaded = explorer.load(
+          client,
+          { provider: "github", workspace: "owned", repo: "same" },
+          kind !== "error",
+        );
+        if (kind !== "loading") await loaded;
+        if (!["tree", "empty", "error", "loading"].includes(kind)) {
+          const path =
+            kind === "binary"
+              ? "images/binary.png"
+              : kind === "deleted"
+                ? "deleted.txt"
+                : kind === "find"
+                  ? "src/--modified ü.ts"
+                  : "README.md";
+          explorer.move(treeRows(explorer.getSnapshot()).findIndex((row) => row.path === path));
+          await explorer.choose();
+          if (kind === "diff" || kind === "blame") await explorer.setMode(kind);
+          if (kind === "markdown") {
+            await getTreeSitterClient().preloadParser("markdown");
+            await getTreeSitterClient().preloadParser("markdown_inline");
+            explorer.toggleMarkdown();
+          }
+          if (kind === "find") {
+            explorer.openInput("find");
+            explorer.appendInput("target_after_first_window");
+            await explorer.applyInput();
+          }
+        }
+        return {
+          store,
+          client,
+          view: (
+            <ExplorerPanel
+              store={explorer}
+              width={cols}
+              height={cols === 120 ? 30 : 20}
+              onClose={() => explorer.dispose()}
+              onSettings={() => {}}
+              quit={() => {}}
+            />
+          ),
+        };
+      },
+    })),
+  ),
   ...(["comparison", "added", "legacy", "unsupported"] as const).flatMap((kind) => [
     {
       id: `shell-local-image-${kind}-120x30`,
@@ -1355,6 +1434,17 @@ for (const scene of scenes) {
     for (let pass = 0; pass < 3; pass += 1) {
       await Bun.sleep(0);
       await test.renderOnce();
+    }
+    if (scene.id.startsWith("explorer-markdown-")) {
+      const ready = () =>
+        test.captureCharFrame().includes("Owned explorer") &&
+        test.captureCharFrame().includes("Readable");
+      const deadline = Date.now() + 3000;
+      while (!ready() && Date.now() < deadline) {
+        await Bun.sleep(10);
+        await test.renderOnce();
+      }
+      if (!ready()) throw new Error(`Native Markdown did not render: ${scene.id}`);
     }
     const frame = test.captureSpans();
     frames[scene.id] = {

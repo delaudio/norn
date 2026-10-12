@@ -136,7 +136,12 @@ export function validExploreResult(
     );
   }
   if (type === "RepositoryExploreFindPage") {
-    const matches = result.matches as Array<{ startUtf16: number; endUtf16: number }>;
+    const matches = result.matches as Array<{
+      startUtf16: number;
+      endUtf16: number;
+      startByte: number;
+      endByte: number;
+    }>;
     const total = result.total as number;
     const end = offset + matches.length;
     return (
@@ -145,6 +150,9 @@ export function validExploreResult(
       matches.every(
         (match, index) =>
           match.endUtf16 > match.startUtf16 &&
+          match.startByte >= match.startUtf16 &&
+          match.endByte > match.startByte &&
+          match.endByte - match.startByte >= match.endUtf16 - match.startUtf16 &&
           (index === 0 || matches[index - 1]!.startUtf16 <= match.startUtf16),
       ) &&
       next === (end < total ? end : null)

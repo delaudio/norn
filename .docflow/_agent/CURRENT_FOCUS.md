@@ -11,15 +11,17 @@ Git is authoritative. Durable history lives in WORKLOG and plan/done.
   No retry/bypass. Native qualified six-method readonly explorer source shipped.
 - Plan0068 reconciled only after actual merge. Auto-review rejected its premature
   pre-merge move; no workaround. Actual proof now satisfies completion criterion.
-- Claim0069 after actual379merge/rootmain sync in isolated
+- Plan0069 implementation prepared after actual379merge/rootmain sync in isolated
   /private/tmp/norn-repository-explorer-ui, issue-359-native-explorer-ui.
   Native tree/windowed content/diff/blame/find +Markdown/focus/review return,
   exact context/generation, escaped display, bounded preview navigation and
-  qualified configured clone-directory fallback. External-editor platform/
+  explicit configured-path semantics. External-editor platform/
   suspend-resume/owned actual terminal proof follows before359closure.
-- Predecessor PASS763core+2existingignored/76stdio/6CLI/5onboarding/3binary,
+- Local source PASS763core+2existingignored/76stdio/6CLI/5onboarding/3binary,
   desktop7/root123+tooling/Archgate17/audit/noGUI/protocol/typecheck/lint/build,
-  UI232/1454/165frames/Storybook/typecheck,Clippy/fmt; Doctor100changedtransport.
+  UI240 tests,187nativeframes/Storybook/typecheck,Clippy/fmt; Doctor changed UI
+  reports no issues (score66). Final source PR exact-head platform CI is pending.
+  Plan0069 remains todo until actual verified squash; no premature done receipt.
 - #359/#294 remain open. Preserve maintainer305/306/357; ADR0020 Accepted until
   fullcutover. No private profiles/credentials/provider writes/actualagents/release.
 - Never read/copy/stage root unrelated untracked.norn.yaml. Preserve user
