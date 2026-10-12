@@ -21,6 +21,7 @@ import { DiffScrollPositions } from "../diffScrollPositions";
 import { DraftStagingStore } from "../draftStagingStore";
 import { DraftStore } from "../draftStore";
 import { ExplorerStore } from "../explorerStore";
+import { HELP_BINDINGS } from "../helpBindings";
 import { imageProtocol } from "../imageProtocol";
 import { ProviderStore } from "../providerStore";
 import { PublicationStore } from "../publicationStore";
@@ -163,8 +164,23 @@ function useShellInput(
       }
       return;
     }
+    if (store.getSnapshot().helpOpen) {
+      key.preventDefault();
+      if (
+        key.name === "escape" ||
+        key.name === "esc" ||
+        key.name === "q" ||
+        key.name === "?" ||
+        key.sequence === "?"
+      ) {
+        store.closeHelp();
+      }
+      return;
+    }
     key.preventDefault();
-    if (key.name === "q") {
+    if (key.name === "?" || key.sequence === "?") {
+      store.toggleHelp();
+    } else if (key.name === "q") {
       quit();
     } else if (key.name === "f2") {
       store.toggleProvider();
@@ -1599,6 +1615,24 @@ export function Shell({ store, client, quit }: ShellProps) {
           <text fg={theme.primary} wrapMode="none" truncate>
             {`${state.composerKind === "profile" ? "Profile (empty = default)" : state.composerKind === "commit" ? "Commit" : "Reply"} › ${state.composerText}`}
           </text>
+        </box>
+      ) : null}
+      {state.helpOpen ? (
+        <box
+          flexDirection="column"
+          flexShrink={0}
+          height={Math.min(24, HELP_BINDINGS.length + 2)}
+          paddingX={2}
+          backgroundColor={theme.panel}
+        >
+          <text fg={theme.primary} attributes={TextAttributes.BOLD} height={1}>
+            {"Keyboard shortcuts  ·  Esc closes"}
+          </text>
+          {HELP_BINDINGS.slice(0, 20).map((binding) => (
+            <text key={binding.keys} fg={theme.muted} height={1} wrapMode="none" truncate>
+              {`${binding.keys.padEnd(14)} ${binding.label}`}
+            </text>
+          ))}
         </box>
       ) : null}
       <box height={1} flexShrink={0} paddingX={1} backgroundColor={theme.panel}>

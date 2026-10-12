@@ -1097,3 +1097,12 @@ test("refresh clears the syncing flag when the connection is closed", async () =
   await store.refresh(client);
   expect(store.getSnapshot().syncing).toBe(false);
 });
+
+test("toggles and closes the help overlay", () => {
+  const store = new ShellStore();
+  expect(store.getSnapshot().helpOpen).toBe(false);
+  store.toggleHelp();
+  expect(store.getSnapshot().helpOpen).toBe(true);
+  store.closeHelp();
+  expect(store.getSnapshot().helpOpen).toBe(false);
+});

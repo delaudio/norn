@@ -230,6 +230,7 @@ export interface ShellSnapshot {
   syncing: boolean;
   lastSyncAt: number | null;
   syncError: string | null;
+  helpOpen: boolean;
   closedMetrics: ClosedPrMetric[];
   threads: ReviewThreadSummary[];
   selectedThread: number;
@@ -333,6 +334,7 @@ const INITIAL: ShellSnapshot = {
   syncing: false,
   lastSyncAt: null,
   syncError: null,
+  helpOpen: false,
   closedMetrics: [],
   threads: [],
   selectedThread: 0,
@@ -3065,6 +3067,16 @@ export class ShellStore {
       this.update({ syncError: message(error) });
     } finally {
       this.update({ syncing: false });
+    }
+  }
+
+  toggleHelp(): void {
+    this.update({ helpOpen: !this.state.helpOpen });
+  }
+
+  closeHelp(): void {
+    if (this.state.helpOpen) {
+      this.update({ helpOpen: false });
     }
   }
 
