@@ -149,6 +149,16 @@ pub struct ReviewFixParams {
     pub approval_token: String,
 }
 
+/// Parameters for `review.jobs`.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ReviewJobsParams {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub limit: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub offset: Option<u32>,
+}
+
 /// Parameters for `file.preview`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -551,6 +561,12 @@ pub enum Request {
         id: String,
         params: crate::services::review_profiles::Params,
     },
+    #[serde(rename = "review.jobs")]
+    ReviewJobs {
+        id: String,
+        #[serde(default)]
+        params: ReviewJobsParams,
+    },
     #[serde(rename = "review.history")]
     ReviewHistory { id: String, params: TargetParams },
     #[serde(rename = "review.threads")]
@@ -700,6 +716,7 @@ impl Request {
             | Self::LocalSnapshotRecheck { id, .. }
             | Self::ReviewProfiles { id, .. }
             | Self::ReviewHistory { id, .. }
+            | Self::ReviewJobs { id, .. }
             | Self::ReviewThreads { id, .. }
             | Self::ReviewOutput { id, .. }
             | Self::BrowserOpen { id, .. }
@@ -796,6 +813,7 @@ impl Request {
             Self::LocalSnapshotRecheck { .. } => "local.snapshot.recheck",
             Self::ReviewProfiles { .. } => "review.profiles",
             Self::ReviewHistory { .. } => "review.history",
+            Self::ReviewJobs { .. } => "review.jobs",
             Self::ReviewThreads { .. } => "review.threads",
             Self::ReviewOutput { .. } => "review.output",
             Self::BrowserOpen { .. } => "browser.open",
@@ -1145,6 +1163,7 @@ impl Request {
             | Self::BrowserOpen { params, .. } => params.target.validate()?,
             Self::RepositoryStatus { .. }
             | Self::ReviewTargets { .. }
+            | Self::ReviewJobs { .. }
             | Self::OperationStatus { .. }
             | Self::OperationCancel { .. }
             | Self::Shutdown { .. } => {}

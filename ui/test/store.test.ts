@@ -982,3 +982,34 @@ test("authoritative polling recovers a missing terminal reply event and preserve
     ),
   ).toHaveLength(starts);
 });
+
+test("loads the bounded global review history", async () => {
+  const store = new ShellStore();
+  const client = new BackendClient(
+    new FakeBackendTransport({
+      repositories,
+      jobs: [
+        {
+          id: "job-1",
+          workspace: "acme",
+          repo: "payments",
+          prId: 42,
+          prTitle: "Title",
+          sourceBranch: "feature/x",
+          destinationBranch: "main",
+          status: "succeeded",
+          trigger: "manual",
+          threadId: null,
+          error: null,
+          createdAt: "2026-01-01T00:00:00Z",
+          startedAt: null,
+          finishedAt: null,
+        },
+      ],
+    }),
+  );
+  await store.connect(client);
+  await store.loadJobs(client);
+  expect(store.getSnapshot().jobs).toHaveLength(1);
+  expect(store.getSnapshot().notice).toContain("Review history");
+});

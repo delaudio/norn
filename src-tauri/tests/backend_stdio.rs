@@ -1267,6 +1267,33 @@ printf '%s\n' '{"result":"late","session_id":"fake-session"}'
 }
 
 #[test]
+fn review_jobs_returns_a_bounded_list() {
+    let repo = temp_repo();
+    let data_dir = tempfile::tempdir().expect("data dir");
+    let mut backend = Backend::spawn_env(
+        repo.path(),
+        &[(
+            "NORN_REVIEW_DATA_DIR",
+            data_dir.path().to_str().expect("data dir"),
+        )],
+    );
+    backend.handshake();
+    backend.send(json!({
+        "type": "request",
+        "id": "req-jobs",
+        "method": "review.jobs",
+        "params": { "limit": 5, "offset": 0 }
+    }));
+    let response = backend.wait_for(
+        |v| v["type"] == "response" && v["id"] == "req-jobs",
+        Duration::from_secs(5),
+    );
+    assert_eq!(response["ok"], true, "response: {response}");
+    assert!(response["result"]["jobs"].is_array());
+    assert_eq!(response["result"]["offset"], 0);
+}
+
+#[test]
 fn malformed_frames_do_not_stop_the_backend() {
     let repo = temp_repo();
     let mut backend = Backend::spawn(repo.path());

@@ -1607,6 +1607,13 @@ fn dispatch(request: Request, backend: &Backend) -> bool {
             };
             false
         }
+        Request::ReviewJobs { params, .. } => {
+            match review_jobs_response(&params) {
+                Ok(value) => backend.respond(&id, value),
+                Err(error) => backend.fail(&id, error),
+            };
+            false
+        }
         Request::ReviewThreads { params, .. } => {
             match review_threads_response(&params.target) {
                 Ok(value) => backend.respond(&id, value),
@@ -2144,6 +2151,42 @@ fn provider_matches(kind: ProviderKind) -> config::ReviewProvider {
         ProviderKind::Github => config::ReviewProvider::Github,
         ProviderKind::Bitbucket => config::ReviewProvider::Bitbucket,
     }
+}
+
+/// Bounded global review history from stored jobs, newest first.
+fn review_jobs_response(
+    params: &protocol::ReviewJobsParams,
+) -> Result<serde_json::Value, ProtocolError> {
+    let limit = params.limit.unwrap_or(50).clamp(1, 100);
+    let offset = params.offset.unwrap_or(0);
+    let fetch = limit.saturating_add(offset).min(100);
+    let jobs = crate::review_storage::list_recent_review_jobs(fetch).map_err(|error| {
+        ProtocolError::new(ProtocolErrorCode::Internal, format!("review jobs: {error}"))
+    })?;
+    let jobs = jobs
+        .into_iter()
+        .skip(offset as usize)
+        .take(limit as usize)
+        .map(|job| {
+            json!({
+                "id": job.id,
+                "workspace": job.workspace,
+                "repo": job.repo,
+                "prId": job.pr_id,
+                "prTitle": job.pr_title,
+                "sourceBranch": job.source_branch,
+                "destinationBranch": job.destination_branch,
+                "status": serde_json::to_value(job.status).unwrap_or_else(|_| json!("unknown")),
+                "trigger": job.trigger,
+                "threadId": job.thread_id,
+                "error": job.error,
+                "createdAt": job.created_at,
+                "startedAt": job.started_at,
+                "finishedAt": job.finished_at,
+            })
+        })
+        .collect::<Vec<_>>();
+    Ok(json!({ "jobs": jobs, "offset": offset }))
 }
 
 /// Recent stored review runs for a target, most recent first (bounded).

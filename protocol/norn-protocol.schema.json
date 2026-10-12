@@ -240,7 +240,8 @@
         "publication.status",
         "publication.reconcile",
         "comments.list",
-        "workspace.scopes"
+        "workspace.scopes",
+        "review.jobs"
       ]
     },
     "DiffFileParams": {
@@ -7859,6 +7860,115 @@
           "type": "boolean"
         }
       }
+    },
+    "ReviewJobsParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100
+        },
+        "offset": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "ReviewJobSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "workspace",
+        "repo",
+        "prId",
+        "prTitle",
+        "sourceBranch",
+        "destinationBranch",
+        "status",
+        "trigger",
+        "createdAt"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "workspace": {
+          "type": "string"
+        },
+        "repo": {
+          "type": "string"
+        },
+        "prId": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "prTitle": {
+          "type": "string"
+        },
+        "sourceBranch": {
+          "type": "string"
+        },
+        "destinationBranch": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        },
+        "trigger": {
+          "type": "string"
+        },
+        "threadId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "error": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "createdAt": {
+          "type": "string"
+        },
+        "startedAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "finishedAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "ReviewJobsResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "jobs",
+        "offset"
+      ],
+      "properties": {
+        "jobs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ReviewJobSummary"
+          }
+        },
+        "offset": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
     }
   },
   "oneOf": [
@@ -10129,6 +10239,30 @@
               "$ref": "#/definitions/RepositoryOperationStatusParams"
             }
           }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "type": {
+              "const": "request"
+            },
+            "id": {
+              "$ref": "#/definitions/RequestId"
+            },
+            "method": {
+              "const": "review.jobs"
+            },
+            "params": {
+              "$ref": "#/definitions/ReviewJobsParams"
+            }
+          }
         }
       ]
     },
@@ -10345,6 +10479,9 @@
             },
             {
               "$ref": "#/definitions/RepositoryOperationStatus"
+            },
+            {
+              "$ref": "#/definitions/ReviewJobsResult"
             }
           ]
         }
