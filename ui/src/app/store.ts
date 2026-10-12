@@ -193,6 +193,8 @@ export interface ShellSnapshot {
   draftsOpen: boolean;
   findingStage: { target: DraftTarget; findingId: string } | null;
   providerOpen: boolean;
+  explorerOpen: boolean;
+  explorerReads: boolean;
   providerReads: boolean;
   providerExternalBrowser: boolean;
   providerApproval: boolean;
@@ -278,6 +280,8 @@ const INITIAL: ShellSnapshot = {
   draftsOpen: false,
   findingStage: null,
   providerOpen: false,
+  explorerOpen: false,
+  explorerReads: false,
   providerReads: false,
   providerExternalBrowser: false,
   providerApproval: false,
@@ -534,6 +538,35 @@ export class ShellStore {
       return;
     }
     this.update({ providerOpen: true });
+  }
+  toggleExplorer(): void {
+    if (this.state.explorerOpen) {
+      this.update({ explorerOpen: false });
+      return;
+    }
+    if (
+      this.state.composing ||
+      this.state.fixPreview ||
+      this.state.fixPreviewLoading ||
+      this.state.searchOpen ||
+      this.state.findingStage ||
+      this.state.settingsOpen ||
+      this.state.dataOpen ||
+      this.state.workspaceOpen ||
+      this.state.referencesOpen ||
+      this.state.draftsOpen ||
+      this.state.providerOpen ||
+      this.state.localForm ||
+      this.state.savedLocal ||
+      this.state.profileOpen ||
+      this.state.findingLayers.length
+    ) {
+      this.update({
+        notice: "Finish or close the current editor or approval before opening files.",
+      });
+      return;
+    }
+    this.update({ explorerOpen: true });
   }
   async selectProviderPr(
     repository: PrRepositoryIdentity,
@@ -1388,6 +1421,9 @@ export class ShellStore {
         savedLocalAvailable: ready.capabilities.includes("local-saved-snapshots"),
         profileCatalogAvailable: ready.capabilities.includes("review-profile-catalog"),
         providerReads: ready.capabilities.includes("provider-pr-reads"),
+        explorerReads:
+          ready.capabilities.includes("repository-explorer-reads") &&
+          ready.capabilities.includes("repository-explorer-windowed-find"),
         providerExternalBrowser: ready.capabilities.includes("provider-external-browser"),
         providerApproval: ready.capabilities.includes("provider-pr-approval"),
         providerSnapshots: ready.capabilities.includes("provider-snapshot-preview"),

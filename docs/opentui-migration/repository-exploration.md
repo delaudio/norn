@@ -1,8 +1,9 @@
 # Native readonly repository exploration
 
 Internal migration evidence for the first bounded #359 slice, implementing
-ADR0020 AC3–5/8–10. Native tree/editor presentation remains a follow-up; this
-slice provides its real Rust API and preserves the desktop readonly adapters.
+ADR0020 AC3–5/8–10. The native F8 tree and preview now use the real Rust API;
+external-editor lifecycle proof remains a following slice. Desktop readonly
+adapters remain until the final cutover.
 
 ## Authority and methods
 
@@ -19,7 +20,7 @@ configuration, mismatched provider or ambiguous clone fails explicitly.
 | `repository.explore.content` | Current worktree text or explicit binary/tooLarge/missing/deleted/unsupported state | 512KiB text limit; 32KiB UTF-8 pages with complete byte hash |
 | `repository.explore.diff` | HEAD/worktree diff, including rename source; unborn and untracked use Git no-index | 8MiB complete patch limit, 32KiB pages with complete byte hash |
 | `repository.explore.blame` | Current selected text's line blame with author, mail, timestamp, summary and complete commit message | 32 lines/page, 32KiB/message, bounded raw metadata and adaptive serialized page size |
-| `repository.explore.find` | Non-overlapping case-insensitive substring in the selected text or raw diff | 32 matches/page; full preview hash; original UTF-16 offsets, line and column |
+| `repository.explore.find` | Non-overlapping case-insensitive substring in the selected text or raw diff | 32 matches/page; full preview hash; original UTF-8 byte and UTF-16 offsets, line and column |
 
 Path filtering and changed-only filtering preserve the shipped explorer meaning.
 Find is not a new whole-repository content search. Preview paths are not finding
@@ -37,8 +38,48 @@ validation rejects traversal; canonical destinations outside the selected root
 are rejected before reading. Internal symlinks remain readable through a
 canonical destination and confined no-follow handle. Non-UTF-8 bytes are never
 silently replaced. Unicode, spaces, option-like names and legitimate Unix
-control characters remain data; the upcoming native renderer must escape them
+control characters remain data; the native renderer escapes them
 for display. Windows paths reject drive, stream and backslash syntax.
+
+## Native presentation
+
+F8 opens the selected configured repository; Escape/F8 returns to the preserved
+review selection. Explicit `localPath` is the source: there is no guessed clone
+discovery. Missing configuration, old backend capabilities or stale root/version
+produce a visible refresh/settings recovery state. Both reader capabilities are
+required because direct find jumps depend on the matching byte-offset contract.
+
+The independent panel has a 32-entry paged file inventory with expandable folder
+groups, all/changed filtering (`c`) and an explicit path filter (`/`, Enter to
+apply, Escape to cancel). Tab changes focus; Enter selects a file or toggles its
+folder. It preserves raw paths/status/rename source for requests and uses only
+escaped text for display. Selection is fenced by full provider/root identity
+and read generation; late results after closing or switching never apply.
+
+Keys `1`, `2`, `3` show current content, HEAD/worktree diff and line blame.
+Content/diff keep one 32KiB UTF-8 window and bounded previous-offset metadata.
+`j/k` scroll rows, arrow left/right pan long source lines without splitting a
+Unicode scalar, and PgUp/PgDn move the viewport before crossing a byte-window
+boundary. Home returns to the start. Binary, oversized, deleted, missing and
+unsupported previews are explicit; none silently becomes replacement text.
+Blame preserves complete metadata and commit body; Tab focuses its detail
+scrollbox for keyboard scrolling independently of the selected blame line.
+
+Ctrl/Cmd-F finds within selected content or raw diff. Enter applies; `n/N`
+navigates/paginates results. Original byte offsets jump directly into a new
+pinned window, avoiding a full-file load in TypeScript; original UTF-16 offsets
+retain highlight meaning. Applying an empty query clears the prior search.
+
+For Markdown text, `v` toggles the native renderer. Its bundled Markdown worker
+initializes asynchronously; tests and golden-frame generation wait for actual
+heading/body output, rather than accepting an empty initial frame. Fenced-code
+info strings are removed only from the rendered copy, keeping preview grammar
+selection bounded and the exact original source intact. Rendered PgUp/PgDn
+scrolls, then crosses byte windows at the scroll boundary. Raw source is always
+available. No browser renderer or production mock substitutes for this view.
+
+Paste is inert outside active text input. Active input rejects controls and is
+bounded to 256 bytes; pasted shortcut-looking text cannot dispatch an action.
 
 ## Verification
 
@@ -55,8 +96,14 @@ control/shutdown. The existing native OpenTUI/production transport/Rust workflow
 now also calls all six explorer methods, including actual untracked no-index
 diff and binary detection, in its Linux/macOS/Windows CI lanes. Local macOS
 runtime passed; other platform results require the PR's own exact-head CI.
+The UI slice adds actual F8/filter/file/content/diff/blame/find/return input to
+that same production workflow. Native wide/narrow tests verify Markdown output,
+full blame-message scrolling, safe paste and preserved review selection. Store
+tests cover direct byte jumps, paged/stale inventory, provider switches, disposed
+reads, unavailable backend and malformed replies. Twenty-two native explorer
+Storybook frames cover wide/narrow tree, previews, find and unavailable states.
 
 Existing desktop component/parser tests, shared raster regression tests, core
 and CLI gates remain required. No provider HTTP, credentials, actual agent or
-private profile is needed for these proofs. #359 remains open for native tree,
-navigation, find presentation and the actual external-editor lifecycle proof.
+private profile is needed for these proofs. #359 remains open for the actual
+external-editor lifecycle proof and final parity assessment.

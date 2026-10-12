@@ -101,7 +101,7 @@ describe("qualified repository preview contract", () => {
     const found = {
       request: find,
       total: 1,
-      matches: [{ startUtf16: 2, endUtf16: 7, line: 1, columnUtf16: 2 }],
+      matches: [{ startUtf16: 2, endUtf16: 7, startByte: 2, endByte: 7, line: 1, columnUtf16: 2 }],
       nextOffset: null,
     };
     expect(validExploreResult("RepositoryExploreFindPage", found, find)).toBe(true);

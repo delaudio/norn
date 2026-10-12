@@ -865,3 +865,43 @@ Plan 0053 completion prepared after implementation `e4264db`, effective only on 
   could imply premature completion despite conditional wording. No move or
   workaround performed. Safer flow: retain0068 in todo for the source PR, then
   reconcile actual merge proof and move only after verified integration.
+
+
+## 2026-10-12 — verified379merge, plan0069claim
+
+- PR379 actually MERGEDb15d80bf2c2f275e22c68a100fd1ca2124c4542d at11:48:19Z.
+  Five CI38243490575 checks SUCCESS on766fa6c084f24079580eacf0fa91cf948f37838c;
+  actual native Linux/macOS/Windows explorer reads +review/cancel/restart PASS.
+  Source48271cf and pending-evidence766fa6c preserved; no retry/bypass.
+- Reconcile0068 only now, after actual source completion; no pre-merge move or
+  workaround of automatic rejection. Rootmain ff synced; privatefile/stash intact.
+- Claim0069 before code in isolated issue-359-native-explorer-ui onactual379:
+  paged native tree, bounded previews, complete blame/find presentation, escaped
+  controls, generation/focus/return and explicit configured-path semantics. Editor
+  lifecycle remains explicit follow-up before359closure. #359/#294 open;
+  maintainer305/306/357closures preserved; ADR0020 stays Accepted untilcutover.
+
+- Editorial baseline correction before code: configured_repo_path only trims
+  explicitlocalPath; no clone-directory fallback exists there. Remove the draft's
+  inferred discovery scope; retain exact configured source/path proof.
+
+## 2026-10-12 — plan0069 native explorer source prepared
+
+- Independent F8 ExplorerStore/panel over real qualified Rust readers; 32-row
+  inventory, explicit filters/folders/status, pinned32KiB content/diff windows,
+  viewport and horizontal navigation, complete blame detail keyboard scrolling,
+  bundled native Markdown source/render toggle and direct UTF8-byte find jumps.
+  Full context/generation fences, escaped display and inert/256-byte safe paste.
+- Matched strict protocol now includes original byte match bounds alongside
+  UTF16 positions; backend capabilities fence incompatible UI/backend pairs.
+  No explorer mutation/editor/agent/provider publication authority introduced.
+- Real owned OpenTUI/production stdio/Rust workflow covers F8/filter/file/modes/
+  find/return preserving selection/focus/scroll. Added22native Storybook scenes
+  at120/50cols; Markdown waits for actual heading/body rather than blank startup.
+- Local763core+2existingignored/76stdio/6CLI/5onboarding/3binary PASS; allfeatures
+  Clippy/fmt, root123+tooling/typecheck/lint/build, protocol/noGUI/Archgate17/audit
+  PASS. UI240tests/187frames/Storybook/typecheck PASS. React Doctor changed UI
+  reports no diagnostics, score66. Final exact-head3OS CI/actualmerge pending.
+- Keep0069 in todo until actual source squash. #359/#294 remain open for editor
+  lifecycle/finalparity and remainingepic. ADR0020 remains Accepted; preserve
+  maintainerclosures/rootprivatefile/userstash. No Norn code review/delegation.

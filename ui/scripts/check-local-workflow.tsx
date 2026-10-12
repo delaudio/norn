@@ -263,6 +263,61 @@ try {
   try {
     await first.until(() => first.store.getSnapshot().localInfo !== null, "Current capture");
     assert.equal(first.store.getSnapshot().localInfo!.snapshot.repository.repo, "workflow");
+    const selectedBeforeExplorer = first.store.getSnapshot();
+    first.renderer.mockInput.pressKey(KeyCodes.F8);
+    await first.until(
+      () => first.renderer.captureCharFrame().includes("FILES · github owned/workflow"),
+      "Native explorer opened",
+    );
+    first.renderer.mockInput.pressKey("/");
+    await first.tick();
+    await first.renderer.mockInput.pasteBracketedText("same.txt");
+    first.renderer.mockInput.pressEnter();
+    await first.until(
+      () => first.renderer.captureCharFrame().includes("1 files · same.txt"),
+      "Native explorer filtered",
+    );
+    first.renderer.mockInput.pressEnter();
+    await first.until(
+      () => first.renderer.captureCharFrame().includes("unstaged"),
+      "Native explorer content",
+    );
+    first.renderer.mockInput.pressKey("2");
+    await first.until(
+      () => first.renderer.captureCharFrame().includes("+unstaged"),
+      "Native explorer diff",
+    );
+    first.renderer.mockInput.pressKey("3");
+    await first.until(
+      () =>
+        first.renderer.captureCharFrame().includes("BLAME · same.txt") &&
+        first.renderer.captureCharFrame().includes(blame.lines[0]!.shortSha),
+      "Native explorer blame",
+    );
+    first.renderer.mockInput.pressKey("1");
+    await first.until(
+      () =>
+        first.renderer.captureCharFrame().includes("CONTENT · same.txt") &&
+        first.renderer.captureCharFrame().includes("unstaged"),
+      "Native explorer text for find",
+    );
+    first.renderer.mockInput.pressKey("f", { ctrl: true });
+    await first.tick();
+    await first.renderer.mockInput.pasteBracketedText("unstaged");
+    first.renderer.mockInput.pressEnter();
+    await first.until(
+      () => first.renderer.captureCharFrame().includes("Find unstaged · 1/1"),
+      "Native explorer byte find",
+    );
+    first.renderer.mockInput.pressEscape();
+    await first.until(() => !first.store.getSnapshot().explorerOpen, "Native explorer return");
+    assert.equal(first.store.getSnapshot().selectedPicker, selectedBeforeExplorer.selectedPicker);
+    assert.equal(first.store.getSnapshot().selectedFile, selectedBeforeExplorer.selectedFile);
+    assert.equal(first.store.getSnapshot().selectedFinding, selectedBeforeExplorer.selectedFinding);
+    assert.equal(first.store.getSnapshot().selectedThread, selectedBeforeExplorer.selectedThread);
+    assert.equal(first.store.getSnapshot().diffMode, selectedBeforeExplorer.diffMode);
+    assert.equal(first.store.getSnapshot().focus, selectedBeforeExplorer.focus);
+    assert.equal(first.store.getSnapshot().scrollRequest, selectedBeforeExplorer.scrollRequest);
     first.renderer.mockInput.pressKey(KeyCodes.F4);
     await first.until(() => !!first.store.getSnapshot().localForm?.options, "Source options");
     first.renderer.mockInput.pressKey(KeyCodes.ARROW_DOWN);

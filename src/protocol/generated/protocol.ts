@@ -2335,6 +2335,8 @@ export interface RepositoryExploreMatch {
   endUtf16: number;
   line: number;
   columnUtf16: number;
+  startByte: number;
+  endByte: number;
 }
 export interface ResponseError {
   type: "response";
