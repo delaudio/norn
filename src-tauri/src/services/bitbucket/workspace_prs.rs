@@ -1,4 +1,5 @@
 //! Bounded provider reads for the terminal workspace (ADR 0020, #357).
+mod approval;
 mod images;
 mod snapshots;
 use super::*;

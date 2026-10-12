@@ -19,19 +19,8 @@ fn valid_id(id: &str) -> bool {
             .all(|b| b.is_ascii_digit() || matches!(b, b'a'..=b'f'))
 }
 
-pub(crate) fn save(scope: &Scope, id: &str, metadata: &str, patch: &[u8]) -> Result<(), String> {
-    if !valid_id(id)
-        || metadata.is_empty()
-        || metadata.len() > METADATA_BYTES
-        || patch.len() > PATCH_BYTES
-    {
-        return Err(invalid());
-    }
-    let mut connection = publication_database()?;
-    let tx = connection
-        .transaction_with_behavior(TransactionBehavior::Immediate)
-        .map_err(|_| invalid())?;
-    let parent = tx.query_row(
+pub(crate) fn ensure_owner(connection: &Connection, scope: &Scope) -> Result<(), String> {
+    let parent = connection.query_row(
         "SELECT workspace, repo, pr_id, target_kind, CASE WHEN length(CAST(store_json AS BLOB)) <= 16777216 THEN store_json ELSE NULL END
          FROM ai_review_stores WHERE tenant_id='local' AND review_key=?1",
         [scope.key()], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, u32>(2)?, row.get::<_, String>(3)?, row.get::<_, Option<String>>(4)?))
@@ -53,7 +42,7 @@ pub(crate) fn save(scope: &Scope, id: &str, metadata: &str, patch: &[u8]) -> Res
             let empty =
                 serde_json::to_string(&AiReviewStoreData::default()).map_err(|_| invalid())?;
             upsert_review_json_for_connection(
-                &tx,
+                connection,
                 "local",
                 &scope.key(),
                 &scope.workspace,
@@ -67,6 +56,22 @@ pub(crate) fn save(scope: &Scope, id: &str, metadata: &str, patch: &[u8]) -> Res
             )?;
         }
     }
+    Ok(())
+}
+
+pub(crate) fn save(scope: &Scope, id: &str, metadata: &str, patch: &[u8]) -> Result<(), String> {
+    if !valid_id(id)
+        || metadata.is_empty()
+        || metadata.len() > METADATA_BYTES
+        || patch.len() > PATCH_BYTES
+    {
+        return Err(invalid());
+    }
+    let mut connection = publication_database()?;
+    let tx = connection
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .map_err(|_| invalid())?;
+    ensure_owner(&tx, scope)?;
     let existing: Option<String> = tx
         .query_row(
             "SELECT scope_key FROM provider_review_evidence WHERE evidence_id=?1",
