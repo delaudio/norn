@@ -47,6 +47,7 @@ export class FakeProviderTransport extends FakeBackendTransport {
   fault: "list" | "detail" | "user" | "snapshot" | null = null;
   private snapshotCounter = 0;
   approvalFault: "uncertain" | "rejected" | null = null;
+  approvalHeadSha = "a".repeat(40);
   approvalEntries = new Map<string, ProviderApprovalEntry>();
   private approvalTokens = new Map<string, ProviderApprovalProof>();
   private approvalCounter = 0;
@@ -120,14 +121,16 @@ export class FakeProviderTransport extends FakeBackendTransport {
           repositoryId: `owned-${request.repository.provider}-repo`,
           actor: { accountId: "owned-reviewer", displayName: "Owned reviewer" },
           title: `${request.repository.provider} change ${request.prId} 世界`,
-          headSha: "a".repeat(40),
+          headSha: this.approvalHeadSha,
           destinationSha: "b".repeat(40),
           sourceBranch: "feature",
           destinationBranch: "main",
           sourceRepository: null,
           state: "OPEN",
           draft: false,
-          alreadyApproved: this.approvalEntries.get(key)?.state === "approved",
+          alreadyApproved:
+            this.approvalEntries.get(key)?.state === "approved" &&
+            this.approvalEntries.get(key)?.proof.headSha === this.approvalHeadSha,
         };
         let entry = this.approvalEntries.get(key) ?? null;
         if (method.endsWith("preview")) {
@@ -164,7 +167,10 @@ export class FakeProviderTransport extends FakeBackendTransport {
           proof,
           entry,
           observedApproved: entry?.state === "approved",
-          outdated: false,
+          outdated:
+            !!entry &&
+            (entry.proof.headSha !== proof.headSha ||
+              entry.proof.destinationSha !== proof.destinationSha),
           localSaved: true,
         };
       }

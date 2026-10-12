@@ -30,8 +30,11 @@ test("approval preview is read-only; repeated confirmation sends once and uncert
     await Promise.all([store.confirmApproval(client), store.confirmApproval(client)]);
     expect(transport.calls.filter((c) => c.method.endsWith("confirm"))).toHaveLength(1);
     expect(store.getSnapshot().approvalResult?.entry?.state).toBe("uncertain");
+    transport.approvalHeadSha = "c".repeat(40);
     await store.approvalStatus(client, true);
     expect(transport.calls.at(-1)?.method).toBe("provider.approval.reconcile");
+    expect(store.getSnapshot().approvalResult?.outdated).toBe(true);
+    expect(store.getSnapshot().approvalResult?.entry?.proof.headSha).toBe("a".repeat(40));
     store.closeApproval();
     await store.previewApproval(client);
     expect(store.getSnapshot().approvalPreview?.approvalId).toBeNull();
@@ -110,6 +113,29 @@ test("client rejects foreign scope, actor and token assertions before exposing c
   }
   client.close();
 });
+test("confirmation receipt must match the captured actor and revision even after a remote send", async () => {
+  const transport = new FakeProviderTransport(),
+    client = new BackendClient(transport),
+    store = new ProviderStore();
+  store.load(client, repositories, []);
+  await settle();
+  await store.previewApproval(client);
+  const original = transport.request.bind(transport);
+  transport.request = async (method, params) => {
+    const value = await original(method, params);
+    if (!method.endsWith("confirm")) return value;
+    const proof = { ...(value.proof as Record<string, unknown>), headSha: "c".repeat(40) };
+    const entry = { ...(value.entry as Record<string, unknown>), proof };
+    return { ...value, proof, entry };
+  };
+  await store.confirmApproval(client);
+  expect(store.getSnapshot().approvalResult).toBeNull();
+  expect(store.getSnapshot().approvalError).toContain("does not match");
+  await store.confirmApproval(client);
+  expect(transport.calls.filter((c) => c.method.endsWith("confirm"))).toHaveLength(1);
+  store.dispose();
+  client.close();
+});
 for (const provider of ["github", "bitbucket"] as const)
   for (const width of [120, 50])
     test(`${provider} native approval keys require preview and ignore pasted confirmation at ${width} columns`, async () => {
@@ -169,3 +195,42 @@ for (const provider of ["github", "bitbucket"] as const)
         renderer.renderer.destroy();
       }
     });
+
+test("unknown confirmation response never renders an unsent preview after sending", async () => {
+  const transport = new FakeProviderTransport(),
+    client = new BackendClient(transport),
+    store = new ShellStore();
+  await store.connect(client);
+  const original = transport.request.bind(transport);
+  transport.request = async (method, params) => {
+    const result = await original(method, params);
+    if (method.endsWith("confirm")) throw new Error("Owned transport response lost.");
+    return result;
+  };
+  const renderer = await createTestRenderer({ width: 120, height: 30 }),
+    ui = mountApp(renderer.renderer, store, client);
+  const render = async () => {
+    for (let i = 0; i < 8; i++) {
+      await Bun.sleep(0);
+      await renderer.renderOnce();
+    }
+  };
+  try {
+    renderer.mockInput.pressKey(KeyCodes.F2);
+    await render();
+    renderer.mockInput.pressKey("a");
+    await render();
+    renderer.mockInput.pressKey("y");
+    await render();
+    expect(renderer.captureCharFrame()).toContain("Approval result unavailable.");
+    expect(renderer.captureCharFrame()).not.toContain("Preview only. Nothing is sent");
+    renderer.mockInput.pressKey("y");
+    await render();
+    expect(transport.calls.filter((c) => c.method.endsWith("confirm"))).toHaveLength(1);
+  } finally {
+    ui.unmount();
+    store.cancelSyntax();
+    client.close();
+    renderer.renderer.destroy();
+  }
+});

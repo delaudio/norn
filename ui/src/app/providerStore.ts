@@ -65,6 +65,7 @@ export interface ProviderSnapshot {
   approvalOpen: boolean;
   approvalBusy: boolean;
   approvalSending: boolean;
+  approvalAttempted: boolean;
   approvalPreview: ProviderApprovalPreview | null;
   approvalResult: ProviderApprovalResult | null;
   approvalError: string | null;
@@ -93,6 +94,7 @@ const initial = (): ProviderSnapshot => ({
   approvalOpen: false,
   approvalBusy: false,
   approvalSending: false,
+  approvalAttempted: false,
   approvalPreview: null,
   approvalResult: null,
   approvalError: null,
@@ -575,6 +577,7 @@ export class ProviderStore {
       approvalOpen: false,
       approvalBusy: false,
       approvalSending: false,
+      approvalAttempted: false,
       approvalPreview: null,
       approvalResult: null,
       approvalError: null,
@@ -603,6 +606,7 @@ export class ProviderStore {
       approvalOpen: true,
       approvalBusy: true,
       approvalSending: false,
+      approvalAttempted: false,
       approvalPreview: null,
       approvalResult: null,
       approvalError: null,
@@ -647,11 +651,13 @@ export class ProviderStore {
       approvalPreview: { ...preview, approvalId: null, expiresAt: null },
       approvalBusy: true,
       approvalSending: true,
+      approvalAttempted: true,
       approvalError: null,
     });
     try {
       const result = await client.providerApprovalConfirm(
         { request: preview.request, approvalId: preview.approvalId },
+        preview.proof,
         current,
       );
       if (current()) this.update({ approvalResult: result });

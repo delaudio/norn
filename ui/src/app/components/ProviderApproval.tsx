@@ -4,6 +4,8 @@ import type { ProviderSnapshot } from "../providerStore";
 import { theme } from "../theme";
 
 function approvalOutcome(state: ProviderSnapshot): string {
+  if (state.approvalSending)
+    return "Approval send is in progress. Await its result; do not send again.";
   const proof = state.approvalResult?.proof ?? state.approvalPreview?.proof;
   const entry = state.approvalResult?.entry ?? state.approvalPreview?.entry;
   const result = state.approvalResult;
@@ -20,6 +22,8 @@ function approvalOutcome(state: ProviderSnapshot): string {
       return "Provider rejected this attempt. Refresh the preview before another attempt.";
     return "Approval has not been verified.";
   }
+  if (state.approvalAttempted)
+    return "Approval result unavailable. Check provider status before sending again.";
   if (unresolved) return "An earlier send is unresolved. Verify status without sending again.";
   if (proof?.alreadyApproved) return "This reviewer already approved the current commit.";
   if (entry?.state === "approved")
@@ -28,6 +32,17 @@ function approvalOutcome(state: ProviderSnapshot): string {
     return "Approval is unavailable for a draft or closed PR.";
   return "Preview only. Nothing is sent until you confirm.";
 }
+function approvalContext(state: ProviderSnapshot) {
+  const proof = state.approvalResult?.proof ?? state.approvalPreview?.proof;
+  const entry = state.approvalResult?.entry ?? state.approvalPreview?.entry;
+  const previous =
+    entry &&
+    proof &&
+    (entry.proof.headSha !== proof.headSha || entry.proof.destinationSha !== proof.destinationSha)
+      ? entry.proof
+      : null;
+  return { proof, entry, previous };
+}
 export function ProviderApproval({
   state,
   scroll,
@@ -35,8 +50,7 @@ export function ProviderApproval({
   state: ProviderSnapshot;
   scroll: RefObject<ScrollBoxRenderable | null>;
 }) {
-  const proof = state.approvalResult?.proof ?? state.approvalPreview?.proof;
-  const entry = state.approvalResult?.entry ?? state.approvalPreview?.entry;
+  const { proof, entry, previous } = approvalContext(state);
   const confirmable = !!state.approvalPreview?.approvalId && !state.approvalBusy;
   const outcome = approvalOutcome(state);
   return (
@@ -93,6 +107,18 @@ export function ProviderApproval({
         <text flexShrink={0} fg={theme.warning}>
           {outcome}
         </text>
+        {previous ? (
+          <>
+            <text flexShrink={0} fg={theme.warning}>
+              The PR changed after this attempt. Its outcome remains tied to these previous commits.
+            </text>
+            <text flexShrink={0} fg={theme.muted}>{`Attempt head: ${previous.headSha}`}</text>
+            <text
+              flexShrink={0}
+              fg={theme.muted}
+            >{`Attempt destination: ${previous.destinationSha}`}</text>
+          </>
+        ) : null}
         {entry ? (
           <text
             flexShrink={0}

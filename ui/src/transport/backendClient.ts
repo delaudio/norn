@@ -8,6 +8,7 @@ import type {
   DraftTarget,
   ProviderApprovalConfirmParams,
   ProviderApprovalPreview,
+  ProviderApprovalProof,
   ProviderApprovalResult,
   ProviderBrowserResult,
   ProviderCurrentUser,
@@ -362,14 +363,43 @@ export class BackendClient {
   }
   providerApprovalConfirm(
     params: ProviderApprovalConfirmParams,
+    expected: ProviderApprovalProof,
     current: () => boolean = () => true,
   ) {
+    if (!validPublicationDTO("ProviderApprovalProof", expected))
+      return Promise.reject(new Error("Invalid approval preview."));
+    const signature = (proof: ProviderApprovalProof) =>
+      JSON.stringify([
+        proof.request.repository.provider,
+        proof.request.repository.workspace,
+        proof.request.repository.repo,
+        proof.request.prId,
+        proof.repositoryId,
+        proof.actor.accountId,
+        proof.actor.displayName,
+        proof.title,
+        proof.headSha,
+        proof.destinationSha,
+        proof.sourceBranch,
+        proof.destinationBranch,
+        proof.sourceRepository?.provider ?? null,
+        proof.sourceRepository?.workspace ?? null,
+        proof.sourceRepository?.repo ?? null,
+        proof.state,
+        proof.draft,
+      ]);
     return this.approvalRequest<ProviderApprovalResult>(
       "provider.approval.confirm",
       params,
       "ProviderApprovalResult",
       current,
-    );
+    ).then((result) => {
+      if (signature(result.proof) !== signature(expected))
+        throw new Error(
+          "Approval receipt does not match its preview. Check provider status before sending again.",
+        );
+      return result;
+    });
   }
   providerApprovalStatus(
     params: ProviderPrDetailParams,

@@ -888,6 +888,8 @@ async function providerScene(
     if (kind.includes("uncertain")) {
       transport.approvalFault = "uncertain";
       await providers.confirmApproval(client);
+      transport.approvalHeadSha = "c".repeat(40);
+      await providers.approvalStatus(client, false);
     }
   }
   if (kind === "detail") {

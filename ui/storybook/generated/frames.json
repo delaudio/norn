@@ -1460,7 +1460,7 @@
             "underline": false
           },
           {
-            "text": "Head: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "text": "Head: cccccccccccccccccccccccccccccccccccccccc",
             "width": 46,
             "fg": "rgba(238,238,238,1)",
             "bg": "rgba(10,10,10,1)",
@@ -1630,6 +1630,108 @@
             "underline": false
           },
           {
+            "text": "The PR changed after this attempt. Its outcome remains tied to these previous commits.",
+            "width": 86,
+            "fg": "rgba(224,175,104,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "                                 ",
+            "width": 33,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "Attempt head: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "width": 54,
+            "fg": "rgba(128,128,128,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "                                                                 ",
+            "width": 65,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "Attempt destination: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "width": 61,
+            "fg": "rgba(128,128,128,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "                                                          ",
+            "width": 58,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
             "text": "Local attempt 1: uncertain",
             "width": 26,
             "fg": "rgba(128,128,128,1)",
@@ -1642,48 +1744,6 @@
           {
             "text": "                                                                                             ",
             "width": 93,
-            "fg": "rgba(255,255,255,1)",
-            "bg": "rgba(10,10,10,1)",
-            "attributes": 0,
-            "bold": false,
-            "italic": false,
-            "underline": false
-          }
-        ]
-      },
-      {
-        "spans": [
-          {
-            "text": "                                                                                                                        ",
-            "width": 120,
-            "fg": "rgba(255,255,255,1)",
-            "bg": "rgba(10,10,10,1)",
-            "attributes": 0,
-            "bold": false,
-            "italic": false,
-            "underline": false
-          }
-        ]
-      },
-      {
-        "spans": [
-          {
-            "text": "                                                                                                                        ",
-            "width": 120,
-            "fg": "rgba(255,255,255,1)",
-            "bg": "rgba(10,10,10,1)",
-            "attributes": 0,
-            "bold": false,
-            "italic": false,
-            "underline": false
-          }
-        ]
-      },
-      {
-        "spans": [
-          {
-            "text": "                                                                                                                        ",
-            "width": 120,
             "fg": "rgba(255,255,255,1)",
             "bg": "rgba(10,10,10,1)",
             "attributes": 0,
@@ -2126,7 +2186,7 @@
             "underline": false
           },
           {
-            "text": "Head: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "text": "Head: cccccccccccccccccccccccccccccccccccccccc",
             "width": 46,
             "fg": "rgba(238,238,238,1)",
             "bg": "rgba(10,10,10,1)",
@@ -2398,6 +2458,210 @@
             "underline": false
           },
           {
+            "text": "The PR changed after this attempt. Its outcome ",
+            "width": 47,
+            "fg": "rgba(224,175,104,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "  ",
+            "width": 2,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "remains tied to these previous commits.",
+            "width": 39,
+            "fg": "rgba(224,175,104,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "          ",
+            "width": 10,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "Attempt head: ",
+            "width": 14,
+            "fg": "rgba(128,128,128,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "                                   ",
+            "width": 35,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "width": 40,
+            "fg": "rgba(128,128,128,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "         ",
+            "width": 9,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "Attempt destination: ",
+            "width": 21,
+            "fg": "rgba(128,128,128,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "                            ",
+            "width": 28,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "width": 40,
+            "fg": "rgba(128,128,128,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "         ",
+            "width": 9,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
             "text": "Local attempt 1: uncertain",
             "width": 26,
             "fg": "rgba(128,128,128,1)",
@@ -2410,90 +2674,6 @@
           {
             "text": "                       ",
             "width": 23,
-            "fg": "rgba(255,255,255,1)",
-            "bg": "rgba(10,10,10,1)",
-            "attributes": 0,
-            "bold": false,
-            "italic": false,
-            "underline": false
-          }
-        ]
-      },
-      {
-        "spans": [
-          {
-            "text": "                                                  ",
-            "width": 50,
-            "fg": "rgba(255,255,255,1)",
-            "bg": "rgba(10,10,10,1)",
-            "attributes": 0,
-            "bold": false,
-            "italic": false,
-            "underline": false
-          }
-        ]
-      },
-      {
-        "spans": [
-          {
-            "text": "                                                  ",
-            "width": 50,
-            "fg": "rgba(255,255,255,1)",
-            "bg": "rgba(10,10,10,1)",
-            "attributes": 0,
-            "bold": false,
-            "italic": false,
-            "underline": false
-          }
-        ]
-      },
-      {
-        "spans": [
-          {
-            "text": "                                                  ",
-            "width": 50,
-            "fg": "rgba(255,255,255,1)",
-            "bg": "rgba(10,10,10,1)",
-            "attributes": 0,
-            "bold": false,
-            "italic": false,
-            "underline": false
-          }
-        ]
-      },
-      {
-        "spans": [
-          {
-            "text": "                                                  ",
-            "width": 50,
-            "fg": "rgba(255,255,255,1)",
-            "bg": "rgba(10,10,10,1)",
-            "attributes": 0,
-            "bold": false,
-            "italic": false,
-            "underline": false
-          }
-        ]
-      },
-      {
-        "spans": [
-          {
-            "text": "                                                  ",
-            "width": 50,
-            "fg": "rgba(255,255,255,1)",
-            "bg": "rgba(10,10,10,1)",
-            "attributes": 0,
-            "bold": false,
-            "italic": false,
-            "underline": false
-          }
-        ]
-      },
-      {
-        "spans": [
-          {
-            "text": "                                                  ",
-            "width": 50,
             "fg": "rgba(255,255,255,1)",
             "bg": "rgba(10,10,10,1)",
             "attributes": 0,
@@ -4060,7 +4240,7 @@
             "underline": false
           },
           {
-            "text": "Head: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "text": "Head: cccccccccccccccccccccccccccccccccccccccc",
             "width": 46,
             "fg": "rgba(238,238,238,1)",
             "bg": "rgba(10,10,10,1)",
@@ -4264,6 +4444,108 @@
             "underline": false
           },
           {
+            "text": "The PR changed after this attempt. Its outcome remains tied to these previous commits.",
+            "width": 86,
+            "fg": "rgba(224,175,104,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "                                 ",
+            "width": 33,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "Attempt head: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "width": 54,
+            "fg": "rgba(128,128,128,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "                                                                 ",
+            "width": 65,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "Attempt destination: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "width": 61,
+            "fg": "rgba(128,128,128,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "                                                          ",
+            "width": 58,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
             "text": "Local attempt 1: uncertain",
             "width": 26,
             "fg": "rgba(128,128,128,1)",
@@ -4276,48 +4558,6 @@
           {
             "text": "                                                                                             ",
             "width": 93,
-            "fg": "rgba(255,255,255,1)",
-            "bg": "rgba(10,10,10,1)",
-            "attributes": 0,
-            "bold": false,
-            "italic": false,
-            "underline": false
-          }
-        ]
-      },
-      {
-        "spans": [
-          {
-            "text": "                                                                                                                        ",
-            "width": 120,
-            "fg": "rgba(255,255,255,1)",
-            "bg": "rgba(10,10,10,1)",
-            "attributes": 0,
-            "bold": false,
-            "italic": false,
-            "underline": false
-          }
-        ]
-      },
-      {
-        "spans": [
-          {
-            "text": "                                                                                                                        ",
-            "width": 120,
-            "fg": "rgba(255,255,255,1)",
-            "bg": "rgba(10,10,10,1)",
-            "attributes": 0,
-            "bold": false,
-            "italic": false,
-            "underline": false
-          }
-        ]
-      },
-      {
-        "spans": [
-          {
-            "text": "                                                                                                                        ",
-            "width": 120,
             "fg": "rgba(255,255,255,1)",
             "bg": "rgba(10,10,10,1)",
             "attributes": 0,
@@ -4654,8 +4894,28 @@
             "underline": false
           },
           {
-            "text": "                 ",
-            "width": 17,
+            "text": "               ",
+            "width": 15,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "█",
+            "width": 1,
+            "fg": "rgba(154,158,163,1)",
+            "bg": "rgba(37,37,39,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": " ",
+            "width": 1,
             "fg": "rgba(255,255,255,1)",
             "bg": "rgba(10,10,10,1)",
             "attributes": 0,
@@ -4688,8 +4948,28 @@
             "underline": false
           },
           {
-            "text": "                          ",
-            "width": 26,
+            "text": "                        ",
+            "width": 24,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "█",
+            "width": 1,
+            "fg": "rgba(154,158,163,1)",
+            "bg": "rgba(37,37,39,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": " ",
+            "width": 1,
             "fg": "rgba(255,255,255,1)",
             "bg": "rgba(10,10,10,1)",
             "attributes": 0,
@@ -4722,8 +5002,28 @@
             "underline": false
           },
           {
-            "text": "        ",
-            "width": 8,
+            "text": "      ",
+            "width": 6,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "█",
+            "width": 1,
+            "fg": "rgba(154,158,163,1)",
+            "bg": "rgba(37,37,39,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": " ",
+            "width": 1,
             "fg": "rgba(255,255,255,1)",
             "bg": "rgba(10,10,10,1)",
             "attributes": 0,
@@ -4746,7 +5046,7 @@
             "underline": false
           },
           {
-            "text": "Head: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "text": "Head: cccccccccccccccccccccccccccccccccccccccc",
             "width": 46,
             "fg": "rgba(238,238,238,1)",
             "bg": "rgba(10,10,10,1)",
@@ -4756,8 +5056,28 @@
             "underline": false
           },
           {
-            "text": "   ",
-            "width": 3,
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "█",
+            "width": 1,
+            "fg": "rgba(154,158,163,1)",
+            "bg": "rgba(37,37,39,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": " ",
+            "width": 1,
             "fg": "rgba(255,255,255,1)",
             "bg": "rgba(10,10,10,1)",
             "attributes": 0,
@@ -4790,8 +5110,28 @@
             "underline": false
           },
           {
-            "text": "                                    ",
-            "width": 36,
+            "text": "                                  ",
+            "width": 34,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "█",
+            "width": 1,
+            "fg": "rgba(154,158,163,1)",
+            "bg": "rgba(37,37,39,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": " ",
+            "width": 1,
             "fg": "rgba(255,255,255,1)",
             "bg": "rgba(10,10,10,1)",
             "attributes": 0,
@@ -4824,8 +5164,28 @@
             "underline": false
           },
           {
-            "text": "         ",
-            "width": 9,
+            "text": "       ",
+            "width": 7,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "█",
+            "width": 1,
+            "fg": "rgba(154,158,163,1)",
+            "bg": "rgba(37,37,39,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": " ",
+            "width": 1,
             "fg": "rgba(255,255,255,1)",
             "bg": "rgba(10,10,10,1)",
             "attributes": 0,
@@ -4858,8 +5218,28 @@
             "underline": false
           },
           {
-            "text": "                                   ",
-            "width": 35,
+            "text": "                                 ",
+            "width": 33,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "█",
+            "width": 1,
+            "fg": "rgba(154,158,163,1)",
+            "bg": "rgba(37,37,39,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": " ",
+            "width": 1,
             "fg": "rgba(255,255,255,1)",
             "bg": "rgba(10,10,10,1)",
             "attributes": 0,
@@ -4892,8 +5272,28 @@
             "underline": false
           },
           {
-            "text": "    ",
-            "width": 4,
+            "text": "  ",
+            "width": 2,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "█",
+            "width": 1,
+            "fg": "rgba(154,158,163,1)",
+            "bg": "rgba(37,37,39,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": " ",
+            "width": 1,
             "fg": "rgba(255,255,255,1)",
             "bg": "rgba(10,10,10,1)",
             "attributes": 0,
@@ -4926,8 +5326,28 @@
             "underline": false
           },
           {
-            "text": "       ",
-            "width": 7,
+            "text": "     ",
+            "width": 5,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "█",
+            "width": 1,
+            "fg": "rgba(154,158,163,1)",
+            "bg": "rgba(37,37,39,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": " ",
+            "width": 1,
             "fg": "rgba(255,255,255,1)",
             "bg": "rgba(10,10,10,1)",
             "attributes": 0,
@@ -4950,10 +5370,20 @@
             "underline": false
           },
           {
-            "text": "Bitbucket cannot pin an approval atomically to a",
-            "width": 48,
+            "text": "Bitbucket cannot pin an approval atomically to ",
+            "width": 47,
             "fg": "rgba(224,175,104,1)",
             "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "█",
+            "width": 1,
+            "fg": "rgba(154,158,163,1)",
+            "bg": "rgba(37,37,39,1)",
             "attributes": 0,
             "bold": false,
             "italic": false,
@@ -4994,8 +5424,28 @@
             "underline": false
           },
           {
-            "text": "          ",
-            "width": 10,
+            "text": "        ",
+            "width": 8,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "█",
+            "width": 1,
+            "fg": "rgba(154,158,163,1)",
+            "bg": "rgba(37,37,39,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": " ",
+            "width": 1,
             "fg": "rgba(255,255,255,1)",
             "bg": "rgba(10,10,10,1)",
             "attributes": 0,
@@ -5028,8 +5478,28 @@
             "underline": false
           },
           {
-            "text": "                                       ",
-            "width": 39,
+            "text": "                                     ",
+            "width": 37,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(37,37,39,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": " ",
+            "width": 1,
             "fg": "rgba(255,255,255,1)",
             "bg": "rgba(10,10,10,1)",
             "attributes": 0,
@@ -5062,8 +5532,18 @@
             "underline": false
           },
           {
-            "text": "  ",
-            "width": 2,
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(37,37,39,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": " ",
+            "width": 1,
             "fg": "rgba(255,255,255,1)",
             "bg": "rgba(10,10,10,1)",
             "attributes": 0,
@@ -5096,8 +5576,28 @@
             "underline": false
           },
           {
-            "text": "                                          ",
-            "width": 42,
+            "text": "                                        ",
+            "width": 40,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(37,37,39,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": " ",
+            "width": 1,
             "fg": "rgba(255,255,255,1)",
             "bg": "rgba(10,10,10,1)",
             "attributes": 0,
@@ -5120,8 +5620,106 @@
             "underline": false
           },
           {
-            "text": "Local attempt 1: uncertain",
-            "width": 26,
+            "text": "The PR changed after this attempt. Its outcome ",
+            "width": 47,
+            "fg": "rgba(224,175,104,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(37,37,39,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "remains tied to these previous commits.",
+            "width": 39,
+            "fg": "rgba(224,175,104,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "        ",
+            "width": 8,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(37,37,39,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "Attempt head: ",
+            "width": 14,
             "fg": "rgba(128,128,128,1)",
             "bg": "rgba(10,10,10,1)",
             "attributes": 0,
@@ -5130,8 +5728,28 @@
             "underline": false
           },
           {
-            "text": "                       ",
-            "width": 23,
+            "text": "                                 ",
+            "width": 33,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(37,37,39,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": " ",
+            "width": 1,
             "fg": "rgba(255,255,255,1)",
             "bg": "rgba(10,10,10,1)",
             "attributes": 0,
@@ -5144,8 +5762,48 @@
       {
         "spans": [
           {
-            "text": "                                                  ",
-            "width": 50,
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "width": 40,
+            "fg": "rgba(128,128,128,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "       ",
+            "width": 7,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(37,37,39,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": " ",
+            "width": 1,
             "fg": "rgba(255,255,255,1)",
             "bg": "rgba(10,10,10,1)",
             "attributes": 0,
@@ -5158,36 +5816,48 @@
       {
         "spans": [
           {
-            "text": "                                                  ",
-            "width": 50,
+            "text": " ",
+            "width": 1,
             "fg": "rgba(255,255,255,1)",
             "bg": "rgba(10,10,10,1)",
             "attributes": 0,
             "bold": false,
             "italic": false,
             "underline": false
-          }
-        ]
-      },
-      {
-        "spans": [
+          },
           {
-            "text": "                                                  ",
-            "width": 50,
+            "text": "Attempt destination: ",
+            "width": 21,
+            "fg": "rgba(128,128,128,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "                          ",
+            "width": 26,
             "fg": "rgba(255,255,255,1)",
             "bg": "rgba(10,10,10,1)",
             "attributes": 0,
             "bold": false,
             "italic": false,
             "underline": false
-          }
-        ]
-      },
-      {
-        "spans": [
+          },
           {
-            "text": "                                                  ",
-            "width": 50,
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(37,37,39,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": " ",
+            "width": 1,
             "fg": "rgba(255,255,255,1)",
             "bg": "rgba(10,10,10,1)",
             "attributes": 0,
