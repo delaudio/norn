@@ -4098,13 +4098,52 @@ pub fn save_review_json(workspace: &str, repo: &str, id: u32, json: &str) -> Res
     save_review_json_for_tenant("local", workspace, repo, id, json, false)
 }
 
+pub(crate) fn load_provider_review_json(
+    scope: &crate::services::review_scope::Scope,
+) -> Result<Option<String>, String> {
+    let conn = open()?;
+    let row = conn.query_row(
+        "SELECT workspace, repo, pr_id, target_kind, length(CAST(store_json AS BLOB)), CASE WHEN length(CAST(store_json AS BLOB)) <= 16777216 THEN store_json ELSE NULL END FROM ai_review_stores WHERE tenant_id = 'local' AND review_key = ?1",
+        [scope.key()], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, u32>(2)?, row.get::<_, String>(3)?, row.get::<_, usize>(4)?, row.get::<_, Option<String>>(5)?))
+    ).optional().map_err(|_| "Cannot read saved native review.".to_string())?;
+    let Some((workspace, repo, id, kind, bytes, json)) = row else {
+        return Ok(None);
+    };
+    if workspace != scope.workspace
+        || repo != scope.repo
+        || id != scope.pr_id
+        || kind != "pull_request"
+        || bytes > 16 * 1024 * 1024
+    {
+        return Err("Saved native review scope or storage limit is invalid.".into());
+    }
+    Ok(json)
+}
+
+pub(crate) fn save_provider_review_json(
+    scope: &crate::services::review_scope::Scope,
+    json: &str,
+) -> Result<(), String> {
+    if json.len() > 16 * 1024 * 1024 {
+        return Err("Saved native review exceeds its storage limit.".into());
+    }
+    save_review_json_for_key(
+        "local",
+        &scope.key(),
+        &scope.workspace,
+        &scope.repo,
+        scope.pr_id,
+        json,
+        false,
+    )
+}
+
 /// Apply a narrow local review update to the latest SQLite row inside one
 /// immediate transaction. This prevents publication metadata from overwriting
 /// chat/run updates that committed before this operation.
 pub(crate) fn update_local_review_json(
-    workspace: &str,
-    repo: &str,
-    id: u32,
+    scope: &crate::services::review_scope::Scope,
+    run_id: &str,
     update: impl FnOnce(
         &str,
         &Connection,
@@ -4114,10 +4153,45 @@ pub(crate) fn update_local_review_json(
     let transaction = connection
         .transaction_with_behavior(TransactionBehavior::Immediate)
         .map_err(|_| "Cannot lock saved review metadata.".to_string())?;
-    let key = review_key(workspace, repo, id);
-    let original: String = transaction.query_row(
-        "SELECT store_json FROM ai_review_stores WHERE tenant_id = 'local' AND review_key = ?1 AND target_kind = 'pull_request' AND length(CAST(store_json AS BLOB)) <= 16777216", [&key], |row| row.get(0)
-    ).optional().map_err(|_| "Cannot read saved review metadata.".to_string())?.ok_or("Saved review metadata is unavailable or exceeds its update limit.")?;
+    // Resolve ownership under the same write lock as the update. Reading the
+    // projected store first would race migration or duplicate ownership.
+    let mut candidates = Vec::new();
+    for key in [
+        scope.key(),
+        review_key(&scope.workspace, &scope.repo, scope.pr_id),
+    ] {
+        let original: Option<String> = transaction.query_row(
+            "SELECT store_json FROM ai_review_stores WHERE tenant_id = 'local' AND review_key = ?1 AND workspace = ?2 AND repo = ?3 AND pr_id = ?4 AND target_kind = 'pull_request' AND length(CAST(store_json AS BLOB)) <= 16777216", params![key, scope.workspace, scope.repo, scope.pr_id], |row| row.get(0)
+        ).optional().map_err(|_| "Cannot read saved review metadata.".to_string())?;
+        if let Some(original) = original {
+            let store: crate::services::review::AiReviewStoreData = serde_json::from_str(&original)
+                .map_err(|_| "Saved review metadata is invalid.".to_string())?;
+            if key == scope.key() {
+                scope.validate_owned(&store)?;
+            }
+            let matching = store
+                .review_runs
+                .iter()
+                .filter(|run| {
+                    run.id == run_id
+                        && run.provider == scope.provider
+                        && run.workspace == scope.workspace
+                        && run.repo == scope.repo
+                        && run.pr_id == scope.pr_id
+                })
+                .count();
+            if matching > 1 {
+                return Err("Saved review identity is ambiguous.".into());
+            }
+            if matching == 1 {
+                candidates.push((key, original));
+            }
+        }
+    }
+    if candidates.len() != 1 {
+        return Err("Saved review owning row is unavailable or ambiguous.".into());
+    }
+    let (key, original) = candidates.pop().expect("one candidate checked");
     let (updated, feedback) = update(&original, &transaction)?;
     if updated.len() > 16 * 1024 * 1024
         || serde_json::from_str::<serde_json::Value>(&updated).is_err()
@@ -4129,9 +4203,18 @@ pub(crate) fn update_local_review_json(
     }
     if let Some(event) = feedback {
         if event.identity.tenant_id != "local"
-            || event.identity.workspace != workspace
-            || event.identity.repo != repo
-            || event.identity.pr_id != u64::from(id)
+            || event.identity.workspace != scope.workspace
+            || event.identity.repo != scope.repo
+            || event.identity.pr_id != u64::from(scope.pr_id)
+            || event.identity.provider
+                != match scope.provider {
+                    crate::services::review::ReviewProvider::Github => {
+                        PullRequestReviewEventProvider::Github
+                    }
+                    crate::services::review::ReviewProvider::Bitbucket => {
+                        PullRequestReviewEventProvider::Bitbucket
+                    }
+                }
         {
             return Err("Reviewer feedback does not match this saved review.".into());
         }
@@ -4431,13 +4514,13 @@ pub fn cleanup_stale_reviews(keep_keys: &[String]) -> Result<(), String> {
     let conn = open()?;
     if keep_keys.is_empty() {
         conn.execute(
-            "DELETE FROM ai_review_stores WHERE tenant_id = 'local' AND target_kind = 'pull_request'",
+            "DELETE FROM ai_review_stores WHERE tenant_id = 'local' AND target_kind = 'pull_request' AND review_key NOT LIKE 'provider:%'",
             [],
         )
             .map_err(|e| e.to_string())?;
     } else {
         let mut stmt = conn
-            .prepare("SELECT review_key FROM ai_review_stores WHERE tenant_id = 'local' AND target_kind = 'pull_request'")
+            .prepare("SELECT review_key FROM ai_review_stores WHERE tenant_id = 'local' AND target_kind = 'pull_request' AND review_key NOT LIKE 'provider:%'")
             .map_err(|e| e.to_string())?;
         let rows = stmt
             .query_map([], |row| row.get::<_, String>(0))
@@ -4446,7 +4529,7 @@ pub fn cleanup_stale_reviews(keep_keys: &[String]) -> Result<(), String> {
             let key = row.map_err(|e| e.to_string())?;
             if !keep_keys.contains(&key) {
                 conn.execute(
-                    "DELETE FROM ai_review_stores WHERE tenant_id = 'local' AND target_kind = 'pull_request' AND review_key = ?1",
+                    "DELETE FROM ai_review_stores WHERE tenant_id = 'local' AND target_kind = 'pull_request' AND review_key NOT LIKE 'provider:%' AND review_key = ?1",
                     params![key],
                 )
                 .map_err(|e| e.to_string())?;
@@ -5216,6 +5299,151 @@ mod tests {
         std::env::remove_var("NORN_DATA_DIR");
         let _ = fs::remove_dir_all(&dir);
         result
+    }
+
+    #[test]
+    fn native_provider_rows_and_publication_updates_preserve_legacy_ownership() {
+        use crate::services::review::{AiReviewStoreData, ReviewProvider};
+        use crate::services::review_scope::{
+            self,
+            tests::{fixture, scope},
+        };
+        with_test_data_dir("provider-review-ownership", |_| {
+            let gh = scope(ReviewProvider::Github);
+            let bb = scope(ReviewProvider::Bitbucket);
+            let legacy = fixture(ReviewProvider::Github, "legacy-run", "legacy-thread");
+            let original = serde_json::to_string(&legacy).unwrap();
+            save_review_json("shared", "project", 42, &original).unwrap();
+            // Keep the original legacy row byte-for-byte while creating native owners.
+            review_scope::save(
+                &gh,
+                &fixture(ReviewProvider::Github, "native-gh", "gh-thread"),
+            )
+            .unwrap();
+            review_scope::save(
+                &bb,
+                &fixture(ReviewProvider::Bitbucket, "native-bb", "bb-thread"),
+            )
+            .unwrap();
+            assert_eq!(
+                load_review_json("shared", "project", 42).unwrap().unwrap(),
+                original
+            );
+            assert_eq!(
+                review_scope::load(&gh).unwrap().unwrap().review_runs.len(),
+                2
+            );
+            assert_eq!(
+                review_scope::load(&bb).unwrap().unwrap().review_runs.len(),
+                1
+            );
+            update_local_review_json(&bb, "native-bb", |json, _| {
+                let mut store: AiReviewStoreData = serde_json::from_str(json).unwrap();
+                store.review_runs[0].summary_markdown = Some("Published native".into());
+                Ok((serde_json::to_string(&store).unwrap(), None))
+            })
+            .unwrap();
+            assert_eq!(
+                load_review_json("shared", "project", 42).unwrap().unwrap(),
+                original
+            );
+            assert_eq!(
+                review_scope::load(&gh).unwrap().unwrap().review_runs[1]
+                    .summary_markdown
+                    .as_deref(),
+                Some("Owned review")
+            );
+            assert_eq!(
+                review_scope::load(&bb).unwrap().unwrap().review_runs[0]
+                    .summary_markdown
+                    .as_deref(),
+                Some("Published native")
+            );
+            assert!(update_local_review_json(&gh, "native-bb", |_, _| panic!(
+                "foreign update must not run"
+            ))
+            .is_err());
+            // Duplicate ownership is rejected within the transaction, before callback.
+            review_scope::save(&gh, &legacy).unwrap();
+            assert!(update_local_review_json(&gh, "legacy-run", |_, _| panic!(
+                "ambiguous update must not run"
+            ))
+            .is_err());
+            assert!(review_scope::load(&gh).is_err());
+        });
+    }
+
+    #[test]
+    fn legacy_cleanup_never_removes_native_provider_rows() {
+        use crate::services::review::ReviewProvider;
+        use crate::services::review_scope::{
+            self,
+            tests::{fixture, scope},
+        };
+        with_test_data_dir("provider-review-legacy-cleanup", |_| {
+            let gh = scope(ReviewProvider::Github);
+            let bb = scope(ReviewProvider::Bitbucket);
+            let original =
+                serde_json::to_string(&fixture(ReviewProvider::Github, "legacy", "thread"))
+                    .unwrap();
+            review_scope::save(
+                &gh,
+                &fixture(ReviewProvider::Github, "native-gh", "gh-thread"),
+            )
+            .unwrap();
+            review_scope::save(
+                &bb,
+                &fixture(ReviewProvider::Bitbucket, "native-bb", "bb-thread"),
+            )
+            .unwrap();
+            save_review_json("shared", "project", 42, &original).unwrap();
+            cleanup_stale_reviews(&["shared_project_42".into()]).unwrap();
+            assert!(load_review_json("shared", "project", 42).unwrap().is_some());
+            cleanup_stale_reviews(&["unrelated_repo_1".into()]).unwrap();
+            assert!(load_review_json("shared", "project", 42).unwrap().is_none());
+            cleanup_stale_reviews(&[]).unwrap();
+            assert_eq!(
+                review_scope::load(&gh).unwrap().unwrap().review_runs[0].id,
+                "native-gh"
+            );
+            assert_eq!(
+                review_scope::load(&bb).unwrap().unwrap().review_runs[0].id,
+                "native-bb"
+            );
+        });
+    }
+
+    #[test]
+    fn native_provider_reader_rejects_corrupt_row_scope_without_legacy_fallback() {
+        use crate::services::review::ReviewProvider;
+        use crate::services::review_scope::{
+            self,
+            tests::{fixture, scope},
+        };
+        with_test_data_dir("provider-review-corruption", |_| {
+            let gh = scope(ReviewProvider::Github);
+            review_scope::save(&gh, &fixture(ReviewProvider::Github, "run", "thread")).unwrap();
+            let connection = open().unwrap();
+            connection
+                .execute(
+                    "UPDATE ai_review_stores SET repo='foreign' WHERE review_key=?1",
+                    [gh.key()],
+                )
+                .unwrap();
+            assert!(review_scope::load(&gh).is_err());
+            connection.execute("UPDATE ai_review_stores SET repo='project', store_json='invalid' WHERE review_key=?1",[gh.key()]).unwrap();
+            assert!(review_scope::load(&gh).is_err());
+            let foreign =
+                serde_json::to_string(&fixture(ReviewProvider::Bitbucket, "run", "thread"))
+                    .unwrap();
+            connection
+                .execute(
+                    "UPDATE ai_review_stores SET store_json=?2 WHERE review_key=?1",
+                    params![gh.key(), foreign],
+                )
+                .unwrap();
+            assert!(review_scope::load(&gh).is_err());
+        });
     }
 
     fn cursor_identity() -> ReviewCursorIdentity {

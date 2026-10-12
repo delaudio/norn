@@ -1048,45 +1048,117 @@ fn review_targets_response() -> serde_json::Value {
             let Some(thread_id) = job.thread_id.as_deref() else {
                 continue;
             };
-            let Ok(Some(store)) = crate::services::review::load_ai_review_store_native(
-                &job.workspace,
-                &job.repo,
-                job.pr_id,
-            ) else {
-                continue;
-            };
-            let Some(run) = store.review_runs.iter().rev().find(|run| {
-                run.thread_id.as_deref() == Some(thread_id)
-                    && run.workspace == job.workspace
-                    && run.repo == job.repo
-                    && run.pr_id == job.pr_id
-                    && !run.id.is_empty()
-                    && run.id.len() <= 256
-            }) else {
-                continue;
-            };
-            let provider = match run.provider {
-                crate::services::review::ReviewProvider::Github => "github",
-                crate::services::review::ReviewProvider::Bitbucket => "bitbucket",
-            };
-            if !seen.insert((
-                provider.to_string(),
-                run.workspace.clone(),
-                run.repo.clone(),
-                run.pr_id,
-                run.id.clone(),
-            )) {
-                continue;
+            for provider in [
+                crate::services::review::ReviewProvider::Github,
+                crate::services::review::ReviewProvider::Bitbucket,
+            ] {
+                let Ok(Some(store)) =
+                    crate::services::review_scope::load(&crate::services::review_scope::Scope {
+                        provider,
+                        workspace: job.workspace.clone(),
+                        repo: job.repo.clone(),
+                        pr_id: job.pr_id,
+                    })
+                else {
+                    continue;
+                };
+                let Some(thread) = store.threads.iter().find(|thread| thread.id == thread_id)
+                else {
+                    continue;
+                };
+                let Some(run) = store.review_runs.iter().rev().find(|run| {
+                    run.thread_id.as_deref() == Some(thread_id)
+                        && run.workspace == job.workspace
+                        && run.repo == job.repo
+                        && run.pr_id == job.pr_id
+                        && !run.id.is_empty()
+                        && run.id.len() <= 256
+                }) else {
+                    continue;
+                };
+                let provider = match run.provider {
+                    crate::services::review::ReviewProvider::Github => "github",
+                    crate::services::review::ReviewProvider::Bitbucket => "bitbucket",
+                };
+                if !seen.insert((
+                    provider.to_string(),
+                    run.workspace.clone(),
+                    run.repo.clone(),
+                    run.pr_id,
+                    run.id.clone(),
+                )) {
+                    continue;
+                }
+                targets.push(json!({
+                    "provider": provider, "workspace": run.workspace, "repo": run.repo,
+                    "prId": run.pr_id, "runId": run.id,
+                    "title": thread.title.chars().take(256).collect::<String>(),
+                    "status": run.status,
+                }));
             }
-            targets.push(json!({
-                "provider": provider, "workspace": run.workspace, "repo": run.repo,
-                "prId": run.pr_id, "runId": run.id,
-                "title": job.pr_title.chars().take(256).collect::<String>(),
-                "status": run.status,
-            }));
         }
     }
     json!({ "targets": targets })
+}
+
+fn load_provider_review_store(
+    target: &TargetIdentity,
+) -> Result<Option<crate::services::review::AiReviewStoreData>, String> {
+    let TargetIdentity::Provider {
+        provider,
+        workspace,
+        repo,
+        pr_id: Some(pr_id),
+        ..
+    } = target
+    else {
+        return Ok(None);
+    };
+    crate::services::review_scope::load(&crate::services::review_scope::Scope {
+        provider: match provider {
+            ProviderKind::Github => crate::services::review::ReviewProvider::Github,
+            ProviderKind::Bitbucket => crate::services::review::ReviewProvider::Bitbucket,
+        },
+        workspace: workspace.clone(),
+        repo: repo.clone(),
+        pr_id: *pr_id,
+    })
+}
+
+fn require_legacy_inline_handoff(
+    target: &TargetIdentity,
+    run: &crate::services::review::ReviewRun,
+    thread: Option<&crate::services::review::AiReviewThread>,
+    repo_path: &Path,
+) -> Result<(), ProtocolError> {
+    let TargetIdentity::Provider {
+        provider,
+        workspace,
+        repo,
+        pr_id: Some(pr_id),
+        ..
+    } = target
+    else {
+        return Err(ProtocolError::new(
+            ProtocolErrorCode::TargetStale,
+            "Select a saved provider review.",
+        ));
+    };
+    crate::services::review_scope::require_legacy_inline_handoff(
+        &crate::services::review_scope::Scope {
+            provider: match provider {
+                ProviderKind::Github => crate::services::review::ReviewProvider::Github,
+                ProviderKind::Bitbucket => crate::services::review::ReviewProvider::Bitbucket,
+            },
+            workspace: workspace.clone(),
+            repo: repo.clone(),
+            pr_id: *pr_id,
+        },
+        run,
+        thread,
+        repo_path,
+    )
+    .map_err(|message| ProtocolError::new(ProtocolErrorCode::TargetStale, message))
 }
 
 /// Filter shared legacy storage by the complete saved run identity before
@@ -1156,16 +1228,36 @@ fn review_output_response(target: &TargetIdentity) -> Result<serde_json::Value, 
             "Select a stored pull-request review to copy its output.",
         ));
     };
-    let store = crate::services::review::load_ai_review_store_native(workspace, repo, *pr_id)
-        .map_err(|_| {
-            ProtocolError::new(
-                ProtocolErrorCode::Internal,
-                "Stored review output is unavailable.",
-            )
-        })?;
-    let run = select_review_run(store, run_id.as_deref()).ok_or_else(|| {
+    let store = load_provider_review_store(target).map_err(|_| {
         ProtocolError::new(
-            ProtocolErrorCode::NotFound,
+            ProtocolErrorCode::Internal,
+            "Stored review output is unavailable.",
+        )
+    })?;
+    let run = select_review_run(store, run_id.as_deref()).ok_or_else(|| {
+        let mismatch = run_id.as_deref().is_some_and(|id| {
+            crate::services::review_scope::foreign_run_exists(
+                &crate::services::review_scope::Scope {
+                    provider: match provider {
+                        ProviderKind::Github => crate::services::review::ReviewProvider::Github,
+                        ProviderKind::Bitbucket => {
+                            crate::services::review::ReviewProvider::Bitbucket
+                        }
+                    },
+                    workspace: workspace.clone(),
+                    repo: repo.clone(),
+                    pr_id: *pr_id,
+                },
+                id,
+            )
+            .unwrap_or(false)
+        });
+        ProtocolError::new(
+            if mismatch {
+                ProtocolErrorCode::TargetStale
+            } else {
+                ProtocolErrorCode::NotFound
+            },
             "Selected stored review was not found.",
         )
     })?;
@@ -1202,16 +1294,10 @@ fn review_output_response(target: &TargetIdentity) -> Result<serde_json::Value, 
 }
 
 fn review_threads_response(target: &TargetIdentity) -> Result<serde_json::Value, ProtocolError> {
-    let TargetIdentity::Provider {
-        workspace,
-        repo,
-        pr_id: Some(pr_id),
-        ..
-    } = target
-    else {
+    let TargetIdentity::Provider { pr_id: Some(_), .. } = target else {
         return Ok(json!({ "threads": [] }));
     };
-    let store = crate::services::review::load_ai_review_store_native(workspace, repo, *pr_id)
+    let store = load_provider_review_store(target)
         .map_err(|error| ProtocolError::new(ProtocolErrorCode::Internal, error))?
         .unwrap_or_default();
     let store = scoped_review_store(target, store)?;
@@ -1284,20 +1370,13 @@ fn provider_matches(kind: ProviderKind) -> config::ReviewProvider {
 /// Recent stored review runs for a target, most recent first (bounded).
 fn review_history_response(target: &TargetIdentity) -> Result<serde_json::Value, ProtocolError> {
     let runs = match target {
-        TargetIdentity::Provider {
-            workspace,
-            repo,
-            pr_id: Some(pr_id),
-            ..
-        } => {
-            let store =
-                crate::services::review::load_ai_review_store_native(workspace, repo, *pr_id)
-                    .map_err(|error| {
-                        ProtocolError::new(
-                            ProtocolErrorCode::Internal,
-                            format!("review store: {error}"),
-                        )
-                    })?;
+        TargetIdentity::Provider { pr_id: Some(_), .. } => {
+            let store = load_provider_review_store(target).map_err(|error| {
+                ProtocolError::new(
+                    ProtocolErrorCode::Internal,
+                    format!("review store: {error}"),
+                )
+            })?;
             let mut runs = scoped_review_store(target, store.unwrap_or_default())?.review_runs;
             runs.reverse();
             runs.into_iter()
@@ -1710,7 +1789,7 @@ fn browser_diff_state(target: &TargetIdentity) -> Result<WebDiffState, ProtocolE
             )
         })?;
         let files = changed_file_entries(&repo_path, Some((base.as_str(), head.as_str())))?;
-        let run = crate::services::review::load_ai_review_store_native(workspace, repo, *pr_id)
+        let run = load_provider_review_store(target)
             .map_err(|error| {
                 ProtocolError::new(
                     ProtocolErrorCode::Internal,
@@ -2310,10 +2389,9 @@ fn reviewed_range(target: &TargetIdentity) -> Result<Option<(String, String)>, P
     else {
         return Ok(None);
     };
-    let store = crate::services::review::load_ai_review_store_native(workspace, repo, *pr_id)
-        .map_err(|e| {
-            ProtocolError::new(ProtocolErrorCode::Internal, format!("review store: {e}"))
-        })?;
+    let store = load_provider_review_store(target).map_err(|e| {
+        ProtocolError::new(ProtocolErrorCode::Internal, format!("review store: {e}"))
+    })?;
     let Some(run) = select_review_run(store, run_id.as_deref()) else {
         return Ok(None);
     };
@@ -2559,20 +2637,16 @@ fn untracked_stats(repo_path: &Path, path: &str) -> (u64, u64) {
 fn findings_response(target: &TargetIdentity) -> Result<serde_json::Value, ProtocolError> {
     let findings = match target {
         TargetIdentity::Provider {
-            workspace,
-            repo,
-            pr_id: Some(pr_id),
+            pr_id: Some(_),
             run_id,
             ..
         } => {
-            let store =
-                crate::services::review::load_ai_review_store_native(workspace, repo, *pr_id)
-                    .map_err(|error| {
-                        ProtocolError::new(
-                            ProtocolErrorCode::Internal,
-                            format!("review store: {error}"),
-                        )
-                    })?;
+            let store = load_provider_review_store(target).map_err(|error| {
+                ProtocolError::new(
+                    ProtocolErrorCode::Internal,
+                    format!("review store: {error}"),
+                )
+            })?;
             let store = scoped_review_store(target, store.unwrap_or_default())?;
             select_review_run(Some(store), run_id.as_deref())
                 .map(|run| run.findings.into_iter().map(finding_json).collect())
@@ -3308,9 +3382,7 @@ fn start_inline_reply_session(
             "reviewed revisions are not available in the local checkout",
         ));
     }
-    let store_data = crate::services::review::load_ai_review_store_native(workspace, repo, *pr_id)
-        .ok()
-        .flatten();
+    let store_data = load_provider_review_store(target).ok().flatten();
     let run = select_review_run(store_data.clone(), run_id.as_deref());
     let thread_id = run
         .as_ref()
@@ -3325,7 +3397,19 @@ fn start_inline_reply_session(
     // resume session id, then the configured provider).
     let thread = store_data
         .as_ref()
-        .and_then(|data| data.threads.iter().find(|thread| thread.id == thread_id));
+        .and_then(|data| data.threads.iter().find(|thread| thread.id == thread_id))
+        .ok_or_else(|| {
+            ProtocolError::new(
+                ProtocolErrorCode::TargetStale,
+                "The selected review has no unambiguous saved conversation.",
+            )
+        })?;
+    require_legacy_inline_handoff(
+        target,
+        run.as_ref().expect("run with thread checked"),
+        Some(thread),
+        &repo_path,
+    )?;
     let (source_branch, destination_branch) = run
         .map(|run| (run.source_branch, run.destination_branch))
         .unwrap_or_else(|| ("source".to_string(), "destination".to_string()));
@@ -3357,10 +3441,11 @@ fn start_inline_reply_session(
         &diff,
     );
     let ai_provider = thread
-        .and_then(|thread| thread.ai_provider)
+        .ai_provider
         .or_else(|| {
             thread
-                .and_then(|thread| thread.claude_session_id.as_ref())
+                .claude_session_id
+                .as_ref()
                 .map(|_| config::AiProvider::Claude)
         })
         .unwrap_or_else(|| config::load().ai_provider);
@@ -3449,7 +3534,7 @@ fn fix_context(target: &TargetIdentity) -> Result<FixApproval, ProtocolError> {
     let repo_path = resolve_repo_path(target)
         .and_then(|path| path.canonicalize().ok())
         .ok_or_else(|| fix_error("The configured local clone is unavailable."))?;
-    let store = crate::services::review::load_ai_review_store_native(workspace, repo, *pr_id)
+    let store = load_provider_review_store(target)
         .map_err(fix_error)?
         .ok_or_else(|| fix_error("The saved review is unavailable."))?;
     let run = store
@@ -3650,8 +3735,7 @@ fn fix_state_response(target: &TargetIdentity) -> Result<serde_json::Value, Prot
     else {
         return Err(fix_error("Select a saved pull-request review."));
     };
-    let data = crate::services::review::load_ai_review_store_native(workspace, repo, *pr_id)
-        .map_err(fix_error)?;
+    let data = load_provider_review_store(target).map_err(fix_error)?;
     let thread_id = data
         .as_ref()
         .and_then(|data| data.review_runs.iter().find(|run| run.id == *run_id))
@@ -4013,10 +4097,17 @@ fn start_inline_session(target: &TargetIdentity) -> Result<InlineSession, Protoc
                     "failed to generate the reviewed diff",
                 )
             })?;
-            let run = crate::services::review::load_ai_review_store_native(workspace, repo, *pr_id)
+            let run = load_provider_review_store(target)
                 .ok()
                 .flatten()
                 .and_then(|store| select_review_run(Some(store), run_id.as_deref()));
+            let saved = run.as_ref().ok_or_else(|| {
+                ProtocolError::new(
+                    ProtocolErrorCode::TargetStale,
+                    "The selected saved review is unavailable.",
+                )
+            })?;
+            require_legacy_inline_handoff(target, saved, None, &repo_path)?;
             let (source_branch, destination_branch) = run
                 .map(|run| (run.source_branch, run.destination_branch))
                 .unwrap_or_else(|| ("source".to_string(), "destination".to_string()));

@@ -5,6 +5,7 @@ pub(crate) mod provider_snapshot;
 pub mod review;
 pub(crate) mod review_fix;
 pub mod review_prompt;
+pub mod review_scope;
 
 pub(crate) mod settings;
 pub(crate) mod workspace_auth;

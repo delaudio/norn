@@ -383,3 +383,68 @@ Plan 0053 completion prepared after implementation `e4264db`, effective only on 
 
 - Prepared plan 0057 receipt for feature `8f7c5cbdc914098a3b109991056e20486b129543`; effective only
   after exact-head CI and verified squash merge. ADR/epic completion not claimed.
+
+## 2026-10-12 — PR #368 shipped; claim plan 0058 review scope foundation
+
+- PR #368 squash merged at `1f9b3d3e0d491c2321817e21bd6f1944194665df`
+  after exact `af7f523dae68366f774400d4bddfb08dbfe25e0b` UI and verify success;
+  CI 38186484683, verify 12m58s. Plan 0057 prepared receipt is now effective.
+- Claimed 0058 on `issue-306-provider-review-scope` before code. Existing PR
+  storage/session keys omit provider; establish explicit native ownership before
+  cached evidence starts create new runs. Preserve legacy rows/contracts and
+  resolve transactional publication against actual owning provenance.
+- #357 maintainer closure remains preserved; retained work tracked by #306.
+  ADR 0020/full epic/platform/profile/install completion not claimed.
+
+## 2026-10-12 — plan 0058 provider ownership foundation, local gate complete
+
+- Native provider/length-framed repository/PR keys isolate saved rows and runtime
+  lookup/cancellation. Library exposes explicit native helpers; legacy CLI/Tauri
+  storage/session formats remain unchanged. New preview starts stay unavailable.
+- Native reads combine only proven legacy and owned native runs, reject foreign
+  or duplicate ownership, and omit ambiguous/unproved legacy conversations.
+  Native conversation updates do not duplicate legacy mutable run ownership.
+- Backend discovery/output/history/findings/reply/fix evidence readers, finding
+  staging and publication source signatures use scoped projections. Confirmed
+  finding publication resolves exactly one owning row inside the write lock;
+  full SQL/JSON scope and feedback provider checked. Legacy byte preservation,
+  corrupt scope and two-provider stdio restart exercised in owned fixtures.
+- Root typecheck/123 tests plus tooling/lint/protocol, UI typecheck/172 tests/
+  1057 asserts/115 unchanged frames, Rust 704 core plus two existing ignored/
+  54 stdio/six CLI/five onboarding/three bin tests, fmt/strict all-feature/all-
+  target Clippy/no-GUI, Archgate 12/12 and docflow audit pass. Final targeted
+  transaction/publication tests rerun after SQL scope predicate change. No React
+  changes, no Norn review, real credentials/provider writes or profile reads.
+- Two existing stdio stale-target expectations initially failed after projection;
+  foreign explicit IDs now retain targetStale without exposing foreign payload.
+- No #306/epic/ADR completion or exact-evidence review-start delivery claimed.
+
+- Prepared plan 0058 receipt for feature `48cafd4e21e144dc6cbad1f049fc717866d560fb`;
+  effective only after exact-head CI and verified squash merge. ADR Accepted.
+
+- Pre-merge compatibility inspection found legacy stale-review cleanup could
+  delete native rows because its keep keys omit provider. Limit that legacy
+  cleanup to legacy keys. Owned regression covers matching/nonmatching/empty
+  keep lists and both native providers. Complete Rust gate rerun: 705 core plus
+  two existing ignored, 54 stdio, six CLI, five onboarding, three bin tests;
+  strict all-feature/all-target Clippy passes. Replacing PR #369 head requires
+  fresh exact-head CI; the prior running head cannot authorize merge.
+
+- A further pre-merge seam check found the old inline reply could recover an
+  ambiguous raw legacy thread despite projection removing it. Require proved
+  conversation presence and exact legacy run/conversation/configured provider/
+  clone before the old inline handoff. Native-owned/replaced context stays read
+  accessible but cannot silently enter that legacy agent seam. Full qualified
+  inline execution follows in 0059; no capability retirement is inferred.
+- Owned real-engine stdio regression covers ambiguous legacy thread, native
+  conversation replacing legacy, native-owned run and mismatched first provider
+  configuration. Fake CLI marker proves no spawn; saved bytes remain identical.
+  Existing prompt/reference/resume tests pass. The first regression attempt used
+  simulated review.start (and could not prove handoff); corrected fixture pins
+  real engine with owned fake CLI. Guard checks configured clone directly and
+  never invokes clone autodiscovery during provenance preflight.
+
+- Final handoff gate passes: 705 Rust core plus two existing ignored/55 stdio/
+  six CLI/five onboarding/three bin tests, strict all-feature/all-target Clippy,
+  fmt/no-GUI, Archgate12/12 and docflow audit. Frontend gate remains unchanged
+  (root123, UI172/1057 assertions/115 frames), no React source edits.

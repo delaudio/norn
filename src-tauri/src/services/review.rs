@@ -2558,6 +2558,13 @@ pub fn get_ai_review_run_state_native(
     clone_inline_review_state(store, &pr_key(workspace, repo, id))
 }
 
+pub fn get_provider_ai_review_run_state_native(
+    store: &AiReviewRunStore,
+    scope: &super::review_scope::Scope,
+) -> Option<AiReviewRunState> {
+    clone_inline_review_state(store, &scope.key())
+}
+
 pub fn get_local_ai_review_run_state_native(
     store: &AiReviewRunStore,
     workspace: &str,
@@ -6398,9 +6405,16 @@ pub(crate) fn acknowledge_draft_publication(
         finding_fingerprint: reference.finding_fingerprint.clone(),
     };
     review_storage::update_local_review_json(
-        &entry.comment.scope.workspace,
-        &entry.comment.scope.repo,
-        entry.comment.scope.pr_id,
+        &super::review_scope::Scope {
+            provider: match entry.comment.scope.provider {
+                ConfigReviewProvider::Github => ReviewProvider::Github,
+                ConfigReviewProvider::Bitbucket => ReviewProvider::Bitbucket,
+            },
+            workspace: entry.comment.scope.workspace.clone(),
+            repo: entry.comment.scope.repo.clone(),
+            pr_id: entry.comment.scope.pr_id,
+        },
+        &reference.review_run_id,
         |original, connection| {
             let latest = review_storage::get_finding_feedback_state_from(connection, &target)?;
             publication_update_json(original, entry, &latest)
@@ -6862,6 +6876,13 @@ pub fn cancel_inline_review_native(
     id: u32,
 ) -> Result<AiReviewRunState, String> {
     cancel_inline_review_for_key(store, &pr_key(workspace, repo, id))
+}
+
+pub fn cancel_provider_inline_review_native(
+    store: &AiReviewRunStore,
+    scope: &super::review_scope::Scope,
+) -> Result<AiReviewRunState, String> {
+    cancel_inline_review_for_key(store, &scope.key())
 }
 
 /// Request cancellation of a running local inline review.
@@ -7814,6 +7835,31 @@ fn review_provider_for_repo(workspace: &str, repo: &str) -> ReviewProvider {
         ConfigReviewProvider::Bitbucket => ReviewProvider::Bitbucket,
         ConfigReviewProvider::Github => ReviewProvider::Github,
     }
+}
+
+pub(crate) fn legacy_inline_context_matches(
+    scope: &super::review_scope::Scope,
+    repo_path: &Path,
+) -> bool {
+    let Some(expected) = repo_path.canonicalize().ok() else {
+        return false;
+    };
+    config::load()
+        .repos
+        .iter()
+        .find(|entry| entry.workspace == scope.workspace && entry.repo == scope.repo)
+        .is_some_and(|entry| {
+            let provider = match entry.provider {
+                ConfigReviewProvider::Github => ReviewProvider::Github,
+                ConfigReviewProvider::Bitbucket => ReviewProvider::Bitbucket,
+            };
+            provider == scope.provider
+                && entry
+                    .local_path
+                    .as_deref()
+                    .and_then(|path| Path::new(path).canonicalize().ok())
+                    == Some(expected)
+        })
 }
 
 #[cfg(test)]
@@ -9108,6 +9154,42 @@ Fix: invalidate the query after the mutation succeeds."#;
         }))
         .expect("legacy numeric event id");
         assert_eq!(event.remote_comment_id.as_deref(), Some("42"));
+    }
+
+    #[test]
+    fn native_provider_sessions_and_cancellation_are_independent() {
+        use crate::services::review_scope::tests::scope;
+        let store = AiReviewRunStore::default();
+        let gh = scope(ReviewProvider::Github);
+        let bb = scope(ReviewProvider::Bitbucket);
+        for target in [&gh, &bb] {
+            begin_inline_review_run(
+                &store,
+                &target.key(),
+                "Owned".into(),
+                "thread".into(),
+                AiReviewTurnKind::Initial,
+                None,
+                None,
+            )
+            .unwrap();
+        }
+        assert!(super::get_ai_review_run_state_native(&store, "shared", "project", 42).is_none());
+        super::cancel_provider_inline_review_native(&store, &gh).unwrap();
+        assert_eq!(
+            super::get_provider_ai_review_run_state_native(&store, &gh)
+                .unwrap()
+                .status,
+            AiReviewRunStatus::Cancelled
+        );
+        assert_eq!(
+            super::get_provider_ai_review_run_state_native(&store, &bb)
+                .unwrap()
+                .status,
+            AiReviewRunStatus::Running
+        );
+        assert!(super::cancel_provider_inline_review_native(&store, &gh).is_err());
+        super::cancel_provider_inline_review_native(&store, &bb).unwrap();
     }
 
     #[test]
