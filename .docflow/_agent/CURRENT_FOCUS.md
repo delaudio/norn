@@ -33,7 +33,9 @@ Git is authoritative. Durable history lives in WORKLOG and plan/done.
   review/cancel/restart. Linux/Windows explorer runtime requires own exactheadCI.
   New10native unit/ownedGit tests include >50k inventory/>8MiB patch refusal;
   4clienttests reject foreign echo/UTF8/continuation/page/row inconsistencies.
-- Next: source commit, prepared plan0068 receipt, focused PR own finalheadCI and
+- Source48271cf prepared; plan0068 pending evidence stays in todo until actual
+  CI/verifiedmerge. Auto-review refused premature todo-to-done; no workaround.
+  Next: focused PR own finalheadCI and
   verified squash; then claim native tree/find/editor UI only after actualmerge.
   #359/#294 remain open; no inferred UI/editor parity from this API slice.
 - Preserve maintainer-closed305/306/357. ADR0020 Accepted until full cutover.

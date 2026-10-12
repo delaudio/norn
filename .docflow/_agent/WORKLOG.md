@@ -857,3 +857,11 @@ Plan 0053 completion prepared after implementation `e4264db`, effective only on 
 - Prepared source/receipt are not actual completion. Plan0068 only becomes
   shipped after own exact-final-head CI and actual squash to currentmain.
   #359 stays open until tree/find/editor UI proof; ADR0020 stays Accepted.
+
+- Source commit `48271cfefd0beb9374dc71775fccf513f1846346` prepared; conditional plan0068 receipt effective only
+  after exact-final-head CI and actual verified squash. Next slice not claimed.
+
+- Automatic approval review rejected pre-merge git mv todo-to-done because it
+  could imply premature completion despite conditional wording. No move or
+  workaround performed. Safer flow: retain0068 in todo for the source PR, then
+  reconcile actual merge proof and move only after verified integration.

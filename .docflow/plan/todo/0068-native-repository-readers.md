@@ -79,5 +79,26 @@ slice does not close #359 before its native tree/find/editor UI proof is merged.
 - Claimed by: default-agent, 2026-10-12, single writer.
 - Branch: issue-359-native-repository-readers.
 - Location: isolated /private/tmp/norn-native-repository-readers on actual378main.
-- Blockers: implementation/local gates/own exact-head CI/verified squash merge.
+- Blockers: own exact-final-head CI and actual verified squash merge; implementation/local gates pass.
 - Stopped:
+
+## Pending integration evidence — not shipped
+
+This plan remains in todo until actual verified integration. It becomes
+complete only when the PR's
+exact final head passes all required CI, including the actual Linux/macOS/
+Windows native workflow, and that head is squash-merged to currentmain.
+
+- Source commit: `48271cfefd0beb9374dc71775fccf513f1846346`.
+- Base: actual PR378 squash8cdd00768eba9b162dd08d6b15717188e77dd455.
+- Local PASS:763core+2existingignored,76stdio,6CLI,5onboarding,3binary;
+  root123+tooling/typecheck/lint/build/Archgate17/protocol/audit/noGUI;
+  UI232/1454/165nativeframes/typecheck/Storybook; strictallfeaturesClippy/fmt.
+  Doctor100/noissues on changed transport files. Actual owned macOS native
+  workflow PASS including all six explorer reads plus review/cancel/restart.
+- Native source/data/stricttransport slice complete locally. #359/#294 remain
+  open until retained native tree/find/editor navigation and actual owned
+  external-editor lifecycle proof are separately implemented and merged.
+- ADR0020 remains Accepted until full verified cutover; no new ADR number/status.
+
+Implemented source: `48271cfefd0beb9374dc71775fccf513f1846346` (effective after exact-head CI and actual verified squash).
