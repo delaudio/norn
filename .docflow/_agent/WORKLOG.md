@@ -579,3 +579,13 @@ Plan 0053 completion prepared after implementation `e4264db`, effective only on 
 - Remaining explicit PR approval/profile catalog/editor/full parity/recovery/
   platform/install/cutover unwaived. No Norn review/live provider writes/private
   data/releases. Exact next-head CI and verified PR squash merge still required.
+
+## 2026-10-12 — claim native explicit PR approval plan0062
+
+- #372 fixed648e253 UI passed; CI38198661868 verify running, no merge claim.
+- Claimed0062 before code in `/private/tmp/norn-provider-approval`, single owner.
+  Scope: retained human PR approval, read-only preview, explicit native actor/
+  pin/scope confirmation, durable pre-POST journal and read-only uncertain-write
+  recovery. No clone/AI prerequisite or mixing with staged comment publication.
+- Rebase after verified predecessor squash; local gates/exact next CI/verified
+  PR merge required. No Norn review/live provider writes/private profiles/releases.
