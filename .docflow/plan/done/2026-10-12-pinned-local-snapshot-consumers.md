@@ -107,5 +107,30 @@ baseline, rather than expanding #358 to unrelated unshipped backlog.
 - Claimed by: default-agent, 2026-10-12, single writer.
 - Branch: issue-358-pinned-local-consumers.
 - Location: isolated /private/tmp/norn-local-pinned-consumers on actual377main.
-- Blockers: implementation/local gates/own final-head CI/verified squash merge.
+- Blockers: exact final-head platform CI and verified squash merge.
 - Stopped:
+
+## Prepared completion receipt — conditional on CI and actual merge
+
+Implementation source: e34758fc77d1fef309e11321b37ea233fa5a1d30.
+This receipt becomes effective only when its final branch head passes required CI
+and all three native workflow lanes and is actually squash merged to main.
+No issue or epic is complete from this prepared receipt alone.
+
+Owned local proof:753core+2existingignored/75stdio/6CLI/5onboarding/3binary;
+strict allfeatures/alltargets Clippy/fmt/corecheck/noGUI; root123+tooling,
+typecheck/lint/build/protocol/Archgate17/audit; UI228/1433/165frames/typecheck/
+Storybook build. Native production-transport/Rust/OpenTUI fake-agent workflow
+passes on macOS, including current-repo CLI, source/base/layers, pinned images,
+review/findings/cancel and restart after root replacement. Three-OS CI pending.
+Twenty owned local service tests cover immutable image sides, rename/delete,
+quota/legacy/corrupt/symlink/oversized behavior and saved page continuity. Existing
+authenticated browser tests plus real saved-image HTTP stdio test preserve
+session/nonce/origin isolation. Legacy Local public routes reject before writes.
+
+Doctor65/11 DOM warnings target OpenTUI flexShrink/truncate, supported by installed
+Renderable/TextBuffer declarations and actual native frames, unsuppressed.
+Known format2/schema20 rollback coupling remains a packaging gate. Qualified local
+reply/fix and global legacy history remain retained follow-ups. Maintainer305/306/
+357 closures preserved; ADR0020 Accepted until actual full cutover. No private
+profiles/credentials/provider write/actual agent/release/user stash mutation.
