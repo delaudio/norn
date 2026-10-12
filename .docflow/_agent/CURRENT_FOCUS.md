@@ -16,6 +16,12 @@ Git is authoritative. Durable history lives in WORKLOG and plan/done.
   Windows ConPTY witness/driver prepared but unobserved; Linux/Windows and full
   gates/PR/actualmerge remain required. Root discovery now precedes work-tree
   pinning; browsing accepts configured nested paths, review capture stays strict.
+- PR381 initialhead3fe8a38 exposed GTK dev-dependency activation, an
+  overbroad Windows adapter-test target and startup timing. Correct optional
+  mock dependency/--lib lanes and explicit busy/startup readiness; preserve
+  CLI binaries across desktop library tests and bound the owned CLI probe.
+  Local finalUI250/1580,195frames, four PTY cases, full765core/dev-noGUI,
+  desktopIPC4 and owned general workflow pass; corrected-head CI pending.
 - Keep0070 todo until actual verified merge. #359/#294 remain open pending
   editor/fullparity; preserve maintainer305/306/357closures; ADR0020 Accepted
   until fullcutover. No private profiles/credentials/providerwrites/actualagents.

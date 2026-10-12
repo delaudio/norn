@@ -1409,7 +1409,6 @@ export class ShellStore {
           : Promise.resolve([]),
       ]);
       this.update({
-        status: "ready",
         serverVersion: ready.serverVersion,
         repositories,
         selected: 0,
@@ -1448,6 +1447,7 @@ export class ShellStore {
         await this.openLocalComparison(client, { kind: "current" });
         await this.applyLocalComparison(client);
       } else await this.loadSnapshot(client, this.state.generation);
+      if (this.getSnapshot().status !== "closed") this.update({ status: "ready" });
     } catch (error) {
       this.update({ status: "error", error: message(error), diffLoading: false });
     }

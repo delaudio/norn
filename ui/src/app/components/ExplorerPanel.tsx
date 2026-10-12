@@ -285,7 +285,9 @@ export function ExplorerPanel({
         1 text · 2 diff · 3 blame · Ctrl-F find · v MD
       </text>
       <text height={1} flexShrink={0} fg={theme.muted} truncate>
-        o open · O terminal · r refresh · m settings
+        {editorBusy
+          ? "Workspace busy · wait before opening an editor"
+          : "o open · O terminal · r refresh · m settings"}
       </text>
       <text height={1} flexShrink={0} fg={theme.muted} truncate>
         F8/Esc return to review · q quit

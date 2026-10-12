@@ -192,7 +192,7 @@ pub(crate) fn run_child(value: &str) -> Result<i32, String> {
     #[cfg(unix)]
     let mut terminal = Terminal::open()?;
     #[cfg(windows)]
-    let terminal = Terminal::open()?;
+    let _terminal_guard = Terminal::open()?;
     if !parent_is_backend(params.parent) {
         #[cfg(unix)]
         if let Some(group) = params.previous_group.filter(|g| *g > 0) {

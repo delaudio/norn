@@ -190,7 +190,7 @@ try {
       "--allow-provider-diff",
       "--json",
     ],
-    { cwd: repo, env, stdout: "pipe", stderr: "pipe" },
+    { cwd: repo, env, stdout: "pipe", stderr: "pipe", timeout: 60_000 },
   );
   assert.equal(cliReview.exitCode, 0, cliReview.stderr.toString());
   assert.equal(JSON.parse(cliReview.stdout.toString()).status, "succeeded");

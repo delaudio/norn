@@ -37,7 +37,7 @@ try {
   AwaitOwned { $Session.Output.Contains('--owned ü.txt') } 'F8 inventory did not render'
   $Session.Send("`r")
   AwaitOwned { $Session.Output.Contains('owned line one') } 'Selected source did not render'
-  Start-Sleep -Milliseconds 1000
+  AwaitOwned { $Session.Output.Contains('o open') } 'Workspace did not finish initial loading'
   $Session.Send('O')
   AwaitOwned { $Session.Output.Contains('OWNED_EDITOR_READY') } 'Editor did not acquire real console handles'
   if (!(Test-Path (Join-Path $Editors 'changed-modes.txt'))) {throw 'Editor did not change native console modes'}

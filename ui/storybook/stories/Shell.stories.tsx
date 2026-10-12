@@ -371,3 +371,8 @@ export const RepositoryEditorUnavailable: Story = {
 export const CompactRepositoryEditorUnavailable: Story = {
   args: { frameId: "explorer-editor-unavailable-50x20" },
 };
+
+export const RepositoryEditorBusy: Story = { args: { frameId: "explorer-editor-busy-120x30" } };
+export const CompactRepositoryEditorBusy: Story = {
+  args: { frameId: "explorer-editor-busy-50x20" },
+};

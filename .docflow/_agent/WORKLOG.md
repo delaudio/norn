@@ -937,3 +937,38 @@ Plan 0053 completion prepared after implementation `e4264db`, effective only on 
   76stdio/6CLI/5onboarding/noGUI, Archgate17/audit/Clippy pass including final adapter-test
   rerun; Doctor17changed/untrackedfiles no diagnostics, score66.
 - Keep0070 todo and #359/#294 open pending all3OS exact-head CI/actualmerge.
+
+
+### PR381 first CI head3fe8a38 — native test dependency correction
+
+- CI38262444809 Linux built the no-GUI binaries and passed the existing owned
+  native workflow; the new adapter library test failed because the unconditional
+  Tauri dev dependency activated GTK/WebKit on the native-only runner.
+- Move Tauri mock support onto its existing optional desktop dependency and
+  include dev edges in the no-GUI verifier. Desktop/all-feature tests retain
+  the test feature; core/editor tests no longer activate Tauri at all.
+- Local exact adapter tests and strict all-feature Clippy pass; cargo tree with
+  normal/build/dev edges reports Tauri absent. Actual3OS terminal proof remains
+  pending the corrected source head. No retry/bypass or premature completion.
+
+- Remaining first-head results: Windows failed by compiling unrelated Unix-only
+  backend integration tests; scope the native adapter test to --lib. macOS
+  reached real terminal smoke but opening raced startup snapshot work. Keep
+  status connecting through initial reads, show busy editor controls and wait
+  for real availability instead of a one-second pause. Own startup regression,
+  UI250/1580,195frames/Storybook and all4 macOS PTY cases pass after correction;
+  retained desktop IPC4 smoke tests and full765core/noGUI-dev-edge gate pass.
+
+- Local general-workflow diagnosis: the retained desktop smoke command built
+  every default-feature binary and overwrote target/debug/norn with a GUI-only
+  build. The owned workflow child48528 then launched the GUI instead of command
+  routing; terminate only that verified child of48494. No profile contents were
+  inspected. Restrict the desktop smoke command to --lib (same four tests), add
+  a 60-second owned CLI probe limit, rebuild the matching no-default pair before
+  rerunning. Make/just recipe names and forwarding remain unchanged.
+
+- Final correction verification: desktop --lib lane retains IPC4 and no longer
+  overwrites CLI artifacts; matched no-default pair/general native workflow
+  passes. UI250/1580,195frames/Storybook, strict Clippy, core765+2ignored and
+  dev-inclusive noGUI gate pass; Doctor18files no diagnostics/score66. Keep plan
+  pending and obtain all5 checks on the corrected head before actual merge.

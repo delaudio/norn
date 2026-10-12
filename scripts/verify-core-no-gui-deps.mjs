@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 // Verifies that the Tauri/Ratatui-free engine build does not pull a GUI or
-// terminal toolkit into its active dependency tree. Fails if the dependency
+// terminal toolkit into its active dependency tree, including core tests. Fails if the dependency
 // inspection itself fails, so CI cannot pass on an unverified tree.
 
 import { execFileSync } from "node:child_process";
@@ -19,7 +19,7 @@ try {
       "src-tauri/Cargo.toml",
       "--no-default-features",
       "-e",
-      "normal,build",
+      "normal,build,dev",
     ],
     { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
   );

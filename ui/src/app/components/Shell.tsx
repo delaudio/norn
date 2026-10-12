@@ -1314,6 +1314,10 @@ export function Shell({ store, client, quit }: ShellProps) {
         editorAvailable={state.editorAvailable}
         editorBusy={
           state.status !== "ready" ||
+          state.localForm?.loading ||
+          state.localForm?.capturing ||
+          state.snapshotLoading ||
+          state.savedLocal?.loading ||
           state.operation?.state === "running" ||
           state.operation?.state === "pending"
         }

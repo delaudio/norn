@@ -1101,7 +1101,7 @@ const scenes: Scene[] = [
       },
     })),
   ),
-  ...(["launched", "failed", "unavailable"] as const).flatMap((kind) =>
+  ...(["launched", "failed", "unavailable", "busy"] as const).flatMap((kind) =>
     [120, 50].map((cols) => ({
       id: `explorer-editor-${kind}-${cols}x${cols === 120 ? 30 : 20}`,
       cols,
@@ -1122,6 +1122,7 @@ const scenes: Scene[] = [
               store={explorer}
               client={client}
               editorAvailable={kind !== "unavailable"}
+              editorBusy={kind === "busy"}
               width={cols}
               height={cols === 120 ? 30 : 20}
               onClose={() => explorer.dispose()}

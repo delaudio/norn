@@ -41,10 +41,7 @@ with tempfile.TemporaryDirectory(prefix='norn-owned-editor-pty-') as owned:
         output.clear(); os.write(master,b'\x1b[19~')
         wait(lambda: source.name.encode() in output,'F8 explorer inventory did not render')
         os.write(master,b'\r'); wait(lambda: b'owned line one' in output,'Selected source did not render')
-        # Let the already-issued startup snapshot reads complete before the
-        # explicitly exclusive editor action. No provider/agent work is started.
-        quiet = time.monotonic() + 1
-        while time.monotonic() < quiet: pump()
+        wait(lambda: b'o open' in output,'Workspace did not finish initial loading')
         output.clear(); os.write(master,b'O')
         wait(lambda: b'OWNED_EDITOR_READY' in output,'Actual editor did not acquire the terminal')
         assert (editors/'changed-modes.txt').is_file(), 'Editor did not change real terminal modes'
