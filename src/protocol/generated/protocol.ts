@@ -556,6 +556,12 @@ export type Request =
       id: RequestId;
       method: "repository.operation.cancel";
       params: RepositoryOperationStatusParams;
+    }
+  | {
+      type: "request";
+      id: RequestId;
+      method: "review.jobs";
+      params: ReviewJobsParams;
     };
 export type RequestId = string;
 /**
@@ -1334,6 +1340,10 @@ export interface RepositoryOperationStatusParams {
   context: RepositoryExploreContext;
   operationId: string;
 }
+export interface ReviewJobsParams {
+  limit?: number;
+  offset?: number;
+}
 export interface ResponseOk {
   type: "response";
   id: RequestId;
@@ -1402,7 +1412,8 @@ export interface ResponseOk {
     | RepositoryOperationPage
     | RepositoryOperationPrepared
     | RepositoryOperationApplied
-    | RepositoryOperationStatus;
+    | RepositoryOperationStatus
+    | ReviewJobsResult;
 }
 export interface DiffFileResult {
   target: TargetIdentity;
@@ -2563,6 +2574,26 @@ export interface RepositoryOperationStatus {
   request: RepositoryOperationStatusParams;
   operation: RepositoryOperation;
   cancelRequested: boolean;
+}
+export interface ReviewJobsResult {
+  jobs: ReviewJobSummary[];
+  offset: number;
+}
+export interface ReviewJobSummary {
+  id: string;
+  workspace: string;
+  repo: string;
+  prId: number;
+  prTitle: string;
+  sourceBranch: string;
+  destinationBranch: string;
+  status: string;
+  trigger: string;
+  threadId?: string | null;
+  error?: string | null;
+  createdAt: string;
+  startedAt?: string | null;
+  finishedAt?: string | null;
 }
 export interface ResponseError {
   type: "response";

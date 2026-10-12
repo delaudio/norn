@@ -187,6 +187,23 @@ export interface ReviewRunSummary {
   findingsCount: number;
 }
 
+export interface ReviewJobSummary {
+  id: string;
+  workspace: string;
+  repo: string;
+  prId: number;
+  prTitle: string;
+  sourceBranch: string;
+  destinationBranch: string;
+  status: string;
+  trigger: string;
+  threadId: string | null;
+  error: string | null;
+  createdAt: string;
+  startedAt: string | null;
+  finishedAt: string | null;
+}
+
 export interface ReviewThreadSummary {
   id: string;
   title: string;
@@ -1832,6 +1849,20 @@ export class BackendClient {
   async reviewHistory(target: TargetIdentity): Promise<ReviewRunSummary[]> {
     const result = await this.transport.request("review.history", { target });
     return (result.runs as ReviewRunSummary[]) ?? [];
+  }
+
+  async reviewJobs(options: { limit?: number; offset?: number } = {}): Promise<{
+    jobs: ReviewJobSummary[];
+    offset: number;
+  }> {
+    const result = await this.transport.request("review.jobs", {
+      ...(options.limit === undefined ? {} : { limit: options.limit }),
+      ...(options.offset === undefined ? {} : { offset: options.offset }),
+    });
+    return {
+      jobs: (result.jobs as ReviewJobSummary[]) ?? [],
+      offset: (result.offset as number) ?? 0,
+    };
   }
 
   async reviewThreads(target: TargetIdentity): Promise<ReviewThreadSummary[]> {

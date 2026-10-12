@@ -19,6 +19,7 @@ export interface FakeTransportOptions {
   repositories?: Array<Record<string, unknown>>;
   targets?: Array<Record<string, unknown>>;
   history?: Array<Record<string, unknown>>;
+  jobs?: Array<Record<string, unknown>>;
   threads?: Array<Record<string, unknown>>;
   files?: Array<Record<string, unknown>>;
   findings?: Array<Record<string, unknown>>;
@@ -410,6 +411,8 @@ export class FakeBackendTransport implements BackendTransport {
         return { targets: this.options.targets ?? [] };
       case "review.history":
         return { runs: this.options.history ?? [] };
+      case "review.jobs":
+        return { jobs: this.options.jobs ?? [], offset: params.offset ?? 0 };
       case "review.threads":
         return { threads: this.options.threads ?? [] };
       case "review.output":

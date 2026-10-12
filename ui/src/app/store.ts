@@ -42,6 +42,7 @@ import type {
   FixPreview,
   FixState,
   RepositorySummary,
+  ReviewJobSummary,
   ReviewRunSummary,
   ReviewTarget,
   ReviewThreadSummary,
@@ -223,6 +224,7 @@ export interface ShellSnapshot {
   findingGroup: FindingGroup;
   selectedFinding: number;
   history: ReviewRunSummary[];
+  jobs: ReviewJobSummary[];
   threads: ReviewThreadSummary[];
   selectedThread: number;
   conversationOpen: boolean;
@@ -320,6 +322,7 @@ const INITIAL: ShellSnapshot = {
   findingGroup: "none",
   selectedFinding: 0,
   history: [],
+  jobs: [],
   threads: [],
   selectedThread: 0,
   conversationOpen: false,
@@ -3028,6 +3031,23 @@ export class ShellStore {
       }
     } catch (error) {
       if (fix.generation === this.state.generation) this.update({ error: message(error) });
+    }
+  }
+
+  /// Load the bounded global review history and surface a summary.
+  async loadJobs(client: BackendClient): Promise<void> {
+    try {
+      const { jobs } = await client.reviewJobs({ limit: 50 });
+      const latest = jobs[0];
+      this.update({
+        jobs,
+        notice:
+          jobs.length === 0
+            ? "No review history."
+            : `Review history: ${jobs.length} job(s). Latest ${latest?.status ?? ""} ${latest?.workspace ?? ""}/${latest?.repo ?? ""}#${latest?.prId ?? ""}`,
+      });
+    } catch (error) {
+      this.update({ error: message(error) });
     }
   }
 
