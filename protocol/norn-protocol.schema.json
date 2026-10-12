@@ -241,7 +241,8 @@
         "publication.reconcile",
         "comments.list",
         "workspace.scopes",
-        "review.jobs"
+        "review.jobs",
+        "review.metrics.closed"
       ]
     },
     "DiffFileParams": {
@@ -7969,6 +7970,160 @@
           "minimum": 0
         }
       }
+    },
+    "ClosedPrCount": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "key",
+        "count"
+      ],
+      "properties": {
+        "key": {
+          "type": "string"
+        },
+        "count": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "ClosedPrRiskSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "hasAiReview",
+        "impact",
+        "totalFindings",
+        "highOrCriticalFindings",
+        "severityCounts",
+        "categoryCounts"
+      ],
+      "properties": {
+        "hasAiReview": {
+          "type": "boolean"
+        },
+        "impact": {
+          "type": "string"
+        },
+        "totalFindings": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "highOrCriticalFindings": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "severityCounts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ClosedPrCount"
+          }
+        },
+        "categoryCounts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ClosedPrCount"
+          }
+        }
+      }
+    },
+    "ClosedPrMetric": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "workspace",
+        "repo",
+        "prId",
+        "title",
+        "authorDisplayName",
+        "state",
+        "sourceBranch",
+        "destinationBranch",
+        "createdOn",
+        "updatedOn",
+        "additions",
+        "deletions",
+        "filesChanged",
+        "diffstatCached",
+        "risk",
+        "syncedAt"
+      ],
+      "properties": {
+        "workspace": {
+          "type": "string"
+        },
+        "repo": {
+          "type": "string"
+        },
+        "prId": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "title": {
+          "type": "string"
+        },
+        "authorDisplayName": {
+          "type": "string"
+        },
+        "authorAccountId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "state": {
+          "type": "string"
+        },
+        "sourceBranch": {
+          "type": "string"
+        },
+        "destinationBranch": {
+          "type": "string"
+        },
+        "createdOn": {
+          "type": "string"
+        },
+        "updatedOn": {
+          "type": "string"
+        },
+        "additions": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "deletions": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "filesChanged": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "diffstatCached": {
+          "type": "boolean"
+        },
+        "risk": {
+          "$ref": "#/definitions/ClosedPrRiskSummary"
+        },
+        "syncedAt": {
+          "type": "string"
+        }
+      }
+    },
+    "ClosedPrMetricsResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "metrics"
+      ],
+      "properties": {
+        "metrics": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ClosedPrMetric"
+          }
+        }
+      }
     }
   },
   "oneOf": [
@@ -10263,6 +10418,30 @@
               "$ref": "#/definitions/ReviewJobsParams"
             }
           }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "type": {
+              "const": "request"
+            },
+            "id": {
+              "$ref": "#/definitions/RequestId"
+            },
+            "method": {
+              "const": "review.metrics.closed"
+            },
+            "params": {
+              "$ref": "#/definitions/EmptyResult"
+            }
+          }
         }
       ]
     },
@@ -10482,6 +10661,9 @@
             },
             {
               "$ref": "#/definitions/ReviewJobsResult"
+            },
+            {
+              "$ref": "#/definitions/ClosedPrMetricsResult"
             }
           ]
         }

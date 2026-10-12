@@ -561,6 +561,12 @@ pub enum Request {
         id: String,
         params: crate::services::review_profiles::Params,
     },
+    #[serde(rename = "review.metrics.closed")]
+    ReviewClosedMetrics {
+        id: String,
+        #[serde(default)]
+        params: EmptyParams,
+    },
     #[serde(rename = "review.jobs")]
     ReviewJobs {
         id: String,
@@ -717,6 +723,7 @@ impl Request {
             | Self::ReviewProfiles { id, .. }
             | Self::ReviewHistory { id, .. }
             | Self::ReviewJobs { id, .. }
+            | Self::ReviewClosedMetrics { id, .. }
             | Self::ReviewThreads { id, .. }
             | Self::ReviewOutput { id, .. }
             | Self::BrowserOpen { id, .. }
@@ -814,6 +821,7 @@ impl Request {
             Self::ReviewProfiles { .. } => "review.profiles",
             Self::ReviewHistory { .. } => "review.history",
             Self::ReviewJobs { .. } => "review.jobs",
+            Self::ReviewClosedMetrics { .. } => "review.metrics.closed",
             Self::ReviewThreads { .. } => "review.threads",
             Self::ReviewOutput { .. } => "review.output",
             Self::BrowserOpen { .. } => "browser.open",
@@ -1164,6 +1172,7 @@ impl Request {
             Self::RepositoryStatus { .. }
             | Self::ReviewTargets { .. }
             | Self::ReviewJobs { .. }
+            | Self::ReviewClosedMetrics { .. }
             | Self::OperationStatus { .. }
             | Self::OperationCancel { .. }
             | Self::Shutdown { .. } => {}

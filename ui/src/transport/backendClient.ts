@@ -187,6 +187,40 @@ export interface ReviewRunSummary {
   findingsCount: number;
 }
 
+export interface ClosedPrCount {
+  key: string;
+  count: number;
+}
+
+export interface ClosedPrRiskSummary {
+  hasAiReview: boolean;
+  impact: string;
+  totalFindings: number;
+  highOrCriticalFindings: number;
+  severityCounts: ClosedPrCount[];
+  categoryCounts: ClosedPrCount[];
+}
+
+export interface ClosedPrMetric {
+  workspace: string;
+  repo: string;
+  prId: number;
+  title: string;
+  authorDisplayName: string;
+  authorAccountId: string | null;
+  state: string;
+  sourceBranch: string;
+  destinationBranch: string;
+  createdOn: string;
+  updatedOn: string;
+  additions: number;
+  deletions: number;
+  filesChanged: number;
+  diffstatCached: boolean;
+  risk: ClosedPrRiskSummary;
+  syncedAt: string;
+}
+
 export interface ReviewJobSummary {
   id: string;
   workspace: string;
@@ -1849,6 +1883,11 @@ export class BackendClient {
   async reviewHistory(target: TargetIdentity): Promise<ReviewRunSummary[]> {
     const result = await this.transport.request("review.history", { target });
     return (result.runs as ReviewRunSummary[]) ?? [];
+  }
+
+  async reviewClosedMetrics(): Promise<ClosedPrMetric[]> {
+    const result = await this.transport.request("review.metrics.closed", {});
+    return (result.metrics as ClosedPrMetric[]) ?? [];
   }
 
   async reviewJobs(options: { limit?: number; offset?: number } = {}): Promise<{

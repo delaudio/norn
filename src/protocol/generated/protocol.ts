@@ -562,6 +562,12 @@ export type Request =
       id: RequestId;
       method: "review.jobs";
       params: ReviewJobsParams;
+    }
+  | {
+      type: "request";
+      id: RequestId;
+      method: "review.metrics.closed";
+      params: EmptyResult;
     };
 export type RequestId = string;
 /**
@@ -1413,7 +1419,8 @@ export interface ResponseOk {
     | RepositoryOperationPrepared
     | RepositoryOperationApplied
     | RepositoryOperationStatus
-    | ReviewJobsResult;
+    | ReviewJobsResult
+    | ClosedPrMetricsResult;
 }
 export interface DiffFileResult {
   target: TargetIdentity;
@@ -2594,6 +2601,40 @@ export interface ReviewJobSummary {
   createdAt: string;
   startedAt?: string | null;
   finishedAt?: string | null;
+}
+export interface ClosedPrMetricsResult {
+  metrics: ClosedPrMetric[];
+}
+export interface ClosedPrMetric {
+  workspace: string;
+  repo: string;
+  prId: number;
+  title: string;
+  authorDisplayName: string;
+  authorAccountId?: string | null;
+  state: string;
+  sourceBranch: string;
+  destinationBranch: string;
+  createdOn: string;
+  updatedOn: string;
+  additions: number;
+  deletions: number;
+  filesChanged: number;
+  diffstatCached: boolean;
+  risk: ClosedPrRiskSummary;
+  syncedAt: string;
+}
+export interface ClosedPrRiskSummary {
+  hasAiReview: boolean;
+  impact: string;
+  totalFindings: number;
+  highOrCriticalFindings: number;
+  severityCounts: ClosedPrCount[];
+  categoryCounts: ClosedPrCount[];
+}
+export interface ClosedPrCount {
+  key: string;
+  count: number;
 }
 export interface ResponseError {
   type: "response";

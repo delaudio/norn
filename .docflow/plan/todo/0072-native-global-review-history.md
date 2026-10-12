@@ -22,9 +22,18 @@ GitHub issue: #361 (epic #294 step 12/15).
 
 - `review.jobs` returns `{ jobs, offset }` bounded by a limit, newest first,
   with status/trigger/identity/timestamps/error; no fake statuses.
-- The shell can open a bounded global history view listing the jobs.
+- `review.metrics.closed` returns bounded closed-PR analytics computed in Rust
+  (risk summary, findings counts) without fabricating zeroes.
+- The shell can open the bounded global history (`shift+H`) and closed-PR
+  analytics (`shift+M`).
 - `cargo clippy -D warnings`, `cargo test`, `pnpm run lint/typecheck/test`, the
   `ui` job and `archgate check` pass.
+
+## Known limitations
+
+- `list_closed_pr_metrics` and `list_recent_review_jobs` have no SQL paging;
+  the backend bounds the response after reading, so very large stores load more
+  rows than returned. Paging at the storage layer is a follow-up.
 
 ## Dependencies
 
