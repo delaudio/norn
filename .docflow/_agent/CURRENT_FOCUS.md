@@ -27,7 +27,10 @@ Git is authoritative. Durable history lives in WORKLOG and plan/done.
   local UI251/1582 and four PTY cases pass. CI38268459553 then proves
   Windows review/cancel/restart, three adapters and GUI IPC. ConPTY setup
   failed because PowerShell consumed a bare Git -- separator; named argv array
-  preserves the hostile Unicode filename. New final-head console proof required.
+  preserves the hostile Unicode filename. CI38269494158 reached the Windows
+  witness but its initial terminal-handle assertion failed before UI launch.
+  Open/retain owned CONIN$/CONOUT$ handles and preserve ConPTY creation
+  handles until client attachment; final-head real console proof still required.
 - Keep0070 todo until actual verified merge. #359/#294 remain open pending
   editor/fullparity; preserve maintainer305/306/357closures; ADR0020 Accepted
   until fullcutover. No private profiles/credentials/providerwrites/actualagents.

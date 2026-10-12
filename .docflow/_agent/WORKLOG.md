@@ -1005,3 +1005,21 @@ Plan 0053 completion prepared after implementation `e4264db`, effective only on 
   separator and hostile filename. This fixes owned fixture setup; it does not
   replace or weaken any console/input/mode/death assertion. No Rust/UI source
   change. New actual-head CI must prove ConPTY and all required jobs.
+
+## 2026-10-12 — PR381 ConPTY supervisor console handles
+
+- Exact0930d9921253d63836382076fe07c1266db27cb6 CI38269494158
+  passed full Linux/macOS native lanes. Windows completed GUI IPC and reached
+  its console driver, but the standalone witness's initial is_terminal assertion
+  failed before production UI launch. This is not Windows editor proof.
+- The owned supervisor now explicitly opens its attached CONIN$/CONOUT$, sets
+  its standard handles and retains them through the UI scenario, keeping native
+  is_terminal/GetConsoleMode and exact restoration assertions. The C# harness
+  retains pseudoconsole creation handles until CreateProcess has attached the
+  client, instead of releasing them before launch. No production change.
+- Primary API references checked: Microsoft console-handles, SetStdHandle and
+  creating-a-pseudoconsole-session documentation. The real Windows runner must
+  prove the corrected harness and all four production lifecycle cases.
+  https://learn.microsoft.com/en-us/windows/console/console-handles
+  https://learn.microsoft.com/en-us/windows/console/setstdhandle
+  https://learn.microsoft.com/en-us/windows/console/creating-a-pseudoconsole-session

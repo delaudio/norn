@@ -7,6 +7,7 @@ use std::{
 #[link(name = "kernel32")]
 unsafe extern "system" {
     fn GetStdHandle(kind: u32) -> *mut std::ffi::c_void;
+    fn SetStdHandle(kind: u32, handle: *mut std::ffi::c_void) -> i32;
     fn GetConsoleMode(handle: *mut std::ffi::c_void, mode: *mut u32) -> i32;
     fn SetConsoleCtrlHandler(
         handler: Option<unsafe extern "system" fn(u32) -> i32>,
@@ -29,6 +30,31 @@ unsafe extern "system" fn witness_interrupt(event: u32) -> i32 {
 }
 #[cfg(windows)]
 fn main() {
+    use std::os::windows::io::AsRawHandle;
+    // ConPTY attachment and standard-handle redirection are distinct. The
+    // PowerShell host has redirected handles; open this process's attached
+    // console explicitly and retain the real handles throughout the scenario.
+    let input = std::fs::File::options()
+        .read(true)
+        .write(true)
+        .open("CONIN$")
+        .expect("owned ConPTY input");
+    let output = std::fs::File::options()
+        .read(true)
+        .write(true)
+        .open("CONOUT$")
+        .expect("owned ConPTY output");
+    unsafe {
+        assert_ne!(SetStdHandle(-10i32 as u32, input.as_raw_handle().cast()), 0);
+        assert_ne!(
+            SetStdHandle(-11i32 as u32, output.as_raw_handle().cast()),
+            0
+        );
+        assert_ne!(
+            SetStdHandle(-12i32 as u32, output.as_raw_handle().cast()),
+            0
+        );
+    }
     assert!(io::stdin().is_terminal() && io::stdout().is_terminal());
     let root = std::path::PathBuf::from(std::env::var_os("NORN_OWNED_EDITOR_DIR").unwrap());
     let before = modes();

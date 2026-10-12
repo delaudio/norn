@@ -58,7 +58,6 @@ public sealed class OwnedConPty : IDisposable {
             Check(CreatePipe(out output,out pseudoOutput,IntPtr.Zero,0),"output pipe");
             int result=CreatePseudoConsole(new Coord{X=120,Y=35},pseudoInput,pseudoOutput,0,out console);
             if(result!=0)throw new IOException("CreatePseudoConsole HRESULT "+result);
-            CloseHandle(pseudoInput);pseudoInput=IntPtr.Zero;CloseHandle(pseudoOutput);pseudoOutput=IntPtr.Zero;
             IntPtr bytes=IntPtr.Zero;InitializeProcThreadAttributeList(IntPtr.Zero,1,0,ref bytes);
             attributes=Marshal.AllocHGlobal(bytes);Check(InitializeProcThreadAttributeList(attributes,1,0,ref bytes),"attribute list");attributesReady=true;
             Check(UpdateProcThreadAttribute(attributes,0,new IntPtr(0x20016),console,new IntPtr(IntPtr.Size),IntPtr.Zero,IntPtr.Zero),"pseudoconsole attribute");
@@ -67,6 +66,9 @@ public sealed class OwnedConPty : IDisposable {
             ProcessInfo child;
             Check(CreateProcessW(executable,new StringBuilder("\""+executable+"\" "+arguments),IntPtr.Zero,IntPtr.Zero,false,0x00080000|0x00000400,environment,cwd,ref startup,out child),"owned UI launch");
             process=child.process;Pid=child.pid;CloseHandle(child.thread);
+            // Retain the creation handles until the client is attached, as
+            // required by the documented pseudoconsole-session lifecycle.
+            CloseHandle(pseudoInput);pseudoInput=IntPtr.Zero;CloseHandle(pseudoOutput);pseudoOutput=IntPtr.Zero;
             reader=new Thread(ReadOutput){IsBackground=true};reader.Start();
         } catch {Dispose();throw;}
         finally {
