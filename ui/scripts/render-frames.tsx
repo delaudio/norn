@@ -24,6 +24,8 @@ import {
   publicationFixtureScope,
 } from "../src/transport/fakePublicationTransport";
 import { LocalTransport } from "../test/fixtures/local-backend";
+import { LocalRasterTransport } from "../test/fixtures/local-raster-backend";
+import { SavedTransport } from "../test/fixtures/saved-local-backend";
 // Renders every terminal component/scene with the real OpenTUI renderer and
 // serializes bounded frame fixtures (cell spans, colors, attributes) for the
 // Storybook preview and the golden-frame visual lane.
@@ -988,7 +990,73 @@ async function localComparisonScene(
   return { client, store };
 }
 
+async function savedLocalScene(kind: "list" | "next" | "empty" | "loading" | "error") {
+  const transport = new SavedTransport();
+  const { client, store, ready } = readyStore(transport);
+  await ready;
+  const request = transport.request.bind(transport);
+  if (kind === "empty" || kind === "loading" || kind === "error")
+    transport.request = async (method, params) => {
+      if (method === "local.snapshot.list") {
+        if (kind === "loading") return new Promise(() => {});
+        if (kind === "error")
+          throw new Error(
+            "Saved local evidence could not be verified. Refresh the list explicitly.",
+          );
+        return {
+          request: params,
+          catalogVersion: "e".repeat(64),
+          snapshots: [],
+          total: 0,
+          nextOffset: null,
+        };
+      }
+      return request(method, params);
+    };
+  if (kind === "loading") void store.openSavedLocal(client);
+  else await store.openSavedLocal(client);
+  if (kind === "next") await store.pageSavedLocal(client, 1);
+  return { client, store };
+}
 const scenes: Scene[] = [
+  ...(["comparison", "added", "legacy", "unsupported"] as const).flatMap((kind) => [
+    {
+      id: `shell-local-image-${kind}-120x30`,
+      cols: 120,
+      rows: 30,
+      build: async () => {
+        const { client, store, ready } = readyStore(new LocalRasterTransport(kind));
+        await ready;
+        for (let i = 0; i < 12; i++) await Bun.sleep(0);
+        return { client, store };
+      },
+    },
+    {
+      id: `shell-local-image-${kind}-50x18`,
+      cols: 50,
+      rows: 18,
+      build: async () => {
+        const { client, store, ready } = readyStore(new LocalRasterTransport(kind));
+        await ready;
+        for (let i = 0; i < 12; i++) await Bun.sleep(0);
+        return { client, store };
+      },
+    },
+  ]),
+  ...(["list", "next", "empty", "loading", "error"] as const).flatMap((kind) => [
+    {
+      id: `shell-saved-local-${kind}-120x30`,
+      cols: 120,
+      rows: 30,
+      build: () => savedLocalScene(kind),
+    },
+    {
+      id: `shell-saved-local-${kind}-50x18`,
+      cols: 50,
+      rows: 18,
+      build: () => savedLocalScene(kind),
+    },
+  ]),
   ...(["source", "base", "layers", "loading", "error", "profile"] as const).flatMap((kind) => [
     {
       id: `shell-local-${kind}-120x30`,

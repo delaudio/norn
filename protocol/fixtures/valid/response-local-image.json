@@ -1,0 +1,36 @@
+{
+  "type": "response",
+  "id": "owned",
+  "ok": true,
+  "result": {
+    "request": {
+      "snapshot": {
+        "source": {
+          "kind": "current"
+        },
+        "repository": {
+          "provider": "github",
+          "workspace": "owned",
+          "repo": "same"
+        },
+        "rootId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "snapshotId": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+      },
+      "layer": "staged",
+      "path": "picture.png",
+      "side": "new",
+      "offset": 0,
+      "maxBytes": 32,
+      "contentSha256": null
+    },
+    "available": false,
+    "mimeType": "",
+    "size": 0,
+    "dataBase64": "",
+    "nextOffset": null,
+    "contentSha256": null,
+    "width": null,
+    "height": null,
+    "reason": "legacySnapshot"
+  }
+}

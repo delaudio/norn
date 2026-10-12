@@ -728,3 +728,75 @@ Plan 0053 completion prepared after implementation `e4264db`, effective only on 
   origin/main still4644a03; number audit passed with existing0011/0013 advisories.
   Prepared0066receipt is conditional on exact final-head CI and actual squash;
   no completed child/epic claim. Additional source tests did not alter Rust gates.
+
+## 2026-10-12 — verified377merge, plan0067claim
+
+- #377 verified squash63970f499ae1a16c66e02438ec7fdd59f26d4cb5 at08:12:58Z;
+  both requiredCI38220689561 SUCCESS on finalc4278e1efe5ae1f4f0dffd5d6c0d6b3d54fdc1c8.
+  No automatic issue closures; root main ff synced, user stash/untracked untouched.
+  Plan0066receipt now effective. Owned gates:745core/73stdio/6CLI/5onboarding/
+  3binary+2existingignored; root123+tooling/Archgate17; UI219/1346/147frames;
+  typecheck/lint/protocol/audit/strictClippy/fmt/noGUI. Doctor65 false positives
+  on supported custom-renderer truncate remain explicitly recorded, unsuppressed.
+- Plan0067 claimed before code on actual377 for pinned local raster/Pierre/saved
+  snapshot consumers, unsafe legacy fallback rejection and actual owned native
+  UI+Rust full workflow proof. Draft prepared while377CI; no sibling source
+  implementation before actual merge. #358/#294 remain open; preserve306closure
+  and ADR0020 Accepted. Broader retained tasks are not silently inferred done.
+
+## 2026-10-12 — plan0067 pinned local consumers, implementation gates
+
+- Shared Rust raster validator; durable format2 independent layer/side captures
+  with byte/metadata identity, stable collection and native stale recheck.
+  Format1 identity and readonly access preserved; absent/unsupported/legacy/quota
+  states never fetch mutable bytes. Bounded secure file handles reject symlink
+  traversal; Windows opened-handle canonical fence awaits actual Windows CI.
+- local.snapshot.image/browser/list use full source/provider/root/snapshot identity.
+  Pierre receives exactly one saved layer, including old rename paths and missing
+  sides. Durable catalog paging verifies ownership/hash/continuity and restores
+  actual runs without checkout. F7 input/paste/modal fences and native wide/narrow
+  saved and image frames. Public arbitrary legacy Local SHA routes reject before
+  side effects; explicit configured provider working-tree contract remains.
+- Native real OpenTUI input/production transport/Rust/owned fake-agent workflow
+  passes on macOS: source/base/layers, pinned images, CLI, actual review/findings,
+  explicit layer choice, cancel and restart into saved run after root replacement.
+  Three-OS CI lane added; configuration is not runtime proof before exact-head CI.
+  Found and fixed operation resync reopening layer selector and intercepting x;
+  choice retained only within exact snapshot/run/finding/anchor. Regression passed.
+- Local gates:753core+2existingignored/75stdio/6CLI/5onboarding/3binary;
+  root123+tooling/typecheck/lint/build/protocol/Archgate17/audit/noGUI;
+  UI228/1433/165frames/typecheck/Storybook build. Strict allfeatures/alltargets Clippy and fmt passed.
+  Doctor65/11 warnings target supported OpenTUI flexShrink/truncate on saved panel;
+  installed Renderable.d.ts/TextBuffer declarations and native frames establish
+  custom-renderer DOM false positives; no suppression or dependency installation.
+- Failures retained and corrected: renamed-image fixture had identical deleted
+  bytes causing Git to select another valid rename source; unique fixture fixed.
+  Root lint formatting fixed; sandbox loopback-denied full Rust tests repeated
+  with approved local server access and passed. Invalid native policy blocks agent
+  even with prompt override; qualified payload precedence test states this
+  explicitly. Legacy private cwd adapter is still present, public access fenced.
+- PR/source commit/own final-head CI/actual squash remain pending. #358/#294 open;
+  maintainer305/306/357 closures preserved, ADR0020 Accepted. No user data/stash,
+  credentials, provider write, actual agent, Norn review, delegation or release.
+
+- Source e34758fc77d1fef309e11321b37ea233fa5a1d30 committed after applicable
+  local gates. origin/main remains actual37763970f4; audit no0067collision.
+  Prepared0067receipt is conditional on final-head CI/all3native lanes and actual
+  squash. No completion/closure is inferred before that event.
+
+- PR378 opened on receipt8479693672104cf6fcc3d2481e60d0e48a7a24ac.
+  CI38232903789 UI passed; native Linux/macOS exposed harness readiness race:
+  operation succeeded/history remained visible before run/finding/thread refresh.
+  Now waits for all actual saved state, rather than skipping the assertion.
+  Windows cleanup EACCES masked the scenario error: preserve original diagnostic,
+  wait for actual backend exit after shutdown and bounded owned-root cleanup.
+  Corrected native gate and UI typecheck pass locally; own new-head CI pending.
+
+- New-head CI38233690131 Linux/macOS native workflows and UI passed.
+  Windows exposed actual cancellation defect: review.kill_process always invoked
+  /bin/kill, marking cancellation failed and leaving the owned fake agent alive.
+  Add Windows API bounded process-tree inspection and terminate only the recorded
+  agent/observed descendants, no shell/PATH/taskkill dependence. Already exited
+  processes are handled explicitly. Unix behavior unchanged. Native Windows CI
+  remains required; observed-tree cancellation does not claim JobObject-level
+  future descendant/race guarantees (retained hardening).

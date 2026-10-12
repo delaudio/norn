@@ -85,6 +85,8 @@ test("cancelled and foreign-root captures cannot replace the selected local snap
 
 test("same-path captured layers require explicit finding choice and never call legacy diff", async () => {
   const transport = new LocalTransport();
+  let runId = "owned-run";
+  let newCapture = false;
   const originalRequest = transport.request.bind(transport);
   const patches = {
     staged: "--- a/same.txt\n+++ b/same.txt\n@@ -1 +1 @@\n-old\n+staged\n",
@@ -104,6 +106,13 @@ test("same-path captured layers require explicit finding choice and never call l
       ];
       info.fileCount = 2;
       info.patchBytes = Buffer.byteLength(patches.staged) + Buffer.byteLength(patches.unstaged);
+      if (newCapture) {
+        info.snapshot = {
+          ...(info.snapshot as Record<string, unknown>),
+          snapshotId: "d".repeat(64),
+        };
+        info.localReviewId = 0xdddddddd;
+      }
       return { ...result, info };
     }
     if (method === "local.snapshot.files")
@@ -130,10 +139,20 @@ test("same-path captured layers require explicit finding choice and never call l
         nextOffset: null,
       };
     }
+    if (method === "local.review.history")
+      return {
+        ...result,
+        runs: [
+          { runId, createdAt: "1", status: "succeeded", turnKind: "initial", findingsCount: 1 },
+        ],
+        total: 1,
+        nextOffset: null,
+      };
+    if (method === "local.review.threads") return { ...result, runId };
     if (method === "local.review.findings")
       return {
         ...result,
-        runId: "owned-run",
+        runId,
         total: 1,
         findings: [
           {
@@ -168,6 +187,23 @@ test("same-path captured layers require explicit finding choice and never call l
       "unstaged",
     );
     expect(store.getSnapshot().diff?.text).toContain("+unstaged");
+    // A status resync must not reopen a chooser that intercepts cancellation.
+    await store.refreshOperation();
+    expect(store.getSnapshot().findingLayers).toEqual([]);
+    expect(store.getSnapshot().files[store.getSnapshot().selectedFile]?.localLayer).toBe(
+      "unstaged",
+    );
+    runId = "new-owned-run";
+    await store.openLocalComparison(client);
+    await store.applyLocalComparison(client);
+    expect(store.getSnapshot().localRunId).toBe(runId);
+    expect(store.getSnapshot().findingLayers).toEqual(["staged", "unstaged"]);
+    store.chooseFindingLayer();
+    newCapture = true;
+    await store.openLocalComparison(client);
+    await store.applyLocalComparison(client);
+    expect(store.getSnapshot().localInfo?.snapshot.snapshotId).toBe("d".repeat(64));
+    expect(store.getSnapshot().findingLayers).toEqual(["staged", "unstaged"]);
     expect(transport.calls).not.toContain("diff.file");
     expect(transport.calls).not.toContain("review.findings");
   } finally {

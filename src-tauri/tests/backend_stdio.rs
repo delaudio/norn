@@ -328,7 +328,25 @@ impl Backend {
     }
 
     fn spawn_env(cwd: &Path, extra_env: &[(&str, &str)]) -> Self {
+        Self::spawn_with_config(cwd, extra_env, false)
+    }
+    fn spawn_configured(cwd: &Path) -> Self {
+        Self::spawn_with_config(cwd, &[], true)
+    }
+    fn spawn_configured_env(cwd: &Path, extra_env: &[(&str, &str)]) -> Self {
+        Self::spawn_with_config(cwd, extra_env, true)
+    }
+    fn spawn_with_config(cwd: &Path, extra_env: &[(&str, &str)], configured: bool) -> Self {
         let isolated = tempfile::tempdir().expect("isolated backend storage");
+        if configured && !extra_env.iter().any(|(name, _)| *name == "NORN_CONFIG_DIR") {
+            // These tests exercise the retained explicit configured-working-tree
+            // adapter, including untracked-file behavior, not captured local APIs.
+            std::fs::create_dir_all(isolated.path().join("config")).unwrap();
+            std::fs::write(isolated.path().join("config/settings.json"), json!({
+                "repos":[{"provider":"github","workspace":"fixture","repo":"demo","localPath":cwd.canonicalize().unwrap()}],
+                "defaultDiffView":"unified","theme":"dark"
+            }).to_string()).unwrap();
+        }
         let mut command = Command::new(env!("CARGO_BIN_EXE_norn-backend"));
         command
             .current_dir(cwd)
@@ -407,6 +425,31 @@ impl Backend {
     }
 }
 
+fn configured_working_tree_target() -> Value {
+    json!({"kind":"provider","provider":"github","workspace":"fixture","repo":"demo","prId":null,"runId":null})
+}
+
+fn captured_current_snapshot(backend: &mut Backend, repo: &Path) -> Value {
+    git(
+        repo,
+        &[
+            "remote",
+            "add",
+            "origin",
+            "https://github.com/fixture/demo.git",
+        ],
+    );
+    backend.send(json!({"type":"request","id":"typed-owned-capture","method":"local.snapshot","params":{
+        "captureId":"b".repeat(64),"comparison":{"source":{"kind":"current"},"mode":"workingTree","baseRef":null,"layers":["staged","unstaged"]}
+    }}));
+    let response = backend.wait_for(
+        |v| v["id"] == "typed-owned-capture",
+        Duration::from_secs(15),
+    );
+    assert_eq!(response["ok"], true, "{response}");
+    response["result"]["info"]["snapshot"].clone()
+}
+
 fn temp_repo() -> tempfile::TempDir {
     let dir = tempfile::tempdir().expect("temp repo");
     git(dir.path(), &["init", "-q"]);
@@ -467,14 +510,14 @@ fn diff_file_returns_the_working_tree_diff() {
     git(repo.path(), &["commit", "-qm", "init"]);
     std::fs::write(repo.path().join("a.txt"), "two\n").expect("write");
 
-    let mut backend = Backend::spawn(repo.path());
+    let mut backend = Backend::spawn_configured(repo.path());
     backend.handshake();
     backend.send(json!({
         "type": "request",
         "id": "req-diff",
         "method": "diff.file",
         "params": {
-            "target": { "kind": "local", "localSnapshotSha256": LOCAL_SHA },
+            "target": configured_working_tree_target(),
             "path": "a.txt"
         }
     }));
@@ -496,13 +539,13 @@ fn review_operation_can_be_cancelled() {
     git(repo.path(), &["commit", "-qm", "init"]);
     std::fs::write(repo.path().join("a.txt"), "two\n").expect("write");
 
-    let mut backend = Backend::spawn(repo.path());
+    let mut backend = Backend::spawn_configured(repo.path());
     backend.handshake();
     backend.send(json!({
         "type": "request",
         "id": "req-start",
         "method": "review.start",
-        "params": { "target": { "kind": "local", "localSnapshotSha256": LOCAL_SHA } }
+        "params": { "target": configured_working_tree_target() }
     }));
     let started = backend.wait_for(
         |v| v["type"] == "response" && v["id"] == "req-start",
@@ -538,14 +581,14 @@ fn diff_file_includes_untracked_new_files() {
     git(repo.path(), &["commit", "-qm", "init"]);
     std::fs::write(repo.path().join("new.txt"), "hello\nworld\n").expect("write untracked");
 
-    let mut backend = Backend::spawn(repo.path());
+    let mut backend = Backend::spawn_configured(repo.path());
     backend.handshake();
     backend.send(json!({
         "type": "request",
         "id": "req-untracked",
         "method": "diff.file",
         "params": {
-            "target": { "kind": "local", "localSnapshotSha256": LOCAL_SHA },
+            "target": configured_working_tree_target(),
             "path": "new.txt"
         }
     }));
@@ -567,14 +610,14 @@ fn diff_file_reports_a_deleted_tracked_file() {
     git(repo.path(), &["commit", "-qm", "init"]);
     std::fs::remove_file(repo.path().join("gone.txt")).expect("delete");
 
-    let mut backend = Backend::spawn(repo.path());
+    let mut backend = Backend::spawn_configured(repo.path());
     backend.handshake();
     backend.send(json!({
         "type": "request",
         "id": "req-deleted",
         "method": "diff.file",
         "params": {
-            "target": { "kind": "local", "localSnapshotSha256": LOCAL_SHA },
+            "target": configured_working_tree_target(),
             "path": "gone.txt"
         }
     }));
@@ -597,14 +640,14 @@ fn diff_file_reports_staged_addition_without_head() {
     std::fs::write(dir.path().join("added.txt"), "fresh\n").expect("write");
     git(dir.path(), &["add", "added.txt"]);
 
-    let mut backend = Backend::spawn(dir.path());
+    let mut backend = Backend::spawn_configured(dir.path());
     backend.handshake();
     backend.send(json!({
         "type": "request",
         "id": "req-staged",
         "method": "diff.file",
         "params": {
-            "target": { "kind": "local", "localSnapshotSha256": LOCAL_SHA },
+            "target": configured_working_tree_target(),
             "path": "added.txt"
         }
     }));
@@ -626,13 +669,13 @@ fn review_files_lists_changed_files() {
     std::fs::write(repo.path().join("a.txt"), "two\n").expect("modify");
     std::fs::write(repo.path().join("new.txt"), "fresh\n").expect("untracked");
 
-    let mut backend = Backend::spawn(repo.path());
+    let mut backend = Backend::spawn_configured(repo.path());
     backend.handshake();
     backend.send(json!({
         "type": "request",
         "id": "req-files",
         "method": "review.files",
-        "params": { "target": { "kind": "local", "localSnapshotSha256": LOCAL_SHA } }
+        "params": { "target": configured_working_tree_target() }
     }));
     let response = backend.wait_for(
         |v| v["type"] == "response" && v["id"] == "req-files",
@@ -659,13 +702,13 @@ fn review_files_reports_renames_without_bogus_entries() {
     git(repo.path(), &["mv", "old.txt", "renamed.txt"]);
     std::fs::write(repo.path().join("renamed.txt"), "one\ntwo\n").expect("edit");
 
-    let mut backend = Backend::spawn(repo.path());
+    let mut backend = Backend::spawn_configured(repo.path());
     backend.handshake();
     backend.send(json!({
         "type": "request",
         "id": "req-rename",
         "method": "review.files",
-        "params": { "target": { "kind": "local", "localSnapshotSha256": LOCAL_SHA } }
+        "params": { "target": configured_working_tree_target() }
     }));
     let response = backend.wait_for(
         |v| v["type"] == "response" && v["id"] == "req-rename",
@@ -687,13 +730,13 @@ fn review_files_lists_staged_files_before_the_first_commit() {
     std::fs::write(repo.path().join("first.txt"), "hello\n").expect("write");
     git(repo.path(), &["add", "-A"]);
 
-    let mut backend = Backend::spawn(repo.path());
+    let mut backend = Backend::spawn_configured(repo.path());
     backend.handshake();
     backend.send(json!({
         "type": "request",
         "id": "req-unborn",
         "method": "review.files",
-        "params": { "target": { "kind": "local", "localSnapshotSha256": LOCAL_SHA } }
+        "params": { "target": configured_working_tree_target() }
     }));
     let response = backend.wait_for(
         |v| v["type"] == "response" && v["id"] == "req-unborn",
@@ -715,13 +758,13 @@ fn review_files_preserves_filenames_with_tabs() {
     git(repo.path(), &["commit", "-qm", "init"]);
     std::fs::write(repo.path().join(name), "one\ntwo\n").expect("edit");
 
-    let mut backend = Backend::spawn(repo.path());
+    let mut backend = Backend::spawn_configured(repo.path());
     backend.handshake();
     backend.send(json!({
         "type": "request",
         "id": "req-tab",
         "method": "review.files",
-        "params": { "target": { "kind": "local", "localSnapshotSha256": LOCAL_SHA } }
+        "params": { "target": configured_working_tree_target() }
     }));
     let response = backend.wait_for(
         |v| v["type"] == "response" && v["id"] == "req-tab",
@@ -760,14 +803,14 @@ fn diff_file_before_first_commit_includes_staged_content() {
     git(repo.path(), &["add", "-A"]);
     std::fs::write(repo.path().join("first.txt"), "one\ntwo\n").expect("edit");
 
-    let mut backend = Backend::spawn(repo.path());
+    let mut backend = Backend::spawn_configured(repo.path());
     backend.handshake();
     backend.send(json!({
         "type": "request",
         "id": "req-unborn-diff",
         "method": "diff.file",
         "params": {
-            "target": { "kind": "local", "localSnapshotSha256": LOCAL_SHA },
+            "target": configured_working_tree_target(),
             "path": "first.txt"
         }
     }));
@@ -789,13 +832,13 @@ fn browser_open_returns_an_authenticated_session_url() {
     git(repo.path(), &["commit", "-qm", "init"]);
     std::fs::write(repo.path().join("a.txt"), "two\n").expect("edit");
 
-    let mut backend = Backend::spawn(repo.path());
+    let mut backend = Backend::spawn_configured(repo.path());
     backend.handshake();
     backend.send(json!({
         "type": "request",
         "id": "req-browser",
         "method": "browser.open",
-        "params": { "target": { "kind": "local", "localSnapshotSha256": LOCAL_SHA } }
+        "params": { "target": configured_working_tree_target() }
     }));
     let response = backend.wait_for(
         |v| v["type"] == "response" && v["id"] == "req-browser",
@@ -823,14 +866,14 @@ fn file_preview_returns_bounded_image_bytes() {
     let png=base64::engine::general_purpose::STANDARD.decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==").unwrap();
     std::fs::write(repo.path().join("pic.png"), &png).expect("write");
 
-    let mut backend = Backend::spawn(repo.path());
+    let mut backend = Backend::spawn_configured(repo.path());
     backend.handshake();
     backend.send(json!({
         "type": "request",
         "id": "req-preview",
         "method": "file.preview",
         "params": {
-            "target": { "kind": "local", "localSnapshotSha256": LOCAL_SHA },
+            "target": configured_working_tree_target(),
             "path": "pic.png"
         }
     }));
@@ -852,14 +895,14 @@ fn file_preview_rejects_unsupported_types() {
     let repo = temp_repo();
     std::fs::write(repo.path().join("notes.txt"), "hello\n").expect("write");
 
-    let mut backend = Backend::spawn(repo.path());
+    let mut backend = Backend::spawn_configured(repo.path());
     backend.handshake();
     backend.send(json!({
         "type": "request",
         "id": "req-preview-bad",
         "method": "file.preview",
         "params": {
-            "target": { "kind": "local", "localSnapshotSha256": LOCAL_SHA },
+            "target": configured_working_tree_target(),
             "path": "notes.txt"
         }
     }));
@@ -878,13 +921,13 @@ fn fake_review_engine_streams_deterministic_events() {
     git(repo.path(), &["commit", "-qm", "init"]);
     std::fs::write(repo.path().join("a.txt"), "two\n").expect("edit");
 
-    let mut backend = Backend::spawn_env(repo.path(), &[("NORN_REVIEW_ENGINE", "fake")]);
+    let mut backend = Backend::spawn_configured_env(repo.path(), &[("NORN_REVIEW_ENGINE", "fake")]);
     backend.handshake();
     backend.send(json!({
         "type": "request",
         "id": "req-start",
         "method": "review.start",
-        "params": { "target": { "kind": "local", "localSnapshotSha256": LOCAL_SHA } }
+        "params": { "target": configured_working_tree_target() }
     }));
     let started = backend.wait_for(
         |v| v["type"] == "response" && v["id"] == "req-start",
@@ -938,7 +981,7 @@ printf '%s\n' '{"result":"No review findings were produced.","session_id":"fake-
     perms.set_mode(0o755);
     std::fs::set_permissions(&agent_path, perms).expect("chmod");
 
-    let mut backend = Backend::spawn_env(
+    let mut backend = Backend::spawn_configured_env(
         repo.path(),
         &[
             ("NORN_REVIEW_ENGINE", "real"),
@@ -953,11 +996,12 @@ printf '%s\n' '{"result":"No review findings were produced.","session_id":"fake-
         ],
     );
     backend.handshake();
+    let snapshot = captured_current_snapshot(&mut backend, repo.path());
     backend.send(json!({
         "type": "request",
         "id": "req-inline",
-        "method": "review.start",
-        "params": { "target": { "kind": "local", "localSnapshotSha256": LOCAL_SHA } }
+        "method": "local.review.start",
+        "params": { "snapshot": snapshot, "profile": null }
     }));
     let started = backend.wait_for(
         |v| v["type"] == "response" && v["id"] == "req-inline",
@@ -1014,7 +1058,7 @@ printf '%s\n' '{"result":"late","session_id":"fake-session"}'
     perms.set_mode(0o755);
     std::fs::set_permissions(&agent_path, perms).expect("chmod");
 
-    let mut backend = Backend::spawn_env(
+    let mut backend = Backend::spawn_configured_env(
         repo.path(),
         &[
             ("NORN_REVIEW_ENGINE", "real"),
@@ -1034,11 +1078,12 @@ printf '%s\n' '{"result":"late","session_id":"fake-session"}'
         ],
     );
     backend.handshake();
+    let snapshot = captured_current_snapshot(&mut backend, repo.path());
     backend.send(json!({
         "type": "request",
         "id": "req-inline-cancel",
-        "method": "review.start",
-        "params": { "target": { "kind": "local", "localSnapshotSha256": LOCAL_SHA } }
+        "method": "local.review.start",
+        "params": { "snapshot": snapshot, "profile": null }
     }));
     let started = backend.wait_for(
         |v| v["type"] == "response" && v["id"] == "req-inline-cancel",
@@ -1116,7 +1161,7 @@ fn incompatible_handshake_fails_without_protocol_output() {
 }
 
 #[test]
-fn thread_request_is_typed_and_local_targets_have_no_pr_threads() {
+fn thread_request_is_typed_and_refuses_unqualified_local_identity() {
     let repo = temp_repo();
     let mut backend = Backend::spawn(repo.path());
     backend.handshake();
@@ -1125,11 +1170,78 @@ fn thread_request_is_typed_and_local_targets_have_no_pr_threads() {
         "params": { "target": { "kind": "local", "localSnapshotSha256": LOCAL_SHA } }
     }));
     let response = backend.wait_for(|v| v["id"] == "threads", Duration::from_secs(5));
-    assert_eq!(response["ok"], true);
-    assert_eq!(response["result"]["threads"], json!([]));
+    assert_eq!(response["ok"], false);
+    assert_eq!(response["error"]["code"], "invalidParams");
+    assert!(response["error"]["message"]
+        .as_str()
+        .unwrap()
+        .contains("qualified local API"));
     backend
         .send(json!({ "type": "request", "id": "shutdown", "method": "shutdown", "params": {} }));
     assert!(backend.child.wait().expect("backend exits").success());
+}
+
+#[test]
+fn arbitrary_local_sha_requests_never_authorize_cwd_consumers_or_agent_work() {
+    let repo = temp_repo();
+    std::fs::write(repo.path().join("tracked.txt"), "owned checkout data\n").unwrap();
+    let mut backend = Backend::spawn(repo.path());
+    backend.handshake();
+    let target = json!({"kind":"local","localSnapshotSha256":LOCAL_SHA});
+    for (method, extra) in [
+        ("diff.file", json!({"path":"tracked.txt"})),
+        ("file.preview", json!({"path":"picture.png"})),
+        ("browser.open", json!({})),
+        ("review.files", json!({})),
+        ("review.findings", json!({})),
+        ("review.history", json!({})),
+        ("review.threads", json!({})),
+        ("review.output", json!({})),
+        ("review.profiles", json!({})),
+        ("review.start", json!({"profile":null})),
+        ("review.reply", json!({"message":"owned reply"})),
+        ("review.fix.state", json!({})),
+        ("review.fix.preview", json!({})),
+        ("review.fix", json!({"approvalToken":"a".repeat(64)})),
+        ("review.commit.preview", json!({"message":"owned commit"})),
+        ("review.commit", json!({"approvalToken":"a".repeat(64)})),
+        ("review.push.preview", json!({})),
+        ("review.push", json!({"approvalToken":"a".repeat(64)})),
+        ("review.sync.preview", json!({})),
+        ("review.sync", json!({"approvalToken":"a".repeat(64)})),
+        ("review.conflicts.preview", json!({})),
+        ("review.conflicts", json!({"approvalToken":"a".repeat(64)})),
+    ] {
+        let mut params = extra;
+        params["target"] = target.clone();
+        backend.send(
+            json!({"type":"request","id":"unqualified-local","method":method,"params":params}),
+        );
+        let response = backend.wait_for(|v| v["id"] == "unqualified-local", Duration::from_secs(5));
+        assert_eq!(response["ok"], false, "{method}");
+        assert_eq!(
+            response["error"]["code"], "invalidParams",
+            "{method}: {response}"
+        );
+        assert!(
+            response["error"]["message"]
+                .as_str()
+                .unwrap()
+                .contains("qualified local API"),
+            "{method}: {response}"
+        );
+    }
+    assert_eq!(
+        std::fs::read_to_string(repo.path().join("tracked.txt")).unwrap(),
+        "owned checkout data\n"
+    );
+    backend.send(
+        json!({"type":"request","id":"still-responsive","method":"repository.status","params":{}}),
+    );
+    assert_eq!(
+        backend.wait_for(|v| v["id"] == "still-responsive", Duration::from_secs(5))["ok"],
+        true
+    );
 }
 
 #[cfg(unix)]
@@ -3060,6 +3172,163 @@ fn bitmap_bytes(color: [u8; 3]) -> Vec<u8> {
     image.write_to(&mut bytes, image::ImageFormat::Bmp).unwrap();
     bytes.into_inner()
 }
+
+#[test]
+fn captured_local_images_and_browser_restore_exact_sides_without_the_checkout() {
+    use base64::Engine;
+    let repo = temp_repo();
+    git(
+        repo.path(),
+        &[
+            "remote",
+            "add",
+            "origin",
+            "https://github.com/owned/images.git",
+        ],
+    );
+    let base = bitmap_bytes([255, 0, 0]);
+    let staged = bitmap_bytes([0, 255, 0]);
+    let unstaged = bitmap_bytes([0, 0, 255]);
+    std::fs::write(repo.path().join("picture.bmp"), &base).unwrap();
+    git(repo.path(), &["add", "picture.bmp"]);
+    git(
+        repo.path(),
+        &["-c", "commit.gpgsign=false", "commit", "-m", "owned base"],
+    );
+    std::fs::write(repo.path().join("picture.bmp"), &staged).unwrap();
+    git(repo.path(), &["add", "picture.bmp"]);
+    std::fs::write(repo.path().join("picture.bmp"), &unstaged).unwrap();
+    let data = tempfile::tempdir().unwrap();
+    let config = tempfile::tempdir().unwrap();
+    let env = [
+        ("NORN_REVIEW_DATA_DIR", data.path().to_str().unwrap()),
+        ("NORN_CONFIG_DIR", config.path().to_str().unwrap()),
+    ];
+    let call = |backend: &mut Backend, method: &str, params: Value| {
+        backend.send(json!({"type":"request","id":"owned-images","method":method,"params":params}));
+        backend.wait_for(
+            |value| value["id"] == "owned-images",
+            Duration::from_secs(15),
+        )
+    };
+    let mut backend = Backend::spawn_env(repo.path(), &env);
+    backend.handshake();
+    let capture = call(
+        &mut backend,
+        "local.snapshot",
+        json!({"captureId":"f".repeat(64),"comparison":{"source":{"kind":"current"},"mode":"workingTree","baseRef":null,"layers":["staged","unstaged"]}}),
+    );
+    assert_eq!(capture["ok"], true, "{capture}");
+    let snapshot = capture["result"]["info"]["snapshot"].clone();
+    assert_eq!(call(&mut backend, "shutdown", json!({}))["ok"], true);
+    assert!(backend.child.wait().unwrap().success());
+    let removed = tempfile::tempdir().unwrap();
+    std::fs::rename(repo.path(), removed.path().join("checkout-removed")).unwrap();
+    let mut restarted = Backend::spawn_env(removed.path(), &env);
+    restarted.handshake();
+    let saved = call(
+        &mut restarted,
+        "local.snapshot.list",
+        json!({"offset":0,"limit":32,"catalogVersion":null}),
+    );
+    assert_eq!(saved["ok"], true, "saved listing failed");
+    assert_eq!(saved["result"]["total"], 1);
+    assert_eq!(saved["result"]["snapshots"][0]["snapshot"], snapshot);
+    assert!(!saved.to_string().contains(removed.path().to_str().unwrap()));
+    let http = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(5))
+        .build()
+        .unwrap();
+    for (layer, old, new) in [("staged", &base, &staged), ("unstaged", &staged, &unstaged)] {
+        for (side, expected) in [("old", old), ("new", new)] {
+            let mut bytes = Vec::new();
+            let mut hash = Value::Null;
+            for _ in 0..12 {
+                let result = call(
+                    &mut restarted,
+                    "local.snapshot.image",
+                    json!({"snapshot":snapshot,"layer":layer,"path":"picture.bmp","side":side,"offset":bytes.len(),"maxBytes":196608,"contentSha256":hash}),
+                );
+                assert_eq!(result["ok"], true, "image request failed");
+                assert_eq!(result["result"]["available"], true);
+                bytes.extend(
+                    base64::engine::general_purpose::STANDARD
+                        .decode(result["result"]["dataBase64"].as_str().unwrap())
+                        .unwrap(),
+                );
+                hash = result["result"]["contentSha256"].clone();
+                if result["result"]["nextOffset"].is_null() {
+                    break;
+                }
+                assert_eq!(
+                    result["result"]["nextOffset"].as_u64(),
+                    Some(bytes.len() as u64)
+                );
+            }
+            assert!(bytes == *expected, "captured {layer}/{side} bytes differ");
+        }
+        let browser = call(
+            &mut restarted,
+            "local.snapshot.browser",
+            json!({"snapshot":snapshot,"layer":layer}),
+        );
+        assert_eq!(browser["ok"], true, "{browser}");
+        assert_eq!(browser["result"]["launchRequested"], false);
+        let url = browser["result"]["url"].as_str().unwrap();
+        let state: Value = http
+            .get(format!("{url}api/state"))
+            .send()
+            .unwrap()
+            .error_for_status()
+            .unwrap()
+            .json()
+            .unwrap();
+        assert_eq!(state["targetBranch"], layer);
+        assert_eq!(state["prId"], 0);
+        assert!(state["diff"].as_str().unwrap().contains("picture.bmp"));
+        assert!(state.get("snapshotSource").is_none());
+        for (side, expected) in [("old", old), ("new", new)] {
+            let image = http
+                .get(format!(
+                    "{url}api/file-preview?path=picture.bmp&side={side}"
+                ))
+                .send()
+                .unwrap()
+                .error_for_status()
+                .unwrap();
+            assert!(
+                image.bytes().unwrap().as_ref() == expected,
+                "browser {layer}/{side} bytes differ"
+            );
+        }
+        let unauthorized = http
+            .get(format!(
+                "http://127.0.0.1:{}/api/state",
+                reqwest::Url::parse(url).unwrap().port().unwrap()
+            ))
+            .send()
+            .unwrap();
+        assert_eq!(unauthorized.status(), reqwest::StatusCode::NOT_FOUND);
+    }
+    let mut foreign = snapshot.clone();
+    foreign["rootId"] = json!("a".repeat(64));
+    assert_eq!(
+        call(
+            &mut restarted,
+            "local.snapshot.browser",
+            json!({"snapshot":foreign,"layer":"staged"})
+        )["ok"],
+        false
+    );
+    assert_eq!(
+        call(
+            &mut restarted,
+            "local.snapshot.browser",
+            json!({"snapshot":snapshot,"layer":"committed"})
+        )["ok"],
+        false
+    );
+}
 fn preview_chunk(
     backend: &mut Backend,
     path: &str,
@@ -3068,7 +3337,7 @@ fn preview_chunk(
     hash: Option<&str>,
 ) -> Value {
     let id = format!("image-{side}-{offset}");
-    let mut params = json!({"target":{"kind":"local","localSnapshotSha256":LOCAL_SHA},"path":path,"side":side,"offset":offset,"maxBytes":196608});
+    let mut params = json!({"target":configured_working_tree_target(),"path":path,"side":side,"offset":offset,"maxBytes":196608});
     if let Some(hash) = hash {
         params["contentSha256"] = json!(hash);
     }
@@ -3085,7 +3354,7 @@ fn image_comparison_chunks_are_bounded_and_fenced_against_content_drift() {
     git(repo.path(), &["add", "-A"]);
     git(repo.path(), &["commit", "-qm", "base image"]);
     std::fs::write(repo.path().join("pic.bmp"), &after).unwrap();
-    let mut backend = Backend::spawn(repo.path());
+    let mut backend = Backend::spawn_configured(repo.path());
     backend.handshake();
     for (side, expected) in [("old", &before), ("new", &after)] {
         let mut offset = 0;
@@ -3134,7 +3403,7 @@ fn image_comparison_preserves_missing_sides_and_rename_sources() {
     git(repo.path(), &["add", "-A"]);
     git(repo.path(), &["commit", "-qm", "base"]);
     git(repo.path(), &["mv", "before.bmp", "after.bmp"]);
-    let mut backend = Backend::spawn(repo.path());
+    let mut backend = Backend::spawn_configured(repo.path());
     backend.handshake();
     let old = preview_chunk(&mut backend, "after.bmp", "old", 0, None);
     let new = preview_chunk(&mut backend, "after.bmp", "new", 0, None);
@@ -3167,7 +3436,7 @@ fn image_comparison_refuses_malformed_oversized_and_symlink_content() {
     let mut oversized = bitmap_bytes([0, 0, 0]);
     oversized.resize(2 * 1024 * 1024 + 1, 0);
     std::fs::write(repo.path().join("huge.bmp"), oversized).unwrap();
-    let mut backend = Backend::spawn(repo.path());
+    let mut backend = Backend::spawn_configured(repo.path());
     backend.handshake();
     assert_eq!(
         preview_chunk(&mut backend, "invalid.png", "new", 0, None)["ok"],
@@ -3332,7 +3601,7 @@ fn staged_drafts_survive_backend_restart_preserve_finding_metadata_and_fence_cas
 
 #[cfg(unix)]
 #[test]
-fn inline_prompt_uses_selected_policy_and_canonical_override_precedence() {
+fn captured_inline_prompt_preserves_override_precedence_and_rejects_invalid_policy() {
     use std::os::unix::fs::PermissionsExt;
     for (policy, user, expected, forbidden) in [
         (
@@ -3392,7 +3661,7 @@ fn inline_prompt_uses_selected_policy_and_canonical_override_precedence() {
         let capture = storage.path().join("captured-prompt");
         std::fs::write(&binary,"#!/bin/sh\ncat > \"$NORN_FAKE_PROMPT_CAPTURE\"\nprintf '%s\\n' '{\"result\":\"No review findings.\",\"session_id\":\"prompt-fixture\"}'\n").unwrap();
         std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o755)).unwrap();
-        let mut backend = Backend::spawn_env(
+        let mut backend = Backend::spawn_configured_env(
             repo.path(),
             &[
                 ("NORN_REVIEW_ENGINE", "real"),
@@ -3403,7 +3672,8 @@ fn inline_prompt_uses_selected_policy_and_canonical_override_precedence() {
             ],
         );
         backend.handshake();
-        backend.send(json!({"type":"request","id":"start","method":"review.start","params":{"target":{"kind":"local","localSnapshotSha256":LOCAL_SHA}}}));
+        let snapshot = captured_current_snapshot(&mut backend, repo.path());
+        backend.send(json!({"type":"request","id":"start","method":"local.review.start","params":{"snapshot":snapshot,"profile":null}}));
         let started = backend.wait_for(|v| v["id"] == "start", Duration::from_secs(5));
         assert_eq!(started["ok"], true, "{started}");
         let operation = started["result"]["operationId"].as_str().unwrap();
@@ -3415,6 +3685,13 @@ fn inline_prompt_uses_selected_policy_and_canonical_override_precedence() {
             },
             Duration::from_secs(15),
         );
+        if policy.starts_with("invalid:") {
+            // Qualified capture starts retain the shared native policy gate;
+            // a prompt override cannot hide an unreadable repository policy.
+            assert_eq!(terminal["event"]["state"], "failed", "{terminal}");
+            assert!(!capture.exists());
+            continue;
+        }
         assert_eq!(terminal["event"]["state"], "succeeded", "{terminal}");
         let payload = std::fs::read_to_string(capture).unwrap();
         assert!(

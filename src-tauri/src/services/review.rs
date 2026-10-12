@@ -3485,6 +3485,7 @@ fn read_codex_inline_review_stream<R: std::io::Read + Send + 'static>(
     )
 }
 
+#[cfg(not(windows))]
 fn kill_process(pid: u32) -> Result<(), String> {
     let output = Command::new("/bin/kill")
         .arg("-TERM")
@@ -3503,6 +3504,95 @@ fn kill_process(pid: u32) -> Result<(), String> {
         stderr.trim(),
         String::from_utf8_lossy(&output.stdout).trim()
     ))
+}
+
+/// Cancel only the recorded native agent and descendants observed in its tree.
+/// The Windows API avoids Unix executables and shell/PATH-dependent taskkill.
+#[cfg(windows)]
+fn kill_process(pid: u32) -> Result<(), String> {
+    use std::mem::size_of;
+    use windows_sys::Win32::Foundation::{
+        CloseHandle, GetLastError, ERROR_INVALID_PARAMETER, ERROR_NO_MORE_FILES,
+        INVALID_HANDLE_VALUE,
+    };
+    use windows_sys::Win32::System::Diagnostics::ToolHelp::{
+        CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W,
+        TH32CS_SNAPPROCESS,
+    };
+    use windows_sys::Win32::System::Threading::{
+        GetExitCodeProcess, OpenProcess, TerminateProcess, PROCESS_QUERY_LIMITED_INFORMATION,
+        PROCESS_TERMINATE,
+    };
+    if pid == 0 {
+        return Err("Cannot cancel an unowned agent process.".into());
+    }
+    let snapshot = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) };
+    if snapshot == INVALID_HANDLE_VALUE {
+        return Err(format!(
+            "Failed to inspect owned agent process tree: {}",
+            std::io::Error::last_os_error()
+        ));
+    }
+    let mut entry: PROCESSENTRY32W = unsafe { std::mem::zeroed() };
+    entry.dwSize = size_of::<PROCESSENTRY32W>() as u32;
+    let mut processes = Vec::new();
+    let mut more = unsafe { Process32FirstW(snapshot, &mut entry) };
+    while more != 0 && processes.len() < 65536 {
+        processes.push((entry.th32ProcessID, entry.th32ParentProcessID));
+        more = unsafe { Process32NextW(snapshot, &mut entry) };
+    }
+    let scan_error = unsafe { GetLastError() };
+    unsafe { CloseHandle(snapshot) };
+    if more != 0 || scan_error != ERROR_NO_MORE_FILES {
+        return Err("Could not verify the bounded owned agent process tree.".into());
+    }
+    let mut children = std::collections::HashMap::<u32, Vec<u32>>::new();
+    for (child, parent) in processes {
+        children.entry(parent).or_default().push(child);
+    }
+    let mut owned = vec![pid];
+    let mut seen = std::collections::HashSet::from([pid]);
+    let mut index = 0;
+    while index < owned.len() {
+        if let Some(descendants) = children.get(&owned[index]) {
+            for &child in descendants {
+                if child != 0 && seen.insert(child) {
+                    owned.push(child);
+                }
+            }
+        }
+        index += 1;
+    }
+    for target in owned.into_iter().rev() {
+        let handle = unsafe {
+            OpenProcess(
+                PROCESS_TERMINATE | PROCESS_QUERY_LIMITED_INFORMATION,
+                0,
+                target,
+            )
+        };
+        if handle.is_null() {
+            if unsafe { GetLastError() } == ERROR_INVALID_PARAMETER {
+                continue;
+            }
+            return Err(format!(
+                "Failed to open owned agent process {target}: {}",
+                std::io::Error::last_os_error()
+            ));
+        }
+        let terminated = unsafe { TerminateProcess(handle, 1) } != 0;
+        let mut exit_code = 259; // STILL_ACTIVE
+        let already_exited =
+            unsafe { GetExitCodeProcess(handle, &mut exit_code) } != 0 && exit_code != 259;
+        let error = std::io::Error::last_os_error();
+        unsafe { CloseHandle(handle) };
+        if !terminated && !already_exited {
+            return Err(format!(
+                "Failed to cancel owned agent process {target}: {error}"
+            ));
+        }
+    }
+    Ok(())
 }
 
 fn git_status_lines(repo_path: &Path) -> Result<Vec<String>, String> {

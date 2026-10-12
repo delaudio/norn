@@ -4,11 +4,11 @@
 # package.json / cargo / tauri commands so package.json stays authoritative.
 
 .DEFAULT_GOAL := help
-.PHONY: help dev tauri-dev install-local cli-build cli-install tui tui-build tui-install build typecheck lint test test-tauri ui-typecheck ui-test ui-frames-check evaluate check bundle-windows
+.PHONY: help dev tauri-dev install-local cli-build cli-install tui tui-build tui-install build typecheck lint test test-tauri ui-typecheck ui-test ui-native-workflow ui-frames-check evaluate check bundle-windows
 
 # List available recipes (runs by default).
 help:
-	@echo "Norn recipes: dev tauri-dev install-local cli-build cli-install tui tui-build tui-install build typecheck lint test test-tauri ui-typecheck ui-test ui-frames-check evaluate check bundle-windows"
+	@echo "Norn recipes: dev tauri-dev install-local cli-build cli-install tui tui-build tui-install build typecheck lint test test-tauri ui-typecheck ui-test ui-native-workflow ui-frames-check evaluate check bundle-windows"
 
 # Start the Vite dev server (browser mock IPC).
 dev:
@@ -92,3 +92,7 @@ check-versions:
 # This target exists for recipe parity; run `just bundle-windows` on Windows.
 bundle-windows:
 	@echo "Windows NSIS installer must be built on Windows: run 'just bundle-windows' (see ADR ARCH-008)."
+
+# Exercise the native UI with the Rust backend and an isolated fake agent.
+ui-native-workflow:
+	pnpm run ui:workflow

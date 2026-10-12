@@ -1,6 +1,8 @@
 import type {
   DraftTarget,
   LocalSnapshotInfo,
+  LocalSnapshotRef,
+  LocalSnapshotSummary,
   LocalSource,
   ProviderSnapshotInfo,
   PrRepositoryIdentity,
@@ -159,8 +161,20 @@ export interface PickerEntry {
 export interface ShellSnapshot {
   localAvailable: boolean;
   localProfilesAvailable: boolean;
+  localImagesAvailable: boolean;
+  localBrowserAvailable: boolean;
   localInfo: LocalSnapshotInfo | null;
   localForm: LocalComparisonForm | null;
+  savedLocal: {
+    items: LocalSnapshotSummary[];
+    cursor: number;
+    offset: number;
+    total: number;
+    version: string | null;
+    loading: boolean;
+    error: string | null;
+  } | null;
+  savedLocalAvailable: boolean;
   localRunId: string | null;
   findingLayers: LocalLayer[];
   findingLayerCursor: number;
@@ -240,8 +254,12 @@ export interface ShellSnapshot {
 const INITIAL: ShellSnapshot = {
   localAvailable: false,
   localProfilesAvailable: false,
+  localImagesAvailable: false,
+  localBrowserAvailable: false,
   localInfo: null,
   localForm: null,
+  savedLocal: null,
+  savedLocalAvailable: false,
   localRunId: null,
   findingLayers: [],
   findingLayerCursor: 0,
@@ -668,6 +686,13 @@ export class ShellStore {
   private snapshotInFlight = false;
   private snapshotPending = false;
   private client: BackendClient | null = null;
+  private localFindingChoice: {
+    snapshot: LocalSnapshotRef;
+    runId: string | null;
+    id: string;
+    anchor: FindingSummary["anchor"];
+    layer: LocalLayer;
+  } | null = null;
   private fixing = false;
   private operationTarget: TargetIdentity | null = null;
   private operationKind: "review" | "reply" | "fix" = "review";
@@ -748,6 +773,80 @@ export class ShellStore {
     this.localCapture = null;
     if (active && this.client) void this.client.localCancel(active).catch(() => {});
   }
+  private async activateLocalSnapshot(
+    info: LocalSnapshotInfo,
+    client: BackendClient,
+    saved = false,
+  ): Promise<void> {
+    const row: PickerEntry = {
+      ...info.snapshot.repository,
+      kind: "working-tree",
+      origin: info.snapshot.source.kind === "current" ? "current" : undefined,
+      localSource: info.snapshot.source,
+      prId: null,
+      runId: null,
+      title: saved
+        ? "Saved local snapshot"
+        : info.snapshot.source.kind === "current"
+          ? "Current repository"
+          : "Working tree",
+      status: "local",
+    };
+    const picker = [...this.state.picker];
+    let selectedPicker = picker.findIndex(
+      (entry) =>
+        entry.kind === "working-tree" &&
+        sameLocalValue(
+          entry.localSource ?? this.configuredLocalSource(entry),
+          info.snapshot.source,
+        ),
+    );
+    if (selectedPicker < 0) {
+      picker.unshift(row);
+      selectedPicker = 0;
+    } else picker[selectedPicker] = row;
+    const generation = this.state.generation + 1;
+    this.cancelSyntax();
+    this.clearSearch();
+    this.update({
+      picker,
+      selectedPicker,
+      localInfo: info,
+      localForm: null,
+      savedLocal: null,
+      localRunId:
+        saved &&
+        this.state.localInfo &&
+        sameLocalValue(this.state.localInfo.snapshot, info.snapshot)
+          ? this.state.localRunId
+          : null,
+      findingLayers: [],
+      liveSnapshot: null,
+      providerPreview: false,
+      generation,
+      files: [],
+      findings: [],
+      history: [],
+      threads: [],
+      selectedFile: 0,
+      selectedFinding: 0,
+      selectedThread: 0,
+      viewedFiles: [],
+      diff: null,
+      syntax: null,
+      syntaxLoading: false,
+      diffError: null,
+      diffLoading: false,
+      preview: null,
+      previewError: null,
+      highlightLine: null,
+      selectedReviewProfile: null,
+      error: null,
+      notice: null,
+    });
+    await this.loadSnapshot(client, generation);
+  }
+
   async openLocalComparison(client: BackendClient, source?: LocalSource): Promise<void> {
     if (!this.state.localAvailable) {
       this.update({ notice: "Qualified local comparisons require an updated backend." });
@@ -771,6 +870,7 @@ export class ShellStore {
     this.localRequest++;
     this.cancelLocalCapture();
     this.update({
+      savedLocal: null,
       localForm: localComparisonForm(
         this.state.repositories,
         source ?? this.state.localInfo?.comparison.source,
@@ -783,6 +883,118 @@ export class ShellStore {
     this.localRequest++;
     this.cancelLocalCapture();
     this.update({ localForm: null });
+  }
+  async openSavedLocal(client: BackendClient): Promise<void> {
+    if (!this.state.savedLocalAvailable) {
+      this.update({ notice: "Saved local snapshots require an updated backend." });
+      return;
+    }
+    if (
+      this.state.composing ||
+      this.state.fixPreview ||
+      this.state.fixPreviewLoading ||
+      this.state.findingStage ||
+      this.state.searchOpen ||
+      this.state.settingsOpen ||
+      this.state.dataOpen ||
+      this.state.workspaceOpen ||
+      this.state.referencesOpen ||
+      this.state.draftsOpen ||
+      this.requestInFlight() ||
+      (this.state.operation && ["accepted", "running"].includes(this.state.operation.state))
+    ) {
+      this.update({ notice: "Finish or close the current operation, editor or approval first." });
+      return;
+    }
+    this.localRequest++;
+    this.cancelLocalCapture();
+    this.update({
+      localForm: null,
+      profileOpen: false,
+      findingLayers: [],
+      savedLocal: {
+        items: [],
+        cursor: 0,
+        offset: 0,
+        total: 0,
+        version: null,
+        loading: false,
+        error: null,
+      },
+    });
+    await this.pageSavedLocal(client, 0);
+  }
+  dismissSavedLocal(): void {
+    this.localRequest++;
+    this.update({ savedLocal: null });
+  }
+  moveSavedLocal(delta: number): void {
+    const form = this.state.savedLocal;
+    if (!form || form.loading) return;
+    this.update({
+      savedLocal: {
+        ...form,
+        cursor: Math.max(0, Math.min(form.items.length - 1, form.cursor + delta)),
+      },
+    });
+  }
+  async pageSavedLocal(client: BackendClient, delta: number): Promise<void> {
+    const form = this.state.savedLocal;
+    if (!form || form.loading) return;
+    const offset = delta === 0 ? 0 : form.offset + delta * 32;
+    if (offset < 0 || (delta > 0 && offset >= form.total)) return;
+    const request = ++this.localRequest;
+    const generation = this.state.generation;
+    const current = () =>
+      request === this.localRequest &&
+      generation === this.state.generation &&
+      this.state.savedLocal !== null;
+    this.update({ savedLocal: { ...form, loading: true, error: null } });
+    try {
+      const page = await client.localSnapshots({
+        offset,
+        limit: 32,
+        catalogVersion: delta === 0 ? null : form.version,
+      });
+      if (current())
+        this.update({
+          savedLocal: {
+            items: page.snapshots,
+            cursor: 0,
+            offset,
+            total: page.total,
+            version: page.catalogVersion,
+            loading: false,
+            error: null,
+          },
+        });
+    } catch (error) {
+      if (current())
+        this.update({
+          savedLocal: { ...this.state.savedLocal!, loading: false, error: message(error) },
+        });
+    }
+  }
+  async chooseSavedLocal(client: BackendClient): Promise<void> {
+    const form = this.state.savedLocal;
+    const item = form?.items[form.cursor];
+    if (!form || !item || form.loading || form.error) return;
+    const request = ++this.localRequest;
+    const generation = this.state.generation;
+    const current = () =>
+      request === this.localRequest &&
+      generation === this.state.generation &&
+      this.state.savedLocal !== null;
+    this.update({ savedLocal: { ...form, loading: true } });
+    try {
+      const result = await client.localInfo({ snapshot: item.snapshot });
+      if (current()) await this.activateLocalSnapshot(result.info, client, true);
+    } catch (error) {
+      if (current())
+        this.update({
+          savedLocal: { ...this.state.savedLocal!, loading: false, error: message(error) },
+        });
+    }
   }
   cycleLocalField(): void {
     const form = this.state.localForm;
@@ -913,60 +1125,7 @@ export class ShellStore {
           "The local source changed after selecting its options. Refresh before capturing.",
         );
       this.localCapture = null;
-      const row: PickerEntry = {
-        ...options.repository,
-        kind: "working-tree",
-        origin: source.kind === "current" ? "current" : undefined,
-        localSource: source,
-        prId: null,
-        runId: null,
-        title: source.kind === "current" ? "Current repository" : "Working tree",
-        status: "local",
-      };
-      const picker = [...this.state.picker];
-      let selectedPicker = picker.findIndex(
-        (entry) =>
-          entry.kind === "working-tree" &&
-          sameLocalValue(entry.localSource ?? this.configuredLocalSource(entry), source),
-      );
-      if (selectedPicker < 0) {
-        picker.unshift(row);
-        selectedPicker = 0;
-      } else picker[selectedPicker] = row;
-      const generation = this.state.generation + 1;
-      this.cancelSyntax();
-      this.clearSearch();
-      this.update({
-        picker,
-        selectedPicker,
-        localInfo: info,
-        localForm: null,
-        localRunId: null,
-        findingLayers: [],
-        liveSnapshot: null,
-        providerPreview: false,
-        generation,
-        files: [],
-        findings: [],
-        history: [],
-        threads: [],
-        selectedFile: 0,
-        selectedFinding: 0,
-        selectedThread: 0,
-        viewedFiles: [],
-        diff: null,
-        syntax: null,
-        syntaxLoading: false,
-        diffError: null,
-        diffLoading: false,
-        preview: null,
-        previewError: null,
-        highlightLine: null,
-        selectedReviewProfile: null,
-        error: null,
-        notice: null,
-      });
-      await this.loadSnapshot(client, generation);
+      await this.activateLocalSnapshot(info, client);
     } catch (error) {
       if (request === this.localRequest) this.cancelLocalCapture();
       if (current())
@@ -1224,6 +1383,9 @@ export class ShellStore {
           ready.capabilities.includes("local-snapshots") &&
           ready.capabilities.includes("local-evidence-reviews"),
         localProfilesAvailable: ready.capabilities.includes("local-profile-catalog"),
+        localImagesAvailable: ready.capabilities.includes("local-captured-images"),
+        localBrowserAvailable: ready.capabilities.includes("local-snapshot-browser"),
+        savedLocalAvailable: ready.capabilities.includes("local-saved-snapshots"),
         profileCatalogAvailable: ready.capabilities.includes("review-profile-catalog"),
         providerReads: ready.capabilities.includes("provider-pr-reads"),
         providerExternalBrowser: ready.capabilities.includes("provider-external-browser"),
@@ -1563,6 +1725,7 @@ export class ShellStore {
         : null;
     this.update({
       findingStage: preview ? null : findingStage,
+      savedLocal: null,
       providerPreview:
         this.state.providerSnapshots &&
         nextEntry?.kind === "review" &&
@@ -1817,7 +1980,19 @@ export class ShellStore {
       return false;
     }
     const layers = this.state.localInfo ? (finding.candidateLayers ?? []) : [];
-    if (layers.length > 1 && !chosenLayer) {
+    const choice = this.localFindingChoice;
+    const retainedLayer =
+      choice &&
+      this.state.localInfo &&
+      sameLocalValue(choice.snapshot, this.state.localInfo.snapshot) &&
+      choice.runId === this.state.localRunId &&
+      choice.id === finding.id &&
+      sameLocalValue(choice.anchor, finding.anchor) &&
+      layers.includes(choice.layer)
+        ? choice.layer
+        : undefined;
+    const selectedLayer = chosenLayer ?? retainedLayer;
+    if (layers.length > 1 && !selectedLayer) {
       this.update({
         findingLayers: layers,
         findingLayerCursor: 0,
@@ -1826,7 +2001,7 @@ export class ShellStore {
       });
       return true;
     }
-    const layer = chosenLayer ?? layers[0];
+    const layer = selectedLayer ?? layers[0];
     const anchor = finding.anchor;
     const side = anchor.side ?? "new";
     // A side-specific match avoids selecting a recreated file: an old-side
@@ -1850,6 +2025,15 @@ export class ShellStore {
         notice: `Anchor file is not in the current diff: ${anchor.path}.`,
       });
       return false;
+    }
+    if (chosenLayer && this.state.localInfo && layers.includes(chosenLayer)) {
+      this.localFindingChoice = {
+        snapshot: this.state.localInfo.snapshot,
+        runId: this.state.localRunId,
+        id: finding.id,
+        anchor: finding.anchor,
+        layer: chosenLayer,
+      };
     }
     this.update({
       selectedFile: index,
@@ -2249,14 +2433,24 @@ export class ShellStore {
     const request = ++this.previewRequest;
     const target = this.activeTarget();
     const file = this.state.files[this.state.selectedFile];
-    if (!target || !file || !isImagePath(file.path)) {
+    if (
+      !target ||
+      !file ||
+      !(
+        isImagePath(file.path) ||
+        (target.kind === "local" && file.oldPath !== null && isImagePath(file.oldPath))
+      )
+    ) {
       this.update({ preview: null, previewError: null });
       return;
     }
-    if (target.kind === "local" && this.state.localInfo) {
+    if (
+      target.kind === "local" &&
+      (!this.state.localInfo || !file.localLayer || !this.state.localImagesAvailable)
+    ) {
       this.update({
         preview: null,
-        previewError: "Image previews for captured local layers are not available yet.",
+        previewError: "The backend does not support captured local image previews.",
       });
       return;
     }
@@ -2266,7 +2460,8 @@ export class ShellStore {
       request === this.previewRequest &&
       generation === this.state.generation &&
       this.state.status !== "closed" &&
-      this.state.files[this.state.selectedFile]?.path === file.path;
+      !!this.state.files[this.state.selectedFile] &&
+      localFileKey(this.state.files[this.state.selectedFile]!) === localFileKey(file);
     const comparison: ImageComparisonView = {
       path: file.path,
       requestId: request,
@@ -2281,11 +2476,40 @@ export class ShellStore {
       const errorField = side === "old" ? "beforeError" : "afterError";
       try {
         const snapshot = this.state.liveSnapshot;
-        const result = snapshot
-          ? await client.providerSnapshotImage(snapshot!.snapshot, file.path, side, current)
-          : await client.filePreview(target, file.path, side, current);
+        const info = this.state.localInfo;
+        const result =
+          target.kind === "local" && info && file.localLayer
+            ? await client.localSnapshotImage(
+                info.snapshot,
+                file.localLayer,
+                file.path,
+                side,
+                current,
+              )
+            : snapshot
+              ? await client.providerSnapshotImage(snapshot!.snapshot, file.path, side, current)
+              : await client.filePreview(target, file.path, side, current);
         if (current()) {
-          this.update({ preview: { ...this.state.preview!, [field]: result, [errorField]: null } });
+          this.update({
+            preview: {
+              ...this.state.preview!,
+              [field]: result,
+              [errorField]:
+                !result.available &&
+                result.unavailableReason &&
+                result.unavailableReason !== "absent"
+                  ? {
+                      legacySnapshot: "Legacy: no image bytes.",
+                      unsupportedFormat: "Unsupported image format.",
+                      unsupportedMode: "Unsupported file mode.",
+                      oversized: "Image exceeds capture limit.",
+                      invalidContent: "Invalid image content.",
+                      captureLimit: "Image capture limit reached.",
+                      absent: "No image on this side.",
+                    }[result.unavailableReason]
+                  : null,
+            },
+          });
         }
       } catch (error) {
         if (current()) {
@@ -2731,7 +2955,28 @@ export class ShellStore {
       return;
     }
     if (target.kind === "local" && this.state.localInfo) {
-      this.update({ notice: "Browser diffs for captured local layers are not available yet." });
+      const layer = this.state.files[this.state.selectedFile]?.localLayer;
+      if (!layer || !this.state.localBrowserAvailable) {
+        this.update({
+          notice:
+            "Select a captured local file layer supported by this backend before opening the browser diff.",
+        });
+        return;
+      }
+      const generation = this.state.generation;
+      try {
+        const result = await client.localSnapshotBrowser(
+          this.state.localInfo.snapshot,
+          layer,
+          () => generation === this.state.generation,
+        );
+        if (generation === this.state.generation)
+          this.update({
+            notice: `Browser diff: ${result.url}${result.launchError ? ` · Launch failed: ${result.launchError}` : ""}`,
+          });
+      } catch (error) {
+        if (generation === this.state.generation) this.update({ error: message(error) });
+      }
       return;
     }
     const generation = this.state.generation;

@@ -26,6 +26,8 @@ struct Stored {
     root: PathBuf,
     info: Info,
     layers: Vec<StoredLayer>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    images: Option<Vec<super::images::StoredImage>>,
 }
 struct Section {
     file: File,
@@ -37,6 +39,7 @@ pub(crate) struct Data {
     root: PathBuf,
     layers: Vec<StoredLayer>,
     files: Vec<Section>,
+    pub(super) images: Option<Vec<super::images::StoredImage>>,
     bytes: usize,
 }
 pub(crate) struct Manager {
@@ -83,7 +86,15 @@ fn identity(stored: &Stored) -> Result<String, String> {
     let mut content = stored.clone();
     content.info.snapshot.snapshot_id.clear();
     content.info.local_review_id = 0;
-    let bytes = serde_json::to_vec(&("norn-local-snapshot-v1", content)).map_err(|_| invalid())?;
+    let bytes = serde_json::to_vec(&(
+        if stored.format_version == 1 {
+            "norn-local-snapshot-v1"
+        } else {
+            "norn-local-snapshot-v2"
+        },
+        content,
+    ))
+    .map_err(|_| invalid())?;
     Ok(hash(&bytes))
 }
 fn review_id(id: &str) -> Result<u32, String> {
@@ -94,8 +105,10 @@ impl Stored {
         expected.validate()?;
         self.info.comparison.validate()?;
         let info = &self.info;
-        if self.format_version != 1
-            || info.snapshot != *expected
+        if !matches!(
+            (self.format_version, self.images.is_some()),
+            (1, false) | (2, true)
+        ) || info.snapshot != *expected
             || info.comparison.source != expected.source
             || !self.root.is_absolute()
             || root_id(&self.root)? != expected.root_id
@@ -162,6 +175,15 @@ impl Stored {
         {
             return Err(invalid());
         }
+        if let Some(images) = &self.images {
+            super::images::validate(
+                images,
+                &files
+                    .iter()
+                    .map(|section| &section.file)
+                    .collect::<Vec<_>>(),
+            )?;
+        }
         let bytes = serde_json::to_vec(&self).map_err(|_| invalid())?.len();
         if bytes > METADATA_BYTES {
             return Err(invalid());
@@ -171,11 +193,40 @@ impl Stored {
             root: self.root,
             layers: self.layers,
             files,
+            images: self.images,
             bytes,
         })
     }
 }
 impl Data {
+    pub(super) fn browser_files(&self, layer: Layer) -> impl Iterator<Item = &File> {
+        self.files
+            .iter()
+            .filter(move |section| section.file.layer == layer)
+            .map(|section| &section.file)
+    }
+    pub(super) fn browser_file(
+        &self,
+        layer: Layer,
+        path: &str,
+        side: crate::services::raster::ImageSide,
+    ) -> Option<&File> {
+        let mut files = self.browser_files(layer);
+        if side == crate::services::raster::ImageSide::Old {
+            if let Some(file) = files.find(|file| {
+                file.status != "added" && file.old_path.as_deref().unwrap_or(&file.path) == path
+            }) {
+                return Some(file);
+            }
+        }
+        self.file(layer, path)
+    }
+    pub(super) fn file(&self, layer: Layer, path: &str) -> Option<&File> {
+        self.files
+            .iter()
+            .find(|section| section.file.layer == layer && section.file.path == path)
+            .map(|section| &section.file)
+    }
     pub(crate) fn root(&self) -> &Path {
         &self.root
     }
@@ -198,7 +249,8 @@ impl Data {
 
     fn stored(&self) -> Stored {
         Stored {
-            format_version: 1,
+            format_version: if self.images.is_some() { 2 } else { 1 },
+            images: self.images.clone(),
             root: self.root.clone(),
             info: self.info.clone(),
             layers: self.layers.clone(),
@@ -215,7 +267,7 @@ impl Manager {
             cache: Mutex::new(VecDeque::new()),
         }
     }
-    fn check(&self) -> Result<(), String> {
+    pub(super) fn check(&self) -> Result<(), String> {
         if self.shutdown.load(Ordering::Acquire) {
             Err("Local snapshot operation canceled during shutdown.".into())
         } else {
@@ -401,8 +453,10 @@ impl Manager {
             result.map_err(|_| "Local capture failed or was canceled. Check the selected comparison and retry explicitly.".into())
         };
         let first = collect()?;
+        let first_images = super::images::collect(&resolved.root, &first, comparison, &control)?;
         let second = collect()?;
-        if first.snapshot_sha256 != second.snapshot_sha256 {
+        let second_images = super::images::collect(&resolved.root, &second, comparison, &control)?;
+        if first.snapshot_sha256 != second.snapshot_sha256 || first_images != second_images {
             return Err("The local comparison changed during capture. Refresh explicitly.".into());
         }
         let after = resolve_source(&comparison.source, &self.startup_root, &control)?;
@@ -435,6 +489,20 @@ impl Manager {
         let mut warnings = Vec::new();
         let mut truncated = false;
         for warning in first.warnings {
+            // The legacy preview contract skips dirty images. Replace that one
+            // obsolete instruction only when this capture actually owns the bytes.
+            let captured = first_images.iter().find(|image| {
+                image.layer == Layer::Unstaged
+                    && image.side == crate::services::raster::ImageSide::New
+                    && matches!(image.content, super::images::Content::Available { .. })
+                    && warning == format!("Skipped image preview with unstaged content `{}`; stage it to create an immutable preview.", image.path.escape_default())
+            });
+            let warning = captured.map_or(warning.clone(), |image| {
+                format!(
+                    "Unstaged image `{}` is preserved in this local capture.",
+                    image.path.escape_default()
+                )
+            });
             if warnings.len() >= 128 || warning.len() > 512 || warning.chars().any(char::is_control)
             {
                 truncated = true;
@@ -443,7 +511,12 @@ impl Manager {
             warnings.push(warning);
         }
         let mut stored = Stored {
-            format_version: 1,
+            format_version: if first_images.is_empty() { 1 } else { 2 },
+            images: if first_images.is_empty() {
+                None
+            } else {
+                Some(first_images)
+            },
             root: resolved.root,
             info: Info {
                 comparison: comparison.clone(),
@@ -564,6 +637,7 @@ impl Manager {
         if current.info.snapshot.root_id != saved.info.snapshot.root_id
             || current.info.snapshot.repository != saved.info.snapshot.repository
             || current.info.native_snapshot_sha256 != saved.info.native_snapshot_sha256
+            || saved.images.is_some() && current.images != saved.images
         {
             return Err("The saved local comparison is stale. Capture it again explicitly before starting an operation.".into());
         }
@@ -1153,5 +1227,535 @@ mod tests {
             })
             .unwrap_err()
             .contains("stale"));
+    }
+    fn owned_png(color: [u8; 4]) -> Vec<u8> {
+        let image = image::RgbaImage::from_pixel(2, 3, image::Rgba(color));
+        let mut bytes = std::io::Cursor::new(Vec::new());
+        image::DynamicImage::ImageRgba8(image)
+            .write_to(&mut bytes, image::ImageFormat::Png)
+            .unwrap();
+        bytes.into_inner()
+    }
+    fn captured_image(
+        manager: &Manager,
+        snapshot: &SnapshotRef,
+        layer: Layer,
+        side: crate::services::raster::ImageSide,
+    ) -> Vec<u8> {
+        use base64::{engine::general_purpose::STANDARD, Engine};
+        let mut offset = 0;
+        let mut sha = None;
+        let mut bytes = Vec::new();
+        loop {
+            let page = manager
+                .image(super::super::ImageParams {
+                    snapshot: snapshot.clone(),
+                    layer,
+                    path: "picture.png".into(),
+                    side,
+                    offset,
+                    max_bytes: 7,
+                    content_sha256: sha.clone(),
+                })
+                .unwrap();
+            assert!(page.available);
+            assert_eq!((page.width, page.height), (Some(2), Some(3)));
+            assert_eq!(page.mime_type, "image/png");
+            bytes.extend(STANDARD.decode(page.data_base64).unwrap());
+            sha = page.content_sha256;
+            match page.next_offset {
+                Some(next) => {
+                    assert!(next > offset);
+                    offset = next
+                }
+                None => {
+                    assert_eq!(bytes.len(), page.size);
+                    assert_eq!(hash(&bytes), sha.unwrap());
+                    return bytes;
+                }
+            }
+        }
+    }
+    #[test]
+    fn captured_rasters_keep_distinct_layer_sides_across_worktree_drift_and_missing_root() {
+        let _lock = crate::review_storage::TEST_DATA_DIR_ENV_LOCK
+            .lock()
+            .unwrap();
+        let owned = Owned::new(true);
+        let base = owned_png([255, 0, 0, 255]);
+        let staged = owned_png([0, 255, 0, 255]);
+        let unstaged = owned_png([0, 0, 255, 255]);
+        std::fs::write(owned.root.path().join("picture.png"), &base).unwrap();
+        git(owned.root.path(), &["add", "picture.png"]);
+        git(
+            owned.root.path(),
+            &[
+                "-c",
+                "commit.gpgsign=false",
+                "commit",
+                "-m",
+                "owned image base",
+            ],
+        );
+        std::fs::write(owned.root.path().join("picture.png"), &staged).unwrap();
+        git(owned.root.path(), &["add", "picture.png"]);
+        std::fs::write(owned.root.path().join("picture.png"), &unstaged).unwrap();
+        std::fs::write(
+            owned.root.path().join("untracked.png"),
+            owned_png([255, 255, 0, 255]),
+        )
+        .unwrap();
+        let manager = owned.manager();
+        let capture = manager.capture(request(Mode::WorkingTree)).unwrap();
+        let reference = &capture.info.snapshot;
+        assert!(capture
+            .info
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("Unstaged image `picture.png` is preserved")));
+        assert!(!capture
+            .info
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("stage it to create an immutable preview")));
+        use crate::services::raster::ImageSide;
+        assert_eq!(
+            captured_image(&manager, reference, Layer::Staged, ImageSide::Old),
+            base
+        );
+        assert_eq!(
+            captured_image(&manager, reference, Layer::Staged, ImageSide::New),
+            staged
+        );
+        assert_eq!(
+            captured_image(&manager, reference, Layer::Unstaged, ImageSide::Old),
+            staged
+        );
+        assert_eq!(
+            captured_image(&manager, reference, Layer::Unstaged, ImageSide::New),
+            unstaged
+        );
+        let json = crate::review_storage::local_evidence::load(reference)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&json).unwrap()["formatVersion"],
+            2
+        );
+        let fresh = owned.manager();
+        fresh
+            .recheck(RecheckParams {
+                snapshot: reference.clone(),
+                capture_id: "b".repeat(64),
+            })
+            .unwrap();
+        std::fs::write(
+            owned.root.path().join("picture.png"),
+            owned_png([255, 255, 255, 255]),
+        )
+        .unwrap();
+        assert!(fresh
+            .recheck(RecheckParams {
+                snapshot: reference.clone(),
+                capture_id: "c".repeat(64)
+            })
+            .is_err());
+        assert_eq!(
+            captured_image(&fresh, reference, Layer::Unstaged, ImageSide::New),
+            unstaged
+        );
+        let destination = tempfile::tempdir().unwrap();
+        std::fs::rename(owned.root.path(), destination.path().join("removed-root")).unwrap();
+        let browser_manager = Arc::new(owned.manager());
+        for layer in [Layer::Staged, Layer::Unstaged] {
+            let state = browser_manager
+                .browser_state(&super::super::BrowserParams {
+                    snapshot: reference.clone(),
+                    layer,
+                })
+                .unwrap();
+            assert_eq!(
+                state.target_kind,
+                crate::browser_diff::WebDiffTargetKind::Local
+            );
+            assert_eq!(state.pr_id, 0);
+            assert_eq!(
+                state.local_snapshot_sha256.as_deref(),
+                Some(reference.snapshot_id.as_str())
+            );
+            assert_eq!(
+                state.diff.as_deref(),
+                browser_manager
+                    .get(reference)
+                    .unwrap()
+                    .layers()
+                    .find(|(kind, _)| *kind == layer)
+                    .map(|(_, text)| text)
+            );
+            assert!(state.snapshot_source.is_some());
+            let public = serde_json::to_string(&state).unwrap();
+            assert!(!public.contains("snapshot_source"));
+            assert!(!public.contains(destination.path().to_str().unwrap()));
+        }
+        let mut foreign = reference.clone();
+        foreign.root_id = "d".repeat(64);
+        assert!(browser_manager
+            .browser_state(&super::super::BrowserParams {
+                snapshot: foreign,
+                layer: Layer::Staged,
+            })
+            .is_err());
+        assert_eq!(
+            captured_image(&owned.manager(), reference, Layer::Staged, ImageSide::New),
+            staged
+        );
+        assert!(owned
+            .manager()
+            .image(super::super::ImageParams {
+                snapshot: reference.clone(),
+                layer: Layer::Unstaged,
+                path: "untracked.png".into(),
+                side: ImageSide::New,
+                offset: 0,
+                max_bytes: 7,
+                content_sha256: None
+            })
+            .is_err());
+    }
+
+    #[test]
+    fn saved_snapshot_pages_verify_catalog_continuity_and_survive_missing_checkout() {
+        let _lock = crate::review_storage::TEST_DATA_DIR_ENV_LOCK
+            .lock()
+            .unwrap();
+        let owned = Owned::new(true);
+        let manager = owned.manager();
+        let first = manager.capture(request(Mode::WorkingTree)).unwrap();
+        let initial = manager
+            .list(super::super::ListParams {
+                offset: 0,
+                limit: 1,
+                catalog_version: None,
+            })
+            .unwrap();
+        assert_eq!(initial.total, 1);
+        assert_eq!(initial.snapshots[0].snapshot, first.info.snapshot);
+        std::fs::write(owned.root.path().join("same.txt"), "another capture\n").unwrap();
+        let second = manager.capture(request(Mode::WorkingTree)).unwrap();
+        assert_ne!(first.info.snapshot, second.info.snapshot);
+        assert!(manager
+            .list(super::super::ListParams {
+                offset: 1,
+                limit: 1,
+                catalog_version: Some(initial.catalog_version)
+            })
+            .is_err());
+        let new_page = manager
+            .list(super::super::ListParams {
+                offset: 0,
+                limit: 1,
+                catalog_version: None,
+            })
+            .unwrap();
+        assert_eq!(new_page.total, 2);
+        assert_eq!(new_page.next_offset, Some(1));
+        let removed = tempfile::tempdir().unwrap();
+        std::fs::rename(owned.root.path(), removed.path().join("removed-checkout")).unwrap();
+        let restored = owned
+            .manager()
+            .list(super::super::ListParams {
+                offset: 1,
+                limit: 1,
+                catalog_version: Some(new_page.catalog_version.clone()),
+            })
+            .unwrap();
+        assert_eq!(restored.next_offset, None);
+        assert_eq!(restored.catalog_version, new_page.catalog_version);
+        assert_ne!(
+            restored.snapshots[0].snapshot,
+            new_page.snapshots[0].snapshot
+        );
+        assert!(owned
+            .manager()
+            .list(super::super::ListParams {
+                offset: 1,
+                limit: 1,
+                catalog_version: None
+            })
+            .is_err());
+        let encoded = serde_json::to_string(&restored).unwrap();
+        assert!(!encoded.contains(removed.path().to_str().unwrap()));
+        assert!(!encoded.contains("localReviewId"));
+    }
+
+    #[test]
+    fn committed_rasters_preserve_rename_sources_deleted_sides_and_ignore_dirty_bytes() {
+        let _lock = crate::review_storage::TEST_DATA_DIR_ENV_LOCK
+            .lock()
+            .unwrap();
+        let owned = Owned::new(true);
+        let old = owned_png([255, 0, 0, 255]);
+        let new = owned_png([0, 0, 255, 255]);
+        let deleted = owned_png([0, 255, 0, 255]);
+        for path in ["picture.png", "changed.png"] {
+            std::fs::write(owned.root.path().join(path), &old).unwrap();
+        }
+        std::fs::write(owned.root.path().join("deleted.png"), &deleted).unwrap();
+        git(
+            owned.root.path(),
+            &["add", "picture.png", "deleted.png", "changed.png"],
+        );
+        git(
+            owned.root.path(),
+            &[
+                "-c",
+                "commit.gpgsign=false",
+                "commit",
+                "-m",
+                "owned image base",
+            ],
+        );
+        git(owned.root.path(), &["branch", "-f", "comparison", "HEAD"]);
+        git(owned.root.path(), &["mv", "picture.png", "moved.png"]);
+        git(owned.root.path(), &["rm", "deleted.png"]);
+        std::fs::write(owned.root.path().join("changed.png"), &new).unwrap();
+        git(owned.root.path(), &["add", "changed.png"]);
+        git(
+            owned.root.path(),
+            &[
+                "-c",
+                "commit.gpgsign=false",
+                "commit",
+                "-m",
+                "owned image change",
+            ],
+        );
+        std::fs::write(owned.root.path().join("moved.png"), &new).unwrap();
+        let manager = Arc::new(owned.manager());
+        let capture = manager.capture(request(Mode::Branch)).unwrap();
+        let state = manager
+            .browser_state(&super::super::BrowserParams {
+                snapshot: capture.info.snapshot.clone(),
+                layer: Layer::Committed,
+            })
+            .unwrap();
+        let crate::browser_diff::WebDiffSnapshotSource::Local(source) =
+            state.snapshot_source.unwrap()
+        else {
+            panic!("local raster authority required")
+        };
+        assert!(source.raster("picture.png", "old").unwrap().unwrap().bytes == old);
+        assert!(source.raster("moved.png", "new").unwrap().unwrap().bytes == old);
+        assert!(source.raster("changed.png", "old").unwrap().unwrap().bytes == old);
+        assert!(source.raster("changed.png", "new").unwrap().unwrap().bytes == new);
+        assert!(source.raster("deleted.png", "old").unwrap().unwrap().bytes == deleted);
+        assert!(source.raster("deleted.png", "new").unwrap().is_none());
+        assert!(source.raster("unknown.png", "new").is_err());
+    }
+
+    #[test]
+    fn raster_capture_count_limit_is_explicit_and_does_not_hide_known_absent_sides() {
+        let _lock = crate::review_storage::TEST_DATA_DIR_ENV_LOCK
+            .lock()
+            .unwrap();
+        let owned = Owned::new(true);
+        let png = owned_png([1, 2, 3, 255]);
+        for index in 0..65 {
+            std::fs::write(
+                owned.root.path().join(format!("image-{index:03}.png")),
+                &png,
+            )
+            .unwrap();
+        }
+        git(owned.root.path(), &["add", "--", "*.png"]);
+        let manager = owned.manager();
+        let capture = manager.capture(request(Mode::WorkingTree)).unwrap();
+        assert_eq!(capture.info.file_count, 65);
+        let data = manager.get(&capture.info.snapshot).unwrap();
+        assert_eq!(data.images.as_ref().unwrap().len(), 128);
+        for (side, reason) in [
+            (crate::services::raster::ImageSide::Old, "absent"),
+            (crate::services::raster::ImageSide::New, "captureLimit"),
+        ] {
+            let page = manager
+                .image(super::super::ImageParams {
+                    snapshot: capture.info.snapshot.clone(),
+                    layer: Layer::Staged,
+                    path: "image-064.png".into(),
+                    side,
+                    offset: 0,
+                    max_bytes: 32,
+                    content_sha256: None,
+                })
+                .unwrap();
+            assert!(!page.available);
+            assert_eq!(page.reason.as_deref(), Some(reason));
+            assert!(page.data_base64.is_empty());
+        }
+    }
+
+    #[test]
+    fn raster_capture_preserves_explicit_unsupported_and_oversized_states() {
+        let _lock = crate::review_storage::TEST_DATA_DIR_ENV_LOCK
+            .lock()
+            .unwrap();
+        let owned = Owned::new(true);
+        std::fs::write(owned.root.path().join("invalid.png"), b"not a raster").unwrap();
+        std::fs::write(owned.root.path().join("vector.svg"), b"<svg></svg>").unwrap();
+        let mut huge = owned_png([1, 2, 3, 255]);
+        huge.resize(2 * 1024 * 1024 + 1, 0);
+        std::fs::write(owned.root.path().join("huge.png"), huge).unwrap();
+        git(
+            owned.root.path(),
+            &["add", "invalid.png", "vector.svg", "huge.png"],
+        );
+        let manager = owned.manager();
+        let capture = manager.capture(request(Mode::WorkingTree)).unwrap();
+        for (path, reason) in [
+            ("invalid.png", "invalidContent"),
+            ("vector.svg", "unsupportedFormat"),
+            ("huge.png", "oversized"),
+        ] {
+            let page = manager
+                .image(super::super::ImageParams {
+                    snapshot: capture.info.snapshot.clone(),
+                    layer: Layer::Staged,
+                    path: path.into(),
+                    side: crate::services::raster::ImageSide::New,
+                    offset: 0,
+                    max_bytes: 32,
+                    content_sha256: None,
+                })
+                .unwrap();
+            assert!(!page.available);
+            assert_eq!(page.reason.as_deref(), Some(reason));
+            assert!(page.data_base64.is_empty());
+            assert_eq!(page.content_sha256, None);
+            assert!(manager
+                .image(super::super::ImageParams {
+                    snapshot: capture.info.snapshot.clone(),
+                    layer: Layer::Staged,
+                    path: path.into(),
+                    side: crate::services::raster::ImageSide::New,
+                    offset: 1,
+                    max_bytes: 32,
+                    content_sha256: Some("f".repeat(64)),
+                })
+                .is_err());
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn raster_capture_rejects_an_unsupported_symlink_type_change() {
+        let _lock = crate::review_storage::TEST_DATA_DIR_ENV_LOCK
+            .lock()
+            .unwrap();
+        let owned = Owned::new(true);
+        let png = owned_png([1, 2, 3, 255]);
+        let path = owned.root.path().join("picture.png");
+        std::fs::write(&path, &png).unwrap();
+        git(owned.root.path(), &["add", "picture.png"]);
+        git(
+            owned.root.path(),
+            &[
+                "-c",
+                "commit.gpgsign=false",
+                "commit",
+                "-m",
+                "owned regular raster",
+            ],
+        );
+        let outside = tempfile::tempdir().unwrap();
+        let outside_path = outside.path().join("owned-external.png");
+        std::fs::write(&outside_path, owned_png([99, 88, 77, 255])).unwrap();
+        std::fs::remove_file(&path).unwrap();
+        std::os::unix::fs::symlink(&outside_path, &path).unwrap();
+        let manager = owned.manager();
+        assert!(manager.capture(request(Mode::WorkingTree)).is_err());
+        assert!(crate::review_storage::local_evidence::catalogue()
+            .unwrap()
+            .is_empty());
+    }
+    #[test]
+    fn raster_capture_validates_metadata_and_legacy_format_without_mutable_fallback() {
+        let _lock = crate::review_storage::TEST_DATA_DIR_ENV_LOCK
+            .lock()
+            .unwrap();
+        let owned = Owned::new(true);
+        let png = owned_png([1, 2, 3, 255]);
+        std::fs::write(owned.root.path().join("picture.png"), &png).unwrap();
+        git(owned.root.path(), &["add", "picture.png"]);
+        let manager = owned.manager();
+        let capture = manager.capture(request(Mode::WorkingTree)).unwrap();
+        let data = manager.get(&capture.info.snapshot).unwrap();
+        let mut stored = data.stored();
+        let available = stored
+            .images
+            .as_mut()
+            .unwrap()
+            .iter_mut()
+            .find(|image| {
+                matches!(
+                    image.content,
+                    super::super::images::Content::Available { .. }
+                )
+            })
+            .unwrap();
+        if let super::super::images::Content::Available { width, .. } = &mut available.content {
+            *width = 3;
+        }
+        stored.info.snapshot.snapshot_id = identity(&stored).unwrap();
+        stored.info.local_review_id = review_id(&stored.info.snapshot.snapshot_id).unwrap();
+        let expected = stored.info.snapshot.clone();
+        assert!(stored.validate(&expected).is_err());
+        let mut legacy = data.stored();
+        legacy.format_version = 1;
+        legacy.images = None;
+        legacy.info.snapshot.snapshot_id = identity(&legacy).unwrap();
+        legacy.info.local_review_id = review_id(&legacy.info.snapshot.snapshot_id).unwrap();
+        let json = serde_json::to_string(&legacy).unwrap();
+        assert!(!json.contains("\"images\""));
+        crate::review_storage::local_evidence::save(&legacy.info, &json).unwrap();
+        use crate::services::raster::ImageSide;
+        let page = owned
+            .manager()
+            .image(super::super::ImageParams {
+                snapshot: legacy.info.snapshot.clone(),
+                layer: Layer::Staged,
+                path: "picture.png".into(),
+                side: ImageSide::New,
+                offset: 0,
+                max_bytes: 32,
+                content_sha256: None,
+            })
+            .unwrap();
+        assert!(!page.available);
+        assert_eq!(page.reason.as_deref(), Some("legacySnapshot"));
+        assert!(page.data_base64.is_empty());
+        let wrong = super::super::ImageParams {
+            snapshot: capture.info.snapshot.clone(),
+            layer: Layer::Staged,
+            path: "picture.png".into(),
+            side: ImageSide::New,
+            offset: 1,
+            max_bytes: 32,
+            content_sha256: Some("a".repeat(64)),
+        };
+        assert!(manager.image(wrong).is_err());
+        let absent = manager
+            .image(super::super::ImageParams {
+                snapshot: capture.info.snapshot,
+                layer: Layer::Staged,
+                path: "picture.png".into(),
+                side: ImageSide::Old,
+                offset: 0,
+                max_bytes: 32,
+                content_sha256: None,
+            })
+            .unwrap();
+        assert!(!absent.available);
+        assert_eq!(absent.reason.as_deref(), Some("absent"));
+        assert!(absent.mime_type.is_empty());
     }
 }

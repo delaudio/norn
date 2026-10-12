@@ -1,0 +1,10 @@
+{
+  "type": "request",
+  "id": "owned",
+  "method": "local.snapshot.list",
+  "params": {
+    "offset": 0,
+    "limit": 32,
+    "catalogVersion": "not-a-hash"
+  }
+}

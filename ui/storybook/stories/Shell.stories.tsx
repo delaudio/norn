@@ -245,3 +245,53 @@ export const InvalidReviewProfilePolicy: Story = {
   args: { frameId: "shell-profiles-error-50x18" },
 };
 export const LoadingReviewProfiles: Story = { args: { frameId: "shell-profiles-loading-50x18" } };
+export const SavedLocalSnapshots: Story = { args: { frameId: "shell-saved-local-list-120x30" } };
+export const CompactSavedLocalSnapshots: Story = {
+  args: { frameId: "shell-saved-local-list-50x18" },
+};
+export const SavedLocalNextPage: Story = { args: { frameId: "shell-saved-local-next-120x30" } };
+export const CompactSavedLocalNextPage: Story = {
+  args: { frameId: "shell-saved-local-next-50x18" },
+};
+export const EmptySavedLocalSnapshots: Story = {
+  args: { frameId: "shell-saved-local-empty-120x30" },
+};
+export const CompactEmptySavedLocalSnapshots: Story = {
+  args: { frameId: "shell-saved-local-empty-50x18" },
+};
+export const LoadingSavedLocalSnapshots: Story = {
+  args: { frameId: "shell-saved-local-loading-120x30" },
+};
+export const CompactLoadingSavedLocalSnapshots: Story = {
+  args: { frameId: "shell-saved-local-loading-50x18" },
+};
+export const InvalidSavedLocalSnapshots: Story = {
+  args: { frameId: "shell-saved-local-error-120x30" },
+};
+export const CompactInvalidSavedLocalSnapshots: Story = {
+  args: { frameId: "shell-saved-local-error-50x18" },
+};
+export const CapturedLocalImages: Story = {
+  args: { frameId: "shell-local-image-comparison-120x30" },
+};
+export const CompactCapturedLocalImages: Story = {
+  args: { frameId: "shell-local-image-comparison-50x18" },
+};
+export const AddedCapturedLocalImage: Story = {
+  args: { frameId: "shell-local-image-added-120x30" },
+};
+export const CompactAddedCapturedLocalImage: Story = {
+  args: { frameId: "shell-local-image-added-50x18" },
+};
+export const LegacyLocalImageUnavailable: Story = {
+  args: { frameId: "shell-local-image-legacy-120x30" },
+};
+export const CompactLegacyLocalImageUnavailable: Story = {
+  args: { frameId: "shell-local-image-legacy-50x18" },
+};
+export const UnsupportedCapturedLocalImage: Story = {
+  args: { frameId: "shell-local-image-unsupported-120x30" },
+};
+export const CompactUnsupportedCapturedLocalImage: Story = {
+  args: { frameId: "shell-local-image-unsupported-50x18" },
+};

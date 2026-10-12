@@ -95,3 +95,7 @@ check-versions:
 # Output: src-tauri/target/release/bundle/nsis/Norn_<version>_x64-setup.exe
 bundle-windows:
     pnpm tauri build --bundles nsis --features custom-protocol,desktop-bundle
+
+# Exercise the native UI with the Rust backend and an isolated fake agent.
+ui-native-workflow:
+    pnpm run ui:workflow

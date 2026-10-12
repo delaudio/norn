@@ -448,6 +448,24 @@ export type Request =
       id: RequestId;
       method: "local.review.profiles";
       params: LocalLookupParams;
+    }
+  | {
+      type: "request";
+      id: RequestId;
+      method: "local.snapshot.image";
+      params: LocalImageParams;
+    }
+  | {
+      type: "request";
+      id: RequestId;
+      method: "local.snapshot.browser";
+      params: LocalBrowserParams;
+    }
+  | {
+      type: "request";
+      id: RequestId;
+      method: "local.snapshot.list";
+      params: LocalListParams;
     };
 export type RequestId = string;
 /**
@@ -577,6 +595,15 @@ export type LocalComparison =
     };
 export type LocalRelativePath = string;
 export type LocalRunId = string;
+export type LocalImageParams = {
+  snapshot: LocalSnapshotRef;
+  path: LocalRelativePath;
+  side: "old" | "new";
+  offset: number;
+  maxBytes: number;
+  contentSha256: string | null;
+  layer: "committed" | "staged" | "unstaged";
+};
 export type OperationState = "accepted" | "running" | "succeeded" | "failed" | "cancelled";
 export type ErrorCode =
   | "invalidRequest"
@@ -631,6 +658,28 @@ export type ProviderSnapshotImagePage = {
   contentSha256: string | null;
   width: number | null;
   height: number | null;
+};
+export type LocalImagePage = {
+  request: LocalImageParams;
+  mimeType: string;
+  size: number;
+  dataBase64: string;
+  available: boolean;
+  nextOffset: number | null;
+  contentSha256: string | null;
+  width: number | null;
+  height: number | null;
+  reason:
+    | (
+        | "absent"
+        | "unsupportedFormat"
+        | "unsupportedMode"
+        | "oversized"
+        | "invalidContent"
+        | "captureLimit"
+        | "legacySnapshot"
+      )
+    | null;
 };
 export type OperationEvent =
   | {
@@ -1075,6 +1124,15 @@ export interface LocalReviewQueryParams {
   snapshot: LocalSnapshotRef;
   runId?: LocalRunId | null;
 }
+export interface LocalBrowserParams {
+  snapshot: LocalSnapshotRef;
+  layer: "committed" | "staged" | "unstaged";
+}
+export interface LocalListParams {
+  offset: number;
+  limit: number;
+  catalogVersion: string | null;
+}
 export interface ResponseOk {
   type: "response";
   id: RequestId;
@@ -1127,7 +1185,10 @@ export interface ResponseOk {
     | LocalReviewFindingsPage
     | LocalReviewOutput
     | LocalReviewThreads
-    | LocalReviewProfilesResult;
+    | LocalReviewProfilesResult
+    | LocalImagePage
+    | LocalBrowserResult
+    | LocalListPage;
 }
 export interface DiffFileResult {
   target: TargetIdentity;
@@ -2079,6 +2140,38 @@ export interface LocalReviewMessage {
 export interface LocalReviewProfilesResult {
   request: LocalLookupParams;
   catalog: ReviewProfileCatalog;
+}
+export interface LocalBrowserResult {
+  request: LocalBrowserParams;
+  url: string;
+  launchRequested: boolean;
+  launchError: string | null;
+}
+export interface LocalListPage {
+  request: LocalListParams;
+  catalogVersion: string;
+  /**
+   * @maxItems 32
+   */
+  snapshots: LocalSnapshotSummary[];
+  total: number;
+  nextOffset: number | null;
+}
+export interface LocalSnapshotSummary {
+  snapshot: LocalSnapshotRef;
+  createdAt: string;
+  mode: "workingTree" | "branch";
+  branch: string;
+  baseSha: string;
+  /**
+   * @minItems 1
+   * @maxItems 3
+   */
+  layers:
+    | ["committed" | "staged" | "unstaged"]
+    | ["committed" | "staged" | "unstaged", "committed" | "staged" | "unstaged"]
+    | ["committed" | "staged" | "unstaged", "committed" | "staged" | "unstaged", "committed" | "staged" | "unstaged"];
+  fileCount: number;
 }
 export interface ResponseError {
   type: "response";

@@ -6,6 +6,8 @@ import type {
   DraftStageParams,
   DraftStageResult,
   DraftTarget,
+  LocalBrowserParams,
+  LocalBrowserResult,
   LocalCancelParams,
   LocalCancelResult,
   LocalCaptureParams,
@@ -15,7 +17,11 @@ import type {
   LocalDiffParams,
   LocalFilesPage,
   LocalFilesParams,
+  LocalImagePage,
+  LocalImageParams,
   LocalInfoResult,
+  LocalListPage,
+  LocalListParams,
   LocalLookupParams,
   LocalOptionsParams,
   LocalOptionsResult,
@@ -216,6 +222,7 @@ export interface CredentialStatus {
 }
 
 export interface FilePreview {
+  unavailableReason?: LocalImagePage["reason"];
   path: string;
   side: "old" | "new";
   available: boolean;
@@ -1292,6 +1299,111 @@ export class BackendClient {
     )
       throw new Error("Invalid local evidence diff page.");
     return result;
+  }
+
+  async localSnapshotImage(
+    snapshot: LocalSnapshotRef,
+    layer: LocalImageParams["layer"],
+    path: string,
+    side: "old" | "new",
+    current: () => boolean = () => true,
+  ): Promise<FilePreview> {
+    return this.loadRaster(path, side, current, async (offset, contentSha256) => {
+      const params: LocalImageParams = {
+        snapshot,
+        layer,
+        path,
+        side,
+        offset,
+        maxBytes: 192 * 1024,
+        contentSha256,
+      };
+      const page = await this.localRequest<LocalImagePage>(
+        "local.snapshot.image",
+        params,
+        "LocalImageParams",
+        "LocalImagePage",
+      );
+      if (
+        (!page.available &&
+          (offset !== 0 ||
+            page.size !== 0 ||
+            page.dataBase64 !== "" ||
+            page.mimeType !== "" ||
+            page.nextOffset !== null ||
+            page.contentSha256 !== null ||
+            page.width !== null ||
+            page.height !== null ||
+            page.reason === null)) ||
+        (page.available &&
+          (page.reason !== null ||
+            !["image/png", "image/jpeg", "image/gif", "image/webp", "image/bmp"].includes(
+              page.mimeType,
+            ))) ||
+        Buffer.from(page.dataBase64, "base64").toString("base64") !== page.dataBase64
+      )
+        throw new Error("Invalid captured local image availability or content.");
+      return { ...page, path, side, offset, unavailableReason: page.reason };
+    });
+  }
+
+  async localSnapshotBrowser(
+    snapshot: LocalSnapshotRef,
+    layer: LocalBrowserParams["layer"],
+    current: () => boolean = () => true,
+  ): Promise<LocalBrowserResult> {
+    if (!current()) throw new Error("Local selection changed.");
+    const result = await this.localRequest<LocalBrowserResult>(
+      "local.snapshot.browser",
+      { snapshot, layer },
+      "LocalBrowserParams",
+      "LocalBrowserResult",
+    );
+    if (!current()) throw new Error("Local selection changed.");
+    const url = new URL(result.url);
+    if (
+      url.port === "" ||
+      Number(url.port) > 65535 ||
+      (!result.launchRequested && result.launchError !== null)
+    )
+      throw new Error("Invalid saved local browser launch response.");
+    return result;
+  }
+
+  async localSnapshots(params: LocalListParams): Promise<LocalListPage> {
+    if (params.offset > 0 && params.catalogVersion === null)
+      throw new Error("Saved snapshot continuation requires its catalog version.");
+    const page = await this.localRequest<LocalListPage>(
+      "local.snapshot.list",
+      params,
+      "LocalListParams",
+      "LocalListPage",
+    );
+    const end = params.offset + page.snapshots.length;
+    if (
+      end > page.total ||
+      page.snapshots.length > params.limit ||
+      (params.catalogVersion !== null && params.catalogVersion !== page.catalogVersion) ||
+      (page.nextOffset !== null
+        ? page.nextOffset !== end || end >= page.total || page.snapshots.length === 0
+        : end !== page.total) ||
+      page.snapshots.some((item, index) =>
+        page.snapshots
+          .slice(0, index)
+          .some((previous) => sameLocalValue(previous.snapshot, item.snapshot)),
+      ) ||
+      page.snapshots.some(
+        (item) =>
+          !validLocalRef(item.snapshot) ||
+          /\p{Cc}/u.test(item.createdAt) ||
+          BigInt(item.createdAt) > 9223372036854775807n ||
+          /\p{Cc}/u.test(item.branch) ||
+          new Set(item.layers).size !== item.layers.length ||
+          (item.mode === "branch" && (item.layers.length !== 1 || item.layers[0] !== "committed")),
+      )
+    )
+      throw new Error("Invalid saved local snapshot page.");
+    return page;
   }
 
   async localReviewProfiles(params: LocalLookupParams): Promise<LocalReviewProfilesResult> {

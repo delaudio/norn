@@ -1,10 +1,16 @@
 //! Qualified immutable local evidence (#358). No caller-provided filesystem path.
+mod browser;
 mod capture;
+mod images;
+mod listing;
 use super::bitbucket::workspace_prs::RepositoryIdentity;
 use crate::local_review::{
     GitRunControl, LocalReviewCancellation, LocalReviewDiffLayerKind as Layer,
 };
+pub use browser::{BrowserParams, BrowserSnapshotSource};
 pub(crate) use capture::{Data, Manager, Ticket};
+pub(crate) use images::ImageParams;
+pub use listing::ListParams;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{

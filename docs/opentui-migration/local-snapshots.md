@@ -88,8 +88,8 @@ exact configured origins, overlapping stages, untracked exclusion, rename/delete
 binary metadata, detached/unborn state, base movement, a local patch above 8 MiB,
 UTF-8 pages, stale/corrupt/foreign data, restart, backup/cascade, atomic quota,
 reservation/cancel limits, responsive stdio control and bounded EOF cleanup.
-The native terminal local controls, finding context, real/fake review payload,
-cancel/history and Pierre integration are still required in the next step.
+Native terminal source/base/layer controls and captured review/cancel/history
+were merged in PR377. Pinned consumers and saved selection are described below.
 
 Captured local evidence also has a native review lifecycle. The backend
 advertises `local-evidence-reviews`; these methods require the full saved
@@ -140,6 +140,44 @@ work and checked before agent construction and launch, including retries.
 Synthetic local review IDs do
 not authorize provider comment publication or approval.
 
-These backend methods do not yet add terminal local comparison controls,
-pinned image/Pierre consumers, or local reply/fix controls. Those consumers
-must use this same qualified evidence rather than legacy fresh-cwd reads.
+## Pinned raster, browser and saved selection
+
+The terminal uses `local.snapshot.image` with the complete snapshot reference,
+explicit layer/path/side and verified chunk SHA. The capture stores independent
+base/HEAD, base/index and index/worktree image sides, including rename sources
+and known absent added/deleted sides. Supported PNG/JPEG/GIF/WebP/BMP rasters
+share the provider validator: 2 MiB per side, 8192 dimension / 40 million pixel
+limits, 128 stored side entries and an 8 MiB aggregate raw-byte budget. Invalid,
+unsupported, oversized and quota-omitted images have explicit unavailable states;
+no image request falls back to a mutable checkout or a provider.
+
+Stored format2 includes image bytes and metadata in its content identity and
+live stale recheck. Format1 preserves its original identity and remains readable;
+its images are unavailable. SQLite schema20 remains unchanged. Package rollback
+must still match binary and stored format compatibility; the schema number alone
+is not a guarantee that an older binary understands format2.
+
+`local.snapshot.browser` requires an explicit layer. The authenticated Pierre
+server receives exactly that saved patch and serves the same captured old/new
+rasters through its current session. Reads work after restart without the checkout.
+
+F7 opens the paged saved-local selector through `local.snapshot.list`. Pages
+contain verified source/provider/root/snapshot references and a continuity token;
+changed catalogues require an explicit refresh. Clone and snapshot identities
+remain distinguishable. Opening saved evidence restores its actual run, findings
+and threads without recapturing the current directory. A previously chosen finding
+layer is retained only for the same snapshot, run, finding and anchor.
+
+Public legacy arbitrary Local SHA requests are rejected before side effects:
+callers must use qualified saved-local APIs. Explicit configured working-tree
+provider requests retain their separate legacy contract. Qualified local reply/fix
+controls and global legacy-history parity remain retained follow-up work.
+
+`make ui-native-workflow` / `just ui-native-workflow` builds the no-default Rust
+backend and command binary, then runs real OpenTUI input/rendering with production
+stdio transport. All Git, settings, storage and fake-agent files belong to the
+test. The scenario covers current/configured source, branch base, layer selection,
+pinned image sides, review, explicit finding layer, native cancellation and saved
+run restoration after replacing the checkout. It also exercises the current-repo
+headless CLI. Missing binaries fail. CI runs this gate on Linux, macOS and Windows;
+a configured lane is not proof until its exact PR head passes.
