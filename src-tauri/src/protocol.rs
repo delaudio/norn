@@ -159,6 +159,22 @@ pub struct ReviewJobsParams {
     pub offset: Option<u32>,
 }
 
+/// Parameters for `review.metrics.effectiveness`.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ReviewEffectivenessParams {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider: Option<ProviderKind>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub repo: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub from_ms: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub to_ms: Option<i64>,
+}
+
 /// Parameters for `file.preview`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -561,6 +577,12 @@ pub enum Request {
         id: String,
         params: crate::services::review_profiles::Params,
     },
+    #[serde(rename = "review.metrics.effectiveness")]
+    ReviewEffectiveness {
+        id: String,
+        #[serde(default)]
+        params: ReviewEffectivenessParams,
+    },
     #[serde(rename = "review.metrics.closed")]
     ReviewClosedMetrics {
         id: String,
@@ -724,6 +746,7 @@ impl Request {
             | Self::ReviewHistory { id, .. }
             | Self::ReviewJobs { id, .. }
             | Self::ReviewClosedMetrics { id, .. }
+            | Self::ReviewEffectiveness { id, .. }
             | Self::ReviewThreads { id, .. }
             | Self::ReviewOutput { id, .. }
             | Self::BrowserOpen { id, .. }
@@ -822,6 +845,7 @@ impl Request {
             Self::ReviewHistory { .. } => "review.history",
             Self::ReviewJobs { .. } => "review.jobs",
             Self::ReviewClosedMetrics { .. } => "review.metrics.closed",
+            Self::ReviewEffectiveness { .. } => "review.metrics.effectiveness",
             Self::ReviewThreads { .. } => "review.threads",
             Self::ReviewOutput { .. } => "review.output",
             Self::BrowserOpen { .. } => "browser.open",
@@ -1173,6 +1197,7 @@ impl Request {
             | Self::ReviewTargets { .. }
             | Self::ReviewJobs { .. }
             | Self::ReviewClosedMetrics { .. }
+            | Self::ReviewEffectiveness { .. }
             | Self::OperationStatus { .. }
             | Self::OperationCancel { .. }
             | Self::Shutdown { .. } => {}

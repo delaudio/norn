@@ -14,6 +14,42 @@ import type { CredentialStatus } from "./backendClient";
 import type { TargetIdentity } from "./protocol";
 import type { BackendExit, BackendOperationEvent, BackendTransport, ReadyInfo } from "./types";
 
+function emptyEffectivenessReport() {
+  const rate = { numerator: 0, denominator: 0, basisPoints: null };
+  return {
+    schemaVersion: "norn.review.v1",
+    summary: {
+      reviewCount: 0,
+      findingCount: 0,
+      findingsBySeverity: [],
+      findingsByCategory: [],
+      feedback: {
+        eligibleFindings: 0,
+        findingsWithFeedback: 0,
+        findingsWithoutFeedback: 0,
+        acceptedFindings: 0,
+        falsePositiveFindings: 0,
+        fixedFindings: 0,
+        dismissedFindings: 0,
+        reopenedFindings: 0,
+        coverageRate: rate,
+        acceptanceRate: rate,
+        falsePositiveRate: rate,
+        fixedRate: rate,
+      },
+      timeToFirstReview: {
+        sampleCount: 0,
+        totalMs: 0,
+        averageMs: null,
+        medianMs: null,
+        minimumMs: null,
+        maximumMs: null,
+      },
+    },
+    repositories: [],
+  };
+}
+
 export interface FakeTransportOptions {
   serverVersion?: string;
   repositories?: Array<Record<string, unknown>>;
@@ -21,6 +57,7 @@ export interface FakeTransportOptions {
   history?: Array<Record<string, unknown>>;
   jobs?: Array<Record<string, unknown>>;
   closedMetrics?: Array<Record<string, unknown>>;
+  effectiveness?: Record<string, unknown>;
   threads?: Array<Record<string, unknown>>;
   files?: Array<Record<string, unknown>>;
   findings?: Array<Record<string, unknown>>;
@@ -416,6 +453,8 @@ export class FakeBackendTransport implements BackendTransport {
         return { jobs: this.options.jobs ?? [], offset: params.offset ?? 0 };
       case "review.metrics.closed":
         return { metrics: this.options.closedMetrics ?? [] };
+      case "review.metrics.effectiveness":
+        return { report: this.options.effectiveness ?? emptyEffectivenessReport() };
       case "review.threads":
         return { threads: this.options.threads ?? [] };
       case "review.output":

@@ -43,6 +43,7 @@ import type {
   FixPreview,
   FixState,
   RepositorySummary,
+  ReviewEffectivenessReport,
   ReviewJobSummary,
   ReviewRunSummary,
   ReviewTarget,
@@ -232,6 +233,7 @@ export interface ShellSnapshot {
   syncError: string | null;
   helpOpen: boolean;
   closedMetrics: ClosedPrMetric[];
+  effectiveness: ReviewEffectivenessReport | null;
   threads: ReviewThreadSummary[];
   selectedThread: number;
   conversationOpen: boolean;
@@ -336,6 +338,7 @@ const INITIAL: ShellSnapshot = {
   syncError: null,
   helpOpen: false,
   closedMetrics: [],
+  effectiveness: null,
   threads: [],
   selectedThread: 0,
   conversationOpen: false,
@@ -3091,6 +3094,22 @@ export class ShellStore {
           jobs.length === 0
             ? "No review history."
             : `Review history: ${jobs.length} job(s). Latest ${latest?.status ?? ""} ${latest?.workspace ?? ""}/${latest?.repo ?? ""}#${latest?.prId ?? ""}`,
+      });
+    } catch (error) {
+      this.update({ error: message(error) });
+    }
+  }
+
+  /// Load the review-effectiveness report computed in Rust.
+  async loadEffectiveness(client: BackendClient): Promise<void> {
+    try {
+      const effectiveness = await client.reviewEffectiveness({});
+      const acceptance = effectiveness.summary.feedback.acceptanceRate.basisPoints;
+      this.update({
+        effectiveness,
+        notice: `Effectiveness: ${effectiveness.summary.reviewCount} review(s) · acceptance ${
+          acceptance === null ? "n/a" : `${(acceptance / 100).toFixed(1)}%`
+        }`,
       });
     } catch (error) {
       this.update({ error: message(error) });

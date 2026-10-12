@@ -1106,3 +1106,12 @@ test("toggles and closes the help overlay", () => {
   store.closeHelp();
   expect(store.getSnapshot().helpOpen).toBe(false);
 });
+
+test("loads the review-effectiveness report", async () => {
+  const store = new ShellStore();
+  const client = new BackendClient(new FakeBackendTransport({ repositories }));
+  await store.connect(client);
+  await store.loadEffectiveness(client);
+  expect(store.getSnapshot().effectiveness?.summary.reviewCount).toBe(0);
+  expect(store.getSnapshot().notice).toContain("Effectiveness");
+});
