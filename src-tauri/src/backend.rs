@@ -4283,6 +4283,19 @@ fn load_inline_review_policy(
     )
 }
 
+fn profile_remote_matches(
+    remote: &str,
+    provider: config::ReviewProvider,
+    workspace: &str,
+    repo: &str,
+) -> bool {
+    crate::local_repo::parse_git_remote(remote).is_ok_and(|(actual, owner, name)| {
+        actual == provider
+            && owner.eq_ignore_ascii_case(workspace)
+            && name.eq_ignore_ascii_case(repo)
+    })
+}
+
 fn review_profiles_response(target: &TargetIdentity) -> Result<serde_json::Value, ProtocolError> {
     use crate::services::review_profiles::{Catalog, Params, Source};
     Params {
@@ -4389,12 +4402,7 @@ fn review_profiles_response(target: &TargetIdentity) -> Result<serde_json::Value
     {
         let remote = git(&canonical, &["remote", "get-url", "origin"]);
         if !remote.is_some_and(|remote| {
-            crate::local_repo::matches_remote(
-                remote.trim(),
-                provider_matches(*provider),
-                workspace,
-                repo,
-            )
+            profile_remote_matches(remote.trim(), provider_matches(*provider), workspace, repo)
         }) {
             return Err(ProtocolError::new(
                 ProtocolErrorCode::TargetStale,
@@ -4425,6 +4433,14 @@ fn review_profiles_response(target: &TargetIdentity) -> Result<serde_json::Value
             ));
         }
         let owner = &owners[0];
+        if !git(&canonical, &["remote", "get-url", "origin"]).is_some_and(|remote| {
+            profile_remote_matches(remote.trim(), owner.provider, &owner.workspace, &owner.repo)
+        }) {
+            return Err(ProtocolError::new(
+                ProtocolErrorCode::TargetStale,
+                "The configured checkout does not match the selected local repository.",
+            ));
+        }
         let snapshot = crate::local_review::local_review_snapshot_for_configured_path(
             owner.provider,
             &owner.workspace,
@@ -5197,6 +5213,36 @@ fn write_frame(stdout: &mut impl Write, message: ServerMessage) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn profile_catalog_remote_owner_is_exact_not_a_substring() {
+        for (provider, host) in [
+            (config::ReviewProvider::Github, "github.com"),
+            (config::ReviewProvider::Bitbucket, "bitbucket.org"),
+        ] {
+            assert!(profile_remote_matches(
+                &format!("https://{host}/owned/same.git"),
+                provider,
+                "owned",
+                "same"
+            ));
+            assert!(profile_remote_matches(
+                &format!("git@{host}:Owned/Same.git"),
+                provider,
+                "owned",
+                "same"
+            ));
+            for remote in [
+                format!("https://{host}/owned/same-other.git"),
+                format!("https://{host}.example.invalid/owned/same.git"),
+                format!("https://example.invalid/{host}/owned/same.git"),
+                format!("https://{host}/other/owned/same.git"),
+                format!("https://{host}/owned/same/nested.git"),
+            ] {
+                assert!(!profile_remote_matches(&remote, provider, "owned", "same"));
+            }
+        }
+    }
 
     #[test]
     fn native_profile_catalog_proves_local_snapshot_and_exact_provider_checkout() {
