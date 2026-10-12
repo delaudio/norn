@@ -29,7 +29,9 @@ stops the update. Provider identity is also checked on persisted feedback.
 
 The library exposes `ProviderReviewScope`, `SavedReviewProvider`, scoped load/save
 and scoped session lookup/cancellation helpers. Legacy CLI and desktop helpers
-retain their existing storage/key formats. This is the storage and identity
+retain their existing storage/key formats. Legacy stale-review cleanup only owns
+legacy keys and cannot remove provider-qualified native rows, including when its
+keep list is empty. This is the storage and identity
 foundation; starting a new review directly from immutable provider preview
 requires the subsequent cached-evidence engine integration. Fresh-preview Enter
 remains unavailable until that complete behavior is verified.

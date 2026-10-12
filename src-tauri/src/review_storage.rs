@@ -4514,13 +4514,13 @@ pub fn cleanup_stale_reviews(keep_keys: &[String]) -> Result<(), String> {
     let conn = open()?;
     if keep_keys.is_empty() {
         conn.execute(
-            "DELETE FROM ai_review_stores WHERE tenant_id = 'local' AND target_kind = 'pull_request'",
+            "DELETE FROM ai_review_stores WHERE tenant_id = 'local' AND target_kind = 'pull_request' AND review_key NOT LIKE 'provider:%'",
             [],
         )
             .map_err(|e| e.to_string())?;
     } else {
         let mut stmt = conn
-            .prepare("SELECT review_key FROM ai_review_stores WHERE tenant_id = 'local' AND target_kind = 'pull_request'")
+            .prepare("SELECT review_key FROM ai_review_stores WHERE tenant_id = 'local' AND target_kind = 'pull_request' AND review_key NOT LIKE 'provider:%'")
             .map_err(|e| e.to_string())?;
         let rows = stmt
             .query_map([], |row| row.get::<_, String>(0))
@@ -4529,7 +4529,7 @@ pub fn cleanup_stale_reviews(keep_keys: &[String]) -> Result<(), String> {
             let key = row.map_err(|e| e.to_string())?;
             if !keep_keys.contains(&key) {
                 conn.execute(
-                    "DELETE FROM ai_review_stores WHERE tenant_id = 'local' AND target_kind = 'pull_request' AND review_key = ?1",
+                    "DELETE FROM ai_review_stores WHERE tenant_id = 'local' AND target_kind = 'pull_request' AND review_key NOT LIKE 'provider:%' AND review_key = ?1",
                     params![key],
                 )
                 .map_err(|e| e.to_string())?;
@@ -5370,6 +5370,46 @@ mod tests {
             ))
             .is_err());
             assert!(review_scope::load(&gh).is_err());
+        });
+    }
+
+    #[test]
+    fn legacy_cleanup_never_removes_native_provider_rows() {
+        use crate::services::review::ReviewProvider;
+        use crate::services::review_scope::{
+            self,
+            tests::{fixture, scope},
+        };
+        with_test_data_dir("provider-review-legacy-cleanup", |_| {
+            let gh = scope(ReviewProvider::Github);
+            let bb = scope(ReviewProvider::Bitbucket);
+            let original =
+                serde_json::to_string(&fixture(ReviewProvider::Github, "legacy", "thread"))
+                    .unwrap();
+            review_scope::save(
+                &gh,
+                &fixture(ReviewProvider::Github, "native-gh", "gh-thread"),
+            )
+            .unwrap();
+            review_scope::save(
+                &bb,
+                &fixture(ReviewProvider::Bitbucket, "native-bb", "bb-thread"),
+            )
+            .unwrap();
+            save_review_json("shared", "project", 42, &original).unwrap();
+            cleanup_stale_reviews(&["shared_project_42".into()]).unwrap();
+            assert!(load_review_json("shared", "project", 42).unwrap().is_some());
+            cleanup_stale_reviews(&["unrelated_repo_1".into()]).unwrap();
+            assert!(load_review_json("shared", "project", 42).unwrap().is_none());
+            cleanup_stale_reviews(&[]).unwrap();
+            assert_eq!(
+                review_scope::load(&gh).unwrap().unwrap().review_runs[0].id,
+                "native-gh"
+            );
+            assert_eq!(
+                review_scope::load(&bb).unwrap().unwrap().review_runs[0].id,
+                "native-bb"
+            );
         });
     }
 

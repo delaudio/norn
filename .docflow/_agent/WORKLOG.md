@@ -421,3 +421,11 @@ Plan 0053 completion prepared after implementation `e4264db`, effective only on 
 
 - Prepared plan 0058 receipt for feature `48cafd4e21e144dc6cbad1f049fc717866d560fb`;
   effective only after exact-head CI and verified squash merge. ADR Accepted.
+
+- Pre-merge compatibility inspection found legacy stale-review cleanup could
+  delete native rows because its keep keys omit provider. Limit that legacy
+  cleanup to legacy keys. Owned regression covers matching/nonmatching/empty
+  keep lists and both native providers. Complete Rust gate rerun: 705 core plus
+  two existing ignored, 54 stdio, six CLI, five onboarding, three bin tests;
+  strict all-feature/all-target Clippy passes. Replacing PR #369 head requires
+  fresh exact-head CI; the prior running head cannot authorize merge.
