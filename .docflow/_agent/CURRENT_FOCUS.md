@@ -13,7 +13,7 @@ Git is authoritative. Durable history lives in WORKLOG and plan/done.
 - State: plan 0058 local gate passed; prepared receipt, PR/CI pending. Provider-qualified storage/
   session identity foundation does not enable preview review-start yet.
 - Gate: root 123 tests plus tooling/typecheck/lint/protocol, UI 172 tests/1057
-  asserts/115 unchanged frames, Rust 704 core plus two ignored/54 stdio/six CLI/
+  asserts/115 unchanged frames, Rust 705 core plus two ignored/54 stdio/six CLI/
   five onboarding/three bin tests, strict Clippy/fmt/no-GUI, Archgate12/12 and
   docflow audit pass. No React changes or Norn code review.
 - Maintainer closed #357 on 2026-10-11T22:01:23Z; preserve closure. Retained

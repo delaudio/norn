@@ -55,8 +55,10 @@ Prepared 2026-10-12 for verified PR integration. This path becomes a completion
 record only after exact-head CI success and verified squash merge into main.
 
 - Feature commit: `48cafd4e21e144dc6cbad1f049fc717866d560fb`.
+- Verified legacy-cleanup follow-up: `7fe8a53dc9e49f08fb3e18fdbc5d405aa493c418`; native rows survive matching,
+  nonmatching and empty legacy keep lists. Full Rust/Clippy gate rerun.
 - Local gate: root typecheck/123 tests plus tooling/lint/protocol; UI typecheck,
-  172 tests/1057 assertions/115 unchanged frames; Rust 704 core plus two existing
+  172 tests/1057 assertions/115 unchanged frames; Rust 705 core plus two existing
   ignored/54 stdio/six CLI/five onboarding/three bin tests; strict all-feature/
   all-target Clippy, fmt, no-GUI, Archgate 12/12 and docflow audit.
 - Owned two-provider storage/session/publication fixtures and real stdio restart
