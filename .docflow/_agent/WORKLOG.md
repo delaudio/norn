@@ -791,3 +791,12 @@ Plan 0053 completion prepared after implementation `e4264db`, effective only on 
   Windows cleanup EACCES masked the scenario error: preserve original diagnostic,
   wait for actual backend exit after shutdown and bounded owned-root cleanup.
   Corrected native gate and UI typecheck pass locally; own new-head CI pending.
+
+- New-head CI38233690131 Linux/macOS native workflows and UI passed.
+  Windows exposed actual cancellation defect: review.kill_process always invoked
+  /bin/kill, marking cancellation failed and leaving the owned fake agent alive.
+  Add Windows API bounded process-tree inspection and terminate only the recorded
+  agent/observed descendants, no shell/PATH/taskkill dependence. Already exited
+  processes are handled explicitly. Unix behavior unchanged. Native Windows CI
+  remains required; observed-tree cancellation does not claim JobObject-level
+  future descendant/race guarantees (retained hardening).
