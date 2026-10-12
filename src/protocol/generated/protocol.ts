@@ -526,6 +526,36 @@ export type Request =
       id: RequestId;
       method: "repository.editor.cancel";
       params: RepositoryEditorStatusParams;
+    }
+  | {
+      type: "request";
+      id: RequestId;
+      method: "repository.operation.list";
+      params: RepositoryOperationListParams;
+    }
+  | {
+      type: "request";
+      id: RequestId;
+      method: "repository.operation.preview";
+      params: RepositoryOperationPreviewParams;
+    }
+  | {
+      type: "request";
+      id: RequestId;
+      method: "repository.operation.apply";
+      params: RepositoryOperationApplyParams;
+    }
+  | {
+      type: "request";
+      id: RequestId;
+      method: "repository.operation.status";
+      params: RepositoryOperationStatusParams;
+    }
+  | {
+      type: "request";
+      id: RequestId;
+      method: "repository.operation.cancel";
+      params: RepositoryOperationStatusParams;
     };
 export type RequestId = string;
 /**
@@ -687,6 +717,42 @@ export type RepositoryExploreDiffParams = {
   contentSha256: string | null;
 };
 export type RepositoryEditorMode = "graphical" | "terminal";
+export type RepositoryOperationListParams = {
+  repository: PrRepositoryIdentity;
+  offset: number;
+  limit: number;
+  version: string | null;
+} & RepositoryOperationListParams1;
+export type RepositoryOperationListParams1 =
+  | {
+      offset?: 0;
+      [k: string]: unknown;
+    }
+  | {
+      offset?: number;
+      version?: string;
+      [k: string]: unknown;
+    };
+export type RepositoryOperationAction =
+  | {
+      kind: "checkout";
+      reference: string;
+      branchKind: "local";
+    }
+  | {
+      kind: "checkout";
+      reference: string;
+      branchKind: "remote";
+    }
+  | {
+      kind: "fetch";
+    }
+  | {
+      kind: "pull";
+    }
+  | {
+      kind: "stash";
+    };
 export type OperationState = "accepted" | "running" | "succeeded" | "failed" | "cancelled";
 export type ErrorCode =
   | "invalidRequest"
@@ -1254,6 +1320,20 @@ export interface RepositoryEditorStatusParams {
   context: RepositoryExploreContext;
   launchId: string;
 }
+export interface RepositoryOperationPreviewParams {
+  context: RepositoryExploreContext;
+  action: RepositoryOperationAction;
+}
+export interface RepositoryOperationApplyParams {
+  context: RepositoryExploreContext;
+  action: RepositoryOperationAction;
+  token: string;
+  confirm: true;
+}
+export interface RepositoryOperationStatusParams {
+  context: RepositoryExploreContext;
+  operationId: string;
+}
 export interface ResponseOk {
   type: "response";
   id: RequestId;
@@ -1318,7 +1398,11 @@ export interface ResponseOk {
     | RepositoryExploreFindPage
     | RepositoryEditorPrepared
     | RepositoryEditorOpened
-    | RepositoryEditorStatus;
+    | RepositoryEditorStatus
+    | RepositoryOperationPage
+    | RepositoryOperationPrepared
+    | RepositoryOperationApplied
+    | RepositoryOperationStatus;
 }
 export interface DiffFileResult {
   target: TargetIdentity;
@@ -2406,6 +2490,79 @@ export interface RepositoryEditor {
 export interface RepositoryEditorStatus {
   request: RepositoryEditorStatusParams;
   editor: RepositoryEditor;
+}
+export interface RepositoryOperationPage {
+  request: RepositoryOperationListParams;
+  checkout: RepositoryOperationCheckout;
+  /**
+   * @maxItems 100
+   */
+  branches: RepositoryOperationBranch[];
+  total: number;
+  nextOffset: number | null;
+}
+export interface RepositoryOperationCheckout {
+  repository: PrRepositoryIdentity;
+  context: RepositoryExploreContext | null;
+  state: "ready" | "unborn" | "missing" | "invalid";
+  branch: string | null;
+  headSha: string | null;
+  upstream: string | null;
+  dirty: boolean;
+  filtered: boolean;
+  conflicted: boolean;
+  pending: boolean;
+  version: string | null;
+  message: string | null;
+  stashSha: string | null;
+}
+export interface RepositoryOperationBranch {
+  reference: string;
+  name: string;
+  kind: "local" | "remote";
+  oid: string;
+  current: boolean;
+}
+export interface RepositoryOperationPrepared {
+  request: RepositoryOperationPreviewParams;
+  token: string;
+  expiresInMs: number;
+  before: RepositoryOperationCheckout;
+  summary: string;
+  /**
+   * @maxItems 8
+   */
+  warnings:
+    | []
+    | [string]
+    | [string, string]
+    | [string, string, string]
+    | [string, string, string, string]
+    | [string, string, string, string, string]
+    | [string, string, string, string, string, string]
+    | [string, string, string, string, string, string, string]
+    | [string, string, string, string, string, string, string, string];
+}
+export interface RepositoryOperationApplied {
+  request: RepositoryOperationApplyParams;
+  operation: RepositoryOperation;
+}
+export interface RepositoryOperation {
+  operationId: string;
+  context: RepositoryExploreContext;
+  action: RepositoryOperationAction;
+  state: "starting" | "checking" | "running" | "inspecting" | "completed" | "failed" | "canceled" | "uncertain";
+  before: RepositoryOperationCheckout;
+  after: RepositoryOperationCheckout | null;
+  exitCode: number | null;
+  stateChanged: boolean | null;
+  recoveryRequired: boolean;
+  message: string;
+}
+export interface RepositoryOperationStatus {
+  request: RepositoryOperationStatusParams;
+  operation: RepositoryOperation;
+  cancelRequested: boolean;
 }
 export interface ResponseError {
   type: "response";

@@ -1105,3 +1105,75 @@ Plan 0053 completion prepared after implementation `e4264db`, effective only on 
   removed; exact console restoration/reaping/all-case execution stay required.
 - Only owned test harness/docs change; production UI/Rust gates unchanged.
   Native Windows four-case proof still pending;0070 remains todo.
+
+## 2026-10-12 — actual381 receipt and0071 repository-operations claim
+
+- PR381 actually squashed 29f5e2a63efca38fccb0f332d812fde80f11354b at2026-10-12T17:03:36Z.
+  Exacte883fc9f8a0f181d99283f56ffade41788816dda passed all five
+  CI38280325908 checks. Windows independently observes native73 and UI73
+  cause; all four native terminal cases pass on all3OS. No check bypass.
+- Rootmain fast-forwarded; user stash and unrelated untracked config intact.
+  Reconcile0070 done/parity only now; combined379/380/381 completes359.
+- Claim0071 before code, isolated issue-360-repository-operations checkout
+  on actual381main. Preserve shipped branch/status/checkout/fetch/pull/stash
+  with bounded provider-aware native services and explicit one-use approval.
+- Prior standalone owned smart-Git CGI proxy research proves both provider
+  origin identities unchanged with real fetch/ff-pull through loopback only.
+  This is research, not future native acceptance; fail-closed tests required.
+- Plan/audit before implementation; no unrelated user config/profile read.
+  ADR0020 Accepted,360/294 active; no Norn review or delegation.
+
+## 2026-10-12 —0071 approved repository operations prepared
+
+- Implemented full-provider/root-bound Rust Git operations and five stdio
+  methods with read-only previews, keyed secret-config fingerprints, one-use
+  30s approvals, bounded process supervision, responsive status/cancel and
+  fresh state checks before writes and between fetch/ff-merge.
+- Native explorer branch panel requires a separate approval key; paste is
+  inert, writes fence navigation, late clone results are discarded and actual
+  completion refreshes matching options without touching review drafts/prompts.
+- Actual owned IPC proves both provider identities via fixed loopback-only
+  smart Git CGI, branch semantics, native stash bytes, local commits/divergence,
+  ignored/conflict protection, config drift, expiry/reuse/restart and cancel.
+  Added actual post-checkout-hook drift detection; actual native proof PASS.
+- Corrected write-path literal-pathspec contamination: stash had saved a
+  hostile untracked filename but left it in the clone. Read previews retain
+  literal semantics; approved Git writes use normal semantics. Rust/native
+  regressions now preserve actual saved bytes and assert the clean result.
+- Gates pass: root123/UI259/core772+2ignored/stdio76, typechecks/noGUI,
+  strictallfeatureClippy,209frames/Storybook, Archgate/audit. Sandbox socket
+  failures were rerun with owned loopback permission and all core tests pass.
+  Doctor rendering-ref error fixed;2nonblocking maintainability warnings.
+- Source commit/PR/3OS exact-head checks and actual merge still required.
+ 0071 stays todo;360/294 stay open; no Norn review/delegation/private data.
+
+## 2026-10-12 — PR382 Windows borrow correction
+
+- Source5a4ccaa opened PR382; first CI38292751534 UI passes, Windows build
+  rejects the changed-content reader because Windows normalization produced
+  an ownedString where the confined open helper requires &str. POSIX strict
+  Clippy correctly required removing the original needless borrow there.
+- Follow the existing cross-platform confined-reader pattern: keep normalized
+  WindowsString alive and pass its as_str view; POSIX uses the original &str.
+  No path confinement, hashes, operation semantics or assertions change.
+- Actual owned post-checkout-hook drift proof and bounded stale branch paging
+  pass. Plan0071/360 stay pending until all5 checks pass on the new exact head
+  and an actual verified squash merge. No Norn review or delegation.
+
+## 2026-10-12 — PR382 complete keyboard approval and actual component frames
+
+- Correctedheadf2861a5 passes all5CI38293524038 jobs, including actual
+  Windows/Linux/macOS native Git and terminal-editor workflows. No merge yet.
+- Reproduced a50-column long-approval defect with native keyboard input:
+  the target tail could not be read. Ctrl-D/U now scrolls details in preview,
+  progress and recovery; it never approves/writes. Scope/action/selection
+  changes remount the details viewport, restoring its initial position.
+- Corrected the new frame scene builder's unusednode property to the renderer's
+  actualview slot. Positive BRANCHES/target-tail assertions now prevent a
+  default-shell image from masquerading as a repository component scene.
+-211actualnativeframes include wide/narrow long-approval proof; targeted input
+  covers complete target reading, inert paste and separate explicit approval.
+  Final UI259/1620assertions, typechecks,211frames, Storybook, lint and
+  Doctor pass (2maintainability warnings; no rendering-ref error).
+- Keep0071/360todo and require all5checks on the final updated PR head before
+  any merge. ADR0020Accepted; no delegation/Norn review/private profiles.

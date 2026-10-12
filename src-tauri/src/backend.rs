@@ -112,6 +112,7 @@ struct Backend {
     active_local: Arc<AtomicUsize>,
     repository_reader: Arc<crate::services::repository_reader::Manager>,
     repository_editor: Arc<crate::services::repository_editor::Manager>,
+    repository_operations: Arc<crate::services::repository_operations::Manager>,
     active_repository_reads: Arc<AtomicUsize>,
     provider_approval: Arc<crate::services::provider_approval::Manager>,
     active_approval: Arc<AtomicUsize>,
@@ -202,6 +203,7 @@ pub fn run() -> Result<(), i32> {
         active_local: Arc::new(AtomicUsize::new(0)),
         repository_reader: Arc::new(crate::services::repository_reader::Manager::new()),
         repository_editor: Arc::new(crate::services::repository_editor::Manager::new()),
+        repository_operations: Arc::new(crate::services::repository_operations::Manager::new()),
         active_repository_reads: Arc::new(AtomicUsize::new(0)),
         provider_approval: Arc::new(crate::services::provider_approval::Manager::new(
             shutdown.clone(),
@@ -240,6 +242,7 @@ pub fn run() -> Result<(), i32> {
             "repository-explorer-reads".to_string(),
             "repository-explorer-windowed-find".to_string(),
             "repository-editor".to_string(),
+            "repository-operations".to_string(),
             "diff".to_string(),
             "review".to_string(),
             "review-profile-catalog".to_string(),
@@ -263,6 +266,7 @@ pub fn run() -> Result<(), i32> {
     backend.local_snapshots.stop();
     backend.repository_reader.stop();
     backend.repository_editor.stop();
+    backend.repository_operations.stop();
     // Stop spawning new children, terminate the ones this backend owns, and let
     // the writer flush and exit.
     shutting_down().store(true, Ordering::SeqCst);
@@ -391,11 +395,50 @@ fn read_loop(reader: &mut impl BufRead, backend: &Backend) {
 fn dispatch(request: Request, backend: &Backend) -> bool {
     let id = request.id().to_string();
     let method = request.method();
+    if backend.repository_operations.active()
+        && !matches!(
+            method,
+            "repository.operation.status"
+                | "repository.operation.cancel"
+                | "operation.status"
+                | "operation.cancel"
+                | "shutdown"
+        )
+    {
+        backend.fail(
+            &id,
+            ProtocolError::new(
+                ProtocolErrorCode::Conflict,
+                "Finish the approved Git operation before using other workspace actions.",
+            ),
+        );
+        return false;
+    }
+    if matches!(
+        &request,
+        Request::RepositoryOperationPreview { .. } | Request::RepositoryOperationApply { .. }
+    ) && (backend.active_operations.load(Ordering::Acquire) > 0
+        || backend.active_publication.load(Ordering::Acquire) > 0
+        || backend.active_workspace.load(Ordering::Acquire) > 0
+        || backend.active_settings.load(Ordering::Acquire) > 0
+        || backend.active_approval.load(Ordering::Acquire) > 0)
+    {
+        backend.fail(
+            &id,
+            ProtocolError::new(
+                ProtocolErrorCode::Conflict,
+                "Finish the current operation before approving a repository write.",
+            ),
+        );
+        return false;
+    }
     if backend.repository_editor.terminal_active()
         && !matches!(
             method,
             "repository.editor.status"
                 | "repository.editor.cancel"
+                | "repository.operation.status"
+                | "repository.operation.cancel"
                 | "operation.status"
                 | "operation.cancel"
                 | "shutdown"
@@ -558,6 +601,97 @@ fn dispatch(request: Request, backend: &Backend) -> bool {
                     );
                 }
             }
+            false
+        }
+        Request::RepositoryOperationApply { params, .. } => {
+            match backend.repository_operations.apply(
+                params,
+                [
+                    backend.active_repository_reads.clone(),
+                    backend.active_local.clone(),
+                ],
+            ) {
+                Ok(value) => {
+                    backend.respond(&id, json!(value));
+                }
+                Err(message) => {
+                    backend.fail(
+                        &id,
+                        ProtocolError::new(ProtocolErrorCode::Conflict, message),
+                    );
+                }
+            }
+            false
+        }
+        Request::RepositoryOperationStatus { params, .. }
+        | Request::RepositoryOperationCancel { params, .. } => {
+            match backend
+                .repository_operations
+                .status(params, method == "repository.operation.cancel")
+            {
+                Ok(value) => {
+                    backend.respond(&id, json!(value));
+                }
+                Err(message) => {
+                    backend.fail(
+                        &id,
+                        ProtocolError::new(ProtocolErrorCode::Conflict, message),
+                    );
+                }
+            }
+            false
+        }
+        Request::RepositoryOperationList { .. } | Request::RepositoryOperationPreview { .. } => {
+            let active = backend.active_repository_reads.clone();
+            if active
+                .fetch_update(Ordering::AcqRel, Ordering::Acquire, |n| {
+                    (n < 2).then_some(n + 1)
+                })
+                .is_err()
+            {
+                backend.fail(
+                    &id,
+                    ProtocolError::new(
+                        ProtocolErrorCode::Conflict,
+                        "Repository reads are busy. Retry shortly.",
+                    ),
+                );
+                return false;
+            }
+            let manager = backend.repository_operations.clone();
+            let output = backend.control.clone();
+            let shutdown = backend.shutdown.clone();
+            thread::spawn(move || {
+                let result = match request {
+                    Request::RepositoryOperationList { params, .. } => {
+                        manager.list(params).map(|v| json!(v))
+                    }
+                    Request::RepositoryOperationPreview { params, .. } => {
+                        manager.preview(params).map(|v| json!(v))
+                    }
+                    _ => unreachable!(),
+                };
+                // Release before responding: a client may immediately apply its
+                // preview, and the worker has already completed all root reads.
+                active.fetch_sub(1, Ordering::AcqRel);
+                if !shutdown.load(Ordering::Acquire) {
+                    let response = match result {
+                        Ok(value) => Response {
+                            id,
+                            ok: true,
+                            result: Some(value),
+                            error: None,
+                        },
+                        Err(message) => Response {
+                            id,
+                            ok: false,
+                            result: None,
+                            error: Some(ProtocolError::new(ProtocolErrorCode::Conflict, message)),
+                        },
+                    };
+                    let _ = output.send(ServerMessage::Response(response));
+                }
+            });
             false
         }
         Request::RepositoryEditorStatus { params, .. }

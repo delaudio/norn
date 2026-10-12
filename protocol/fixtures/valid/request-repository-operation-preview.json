@@ -1,0 +1,20 @@
+{
+  "type": "request",
+  "id": "preview",
+  "method": "repository.operation.preview",
+  "params": {
+    "context": {
+      "repository": {
+        "provider": "github",
+        "workspace": "owned",
+        "repo": "operations"
+      },
+      "rootId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "action": {
+      "kind": "checkout",
+      "reference": "refs/heads/feature-ü;$(owned)",
+      "branchKind": "local"
+    }
+  }
+}

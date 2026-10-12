@@ -1,0 +1,15 @@
+{
+  "type": "request",
+  "id": "list",
+  "method": "repository.operation.list",
+  "params": {
+    "repository": {
+      "provider": "github",
+      "workspace": "owned",
+      "repo": "operations"
+    },
+    "offset": 0,
+    "limit": 100,
+    "version": null
+  }
+}

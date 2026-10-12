@@ -471,6 +471,31 @@ pub enum Request {
         id: String,
         params: crate::services::repository_editor::StatusParams,
     },
+    #[serde(rename = "repository.operation.list")]
+    RepositoryOperationList {
+        id: String,
+        params: crate::services::repository_operations::ListParams,
+    },
+    #[serde(rename = "repository.operation.preview")]
+    RepositoryOperationPreview {
+        id: String,
+        params: crate::services::repository_operations::PreviewParams,
+    },
+    #[serde(rename = "repository.operation.apply")]
+    RepositoryOperationApply {
+        id: String,
+        params: crate::services::repository_operations::ApplyParams,
+    },
+    #[serde(rename = "repository.operation.status")]
+    RepositoryOperationStatus {
+        id: String,
+        params: crate::services::repository_operations::JobParams,
+    },
+    #[serde(rename = "repository.operation.cancel")]
+    RepositoryOperationCancel {
+        id: String,
+        params: crate::services::repository_operations::JobParams,
+    },
     #[serde(rename = "local.options")]
     LocalOptions {
         id: String,
@@ -658,6 +683,11 @@ impl Request {
             | Self::RepositoryEditorOpen { id, .. }
             | Self::RepositoryEditorStatus { id, .. }
             | Self::RepositoryEditorCancel { id, .. }
+            | Self::RepositoryOperationList { id, .. }
+            | Self::RepositoryOperationPreview { id, .. }
+            | Self::RepositoryOperationApply { id, .. }
+            | Self::RepositoryOperationStatus { id, .. }
+            | Self::RepositoryOperationCancel { id, .. }
             | Self::LocalOptions { id, .. }
             | Self::LocalSnapshot { id, .. }
             | Self::LocalSnapshotCancel { id, .. }
@@ -749,6 +779,11 @@ impl Request {
             Self::RepositoryEditorOpen { .. } => "repository.editor.open",
             Self::RepositoryEditorStatus { .. } => "repository.editor.status",
             Self::RepositoryEditorCancel { .. } => "repository.editor.cancel",
+            Self::RepositoryOperationList { .. } => "repository.operation.list",
+            Self::RepositoryOperationPreview { .. } => "repository.operation.preview",
+            Self::RepositoryOperationApply { .. } => "repository.operation.apply",
+            Self::RepositoryOperationStatus { .. } => "repository.operation.status",
+            Self::RepositoryOperationCancel { .. } => "repository.operation.cancel",
             Self::LocalOptions { .. } => "local.options",
             Self::LocalSnapshot { .. } => "local.snapshot",
             Self::LocalSnapshotCancel { .. } => "local.snapshot.cancel",
@@ -1059,6 +1094,21 @@ impl Request {
             }
             Self::RepositoryEditorStatus { params, .. }
             | Self::RepositoryEditorCancel { params, .. } => {
+                params.validate().map_err(invalid_request)?
+            }
+            Self::RepositoryOperationList { params, .. } => {
+                params.validate().map_err(invalid_request)?
+            }
+            Self::RepositoryOperationPreview { params, .. } => {
+                params.validate().map_err(invalid_request)?
+            }
+            Self::RepositoryOperationApply { params, .. } => {
+                params.validate().map_err(invalid_request)?
+            }
+            Self::RepositoryOperationStatus { params, .. } => {
+                params.validate().map_err(invalid_request)?
+            }
+            Self::RepositoryOperationCancel { params, .. } => {
                 params.validate().map_err(invalid_request)?
             }
             Self::LocalOptions { params, .. } => params.validate().map_err(invalid_request)?,
@@ -1441,6 +1491,15 @@ mod tests {
             "valid/response-repository-explore-diff.json",
             "valid/request-repository-explore-blame.json",
             "valid/response-repository-explore-blame.json",
+            "valid/response-repository-operation-list.json",
+            "valid/response-repository-operation-preview.json",
+            "valid/response-repository-operation-apply.json",
+            "valid/response-repository-operation-status.json",
+            "valid/request-repository-operation-list.json",
+            "valid/request-repository-operation-preview.json",
+            "valid/request-repository-operation-apply.json",
+            "valid/request-repository-operation-status.json",
+            "valid/request-repository-operation-cancel.json",
             "valid/request-repository-editor-prepare.json",
             "valid/response-repository-editor-prepare.json",
             "valid/request-repository-editor-open.json",
@@ -1539,6 +1598,16 @@ mod tests {
             "invalid/request-repository-explore-unknown-root.json",
             "invalid/request-repository-explore-oversize-page.json",
             "invalid/request-repository-explore-unknown-search.json",
+            "invalid/request-repository-operation-root.json",
+            "invalid/request-repository-operation-false-confirm.json",
+            "invalid/request-repository-operation-missing-version.json",
+            "invalid/request-repository-operation-unversioned-page.json",
+            "invalid/request-repository-operation-oversized-page.json",
+            "invalid/request-repository-operation-ref-kind.json",
+            "invalid/request-repository-operation-ref-option.json",
+            "invalid/request-repository-operation-ref-traversal.json",
+            "invalid/request-repository-operation-remote-url.json",
+            "invalid/request-repository-operation-pid.json",
             "invalid/request-repository-editor-program.json",
             "invalid/request-repository-editor-unsafe-path.json",
             "invalid/request-repository-editor-zero-line.json",

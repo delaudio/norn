@@ -6,6 +6,7 @@ import type {
   LocalSource,
   ProviderSnapshotInfo,
   PrRepositoryIdentity,
+  RepositoryOperationCheckout,
   ReviewProfileCatalog,
   WorkspaceScope,
   WorkspaceSettings,
@@ -196,6 +197,7 @@ export interface ShellSnapshot {
   explorerOpen: boolean;
   explorerReads: boolean;
   editorAvailable: boolean;
+  repositoryOperationsAvailable: boolean;
   providerReads: boolean;
   providerExternalBrowser: boolean;
   providerApproval: boolean;
@@ -284,6 +286,7 @@ const INITIAL: ShellSnapshot = {
   explorerOpen: false,
   explorerReads: false,
   editorAvailable: false,
+  repositoryOperationsAvailable: false,
   providerReads: false,
   providerExternalBrowser: false,
   providerApproval: false,
@@ -1080,6 +1083,45 @@ export class ShellStore {
     }
     this.update({ localForm: { ...form, layers, error: null } });
   }
+  async repositoryStateObserved(
+    client: BackendClient,
+    checkout: RepositoryOperationCheckout,
+  ): Promise<void> {
+    if (!checkout.context) return;
+    const info = this.state.localInfo;
+    if (
+      info &&
+      sameLocalValue(info.snapshot.repository, checkout.repository) &&
+      info.snapshot.rootId === checkout.context.rootId
+    ) {
+      this.update({
+        notice:
+          "The repository was refreshed. This review keeps its captured evidence and drafts; recapture explicitly to review the new Git state.",
+      });
+    }
+    const form = this.state.localForm;
+    const source = form?.sources[form.sourceIndex]?.source;
+    if (
+      !form ||
+      !source ||
+      !form.options ||
+      form.options.rootId !== checkout.context.rootId ||
+      !sameLocalValue(form.options.repository, checkout.repository)
+    )
+      return;
+    // The refresh only changes options. Existing review/prompt/draft state stays.
+    const selectedRef = form.baseIndex === 0 ? null : form.options.baseRefs[form.baseIndex - 1];
+    await this.refreshLocalOptions(client);
+    const current = this.state.localForm;
+    if (
+      current?.options &&
+      sameLocalValue(current.options.repository, checkout.repository) &&
+      current.options.rootId === checkout.context.rootId
+    ) {
+      const index = selectedRef === null ? 0 : current.options.baseRefs.indexOf(selectedRef!) + 1;
+      this.update({ localForm: { ...current, baseIndex: Math.max(0, index) } });
+    }
+  }
   async refreshLocalOptions(client: BackendClient): Promise<void> {
     if (!this.state.localForm) return;
     this.localRequest++;
@@ -1426,6 +1468,7 @@ export class ShellStore {
           ready.capabilities.includes("repository-explorer-reads") &&
           ready.capabilities.includes("repository-explorer-windowed-find"),
         editorAvailable: ready.capabilities.includes("repository-editor"),
+        repositoryOperationsAvailable: ready.capabilities.includes("repository-operations"),
         providerExternalBrowser: ready.capabilities.includes("provider-external-browser"),
         providerApproval: ready.capabilities.includes("provider-pr-approval"),
         providerSnapshots: ready.capabilities.includes("provider-snapshot-preview"),

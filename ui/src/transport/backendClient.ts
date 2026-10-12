@@ -86,6 +86,15 @@ import type {
   RepositoryExploreFindParams,
   RepositoryExploreInfo,
   RepositoryExploreInfoParams,
+  RepositoryOperation,
+  RepositoryOperationApplied,
+  RepositoryOperationApplyParams,
+  RepositoryOperationListParams,
+  RepositoryOperationPage,
+  RepositoryOperationPrepared,
+  RepositoryOperationPreviewParams,
+  RepositoryOperationStatus,
+  RepositoryOperationStatusParams,
   ReviewProfileCatalog,
   ScopePage,
   WorkspaceReadiness,
@@ -101,6 +110,7 @@ import {
   validLocalInfo,
   validLocalRef,
 } from "./localValidation";
+import { validOperationParams, validOperationResult } from "./operationsValidation";
 import { samePublicationScope, validPublicationDTO } from "./publicationValidation";
 
 // Typed facade over a BackendTransport. Domain methods are added as later
@@ -1226,6 +1236,76 @@ export class BackendClient {
     if (!validEditorResult(resultType, result, params, expected))
       throw new Error("Invalid or mismatched repository editor response.");
     return result as T;
+  }
+  private async operationsRequest<T>(
+    method: string,
+    params: object,
+    requestType: string,
+    resultType: string,
+    expected?: RepositoryOperationPrepared | RepositoryOperation,
+  ): Promise<T> {
+    if (!validOperationParams(requestType, params))
+      throw new Error("Invalid repository operation request.");
+    const result = await this.transport.request(method, params as Record<string, unknown>);
+    if (!validOperationResult(resultType, result, params, expected))
+      throw new Error("Invalid or mismatched repository operation response.");
+    return result as T;
+  }
+  repositoryOperationsList(
+    params: RepositoryOperationListParams,
+  ): Promise<RepositoryOperationPage> {
+    return this.operationsRequest(
+      "repository.operation.list",
+      params,
+      "RepositoryOperationListParams",
+      "RepositoryOperationPage",
+    );
+  }
+  repositoryOperationsPreview(
+    params: RepositoryOperationPreviewParams,
+  ): Promise<RepositoryOperationPrepared> {
+    return this.operationsRequest(
+      "repository.operation.preview",
+      params,
+      "RepositoryOperationPreviewParams",
+      "RepositoryOperationPrepared",
+    );
+  }
+  repositoryOperationsApply(
+    params: RepositoryOperationApplyParams,
+    expected: RepositoryOperationPrepared,
+  ): Promise<RepositoryOperationApplied> {
+    return this.operationsRequest(
+      "repository.operation.apply",
+      params,
+      "RepositoryOperationApplyParams",
+      "RepositoryOperationApplied",
+      expected,
+    );
+  }
+  repositoryOperationsStatus(
+    params: RepositoryOperationStatusParams,
+    expected: RepositoryOperation,
+  ): Promise<RepositoryOperationStatus> {
+    return this.operationsRequest(
+      "repository.operation.status",
+      params,
+      "RepositoryOperationStatusParams",
+      "RepositoryOperationStatus",
+      expected,
+    );
+  }
+  repositoryOperationsCancel(
+    params: RepositoryOperationStatusParams,
+    expected: RepositoryOperation,
+  ): Promise<RepositoryOperationStatus> {
+    return this.operationsRequest(
+      "repository.operation.cancel",
+      params,
+      "RepositoryOperationStatusParams",
+      "RepositoryOperationStatus",
+      expected,
+    );
   }
   repositoryEditorPrepare(
     params: RepositoryEditorPrepareParams,

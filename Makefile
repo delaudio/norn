@@ -4,11 +4,11 @@
 # package.json / cargo / tauri commands so package.json stays authoritative.
 
 .DEFAULT_GOAL := help
-.PHONY: help dev tauri-dev install-local cli-build cli-install tui tui-build tui-install build typecheck lint test test-tauri ui-typecheck ui-test ui-native-workflow ui-frames-check evaluate check bundle-windows
+.PHONY: help dev tauri-dev install-local cli-build cli-install tui tui-build tui-install build typecheck lint test test-tauri ui-typecheck ui-test ui-native-workflow ui-repository-operations ui-frames-check evaluate check bundle-windows
 
 # List available recipes (runs by default).
 help:
-	@echo "Norn recipes: dev tauri-dev install-local cli-build cli-install tui tui-build tui-install build typecheck lint test test-tauri ui-typecheck ui-test ui-native-workflow ui-frames-check evaluate check bundle-windows"
+	@echo "Norn recipes: dev tauri-dev install-local cli-build cli-install tui tui-build tui-install build typecheck lint test test-tauri ui-typecheck ui-test ui-native-workflow ui-repository-operations ui-frames-check evaluate check bundle-windows"
 
 # Start the Vite dev server (browser mock IPC).
 dev:
@@ -96,3 +96,7 @@ bundle-windows:
 # Exercise the native UI with the Rust backend and an isolated fake agent.
 ui-native-workflow:
 	pnpm run ui:workflow
+
+# Approved Git operations using disposable clones and loopback-only bare remotes.
+ui-repository-operations:
+	pnpm run ui:repository-operations

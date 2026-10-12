@@ -1,0 +1,92 @@
+{
+  "type": "response",
+  "id": "status",
+  "ok": true,
+  "result": {
+    "request": {
+      "context": {
+        "repository": {
+          "provider": "github",
+          "workspace": "owned",
+          "repo": "operations"
+        },
+        "rootId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "operationId": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+    },
+    "operation": {
+      "operationId": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "context": {
+        "repository": {
+          "provider": "github",
+          "workspace": "owned",
+          "repo": "operations"
+        },
+        "rootId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "action": {
+        "kind": "checkout",
+        "branchKind": "local",
+        "reference": "refs/heads/main"
+      },
+      "state": "completed",
+      "before": {
+        "repository": {
+          "provider": "github",
+          "workspace": "owned",
+          "repo": "operations"
+        },
+        "context": {
+          "repository": {
+            "provider": "github",
+            "workspace": "owned",
+            "repo": "operations"
+          },
+          "rootId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "state": "ready",
+        "branch": "main",
+        "headSha": "dddddddddddddddddddddddddddddddddddddddd",
+        "upstream": "refs/remotes/origin/main",
+        "stashSha": null,
+        "dirty": false,
+        "filtered": false,
+        "conflicted": false,
+        "pending": false,
+        "version": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "message": null
+      },
+      "after": {
+        "repository": {
+          "provider": "github",
+          "workspace": "owned",
+          "repo": "operations"
+        },
+        "context": {
+          "repository": {
+            "provider": "github",
+            "workspace": "owned",
+            "repo": "operations"
+          },
+          "rootId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "state": "ready",
+        "branch": "main",
+        "headSha": "dddddddddddddddddddddddddddddddddddddddd",
+        "upstream": "refs/remotes/origin/main",
+        "stashSha": null,
+        "dirty": false,
+        "filtered": false,
+        "conflicted": false,
+        "pending": false,
+        "version": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "message": null
+      },
+      "exitCode": 0,
+      "stateChanged": false,
+      "recoveryRequired": false,
+      "message": "Actual checkout verified."
+    },
+    "cancelRequested": false
+  }
+}

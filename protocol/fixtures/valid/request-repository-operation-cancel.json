@@ -1,0 +1,16 @@
+{
+  "type": "request",
+  "id": "cancel",
+  "method": "repository.operation.cancel",
+  "params": {
+    "context": {
+      "repository": {
+        "provider": "github",
+        "workspace": "owned",
+        "repo": "operations"
+      },
+      "rootId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "operationId": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+  }
+}

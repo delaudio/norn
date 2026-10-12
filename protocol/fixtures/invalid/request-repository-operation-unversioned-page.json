@@ -1,0 +1,15 @@
+{
+  "type": "request",
+  "id": "unversioned-page",
+  "method": "repository.operation.list",
+  "params": {
+    "repository": {
+      "provider": "github",
+      "workspace": "owned",
+      "repo": "operations"
+    },
+    "offset": 100,
+    "limit": 100,
+    "version": null
+  }
+}

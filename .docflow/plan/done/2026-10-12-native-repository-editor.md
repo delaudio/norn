@@ -87,5 +87,22 @@ arbitrary finding anchors, private profiles or general process-execution API.
   Archgate17, audit, strict all-feature Clippy including final native adapter
   test rerun. React Doctor25files: no diagnostics;
   current score API unavailable (earlier scan score66). No installation/setup files added by Doctor.
-- Blockers: own exact-head3OS CI (Windows success/error proven; Ctrl-C/backend-death corrections pending)/actualmerge.
+- Completed: PR381 actually merged with all five exact-head checks passing.
+- Status: completed from observed squash/native proof, reconciled into done
+  with following repository-operations claim.
 - Stopped:
+
+## Shipped receipt
+
+- Actual PR381 squash 29f5e2a63efca38fccb0f332d812fde80f11354b at2026-10-12T17:03:36Z.
+- Exact sourcee883fc9f8a0f181d99283f56ffade41788816dda; all five
+  CI38280325908 jobs SUCCESS: verify, UI and Linux/macOS/Windows native.
+- All three platforms prove actual production UI/Rust editor success/error/
+  Ctrl-C/backend-death, literal argv/input, owned child reaping and exact
+  native mode/focus restoration. Windows known native exit73 independently
+  observed and matched UI exit/cause; console guard survives interrupt.
+- Local253UI/1588assertions/195frames/Storybook; Rust767core+2ignored/76stdio,
+  strictClippy/noGUI/CLI/onboarding/root/typecheck/lint/build/Archgate17/audit.
+  Cached Doctor25files no diagnostics; score service unavailable.
+- Receipt follows actual merge. Combined379/380/381 evidence completes359;
+  parent parity and epic294 remain active. ADR0020 stays Accepted until309.

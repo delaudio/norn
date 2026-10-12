@@ -105,5 +105,47 @@ Storybook frames cover wide/narrow tree, previews, find and unavailable states.
 
 Existing desktop component/parser tests, shared raster regression tests, core
 and CLI gates remain required. No provider HTTP, credentials, actual agent or
-private profile is needed for these proofs. #359 remains open for the actual
-external-editor lifecycle proof and final parity assessment.
+private profile is needed for these proofs. The complete explorer and explicit editor baseline is now preserved through
+PR379/b15d80b, PR380/d623231 and PR381/29f5e2a. Exact editor source
+e883fc9 passed all five CI38280325908 jobs, including actual GUI IPC and
+terminal success/error/Ctrl-C/backend-death on Linux/macOS/Windows. Native
+console modes/focus and owned editor cleanup are proven. This completes #359;
+branch/worktree operations remain separately owned by #360.
+
+## Approved branch operations under verification
+
+The native explorer opens branch operations with `b`. It lists configured clone
+state and bounded pages of local/remote references. Enter previews checkout;
+`f`, `p` and `s` preview fetch, fast-forward pull and include-untracked stash.
+A separate `y` press approves a single-use preview that expires after30seconds.
+Pasted text never approves an operation. `Ctrl-D/U` scrolls the complete
+approval or recovery details, including long branch descriptions. Each approval binds the full provider,
+repository, canonical clone, reference, checkout bytes and effective Git config.
+
+The Rust service preserves existing local branch commits when selecting an
+origin reference; it creates a tracking branch only when no local branch exists.
+Other remote references explicitly produce detached HEAD. Checkout and pull
+refuse local changes and protect ignored files. Pull fetches its actual upstream,
+checks local state again and uses fast-forward only. A divergent branch keeps
+its commits. Stash saves tracked/untracked changes and reports the actual stash
+object; ignored files remain. Existing conflicts block checkout/pull/stash;
+fetch can update remote references while preserving conflict content/index.
+
+An active write blocks competing workspace mutations. `x` or Ctrl-C requests
+cancellation of its owned Git process tree. The panel waits for observed status
+and shows actual after-state, failure or uncertainty, without replay or rollback.
+If the backend exits, approvals are discarded and the outcome must be inspected
+after restart. Existing captured review evidence, prompts and staged drafts stay
+intact; matching local target options refresh without starting another review.
+
+`make ui-repository-operations` / `just ui-repository-operations` run the real
+backend against disposable clones and owned bare remotes. A bounded loopback
+proxy maps registered fake GitHub/Bitbucket origins only to git-http-backend on
+that bare repository. It never resolves or forwards provider hosts. Tests cover
+actual state, configuration drift, approval expiry/reuse, cancellation, restart,
+local commits, ignored files, existing conflicts and provider/root isolation.
+
+These source changes are prepared for #360. Exact-head native CI on all three
+supported systems and an actual verified squash merge remain required before
+marking this parity row shipped. Linked-worktree creation adds no shipped UI
+capability and is outside this migration slice.

@@ -1,0 +1,17 @@
+{
+  "type": "request",
+  "id": "pid",
+  "method": "repository.operation.cancel",
+  "params": {
+    "context": {
+      "repository": {
+        "provider": "github",
+        "workspace": "owned",
+        "repo": "operations"
+      },
+      "rootId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "operationId": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "pid": 1
+  }
+}

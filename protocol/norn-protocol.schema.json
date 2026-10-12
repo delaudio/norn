@@ -7290,6 +7290,575 @@
           "$ref": "#/definitions/RepositoryEditor"
         }
       }
+    },
+    "RepositoryOperationAction": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "reference",
+            "branchKind"
+          ],
+          "properties": {
+            "kind": {
+              "const": "checkout"
+            },
+            "reference": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 1024,
+              "pattern": "^refs/heads/(?!-)(?![\\s\\S]*[\\u0000-\\u0020\\u007f~^:?*\\[\\\\])(?![\\s\\S]*\\.\\.)(?![\\s\\S]*@\\{)[\\s\\S]+$"
+            },
+            "branchKind": {
+              "const": "local"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "reference",
+            "branchKind"
+          ],
+          "properties": {
+            "kind": {
+              "const": "checkout"
+            },
+            "reference": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 1024,
+              "pattern": "^refs/remotes/(?!origin/-)(?![\\s\\S]*[\\u0000-\\u0020\\u007f~^:?*\\[\\\\])(?![\\s\\S]*\\.\\.)(?![\\s\\S]*@\\{)[\\s\\S]+$"
+            },
+            "branchKind": {
+              "const": "remote"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind"
+          ],
+          "properties": {
+            "kind": {
+              "const": "fetch"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind"
+          ],
+          "properties": {
+            "kind": {
+              "const": "pull"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind"
+          ],
+          "properties": {
+            "kind": {
+              "const": "stash"
+            }
+          }
+        }
+      ]
+    },
+    "RepositoryOperationBranch": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "reference",
+        "name",
+        "kind",
+        "oid",
+        "current"
+      ],
+      "properties": {
+        "reference": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "kind": {
+          "enum": [
+            "local",
+            "remote"
+          ]
+        },
+        "oid": {
+          "type": "string",
+          "pattern": "^(?:[0-9a-f]{40}|[0-9a-f]{64})$"
+        },
+        "current": {
+          "type": "boolean"
+        }
+      }
+    },
+    "RepositoryOperationListParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "repository",
+        "offset",
+        "limit",
+        "version"
+      ],
+      "properties": {
+        "repository": {
+          "$ref": "#/definitions/PrRepositoryIdentity"
+        },
+        "offset": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10000
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100
+        },
+        "version": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "oneOf": [
+        {
+          "properties": {
+            "offset": {
+              "const": 0
+            }
+          },
+          "type": "object",
+          "additionalProperties": true
+        },
+        {
+          "properties": {
+            "offset": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "version": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            }
+          },
+          "type": "object",
+          "additionalProperties": true
+        }
+      ]
+    },
+    "RepositoryOperationPreviewParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "context",
+        "action"
+      ],
+      "properties": {
+        "context": {
+          "$ref": "#/definitions/RepositoryExploreContext"
+        },
+        "action": {
+          "$ref": "#/definitions/RepositoryOperationAction"
+        }
+      }
+    },
+    "RepositoryOperationApplyParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "context",
+        "action",
+        "token",
+        "confirm"
+      ],
+      "properties": {
+        "context": {
+          "$ref": "#/definitions/RepositoryExploreContext"
+        },
+        "action": {
+          "$ref": "#/definitions/RepositoryOperationAction"
+        },
+        "token": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "confirm": {
+          "const": true
+        }
+      }
+    },
+    "RepositoryOperationStatusParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "context",
+        "operationId"
+      ],
+      "properties": {
+        "context": {
+          "$ref": "#/definitions/RepositoryExploreContext"
+        },
+        "operationId": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      }
+    },
+    "RepositoryOperationCheckout": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "repository",
+        "context",
+        "state",
+        "branch",
+        "headSha",
+        "upstream",
+        "stashSha",
+        "dirty",
+        "filtered",
+        "conflicted",
+        "pending",
+        "version",
+        "message"
+      ],
+      "properties": {
+        "repository": {
+          "$ref": "#/definitions/PrRepositoryIdentity"
+        },
+        "context": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/RepositoryExploreContext"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "state": {
+          "enum": [
+            "ready",
+            "unborn",
+            "missing",
+            "invalid"
+          ]
+        },
+        "branch": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 1024
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "headSha": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^(?:[0-9a-f]{40}|[0-9a-f]{64})$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "upstream": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 1024
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "dirty": {
+          "type": "boolean"
+        },
+        "filtered": {
+          "type": "boolean"
+        },
+        "conflicted": {
+          "type": "boolean"
+        },
+        "pending": {
+          "type": "boolean"
+        },
+        "version": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "message": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2048
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "stashSha": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^(?:[0-9a-f]{40}|[0-9a-f]{64})$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "RepositoryOperationPage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "request",
+        "checkout",
+        "branches",
+        "total",
+        "nextOffset"
+      ],
+      "properties": {
+        "request": {
+          "$ref": "#/definitions/RepositoryOperationListParams"
+        },
+        "checkout": {
+          "$ref": "#/definitions/RepositoryOperationCheckout"
+        },
+        "branches": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/RepositoryOperationBranch"
+          },
+          "maxItems": 100
+        },
+        "total": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10000
+        },
+        "nextOffset": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 10000
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "RepositoryOperationPrepared": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "request",
+        "token",
+        "expiresInMs",
+        "before",
+        "summary",
+        "warnings"
+      ],
+      "properties": {
+        "request": {
+          "$ref": "#/definitions/RepositoryOperationPreviewParams"
+        },
+        "token": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "expiresInMs": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 30000
+        },
+        "before": {
+          "$ref": "#/definitions/RepositoryOperationCheckout"
+        },
+        "summary": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096
+        },
+        "warnings": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2048
+          },
+          "maxItems": 8
+        }
+      }
+    },
+    "RepositoryOperation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "operationId",
+        "context",
+        "action",
+        "state",
+        "before",
+        "after",
+        "exitCode",
+        "stateChanged",
+        "recoveryRequired",
+        "message"
+      ],
+      "properties": {
+        "operationId": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "context": {
+          "$ref": "#/definitions/RepositoryExploreContext"
+        },
+        "action": {
+          "$ref": "#/definitions/RepositoryOperationAction"
+        },
+        "state": {
+          "enum": [
+            "starting",
+            "checking",
+            "running",
+            "inspecting",
+            "completed",
+            "failed",
+            "canceled",
+            "uncertain"
+          ]
+        },
+        "before": {
+          "$ref": "#/definitions/RepositoryOperationCheckout"
+        },
+        "after": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/RepositoryOperationCheckout"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "exitCode": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": -2147483648,
+              "maximum": 2147483647
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "stateChanged": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "recoveryRequired": {
+          "type": "boolean"
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096
+        }
+      }
+    },
+    "RepositoryOperationApplied": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "request",
+        "operation"
+      ],
+      "properties": {
+        "request": {
+          "$ref": "#/definitions/RepositoryOperationApplyParams"
+        },
+        "operation": {
+          "$ref": "#/definitions/RepositoryOperation"
+        }
+      }
+    },
+    "RepositoryOperationStatus": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "request",
+        "operation",
+        "cancelRequested"
+      ],
+      "properties": {
+        "request": {
+          "$ref": "#/definitions/RepositoryOperationStatusParams"
+        },
+        "operation": {
+          "$ref": "#/definitions/RepositoryOperation"
+        },
+        "cancelRequested": {
+          "type": "boolean"
+        }
+      }
     }
   },
   "oneOf": [
@@ -9440,6 +10009,126 @@
               "$ref": "#/definitions/RepositoryEditorStatusParams"
             }
           }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "type": {
+              "const": "request"
+            },
+            "id": {
+              "$ref": "#/definitions/RequestId"
+            },
+            "method": {
+              "const": "repository.operation.list"
+            },
+            "params": {
+              "$ref": "#/definitions/RepositoryOperationListParams"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "type": {
+              "const": "request"
+            },
+            "id": {
+              "$ref": "#/definitions/RequestId"
+            },
+            "method": {
+              "const": "repository.operation.preview"
+            },
+            "params": {
+              "$ref": "#/definitions/RepositoryOperationPreviewParams"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "type": {
+              "const": "request"
+            },
+            "id": {
+              "$ref": "#/definitions/RequestId"
+            },
+            "method": {
+              "const": "repository.operation.apply"
+            },
+            "params": {
+              "$ref": "#/definitions/RepositoryOperationApplyParams"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "type": {
+              "const": "request"
+            },
+            "id": {
+              "$ref": "#/definitions/RequestId"
+            },
+            "method": {
+              "const": "repository.operation.status"
+            },
+            "params": {
+              "$ref": "#/definitions/RepositoryOperationStatusParams"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "type": {
+              "const": "request"
+            },
+            "id": {
+              "$ref": "#/definitions/RequestId"
+            },
+            "method": {
+              "const": "repository.operation.cancel"
+            },
+            "params": {
+              "$ref": "#/definitions/RepositoryOperationStatusParams"
+            }
+          }
         }
       ]
     },
@@ -9644,6 +10333,18 @@
             },
             {
               "$ref": "#/definitions/RepositoryEditorStatus"
+            },
+            {
+              "$ref": "#/definitions/RepositoryOperationPage"
+            },
+            {
+              "$ref": "#/definitions/RepositoryOperationPrepared"
+            },
+            {
+              "$ref": "#/definitions/RepositoryOperationApplied"
+            },
+            {
+              "$ref": "#/definitions/RepositoryOperationStatus"
             }
           ]
         }

@@ -99,3 +99,7 @@ bundle-windows:
 # Exercise the native UI with the Rust backend and an isolated fake agent.
 ui-native-workflow:
     pnpm run ui:workflow
+
+# Approved Git operations using disposable clones and loopback-only bare remotes.
+ui-repository-operations:
+    pnpm run ui:repository-operations

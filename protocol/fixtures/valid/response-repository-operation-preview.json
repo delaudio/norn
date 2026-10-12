@@ -1,0 +1,54 @@
+{
+  "type": "response",
+  "id": "preview",
+  "ok": true,
+  "result": {
+    "request": {
+      "context": {
+        "repository": {
+          "provider": "github",
+          "workspace": "owned",
+          "repo": "operations"
+        },
+        "rootId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "action": {
+        "kind": "checkout",
+        "branchKind": "local",
+        "reference": "refs/heads/main"
+      }
+    },
+    "token": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "expiresInMs": 30000,
+    "before": {
+      "repository": {
+        "provider": "github",
+        "workspace": "owned",
+        "repo": "operations"
+      },
+      "context": {
+        "repository": {
+          "provider": "github",
+          "workspace": "owned",
+          "repo": "operations"
+        },
+        "rootId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "state": "ready",
+      "branch": "main",
+      "headSha": "dddddddddddddddddddddddddddddddddddddddd",
+      "upstream": "refs/remotes/origin/main",
+      "stashSha": null,
+      "dirty": false,
+      "filtered": false,
+      "conflicted": false,
+      "pending": false,
+      "version": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      "message": null
+    },
+    "summary": "Checkout local main at the verified commit.",
+    "warnings": [
+      "Configured hooks may execute after approval."
+    ]
+  }
+}
