@@ -54,10 +54,28 @@ once this engine seam is verified. Fresh preview Enter remains unavailable here.
 - Existing shared pipeline, prompt/reference and approved filesystem seams.
 - Subsequent durable cached-evidence start before fresh provider review parity.
 
-## Status
+## Prepared completion receipt
 
-- Claimed by: default-agent, 2026-10-12, `issue-306-provider-inline-engine`.
-- Location: isolated `/private/tmp/norn-provider-inline-engine` worktree based
-  on final PR #369 head `0e828f7c0eb6a02579a4450eb2fce974605a567e`.
-- Blockers: final gates, rebase/collision audit and verified merge of this work.
-- Stopped:
+Prepared 2026-10-12 for PR integration from implementation commit
+`4db90405f7d80692c54ea491facc97de32ec8110` on
+`issue-306-provider-inline-engine`. This path becomes a completion record only
+after exact-head CI succeeds and the PR is verified squash-merged into main.
+
+- Predecessor PR #369 verified merged at `68c69399cc879b29873846a65fd7c79ad42baee9`.
+  This branch was rebased onto that actual squash baseline without tree changes.
+- Local gate: root typecheck/123 tests plus tooling/lint/protocol; UI typecheck,
+  172 tests/1057 assertions/115 unchanged native frames; Rust 706 core plus two
+  existing ignored/58 stdio/six CLI/five onboarding/three bin tests; strict
+  all-feature/all-target Clippy, fmt, no-GUI, Archgate and docflow audit.
+- Criteria 1–4: owned initial/reply legacy-preservation fixtures, ambiguous
+  conversation rejection, native conversation inheritance, configured clone
+  selection across providers, selected/default/missing profiles and separate
+  approval/diff-base pins; mandatory analyzer clean pinned checkout fences.
+- Criteria 5–6: native fix state with identical thread IDs stays provider scoped;
+  existing approved fix/commit/push/sync/conflict tests pass. Real simultaneous
+  GitHub/Bitbucket sessions use different configured clones with identical
+  repository/PR/run/thread identities; cancelling GitHub lets Bitbucket succeed.
+- No React changes, Norn reviews, live provider writes, private profiles/data or
+  public releases. Optional diff-base omission preserves old saved/public output.
+- Fresh-preview review start still requires durable cached provider evidence.
+  No full parity/epic completion or owning ADR status advancement is claimed.

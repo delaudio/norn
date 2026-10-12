@@ -11,8 +11,8 @@ Git is authoritative. Durable history lives in WORKLOG and plan/done.
 - Predecessor #369 merged at `68c69399cc879b29873846a65fd7c79ad42baee9`
   after exact final-head CI38190456486 passed both jobs, 2026-10-12 01:22:43Z.
 - State: native context/profile/initial/reply/fix integration implemented;
-  completing owned regression gates, then rebase onto the actual squash
-  baseline and audit before opening the next PR.
+  local gates passed and rebased onto the actual squash baseline with no
+  tree changes; collision audit passed. Preparing PR; exact-head CI/merge pending.
 - Fresh-preview review start stays unavailable until durable cached evidence.
 - #369 local gate: 705 core+two ignored/55 stdio/six CLI/five onboarding/three
   bin, root123/UI172+1057asserts/115frames, strict Clippy/fmt/no-GUI/Archgate/audit.

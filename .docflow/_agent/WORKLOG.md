@@ -475,3 +475,18 @@ Plan 0053 completion prepared after implementation `e4264db`, effective only on 
 - No Norn review, live provider writes, private data/profiles or public releases.
   Fresh-preview activation and the remaining parity/hardening/package/cutover
   tasks remain outstanding. Single agent, authorized sequential PR integration.
+
+## 2026-10-12 — prepare provider-qualified inline engine PR receipt
+
+- Implementation `4db90405f7d80692c54ea491facc97de32ec8110` rebased onto
+  #369 squash `68c6939`; tree comparison is identical. Number0059 collision
+  audit passed against fresh origin/main.
+- Final local gate: root123+tooling/typecheck/lint/protocol; UI172 tests,
+  1057 assertions, 115 unchanged frames; Rust706+two ignored/58 stdio/six CLI/
+  five onboarding/three bin tests; strict Clippy/fmt/no-GUI/Archgate/audit.
+- Added real simultaneous same-identity GitHub/Bitbucket sessions in separate
+  clones: both fake agents start; cancel GitHub only, Bitbucket succeeds;
+  legacy bytes preserved. Mandatory local analyzer runs only on clean pinned
+  checkout. Scoped fix-state lookup preserves each provider's lifecycle.
+- Prepared plan/done receipt is conditional on exact-head CI and verified PR
+  squash merge; full ADR0020/#306/epic remain incomplete.
