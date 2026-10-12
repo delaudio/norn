@@ -25,7 +25,8 @@ The fresh preview review action remains unavailable until that integration ships
    Local SHA-scoped and legacy key formats remain compatible.
 2. Owned native rows are validated against full run provenance. Read projections
    combine native and proven legacy runs without duplicating ownership, exposing
-   foreign or unproven threads, or guessing provider from configuration.
+   foreign or unproven threads, or guessing provider from configuration. Fence the old inline agent handoff:
+   native-owned or ambiguous context cannot silently resume a legacy session.
 3. Saved review discovery/readers and staged finding/publication reflection can
    resolve the actual owning row. Publication updates remain transactional and
    cannot overwrite a foreign provider row. Legacy data is not rewritten merely
@@ -57,9 +58,11 @@ record only after exact-head CI success and verified squash merge into main.
 - Feature commit: `48cafd4e21e144dc6cbad1f049fc717866d560fb`.
 - Verified legacy-cleanup follow-up: `7fe8a53dc9e49f08fb3e18fdbc5d405aa493c418`; native rows survive matching,
   nonmatching and empty legacy keep lists. Full Rust/Clippy gate rerun.
+- Verified legacy inline handoff follow-up: `2140d09a6b73278f3ab06bb6cb24c86d6c5bd3f6`; four owned
+  real-engine cases stop before fake agent spawn and preserve legacy bytes.
 - Local gate: root typecheck/123 tests plus tooling/lint/protocol; UI typecheck,
   172 tests/1057 assertions/115 unchanged frames; Rust 705 core plus two existing
-  ignored/54 stdio/six CLI/five onboarding/three bin tests; strict all-feature/
+  ignored/55 stdio/six CLI/five onboarding/three bin tests; strict all-feature/
   all-target Clippy, fmt, no-GUI, Archgate 12/12 and docflow audit.
 - Owned two-provider storage/session/publication fixtures and real stdio restart
   pass. Final targeted publication/ownership tests rerun after SQL scope change.
