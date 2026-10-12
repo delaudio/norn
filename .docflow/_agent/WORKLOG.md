@@ -448,3 +448,14 @@ Plan 0053 completion prepared after implementation `e4264db`, effective only on 
   six CLI/five onboarding/three bin tests, strict all-feature/all-target Clippy,
   fmt/no-GUI, Archgate12/12 and docflow audit. Frontend gate remains unchanged
   (root123, UI172/1057 assertions/115 frames), no React source edits.
+
+## 2026-10-12 — claim isolated plan0059 while predecessor CI runs
+
+- #369 final head `0e828f7c0eb6a02579a4450eb2fce974605a567e` is under
+  CI38190456486; earlier6433 head gate passed but cannot authorize final merge.
+- Claimed0059 before code in isolated `/private/tmp/norn-provider-inline-engine`
+  on `issue-306-provider-inline-engine`. Same single agent; predecessor code/CI
+  head remains fixed. Native context/profile/inline reply/fix integration reuses
+  shared core. No fresh-preview activation until durable evidence integration.
+- Sequential PR integration remains mandatory: verify/merge369 first, rebase
+  isolated branch onto actual squash baseline, audit, then open next PR.
