@@ -51,10 +51,36 @@ catalog/editor are subsequent work; this alone does not close provider parity.
   2026-10-12 03:00:52Z after exact-head UI/verify success. Rebase required before PR.
 - Native PR browser, explicit repository identity and bounded native URL opener.
 
-## Status
 
-- Claimed by: default-agent, 2026-10-12, single agent.
-- Branch: `issue-306-provider-external-browser`.
-- Location: isolated `/private/tmp/norn-provider-external-browser`.
-- Blockers: verified predecessor merge, implementation/gates and exact next PR CI.
-- Stopped:
+## Prepared completion receipt
+
+Prepared 2026-10-12 from implementation `a21b575b16cfdfe5856d146f7bbf4a0ef142aae3`
+on `issue-306-provider-external-browser`. Effective only after exact-head CI
+passes and verified squash merge into main; no pre-merge shipped claim.
+
+- Predecessor #371 verified merged at `3322ff050c8d7c6bc115c01c9341cb0594cb4730`
+  after exact78ca5d0 CI38197325446 success. Rebased on actual squash; collision/
+  numbering/metadata/INDEX/links audit passes. Main checkout synced to that base.
+- Criteria1/2: shared valid/invalid request/response fixtures, strict generated
+  boundary, owned URL/HTTP fixtures verify GitHub/Bitbucket fixed origins, no
+  provider calls for slugs, explicit native UUID alias ownership/path/redirect
+  validation and ignoring hostile provider HTML links. Original full scope echoes.
+- Criterion3: shared one-worker native browser gate/read gate/shutdown checks,
+  existing bounded platform opener, disabled-launcher real stdio for both
+  providers with responsive following control and shutdown. Results acknowledge
+  requests/errors, never page visibility. Native Windows runtime remains a #364
+  gate; compile/shared-opener reuse is not runtime evidence.
+- Criterion4: native b input in list/detail, strict DTO canonical URL/identity,
+  wide/narrow input/paste, coalesced request/late selection/dispose tests. Two new
+  disabled-opener Storybook frames plus updated help; 119 frames match baseline.
+- Criterion5 local gate: root typecheck/123 tests plus tooling/lint/protocol;
+  UI typecheck/181 tests/1117 assertions/119 frames; Rust713 core+two existing
+  ignored/60stdio/six CLI/five onboarding/three bin, strict all-feature/all-target
+  Clippy/fmt/all-target core/no-GUI; Archgate17 and docflow audit. React Doctor
+  no changed-file issues, aggregate score62; no suppressed native prop rules.
+- Explicit provider approval, profile catalog/editor and #358–#364/hardening/
+  packaging/recovery/platform/cutover remain required. No Norn review/live
+  provider writes/private profiles/releases. ADR0020 remains Accepted; this does
+  not close #306 or epic #294.
+
+Shipped implementation (conditional on verified PR merge): `a21b575`.
