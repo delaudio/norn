@@ -1,5 +1,8 @@
 // Owned synthetic PR metadata for native tests and Storybook. No network or credentials.
 import type {
+  ProviderApprovalEntry,
+  ProviderApprovalProof,
+  ProviderPrDetailParams,
   ProviderPrListParams,
   ProviderPrSummary,
   ProviderSnapshotRef,
@@ -43,6 +46,11 @@ export class FakeProviderTransport extends FakeBackendTransport {
   gate: Promise<void> | null = null;
   fault: "list" | "detail" | "user" | "snapshot" | null = null;
   private snapshotCounter = 0;
+  approvalFault: "uncertain" | "rejected" | null = null;
+  approvalHeadSha = "a".repeat(40);
+  approvalEntries = new Map<string, ProviderApprovalEntry>();
+  private approvalTokens = new Map<string, ProviderApprovalProof>();
+  private approvalCounter = 0;
   private snapshots = new Map<
     string,
     { snapshot: ProviderSnapshotRef; patch: string; images: boolean }
@@ -73,6 +81,7 @@ export class FakeProviderTransport extends FakeBackendTransport {
         ...ready.capabilities,
         "provider-pr-reads",
         "provider-external-browser",
+        "provider-pr-approval",
         "provider-snapshots",
         "provider-snapshot-preview",
       ],
@@ -102,6 +111,69 @@ export class FakeProviderTransport extends FakeBackendTransport {
     this.maxReads = Math.max(this.maxReads, this.activeReads);
     try {
       if (this.gate) await this.gate;
+      if (method.startsWith("provider.approval.")) {
+        const request = (
+          method.endsWith("confirm") ? params.request : params
+        ) as ProviderPrDetailParams;
+        const key = JSON.stringify(request);
+        const proof: ProviderApprovalProof = {
+          request,
+          repositoryId: `owned-${request.repository.provider}-repo`,
+          actor: { accountId: "owned-reviewer", displayName: "Owned reviewer" },
+          title: `${request.repository.provider} change ${request.prId} 世界`,
+          headSha: this.approvalHeadSha,
+          destinationSha: "b".repeat(40),
+          sourceBranch: "feature",
+          destinationBranch: "main",
+          sourceRepository: null,
+          state: "OPEN",
+          draft: false,
+          alreadyApproved:
+            this.approvalEntries.get(key)?.state === "approved" &&
+            this.approvalEntries.get(key)?.proof.headSha === this.approvalHeadSha,
+        };
+        let entry = this.approvalEntries.get(key) ?? null;
+        if (method.endsWith("preview")) {
+          const approvalId =
+            !proof.alreadyApproved && (!entry || entry.state === "rejected")
+              ? (++this.approvalCounter).toString(16).padStart(64, "0")
+              : null;
+          if (approvalId) this.approvalTokens.set(approvalId, structuredClone(proof));
+          return {
+            request,
+            proof,
+            approvalId,
+            expiresAt: approvalId ? Math.floor(Date.now() / 1000) + 300 : null,
+            entry,
+          };
+        }
+        if (method.endsWith("confirm")) {
+          const token = this.approvalTokens.get(String(params.approvalId));
+          this.approvalTokens.delete(String(params.approvalId));
+          if (!token || JSON.stringify(token.request) !== key)
+            throw new Error("Synthetic approval expired.");
+          entry = {
+            formatVersion: 1,
+            proof,
+            state: this.approvalFault ?? "approved",
+            remoteReviewId: this.approvalFault ? null : "owned-receipt-1",
+            updatedAt: Math.floor(Date.now() / 1000),
+            attempt: (entry?.attempt ?? 0) + 1,
+          };
+          this.approvalEntries.set(key, entry);
+        }
+        return {
+          request,
+          proof,
+          entry,
+          observedApproved: entry?.state === "approved",
+          outdated:
+            !!entry &&
+            (entry.proof.headSha !== proof.headSha ||
+              entry.proof.destinationSha !== proof.destinationSha),
+          localSaved: true,
+        };
+      }
       if (method === "provider.snapshot") {
         if (this.fault === "snapshot") throw new Error("Synthetic pinned snapshot unavailable.");
         const repository = params.repository as PrRepositoryIdentity;

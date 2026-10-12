@@ -4201,6 +4201,266 @@
           ]
         }
       }
+    },
+    "ProviderApprovalActor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "accountId",
+        "displayName"
+      ],
+      "properties": {
+        "accountId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+        },
+        "displayName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+        }
+      }
+    },
+    "ProviderApprovalProof": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "request",
+        "repositoryId",
+        "actor",
+        "title",
+        "headSha",
+        "destinationSha",
+        "sourceBranch",
+        "destinationBranch",
+        "sourceRepository",
+        "state",
+        "draft",
+        "alreadyApproved"
+      ],
+      "properties": {
+        "request": {
+          "$ref": "#/definitions/ProviderPrDetailParams"
+        },
+        "repositoryId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+        },
+        "actor": {
+          "$ref": "#/definitions/ProviderApprovalActor"
+        },
+        "title": {
+          "type": "string",
+          "maxLength": 4096,
+          "pattern": "^[^\\u0000-\\u001f\\u007f]*$"
+        },
+        "headSha": {
+          "type": "string",
+          "pattern": "^([0-9a-f]{40}|[0-9a-f]{64})$"
+        },
+        "destinationSha": {
+          "type": "string",
+          "pattern": "^([0-9a-f]{40}|[0-9a-f]{64})$"
+        },
+        "sourceBranch": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+        },
+        "destinationBranch": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+        },
+        "sourceRepository": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/PrRepositoryIdentity"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "state": {
+          "enum": [
+            "OPEN",
+            "MERGED",
+            "DECLINED",
+            "SUPERSEDED"
+          ]
+        },
+        "draft": {
+          "type": "boolean"
+        },
+        "alreadyApproved": {
+          "type": "boolean"
+        }
+      }
+    },
+    "ProviderApprovalEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "formatVersion",
+        "proof",
+        "state",
+        "remoteReviewId",
+        "updatedAt",
+        "attempt"
+      ],
+      "properties": {
+        "formatVersion": {
+          "const": 1
+        },
+        "proof": {
+          "$ref": "#/definitions/ProviderApprovalProof"
+        },
+        "state": {
+          "enum": [
+            "writing",
+            "approved",
+            "rejected",
+            "uncertain"
+          ]
+        },
+        "remoteReviewId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "updatedAt": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "attempt": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4294967295
+        }
+      }
+    },
+    "ProviderApprovalConfirmParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "request",
+        "approvalId"
+      ],
+      "properties": {
+        "request": {
+          "$ref": "#/definitions/ProviderPrDetailParams"
+        },
+        "approvalId": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      }
+    },
+    "ProviderApprovalPreview": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "request",
+        "proof",
+        "approvalId",
+        "expiresAt",
+        "entry"
+      ],
+      "properties": {
+        "request": {
+          "$ref": "#/definitions/ProviderPrDetailParams"
+        },
+        "proof": {
+          "$ref": "#/definitions/ProviderApprovalProof"
+        },
+        "approvalId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "expiresAt": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "entry": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ProviderApprovalEntry"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "ProviderApprovalResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "request",
+        "proof",
+        "entry",
+        "observedApproved",
+        "outdated",
+        "localSaved"
+      ],
+      "properties": {
+        "request": {
+          "$ref": "#/definitions/ProviderPrDetailParams"
+        },
+        "proof": {
+          "$ref": "#/definitions/ProviderApprovalProof"
+        },
+        "entry": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ProviderApprovalEntry"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "observedApproved": {
+          "type": "boolean"
+        },
+        "outdated": {
+          "type": "boolean"
+        },
+        "localSaved": {
+          "type": "boolean"
+        }
+      }
     }
   },
   "oneOf": [
@@ -5607,6 +5867,102 @@
               "$ref": "#/definitions/ProviderPrDetailParams"
             }
           }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "type": {
+              "const": "request"
+            },
+            "id": {
+              "$ref": "#/definitions/RequestId"
+            },
+            "method": {
+              "const": "provider.approval.preview"
+            },
+            "params": {
+              "$ref": "#/definitions/ProviderPrDetailParams"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "type": {
+              "const": "request"
+            },
+            "id": {
+              "$ref": "#/definitions/RequestId"
+            },
+            "method": {
+              "const": "provider.approval.confirm"
+            },
+            "params": {
+              "$ref": "#/definitions/ProviderApprovalConfirmParams"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "type": {
+              "const": "request"
+            },
+            "id": {
+              "$ref": "#/definitions/RequestId"
+            },
+            "method": {
+              "const": "provider.approval.status"
+            },
+            "params": {
+              "$ref": "#/definitions/ProviderPrDetailParams"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "type": {
+              "const": "request"
+            },
+            "id": {
+              "$ref": "#/definitions/RequestId"
+            },
+            "method": {
+              "const": "provider.approval.reconcile"
+            },
+            "params": {
+              "$ref": "#/definitions/ProviderPrDetailParams"
+            }
+          }
         }
       ]
     },
@@ -5727,6 +6083,12 @@
             },
             {
               "$ref": "#/definitions/ProviderBrowserResult"
+            },
+            {
+              "$ref": "#/definitions/ProviderApprovalPreview"
+            },
+            {
+              "$ref": "#/definitions/ProviderApprovalResult"
             }
           ]
         }

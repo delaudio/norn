@@ -10,6 +10,7 @@ import {
   repositoryKey,
 } from "../providerStore";
 import { theme } from "../theme";
+import { ProviderApproval } from "./ProviderApproval";
 
 export function ProviderPanel({
   store,
@@ -19,6 +20,7 @@ export function ProviderPanel({
   onSettings,
   quit,
   browserAvailable = false,
+  approvalAvailable = false,
 }: {
   store: ProviderStore;
   client: BackendClient;
@@ -32,6 +34,7 @@ export function ProviderPanel({
   onSettings: () => void;
   quit: () => void;
   browserAvailable?: boolean;
+  approvalAvailable?: boolean;
 }) {
   const state = useSyncExternalStore(store.subscribe, store.getSnapshot);
   const { width, height } = useTerminalDimensions();
@@ -58,6 +61,22 @@ export function ProviderPanel({
       quit();
       return;
     }
+    if (state.approvalOpen) {
+      if (key.name === "escape") store.closeApproval();
+      else if (!key.ctrl && !key.meta && !key.super && !key.option) {
+        if (key.name === "y") void store.confirmApproval(client);
+        else if (key.name === "s") void store.approvalStatus(client, false);
+        else if (key.name === "r") void store.approvalStatus(client, true);
+        else if (key.name === "b" && browserAvailable) void store.openBrowser(client);
+        else if (["j", "down", "k", "up", "pagedown", "pageup"].includes(key.name)) {
+          const amount = ["pagedown", "pageup"].includes(key.name)
+            ? Math.max(1, (scroll.current?.height ?? 3) - 2)
+            : 1;
+          scroll.current?.scrollBy(["j", "down", "pagedown"].includes(key.name) ? amount : -amount);
+        }
+      }
+      return;
+    }
     if (state.editing) {
       if (key.name === "escape") store.cancelQuery();
       else if (key.ctrl && key.name === "u") store.clearQueryText();
@@ -79,6 +98,11 @@ export function ProviderPanel({
     }
     if (key.name === "m") {
       onSettings();
+      return;
+    }
+    if (key.name === "a") {
+      if (approvalAvailable) void store.previewApproval(client);
+      else store.notice("PR approval is unavailable with this backend.");
       return;
     }
     if (key.name === "b") {
@@ -189,10 +213,13 @@ export function ProviderPanel({
       <text height={1} flexShrink={0} truncate fg={theme.primary} attributes={TextAttributes.BOLD}>
         {heading}
       </text>
-      {state.detailOpen ? (
+      {state.approvalOpen ? (
+        <ProviderApproval state={state} scroll={scroll} />
+      ) : state.detailOpen ? (
         <>
           <text height={2} flexShrink={0} fg={theme.muted}>
-            Enter workspace · r refresh · y copy URL · b provider page · Esc list · arrows scroll
+            Enter workspace · a approve · r refresh · y copy URL · b provider page · Esc list ·
+            arrows scroll
           </text>
           {state.detailLoading ? (
             <text height={1} flexShrink={0} fg={theme.warning}>
@@ -304,8 +331,8 @@ export function ProviderPanel({
           </text>
           <text height={1} flexShrink={0} truncate fg={theme.muted}>
             {width >= 80
-              ? "Space workspace · b provider page · n next page · r refresh · / query · m settings"
-              : "Space select · b page · n more · r refresh · m settings"}
+              ? "Space workspace · a approve · b provider page · n next page · r refresh · / query · m settings"
+              : "Space select · a approve · b page · n more · m settings"}
           </text>
           {state.error ? (
             <text height={2} flexShrink={0} fg={theme.error}>

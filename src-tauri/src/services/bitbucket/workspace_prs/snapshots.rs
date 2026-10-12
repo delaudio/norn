@@ -619,7 +619,7 @@ pub(crate) fn snapshot_sections(patch: &str) -> Result<Vec<Section>, String> {
     Ok(sections)
 }
 
-fn snapshot_source_repository(
+pub(super) fn snapshot_source_repository(
     value: &Value,
     provider: ReviewProvider,
 ) -> Result<Option<RepositoryIdentity>, String> {

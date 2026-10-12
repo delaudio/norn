@@ -852,7 +852,18 @@ async function publicationScene(mode: "drafts" | "preview" | "partial" | "status
 }
 
 async function providerScene(
-  kind: "list" | "detail" | "empty" | "error" | "loading" | "identity" | "browser",
+  kind:
+    | "list"
+    | "detail"
+    | "empty"
+    | "error"
+    | "loading"
+    | "identity"
+    | "browser"
+    | "approval"
+    | "approval-uncertain"
+    | "approval-bitbucket"
+    | "approval-bitbucket-uncertain",
 ) {
   const transport = new FakeProviderTransport();
   if (kind === "empty") transport.empty = true;
@@ -869,6 +880,18 @@ async function providerScene(
   );
   for (let i = 0; i < 10; i++) await Bun.sleep(0);
   if (kind === "browser") await providers.openBrowser(client);
+  if (kind.startsWith("approval")) {
+    if (kind.includes("bitbucket")) {
+      providers.move(4);
+    }
+    await providers.previewApproval(client);
+    if (kind.includes("uncertain")) {
+      transport.approvalFault = "uncertain";
+      await providers.confirmApproval(client);
+      transport.approvalHeadSha = "c".repeat(40);
+      await providers.approvalStatus(client, false);
+    }
+  }
   if (kind === "detail") {
     providers.showDetail(client);
     for (let i = 0; i < 6; i++) await Bun.sleep(0);
@@ -880,6 +903,7 @@ async function providerScene(
       <ProviderPanel
         store={providers}
         browserAvailable
+        approvalAvailable
         client={client}
         onClose={() => {}}
         onWorkspace={async () => {}}
@@ -911,6 +935,17 @@ async function providerPreviewScene(kind: "github" | "bitbucket" | "saved" | "er
 }
 
 const scenes: Scene[] = [
+  ...(
+    [
+      "approval",
+      "approval-uncertain",
+      "approval-bitbucket",
+      "approval-bitbucket-uncertain",
+    ] as const
+  ).flatMap((kind) => [
+    { id: `shell-provider-${kind}-120x30`, cols: 120, rows: 30, build: () => providerScene(kind) },
+    { id: `shell-provider-${kind}-50x22`, cols: 50, rows: 22, build: () => providerScene(kind) },
+  ]),
   {
     id: "shell-provider-browser-disabled-120x30",
     cols: 120,

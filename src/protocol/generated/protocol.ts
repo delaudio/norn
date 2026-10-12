@@ -340,6 +340,30 @@ export type Request =
       id: RequestId;
       method: "provider.browser";
       params: ProviderPrDetailParams;
+    }
+  | {
+      type: "request";
+      id: RequestId;
+      method: "provider.approval.preview";
+      params: ProviderPrDetailParams;
+    }
+  | {
+      type: "request";
+      id: RequestId;
+      method: "provider.approval.confirm";
+      params: ProviderApprovalConfirmParams;
+    }
+  | {
+      type: "request";
+      id: RequestId;
+      method: "provider.approval.status";
+      params: ProviderPrDetailParams;
+    }
+  | {
+      type: "request";
+      id: RequestId;
+      method: "provider.approval.reconcile";
+      params: ProviderPrDetailParams;
     };
 export type RequestId = string;
 /**
@@ -850,6 +874,10 @@ export interface ProviderSnapshotDiffParams {
 export interface ProviderSnapshotBrowserParams {
   snapshot: ProviderSnapshotRef;
 }
+export interface ProviderApprovalConfirmParams {
+  request: ProviderPrDetailParams;
+  approvalId: string;
+}
 export interface ResponseOk {
   type: "response";
   id: RequestId;
@@ -886,7 +914,9 @@ export interface ResponseOk {
     | ProviderSnapshotDiffPage
     | ProviderSnapshotImagePage
     | ProviderSnapshotBrowserResult
-    | ProviderBrowserResult;
+    | ProviderBrowserResult
+    | ProviderApprovalPreview
+    | ProviderApprovalResult;
 }
 export interface DiffFileResult {
   target: TargetIdentity;
@@ -1503,6 +1533,47 @@ export interface ProviderBrowserResult {
   url: string;
   launchRequested: boolean;
   launchError: string | null;
+}
+export interface ProviderApprovalPreview {
+  request: ProviderPrDetailParams;
+  proof: ProviderApprovalProof;
+  approvalId: string | null;
+  expiresAt: number | null;
+  entry: ProviderApprovalEntry | null;
+}
+export interface ProviderApprovalProof {
+  request: ProviderPrDetailParams;
+  repositoryId: string;
+  actor: ProviderApprovalActor;
+  title: string;
+  headSha: string;
+  destinationSha: string;
+  sourceBranch: string;
+  destinationBranch: string;
+  sourceRepository: PrRepositoryIdentity | null;
+  state: "OPEN" | "MERGED" | "DECLINED" | "SUPERSEDED";
+  draft: boolean;
+  alreadyApproved: boolean;
+}
+export interface ProviderApprovalActor {
+  accountId: string;
+  displayName: string;
+}
+export interface ProviderApprovalEntry {
+  formatVersion: 1;
+  proof: ProviderApprovalProof;
+  state: "writing" | "approved" | "rejected" | "uncertain";
+  remoteReviewId: string | null;
+  updatedAt: number;
+  attempt: number;
+}
+export interface ProviderApprovalResult {
+  request: ProviderPrDetailParams;
+  proof: ProviderApprovalProof;
+  entry: ProviderApprovalEntry | null;
+  observedApproved: boolean;
+  outdated: boolean;
+  localSaved: boolean;
 }
 export interface ResponseError {
   type: "response";

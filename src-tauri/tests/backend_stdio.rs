@@ -12,6 +12,47 @@ use serde_json::{json, Value};
 const LOCAL_SHA: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 
 #[test]
+fn native_provider_approval_invalid_tokens_are_offline_and_restart_keeps_control() {
+    fn request(backend: &mut Backend, id: &str, method: &str, params: Value) -> Value {
+        backend.send(json!({"type":"request","id":id,"method":method,"params":params}));
+        backend.wait_for(|v| v["id"] == id, Duration::from_secs(5))
+    }
+    let owned = tempfile::tempdir().unwrap();
+    let config = tempfile::tempdir().unwrap();
+    for _ in 0..2 {
+        let mut backend = Backend::spawn_env(
+            owned.path(),
+            &[
+                ("NORN_CONFIG_DIR", config.path().to_str().unwrap()),
+                ("NORN_REVIEW_DATA_DIR", owned.path().to_str().unwrap()),
+            ],
+        );
+        backend.send(json!({"type":"hello","protocolVersion":1,"client":{"name":"owned-approval","version":"0"}}));
+        let ready = backend.wait_for(|v| v["type"] == "ready", Duration::from_secs(5));
+        assert!(ready["capabilities"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|v| v == "provider-pr-approval"));
+        for provider in ["github", "bitbucket"] {
+            let params = json!({"request":{"repository":{"provider":provider,"workspace":"Owned","repo":"Review"},"prId":7},"approvalId":"a".repeat(64)});
+            let result = request(&mut backend, provider, "provider.approval.confirm", params);
+            assert_eq!(result["ok"], false);
+            let message = result["error"]["message"].as_str().unwrap();
+            assert!(message.contains("expired") || message.contains("consumed"));
+            assert!(!message.to_ascii_lowercase().contains("credential"));
+        }
+        backend.send(json!({"type":"request","id":"malformed-approval","method":"provider.approval.confirm","params":{"request":{"repository":{"provider":"github","workspace":"Owned","repo":"Review"},"prId":2147483648_u32},"approvalId":"a".repeat(64)}}));
+        assert_eq!(
+            request(&mut backend, "control", "repository.status", json!({}))["ok"],
+            true
+        );
+        request(&mut backend, "finish", "shutdown", json!({}));
+        assert!(backend.child.wait().unwrap().success());
+    }
+}
+
+#[test]
 fn explicit_native_provider_browser_is_offline_for_slugs_and_preserves_control() {
     let owned = tempfile::tempdir().unwrap();
     let config = tempfile::tempdir().unwrap();

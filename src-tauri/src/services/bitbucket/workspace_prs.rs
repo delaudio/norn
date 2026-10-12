@@ -1,4 +1,6 @@
 //! Bounded provider reads for the terminal workspace (ADR 0020, #357).
+mod approval;
+pub(crate) use approval::WriteOutcome;
 mod images;
 mod snapshots;
 use super::*;

@@ -214,3 +214,26 @@ export const ProviderBrowserDisabled: Story = {
 export const CompactProviderBrowserDisabled: Story = {
   args: { frameId: "shell-provider-browser-disabled-50x15" },
 };
+
+export const ProviderApproval: Story = { args: { frameId: "shell-provider-approval-120x30" } };
+export const CompactProviderApproval: Story = {
+  args: { frameId: "shell-provider-approval-50x22" },
+};
+export const UncertainProviderApproval: Story = {
+  args: { frameId: "shell-provider-approval-uncertain-120x30" },
+};
+export const CompactUncertainProviderApproval: Story = {
+  args: { frameId: "shell-provider-approval-uncertain-50x22" },
+};
+export const BitbucketApproval: Story = {
+  args: { frameId: "shell-provider-approval-bitbucket-120x30" },
+};
+export const CompactBitbucketApproval: Story = {
+  args: { frameId: "shell-provider-approval-bitbucket-50x22" },
+};
+export const UncertainBitbucketApproval: Story = {
+  args: { frameId: "shell-provider-approval-bitbucket-uncertain-120x30" },
+};
+export const CompactUncertainBitbucketApproval: Story = {
+  args: { frameId: "shell-provider-approval-bitbucket-uncertain-50x22" },
+};
