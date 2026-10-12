@@ -3772,3 +3772,248 @@ fn saved_targets_resolve_run_and_provider_without_configuration_guessing() {
         assert_eq!(response["error"]["code"], "targetStale");
     }
 }
+
+#[test]
+fn qualified_local_snapshot_stdio_restores_layers_and_rejects_stale_current_authority() {
+    for provider in ["github", "bitbucket"] {
+        let repo = tempfile::tempdir().unwrap();
+        let data = tempfile::tempdir().unwrap();
+        let config = tempfile::tempdir().unwrap();
+        let owned_git = |args: &[&str]| {
+            let out = Command::new("git")
+                .arg("-C")
+                .arg(repo.path())
+                .args(args)
+                .env(
+                    "GIT_CONFIG_GLOBAL",
+                    if cfg!(windows) { "NUL" } else { "/dev/null" },
+                )
+                .env("GIT_CONFIG_NOSYSTEM", "1")
+                .output()
+                .unwrap();
+            assert!(out.status.success(), "owned Git fixture failed");
+        };
+        owned_git(&["init"]);
+        owned_git(&["config", "user.name", "Owned"]);
+        owned_git(&["config", "user.email", "owned@example.invalid"]);
+        owned_git(&[
+            "remote",
+            "add",
+            "origin",
+            if provider == "github" {
+                "https://github.com/owned/same.git"
+            } else {
+                "https://bitbucket.org/owned/same.git"
+            },
+        ]);
+        std::fs::write(repo.path().join("same.txt"), "base\n").unwrap();
+        owned_git(&["add", "same.txt"]);
+        owned_git(&["-c", "commit.gpgsign=false", "commit", "-m", "owned"]);
+        owned_git(&["branch", "comparison"]);
+        std::fs::write(repo.path().join("same.txt"), "staged\n").unwrap();
+        owned_git(&["add", "same.txt"]);
+        std::fs::write(repo.path().join("same.txt"), "unstaged 世界\n").unwrap();
+        std::fs::write(repo.path().join("untracked.txt"), "excluded owned\n").unwrap();
+        std::fs::create_dir(repo.path().join("nested")).unwrap();
+        let env = [
+            ("NORN_CONFIG_DIR", config.path().to_str().unwrap()),
+            ("NORN_REVIEW_DATA_DIR", data.path().to_str().unwrap()),
+            ("NORN_BACKEND_REPO_PATH", repo.path().to_str().unwrap()),
+        ];
+        let mut backend = Backend::spawn_env(&repo.path().join("nested"), &env);
+        backend.handshake();
+        let options = json!({"source":{"kind":"current"},"offset":0,"limit":32});
+        backend.send(json!({"type":"request","id":"local-options","method":"local.options","params":options}));
+        let response = backend.wait_for(|v| v["id"] == "local-options", Duration::from_secs(10));
+        assert_eq!(response["ok"], true, "{response}");
+        assert_eq!(response["result"]["repository"]["provider"], provider);
+        assert_eq!(response["result"]["baseRefs"], json!(["comparison"]));
+        let params = json!({"captureId":"a".repeat(64),"comparison":{"source":{"kind":"current"},"mode":"workingTree","baseRef":null,"layers":["committed","staged","unstaged"]}});
+        backend.send(json!({"type":"request","id":"local-capture","method":"local.snapshot","params":params}));
+        backend.send(
+            json!({"type":"request","id":"local-control","method":"repository.status","params":{}}),
+        );
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        let mut captured = None;
+        let mut controlled = None;
+        while captured.is_none() || controlled.is_none() {
+            let frame = backend
+                .next(deadline.saturating_duration_since(std::time::Instant::now()))
+                .expect("local capture/control response");
+            if frame["id"] == "local-capture" {
+                captured = Some(frame);
+            } else if frame["id"] == "local-control" {
+                controlled = Some(frame);
+            }
+        }
+        assert_eq!(controlled.unwrap()["ok"], true);
+        let response = captured.unwrap();
+        assert_eq!(response["ok"], true, "{response}");
+        let info = response["result"]["info"].clone();
+        let snapshot = info["snapshot"].clone();
+        assert_eq!(info["fileCount"], 2);
+        assert_eq!(snapshot["repository"]["provider"], provider);
+        backend.send(json!({"type":"request","id":"local-files","method":"local.snapshot.files","params":{"snapshot":snapshot,"offset":0,"limit":32}}));
+        let files = backend.wait_for(|v| v["id"] == "local-files", Duration::from_secs(10));
+        assert_eq!(files["result"]["files"][0]["layer"], "staged");
+        assert_eq!(files["result"]["files"][1]["layer"], "unstaged");
+        backend.send(json!({"type":"request","id":"local-patch","method":"local.snapshot.diff","params":{"snapshot":snapshot,"layer":"unstaged","path":"same.txt","offset":0}}));
+        let patch = backend.wait_for(|v| v["id"] == "local-patch", Duration::from_secs(10))
+            ["result"]["text"]
+            .clone();
+        assert!(patch.as_str().unwrap().contains("+unstaged 世界"));
+        backend.send(json!({"type":"request","id":"local-stop","method":"shutdown","params":{}}));
+        backend.wait_for(|v| v["id"] == "local-stop", Duration::from_secs(5));
+        assert!(backend.child.wait().unwrap().success());
+        std::fs::write(repo.path().join("same.txt"), "changed after restart\n").unwrap();
+        let mut restarted = Backend::spawn_env(repo.path(), &env);
+        restarted.handshake();
+        restarted.send(json!({"type":"request","id":"local-restore","method":"local.snapshot.info","params":{"snapshot":snapshot}}));
+        let restored = restarted.wait_for(|v| v["id"] == "local-restore", Duration::from_secs(10));
+        assert_eq!(restored["ok"], true, "{restored}");
+        assert_eq!(restored["result"]["info"], info);
+        restarted.send(json!({"type":"request","id":"local-old-patch","method":"local.snapshot.diff","params":{"snapshot":snapshot,"layer":"unstaged","path":"same.txt","offset":0}}));
+        assert_eq!(
+            restarted.wait_for(|v| v["id"] == "local-old-patch", Duration::from_secs(10))["result"]
+                ["text"],
+            patch
+        );
+        restarted.send(json!({"type":"request","id":"local-stale","method":"local.snapshot.recheck","params":{"snapshot":snapshot,"captureId":"b".repeat(64)}}));
+        assert_eq!(
+            restarted.wait_for(|v| v["id"] == "local-stale", Duration::from_secs(10))["error"]
+                ["code"],
+            "targetStale"
+        );
+        let mut foreign = snapshot;
+        foreign["repository"]["provider"] = json!(if provider == "github" {
+            "bitbucket"
+        } else {
+            "github"
+        });
+        restarted.send(json!({"type":"request","id":"local-foreign","method":"local.snapshot.info","params":{"snapshot":foreign}}));
+        assert_eq!(
+            restarted.wait_for(|v| v["id"] == "local-foreign", Duration::from_secs(10))["ok"],
+            false
+        );
+    }
+}
+
+#[test]
+fn local_capture_immediate_cancel_and_eof_keep_control_and_exit_bounded() {
+    use std::io::Read;
+    let repo = tempfile::tempdir().unwrap();
+    let data = tempfile::tempdir().unwrap();
+    let config = tempfile::tempdir().unwrap();
+    for args in [
+        &["init"][..],
+        &["config", "user.name", "Owned"],
+        &["config", "user.email", "owned@example.invalid"],
+        &[
+            "remote",
+            "add",
+            "origin",
+            "https://github.com/owned/same.git",
+        ],
+    ] {
+        let out = Command::new("git")
+            .arg("-C")
+            .arg(repo.path())
+            .args(args)
+            .env(
+                "GIT_CONFIG_GLOBAL",
+                if cfg!(windows) { "NUL" } else { "/dev/null" },
+            )
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .output()
+            .unwrap();
+        assert!(out.status.success());
+    }
+    std::fs::write(repo.path().join("large.txt"), "owned ".repeat(1_500_000)).unwrap();
+    let out = Command::new("git")
+        .arg("-C")
+        .arg(repo.path())
+        .args(["add", "large.txt"])
+        .env(
+            "GIT_CONFIG_GLOBAL",
+            if cfg!(windows) { "NUL" } else { "/dev/null" },
+        )
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    let env = [
+        ("NORN_CONFIG_DIR", config.path().to_str().unwrap()),
+        ("NORN_REVIEW_DATA_DIR", data.path().to_str().unwrap()),
+        ("NORN_BACKEND_REPO_PATH", repo.path().to_str().unwrap()),
+    ];
+    let params = json!({"captureId":"a".repeat(64),"comparison":{"source":{"kind":"current"},"mode":"workingTree","baseRef":null,"layers":["staged"]}});
+    let mut backend = Backend::spawn_env(repo.path(), &env);
+    backend.handshake();
+    // Both frames arrive together. Registration is synchronous in the read loop,
+    // so cancel cannot miss a not-yet-scheduled capture worker.
+    let frames = format!(
+        "{}\n{}\n",
+        json!({"type":"request","id":"cancel-capture","method":"local.snapshot","params":params}),
+        json!({"type":"request","id":"cancel-now","method":"local.snapshot.cancel","params":{"source":{"kind":"current"},"captureId":"a".repeat(64)}})
+    );
+    backend.stdin.write_all(frames.as_bytes()).unwrap();
+    backend.stdin.flush().unwrap();
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    let mut capture = None;
+    let mut cancel = None;
+    while capture.is_none() || cancel.is_none() {
+        let frame = backend
+            .next(deadline.saturating_duration_since(std::time::Instant::now()))
+            .expect("bounded cancel/capture response");
+        if frame["id"] == "cancel-capture" {
+            capture = Some(frame);
+        } else if frame["id"] == "cancel-now" {
+            cancel = Some(frame);
+        }
+    }
+    assert_eq!(cancel.unwrap()["result"]["canceled"], true);
+    assert_eq!(capture.unwrap()["ok"], false);
+    backend.send(json!({"type":"request","id":"post-cancel-control","method":"repository.status","params":{}}));
+    assert_eq!(
+        backend.wait_for(|v| v["id"] == "post-cancel-control", Duration::from_secs(5))["ok"],
+        true
+    );
+    // Separate process with the same owned fixture: EOF cancels any registered
+    // Git capture and emits no late local response after shutdown begins.
+    let mut command = Command::new(env!("CARGO_BIN_EXE_norn-backend"));
+    command
+        .current_dir(repo.path())
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    for (key, value) in env {
+        command.env(key, value);
+    }
+    let mut child = command.spawn().unwrap();
+    let mut input = child.stdin.take().unwrap();
+    input.write_all(format!("{}\n{}\n",json!({"type":"hello","protocolVersion":1,"client":{"name":"owned","version":"1"}}),json!({"type":"request","id":"eof-capture","method":"local.snapshot","params":params})).as_bytes()).unwrap();
+    drop(input);
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    loop {
+        if let Some(status) = child.try_wait().unwrap() {
+            assert!(status.success());
+            break;
+        }
+        if std::time::Instant::now() >= deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            panic!("owned local EOF process exceeded deadline");
+        }
+        thread::sleep(Duration::from_millis(10));
+    }
+    let mut output = String::new();
+    child
+        .stdout
+        .take()
+        .unwrap()
+        .read_to_string(&mut output)
+        .unwrap();
+    assert!(!output
+        .lines()
+        .any(|line| serde_json::from_str::<Value>(line).unwrap()["id"] == "eof-capture"));
+}

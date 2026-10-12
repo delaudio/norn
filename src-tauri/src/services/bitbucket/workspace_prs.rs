@@ -6,7 +6,7 @@ mod snapshots;
 use super::*;
 use reqwest::{blocking::Client, redirect::Policy, Url};
 use serde_json::Value;
-pub(crate) use snapshots::snapshot_sections;
+pub(crate) use snapshots::{snapshot_sections, snapshot_sections_with_limit};
 use std::{
     collections::HashSet,
     time::{Duration, Instant},

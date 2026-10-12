@@ -188,6 +188,9 @@ pub(crate) struct Section {
     content_sha256: String,
 }
 impl Section {
+    pub(crate) fn parts(&self) -> (&SnapshotFile, std::ops::Range<usize>) {
+        (&self.file, self.start..self.end)
+    }
     pub(crate) fn path(&self) -> &str {
         &self.file.path
     }

@@ -391,6 +391,41 @@ pub enum Request {
     ReviewFiles { id: String, params: TargetParams },
     #[serde(rename = "review.findings")]
     ReviewFindings { id: String, params: TargetParams },
+    #[serde(rename = "local.options")]
+    LocalOptions {
+        id: String,
+        params: crate::services::local_snapshot::OptionsParams,
+    },
+    #[serde(rename = "local.snapshot")]
+    LocalSnapshot {
+        id: String,
+        params: crate::services::local_snapshot::CaptureParams,
+    },
+    #[serde(rename = "local.snapshot.cancel")]
+    LocalSnapshotCancel {
+        id: String,
+        params: crate::services::local_snapshot::CancelParams,
+    },
+    #[serde(rename = "local.snapshot.info")]
+    LocalSnapshotInfo {
+        id: String,
+        params: crate::services::local_snapshot::LookupParams,
+    },
+    #[serde(rename = "local.snapshot.files")]
+    LocalSnapshotFiles {
+        id: String,
+        params: crate::services::local_snapshot::FilesParams,
+    },
+    #[serde(rename = "local.snapshot.diff")]
+    LocalSnapshotDiff {
+        id: String,
+        params: crate::services::local_snapshot::DiffParams,
+    },
+    #[serde(rename = "local.snapshot.recheck")]
+    LocalSnapshotRecheck {
+        id: String,
+        params: crate::services::local_snapshot::RecheckParams,
+    },
     #[serde(rename = "review.profiles")]
     ReviewProfiles {
         id: String,
@@ -512,6 +547,13 @@ impl Request {
             | Self::ProviderPrDetail { id, .. }
             | Self::ProviderUser { id, .. }
             | Self::WorkspaceScopes { id, .. }
+            | Self::LocalOptions { id, .. }
+            | Self::LocalSnapshot { id, .. }
+            | Self::LocalSnapshotCancel { id, .. }
+            | Self::LocalSnapshotInfo { id, .. }
+            | Self::LocalSnapshotFiles { id, .. }
+            | Self::LocalSnapshotDiff { id, .. }
+            | Self::LocalSnapshotRecheck { id, .. }
             | Self::ReviewProfiles { id, .. }
             | Self::ReviewHistory { id, .. }
             | Self::ReviewThreads { id, .. }
@@ -577,6 +619,13 @@ impl Request {
             Self::ProviderPrDetail { .. } => "provider.pr.detail",
             Self::ProviderUser { .. } => "provider.user",
             Self::WorkspaceScopes { .. } => "workspace.scopes",
+            Self::LocalOptions { .. } => "local.options",
+            Self::LocalSnapshot { .. } => "local.snapshot",
+            Self::LocalSnapshotCancel { .. } => "local.snapshot.cancel",
+            Self::LocalSnapshotInfo { .. } => "local.snapshot.info",
+            Self::LocalSnapshotFiles { .. } => "local.snapshot.files",
+            Self::LocalSnapshotDiff { .. } => "local.snapshot.diff",
+            Self::LocalSnapshotRecheck { .. } => "local.snapshot.recheck",
             Self::ReviewProfiles { .. } => "review.profiles",
             Self::ReviewHistory { .. } => "review.history",
             Self::ReviewThreads { .. } => "review.threads",
@@ -836,6 +885,19 @@ impl Request {
                 if params.message.trim().is_empty() {
                     return Err(invalid_request("`review.reply` message must not be empty"));
                 }
+            }
+            Self::LocalOptions { params, .. } => params.validate().map_err(invalid_request)?,
+            Self::LocalSnapshot { params, .. } => params.validate().map_err(invalid_request)?,
+            Self::LocalSnapshotCancel { params, .. } => {
+                params.validate().map_err(invalid_request)?
+            }
+            Self::LocalSnapshotInfo { params, .. } => params.validate().map_err(invalid_request)?,
+            Self::LocalSnapshotFiles { params, .. } => {
+                params.validate().map_err(invalid_request)?
+            }
+            Self::LocalSnapshotDiff { params, .. } => params.validate().map_err(invalid_request)?,
+            Self::LocalSnapshotRecheck { params, .. } => {
+                params.validate().map_err(invalid_request)?
             }
             Self::ReviewProfiles { params, .. } => params.validate()?,
             Self::ReviewSyncPreview { params, .. }
@@ -1203,6 +1265,20 @@ mod tests {
             "valid/response-provider-snapshot-files.json",
             "valid/response-provider-snapshot-diff.json",
             "valid/request-provider-prs.json",
+            "valid/request-local-options.json",
+            "valid/response-local-options.json",
+            "valid/request-local-snapshot.json",
+            "valid/response-local-snapshot.json",
+            "valid/request-local-cancel.json",
+            "valid/response-local-cancel.json",
+            "valid/request-local-info.json",
+            "valid/response-local-info.json",
+            "valid/request-local-files.json",
+            "valid/response-local-files.json",
+            "valid/request-local-diff.json",
+            "valid/response-local-diff.json",
+            "valid/request-local-recheck.json",
+            "valid/response-local-recheck.json",
             "valid/request-review-profiles.json",
             "valid/response-review-profiles.json",
             "valid/request-provider-browser.json",
@@ -1256,6 +1332,11 @@ mod tests {
             "invalid/request-provider-snapshot-image-missing-hash.json",
             "invalid/request-provider-pr-unsafe-owner.json",
             "invalid/request-provider-pr-local-id.json",
+            "invalid/request-local-path.json",
+            "invalid/request-local-layers.json",
+            "invalid/request-local-nonce.json",
+            "invalid/request-local-branch-layers.json",
+            "invalid/request-local-diff-path.json",
             "invalid/request-review-profiles-path.json",
             "invalid/request-review-profiles-owner.json",
             "invalid/request-review-profiles-local.json",

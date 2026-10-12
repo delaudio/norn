@@ -1,0 +1,27 @@
+{
+  "type": "response",
+  "id": "owned",
+  "ok": true,
+  "result": {
+    "request": {
+      "source": {
+        "kind": "current"
+      },
+      "offset": 0,
+      "limit": 32
+    },
+    "repository": {
+      "provider": "github",
+      "workspace": "owned",
+      "repo": "same"
+    },
+    "rootId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "branch": "main",
+    "headSha": "dddddddddddddddddddddddddddddddddddddddd",
+    "baseRefs": [
+      "comparison"
+    ],
+    "total": 1,
+    "nextOffset": null
+  }
+}

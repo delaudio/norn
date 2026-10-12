@@ -436,7 +436,13 @@ impl FileState {
     }
 }
 pub(crate) fn snapshot_sections(patch: &str) -> Result<Vec<Section>, String> {
-    if patch.len() > snapshot::PATCH_BYTES {
+    snapshot_sections_with_limit(patch, snapshot::PATCH_BYTES)
+}
+pub(crate) fn snapshot_sections_with_limit(
+    patch: &str,
+    limit: usize,
+) -> Result<Vec<Section>, String> {
+    if limit > 16 * 1024 * 1024 || patch.len() > limit {
         return Err(snapshot::invalid());
     }
     let mut sections = Vec::new();

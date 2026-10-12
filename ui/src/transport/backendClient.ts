@@ -6,6 +6,23 @@ import type {
   DraftStageParams,
   DraftStageResult,
   DraftTarget,
+  LocalCancelParams,
+  LocalCancelResult,
+  LocalCaptureParams,
+  LocalCaptureResult,
+  LocalComparison,
+  LocalDiffPage,
+  LocalDiffParams,
+  LocalFilesPage,
+  LocalFilesParams,
+  LocalInfoResult,
+  LocalLookupParams,
+  LocalOptionsParams,
+  LocalOptionsResult,
+  LocalRecheckParams,
+  LocalRecheckResult,
+  LocalSnapshotInfo,
+  LocalSnapshotRef,
   ProviderApprovalConfirmParams,
   ProviderApprovalPreview,
   ProviderApprovalProof,
@@ -40,6 +57,13 @@ import type {
   WorkspaceScope,
   WorkspaceSettings,
 } from "../../../src/protocol/generated/protocol";
+import {
+  localPath,
+  sameLocalValue,
+  validLocalComparison,
+  validLocalInfo,
+  validLocalRef,
+} from "./localValidation";
 import { samePublicationScope, validPublicationDTO } from "./publicationValidation";
 
 // Typed facade over a BackendTransport. Domain methods are added as later
@@ -1125,6 +1149,136 @@ export class BackendClient {
   async reviewTargets(): Promise<ReviewTarget[]> {
     const result = await this.transport.request("review.targets", {});
     return (result.targets as ReviewTarget[]) ?? [];
+  }
+
+  private async localRequest<T>(
+    method: string,
+    input: object,
+    requestType: string,
+    resultType: string,
+  ): Promise<T> {
+    const params: Record<string, unknown> = { ...input };
+    if (
+      !validPublicationDTO(requestType, params) ||
+      (params.comparison !== undefined &&
+        !validLocalComparison(params.comparison as LocalComparison)) ||
+      (params.snapshot !== undefined && !validLocalRef(params.snapshot as LocalSnapshotRef)) ||
+      (params.path !== undefined && !localPath(params.path as string))
+    )
+      throw new Error("Invalid local evidence request.");
+    const result = await this.transport.request(method, params);
+    if (
+      Buffer.byteLength(JSON.stringify(result)) > 1024 * 1024 ||
+      !validPublicationDTO(resultType, result) ||
+      !sameLocalValue(result.request, params)
+    )
+      throw new Error("Invalid or mismatched local evidence response.");
+    if (result.info !== undefined) {
+      const info = result.info as LocalSnapshotInfo;
+      if (
+        !validLocalInfo(info) ||
+        (params.snapshot !== undefined && !sameLocalValue(info.snapshot, params.snapshot)) ||
+        (params.comparison !== undefined && !sameLocalValue(info.comparison, params.comparison))
+      )
+        throw new Error("Local evidence does not match the selected comparison.");
+    }
+    return result as T;
+  }
+  async localOptions(params: LocalOptionsParams): Promise<LocalOptionsResult> {
+    const result = await this.localRequest<LocalOptionsResult>(
+      "local.options",
+      params,
+      "LocalOptionsParams",
+      "LocalOptionsResult",
+    );
+    const end = params.offset + result.baseRefs.length;
+    if (
+      end > result.total ||
+      result.baseRefs.length > params.limit ||
+      (result.nextOffset !== null
+        ? result.nextOffset !== end || end >= result.total
+        : end !== result.total) ||
+      (params.source.kind === "configured" &&
+        !sameLocalValue(params.source.repository, result.repository)) ||
+      result.baseRefs.some(
+        (ref, index) =>
+          Buffer.byteLength(ref) > 256 ||
+          /\p{Cc}/u.test(ref) ||
+          (index > 0 &&
+            Buffer.compare(Buffer.from(ref), Buffer.from(result.baseRefs[index - 1]!)) <= 0),
+      ) ||
+      (result.branch !== null &&
+        (Buffer.byteLength(result.branch) > 256 || /\p{Cc}/u.test(result.branch)))
+    )
+      throw new Error("Invalid local source options page.");
+    return result;
+  }
+  localCapture(params: LocalCaptureParams): Promise<LocalCaptureResult> {
+    return this.localRequest("local.snapshot", params, "LocalCaptureParams", "LocalCaptureResult");
+  }
+  localCancel(params: LocalCancelParams): Promise<LocalCancelResult> {
+    return this.localRequest(
+      "local.snapshot.cancel",
+      params,
+      "LocalCancelParams",
+      "LocalCancelResult",
+    );
+  }
+  localInfo(params: LocalLookupParams): Promise<LocalInfoResult> {
+    return this.localRequest("local.snapshot.info", params, "LocalLookupParams", "LocalInfoResult");
+  }
+  localRecheck(params: LocalRecheckParams): Promise<LocalRecheckResult> {
+    return this.localRequest(
+      "local.snapshot.recheck",
+      params,
+      "LocalRecheckParams",
+      "LocalRecheckResult",
+    );
+  }
+  async localFiles(params: LocalFilesParams): Promise<LocalFilesPage> {
+    const result = await this.localRequest<LocalFilesPage>(
+      "local.snapshot.files",
+      params,
+      "LocalFilesParams",
+      "LocalFilesPage",
+    );
+    const end = params.offset + result.files.length;
+    if (
+      end > result.total ||
+      result.files.length > params.limit ||
+      (result.nextOffset !== null
+        ? result.nextOffset !== end || end >= result.total
+        : end !== result.total) ||
+      new Set(result.files.map((file) => JSON.stringify([file.layer, file.path]))).size !==
+        result.files.length ||
+      result.files.some(
+        (file) => !localPath(file.path) || (file.oldPath !== null && !localPath(file.oldPath)),
+      )
+    )
+      throw new Error("Invalid local evidence file page.");
+    return result;
+  }
+  async localDiff(params: LocalDiffParams): Promise<LocalDiffPage> {
+    const result = await this.localRequest<LocalDiffPage>(
+      "local.snapshot.diff",
+      params,
+      "LocalDiffParams",
+      "LocalDiffPage",
+    );
+    const bytes = Buffer.byteLength(result.text),
+      end = params.offset + bytes;
+    if (
+      bytes > 64 * 1024 ||
+      end > result.totalBytes ||
+      (result.nextOffset !== null
+        ? result.nextOffset !== end || end >= result.totalBytes || bytes === 0
+        : end !== result.totalBytes) ||
+      (params.offset === 0 &&
+        result.nextOffset === null &&
+        new Bun.CryptoHasher("sha256").update(result.text).digest("hex") !== result.contentSha256)
+    )
+      throw new Error("Invalid local evidence diff page.");
+    return result;
   }
 
   async reviewProfiles(target: TargetIdentity): Promise<ReviewProfileCatalog> {

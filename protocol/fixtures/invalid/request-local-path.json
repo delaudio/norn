@@ -1,0 +1,21 @@
+{
+  "type": "request",
+  "id": "owned",
+  "method": "local.snapshot",
+  "params": {
+    "captureId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "comparison": {
+      "source": {
+        "kind": "current",
+        "path": "/forbidden"
+      },
+      "mode": "workingTree",
+      "baseRef": null,
+      "layers": [
+        "committed",
+        "staged",
+        "unstaged"
+      ]
+    }
+  }
+}

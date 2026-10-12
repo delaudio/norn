@@ -1,0 +1,18 @@
+{
+  "type": "request",
+  "id": "owned",
+  "method": "local.snapshot",
+  "params": {
+    "captureId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "comparison": {
+      "source": {
+        "kind": "current"
+      },
+      "mode": "branch",
+      "baseRef": "main",
+      "layers": [
+        "staged"
+      ]
+    }
+  }
+}
