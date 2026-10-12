@@ -607,3 +607,23 @@ Plan 0053 completion prepared after implementation `e4264db`, effective only on 
 - Prepared plan/done receipt namesd503f9b; effective only after exact-head CI and
   verified merge. #306/epic remain open, ADR0020 Accepted; preserve maintainer
   closures. No Norn review/live provider writes/private profiles/public releases.
+
+
+## 2026-10-12 — Claim native review profile catalog (plan0063)
+
+- #373 is open at fixed2db1dcb; CI38202396806 UI passed, verify in progress.
+  No shipped claim until actual merge. New isolated branch starts at that fixed
+  predecessor and must rebase on the verified squash before its own PR.
+- Port the desktop's actual read-only catalog/default selection, using exact
+  native policy/target/path ownership. Do not invent a profile rewrite API:
+  retained policy-file editing belongs to #359; canonical prompt editing exists.
+- Claim written before code; owned fixtures only, no unrelated root .norn.yaml,
+  private credentials/profiles, live provider writes, Norn reviews or releases.
+
+- 2026-10-12: PR #373 fixed2db1dcb passed exact-head CI38202396806 and was verified squash-merged at 04:23:57 UTC as ac077cd48ff96d6a6248f1ee941dd7904e2d9ce5. Plan0062 completion is effective. Rebased the claimed plan0063 onto the actual squash. Implemented strict bounded native profile catalog, exact provider/local ownership, shared actual Rust policy validation/default and F6 selection with full-target/generation fencing, no raw config/commands/credentials. Native local override semantics and existing organization verified-cache maintenance are explicitly retained rather than redefined. Owned policy, signed-layer, real Git, stdio/fake-agent and native input/frame proofs; full gates pending final receipt. No Norn review, private profiles, live provider writes or releases.
+
+- 2026-10-12: Plan0063 implementation8e57d2a local gates passed: root123+tooling/Archgate17, UI197/1225/nativeframes135, Rust731core+2existingignored/62stdio/6CLI/5onboarding/3binary, strict Clippy/fmt/noGUI/protocol/docflow audit. ReactDoctor64 with3 valid native OpenTUI text-property warnings; no suppression. Prepared done receipt remains contingent on exact-head required CI and verified PR squash merge. #306/epic/ADR0020 remain open/Accepted; explicit policy editor is #359 and actual local branch/base/layers are #358.
+
+- 2026-10-12: While inventorying #358's exact local source proof, found that the reused legacy matches_remote helper compared a substring. Tightened plan0063 catalog ownership to native parsed provider/owner/repository equality, including local requests, and added owned suffix/foreign-host/nested-path negative proofs for both providers. PR#374 prior fixedbd9a511 checks are superseded; a new exact-head CI run is required before merge. No other behavior or legacy helper consumers changed.
+
+- 2026-10-12: Final374 e0a1cce UI job114667814181 failed one existing F2 test: it asserted a diff after eight zero-duration render turns, before the asynchronous native snapshot patch/hash completed. All catalog/new Unicode tests passed. Added an owned20ms patch delay and bounded wait on actual diff-loading completion, preserving error/exact-content/ownership/no-write assertions rather than increasing arbitrary sleeps or rerunning away the failure. Required UI/full integration gates and a new final-head CI remain pending.

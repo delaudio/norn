@@ -1,0 +1,16 @@
+{
+  "type": "request",
+  "id": "profiles",
+  "method": "review.profiles",
+  "params": {
+    "target": {
+      "kind": "provider",
+      "provider": "github",
+      "workspace": "owned",
+      "repo": "same",
+      "prId": 7,
+      "runId": "saved",
+      "path": "/private/forbidden"
+    }
+  }
+}

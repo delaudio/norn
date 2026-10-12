@@ -11,6 +11,90 @@ use serde_json::{json, Value};
 
 const LOCAL_SHA: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 
+#[cfg(unix)]
+#[test]
+fn native_profile_catalog_is_read_only_scoped_and_keeps_stdio_control() {
+    for provider in ["github", "bitbucket"] {
+        let fixture = FixFixture::new("#!/bin/sh\nexit 99\n");
+        let url = format!(
+            "https://{}.org/fixture/demo.git",
+            if provider == "bitbucket" {
+                "bitbucket"
+            } else {
+                "github"
+            }
+        );
+        let url = if provider == "github" {
+            "https://github.com/fixture/demo.git".to_string()
+        } else {
+            url
+        };
+        git(fixture.repo.path(), &["remote", "set-url", "origin", &url]);
+        let settings_path = fixture._config.path().join("settings.json");
+        let mut settings: Value =
+            serde_json::from_str(&std::fs::read_to_string(&settings_path).unwrap()).unwrap();
+        settings["repos"][0]["provider"] = json!(provider);
+        std::fs::write(settings_path, settings.to_string()).unwrap();
+        let policy = "version: 0.1\nreview:\n  profile: security\nprofiles:\n  default: {}\n  security: {}\n";
+        std::fs::write(fixture.repo.path().join(".norn.yaml"), policy).unwrap();
+        let mut backend = Backend::spawn_env(
+            fixture.repo.path(),
+            &[
+                ("NORN_CONFIG_DIR", fixture._config.path().to_str().unwrap()),
+                (
+                    "NORN_REVIEW_DATA_DIR",
+                    fixture._data.path().to_str().unwrap(),
+                ),
+            ],
+        );
+        backend.handshake();
+        let target = json!({"kind":"provider","provider":provider,"workspace":"fixture","repo":"demo","prId":9});
+        backend.send(json!({"type":"request","id":"catalog","method":"review.profiles","params":{"target":target}}));
+        let response = backend.wait_for(|v| v["id"] == "catalog", Duration::from_secs(5));
+        assert_eq!(response["ok"], true, "{response}");
+        assert_eq!(response["result"]["target"], target);
+        assert_eq!(
+            response["result"]["profiles"],
+            json!(["default", "security"])
+        );
+        assert_eq!(response["result"]["defaultProfile"], "security");
+        assert_eq!(response["result"].as_object().unwrap().len(), 5);
+        assert_eq!(
+            std::fs::read_to_string(fixture.repo.path().join(".norn.yaml")).unwrap(),
+            policy
+        );
+        let mut stale = target.clone();
+        stale["runId"] = json!("not-owned");
+        backend.send(json!({"type":"request","id":"stale-catalog","method":"review.profiles","params":{"target":stale}}));
+        assert_eq!(
+            backend.wait_for(|v| v["id"] == "stale-catalog", Duration::from_secs(5))["error"]
+                ["code"],
+            "targetStale"
+        );
+        let mut other = target.clone();
+        other["provider"] = json!(if provider == "github" {
+            "bitbucket"
+        } else {
+            "github"
+        });
+        backend.send(json!({"type":"request","id":"other-catalog","method":"review.profiles","params":{"target":other}}));
+        let base = backend.wait_for(|v| v["id"] == "other-catalog", Duration::from_secs(5));
+        assert_eq!(base["result"]["source"], "base");
+        assert_eq!(base["result"]["profiles"], json!([]));
+        std::fs::write(fixture.repo.path().join(".norn.yaml"), "version: 9.0\n").unwrap();
+        backend.send(json!({"type":"request","id":"invalid-policy","method":"review.profiles","params":{"target":target}}));
+        assert_eq!(
+            backend.wait_for(|v| v["id"] == "invalid-policy", Duration::from_secs(5))["ok"],
+            false
+        );
+        backend.send(json!({"type":"request","id":"catalog-control","method":"repository.status","params":{}}));
+        assert_eq!(
+            backend.wait_for(|v| v["id"] == "catalog-control", Duration::from_secs(5))["ok"],
+            true
+        );
+    }
+}
+
 #[test]
 fn native_provider_approval_invalid_tokens_are_offline_and_restart_keeps_control() {
     fn request(backend: &mut Backend, id: &str, method: &str, params: Value) -> Value {
@@ -1632,6 +1716,34 @@ fn native_review_applies_explicit_default_profiles_and_preserves_pins_and_legacy
             );
             backend.handshake();
             let target = json!({"kind":"provider","provider":provider,"workspace":"fixture","repo":"demo","prId":9,"runId":"native-source"});
+            // Catalog is read-only; point the owned checkout at its native identity,
+            // then restore the owned bare source used by the fake-agent pipeline.
+            let catalog_origin = if provider == "github" {
+                "https://github.com/fixture/demo.git"
+            } else {
+                "https://bitbucket.org/fixture/demo.git"
+            };
+            git(
+                fixture.repo.path(),
+                &["remote", "set-url", "origin", catalog_origin],
+            );
+            backend.send(json!({"type":"request","id":"native-catalog","method":"review.profiles","params":{"target":target}}));
+            let catalog = backend.wait_for(|v| v["id"] == "native-catalog", Duration::from_secs(5));
+            assert_eq!(catalog["ok"], true, "{catalog}");
+            assert_eq!(
+                catalog["result"]["profiles"],
+                json!(["default", "security"])
+            );
+            assert_eq!(catalog["result"]["defaultProfile"], "default");
+            git(
+                fixture.repo.path(),
+                &[
+                    "remote",
+                    "set-url",
+                    "origin",
+                    fixture._origin.path().to_str().unwrap(),
+                ],
+            );
             backend.send(json!({"type":"request","id":"native-profile","method":"review.start","params":{"target":target,"profile":requested}}));
             let response =
                 backend.wait_for(|v| v["id"] == "native-profile", Duration::from_secs(5));

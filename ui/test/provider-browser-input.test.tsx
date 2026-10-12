@@ -7,6 +7,12 @@ import { FakeProviderTransport } from "../src/transport/fakeProviderTransport";
 
 test("native F2 opens grouped PRs, filters, pages, detail and full-scope saved workspace", async () => {
   const transport = new FakeProviderTransport();
+  const request = transport.request.bind(transport);
+  transport.request = async (method, params) => {
+    // Prove the real async patch/hash completion boundary, including a slow read.
+    if (method === "provider.snapshot.diff") await Bun.sleep(20);
+    return request(method, params);
+  };
   const client = new BackendClient(transport);
   const store = new ShellStore();
   await store.connect(client);
@@ -69,6 +75,15 @@ test("native F2 opens grouped PRs, filters, pages, detail and full-scope saved w
     expect(store.getSnapshot().error).toBeNull();
     expect(store.getSnapshot().files.map((file) => file.path)).toEqual(["readme.ts"]);
     expect(store.getSnapshot().providerPreview).toBe(true);
+    const deadline = performance.now() + 2000;
+    while (
+      !store.getSnapshot().diff?.text.includes("github PR 8 世界") &&
+      store.getSnapshot().diffError === null &&
+      performance.now() < deadline
+    ) {
+      await Bun.sleep(1);
+    }
+    expect(store.getSnapshot().diffError).toBeNull();
     expect(store.getSnapshot().diff?.text).toContain("github PR 8 世界");
     expect(transport.calls.filter((call) => call.method === "diff.file")).toHaveLength(0);
     expect(store.getSnapshot().picker[store.getSnapshot().selectedPicker]).toMatchObject({

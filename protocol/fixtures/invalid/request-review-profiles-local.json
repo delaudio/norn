@@ -1,0 +1,11 @@
+{
+  "type": "request",
+  "id": "profiles",
+  "method": "review.profiles",
+  "params": {
+    "target": {
+      "kind": "local",
+      "localSnapshotSha256": "ZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ"
+    }
+  }
+}

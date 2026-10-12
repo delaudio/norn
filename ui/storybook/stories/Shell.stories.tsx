@@ -237,3 +237,11 @@ export const UncertainBitbucketApproval: Story = {
 export const CompactUncertainBitbucketApproval: Story = {
   args: { frameId: "shell-provider-approval-bitbucket-uncertain-50x22" },
 };
+
+export const ReviewProfiles: Story = { args: { frameId: "shell-profiles-catalog-120x30" } };
+export const CompactReviewProfiles: Story = { args: { frameId: "shell-profiles-catalog-50x18" } };
+export const BaseReviewProfile: Story = { args: { frameId: "shell-profiles-base-50x18" } };
+export const InvalidReviewProfilePolicy: Story = {
+  args: { frameId: "shell-profiles-error-50x18" },
+};
+export const LoadingReviewProfiles: Story = { args: { frameId: "shell-profiles-loading-50x18" } };

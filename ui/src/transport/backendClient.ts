@@ -34,6 +34,7 @@ import type {
   RecordMutation,
   RecordMutationResult,
   RecordPage,
+  ReviewProfileCatalog,
   ScopePage,
   WorkspaceReadiness,
   WorkspaceScope,
@@ -1124,6 +1125,36 @@ export class BackendClient {
   async reviewTargets(): Promise<ReviewTarget[]> {
     const result = await this.transport.request("review.targets", {});
     return (result.targets as ReviewTarget[]) ?? [];
+  }
+
+  async reviewProfiles(target: TargetIdentity): Promise<ReviewProfileCatalog> {
+    if (
+      !validPublicationDTO("ReviewProfilesParams", { target }) ||
+      (target.kind === "provider" && target.runId !== undefined && target.prId === undefined)
+    )
+      throw new Error("Invalid review profile target.");
+    const result = await this.transport.request("review.profiles", { target });
+    if (
+      JSON.stringify(result).length > 64 * 1024 ||
+      !validPublicationDTO("ReviewProfileCatalog", result)
+    )
+      throw new Error("Invalid or oversized review profile catalog.");
+    const catalog = result as unknown as ReviewProfileCatalog;
+    if (
+      this.reviewSourceKey(catalog.target) !== this.reviewSourceKey(target) ||
+      catalog.profiles.some(
+        (name) =>
+          name.trim() !== name ||
+          /\p{Cc}/u.test(name) ||
+          new TextEncoder().encode(name).length > 512,
+      ) ||
+      (catalog.defaultProfile !== null && !catalog.profiles.includes(catalog.defaultProfile)) ||
+      (catalog.source === "base" &&
+        (catalog.profiles.length !== 0 || catalog.defaultProfile !== null)) ||
+      (catalog.notice !== null && /\p{Cc}/u.test(catalog.notice))
+    )
+      throw new Error("Review profile catalog does not match the selected target or policy.");
+    return catalog;
   }
 
   async reviewHistory(target: TargetIdentity): Promise<ReviewRunSummary[]> {

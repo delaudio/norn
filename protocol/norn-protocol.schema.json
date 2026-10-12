@@ -4461,6 +4461,148 @@
           "type": "boolean"
         }
       }
+    },
+    "ReviewProfilesParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "target"
+      ],
+      "properties": {
+        "target": {
+          "$ref": "#/definitions/ReviewProfileTarget"
+        }
+      }
+    },
+    "ReviewProfileCatalog": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "target",
+        "profiles",
+        "defaultProfile",
+        "source",
+        "notice"
+      ],
+      "properties": {
+        "target": {
+          "$ref": "#/definitions/ReviewProfileTarget"
+        },
+        "profiles": {
+          "type": "array",
+          "maxItems": 100,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          }
+        },
+        "defaultProfile": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "source": {
+          "enum": [
+            "policy",
+            "base"
+          ]
+        },
+        "notice": {
+          "anyOf": [
+            {
+              "type": "string",
+              "maxLength": 256
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "ReviewProfileTarget": {
+      "description": "Strict target for the read-only native profile catalog.",
+      "oneOf": [
+        {
+          "type": "object",
+          "title": "ReviewProfileProviderTarget",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "provider",
+            "workspace",
+            "repo"
+          ],
+          "properties": {
+            "kind": {
+              "const": "provider"
+            },
+            "provider": {
+              "enum": [
+                "github",
+                "bitbucket"
+              ]
+            },
+            "workspace": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "pattern": "^(?!\\.{1,2}$)(?:[A-Za-z0-9_.-]+|\\{[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12}\\})$"
+            },
+            "repo": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "pattern": "^(?!\\.{1,2}$)(?:[A-Za-z0-9_.-]+|\\{[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12}\\})$"
+            },
+            "prId": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647
+            },
+            "runId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "pattern": "^[^\\s\\u0000-\\u001f\\u007f-\\u009f](?:[^\\u0000-\\u001f\\u007f-\\u009f]*[^\\s\\u0000-\\u001f\\u007f-\\u009f])?$"
+            }
+          },
+          "dependencies": {
+            "runId": [
+              "prId"
+            ]
+          }
+        },
+        {
+          "type": "object",
+          "title": "ReviewProfileLocalTarget",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "localSnapshotSha256"
+          ],
+          "properties": {
+            "kind": {
+              "const": "local"
+            },
+            "localSnapshotSha256": {
+              "type": "string",
+              "minLength": 64,
+              "maxLength": 64,
+              "pattern": "^[a-f0-9]{64}$"
+            }
+          }
+        }
+      ]
     }
   },
   "oneOf": [
@@ -5963,6 +6105,30 @@
               "$ref": "#/definitions/ProviderPrDetailParams"
             }
           }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "type": {
+              "const": "request"
+            },
+            "id": {
+              "$ref": "#/definitions/RequestId"
+            },
+            "method": {
+              "const": "review.profiles"
+            },
+            "params": {
+              "$ref": "#/definitions/ReviewProfilesParams"
+            }
+          }
         }
       ]
     },
@@ -6089,6 +6255,9 @@
             },
             {
               "$ref": "#/definitions/ProviderApprovalResult"
+            },
+            {
+              "$ref": "#/definitions/ReviewProfileCatalog"
             }
           ]
         }

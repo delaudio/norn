@@ -1727,6 +1727,54 @@ mod tests {
     }
 
     #[test]
+    fn signed_layers_supply_the_same_native_catalog_and_effective_profile() {
+        let owned = tempfile::tempdir().unwrap();
+        let source = StaticSource(Ok(signed_bundle(
+            3,
+            json!({"profiles":{"organization":{}},"review":{"profile":"organization"}}),
+            json!({"profiles":{"enforced":{}},"review":{"profile":"enforced"}}),
+        )));
+        let mut layers = input();
+        layers.repository =
+            Some(json!({"profiles":{"repository":{}},"review":{"profile":"repository"}}));
+        layers.local_overrides =
+            Some(json!({"profiles":{"local":{}},"review":{"profile":"local"}}));
+        let mut resolved = resolve_organization_policy(
+            &config(
+                OrganizationPolicyRequirement::Mandatory,
+                OrganizationPolicyUnavailableBehavior::FailClosed,
+            ),
+            &source,
+            &MemoryCache::default(),
+            None,
+            layers,
+        )
+        .unwrap();
+        finalize_resolved_organization_policy(owned.path(), &mut resolved, None).unwrap();
+        let mut loaded = crate::repo_config::finalize_resolved_config(
+            owned.path(),
+            &resolved.config,
+            resolved.selected_profile.as_deref(),
+        )
+        .unwrap();
+        loaded.selected_profile = resolved.selected_profile;
+        let target = crate::protocol::TargetIdentity::Provider {
+            provider: crate::protocol::ProviderKind::Github,
+            workspace: "owned".into(),
+            repo: "same".into(),
+            pr_id: Some(7),
+            run_id: None,
+        };
+        let catalog =
+            crate::services::review_profiles::Catalog::from_policy(target, loaded).unwrap();
+        assert_eq!(catalog.default_profile.as_deref(), Some("enforced"));
+        assert_eq!(
+            catalog.profiles,
+            ["enforced", "local", "organization", "repository"]
+        );
+    }
+
+    #[test]
     fn precedence_is_defaults_then_repo_then_local_then_enforced() {
         let source = StaticSource(Ok(signed_bundle(
             3,

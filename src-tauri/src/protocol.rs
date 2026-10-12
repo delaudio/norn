@@ -391,6 +391,11 @@ pub enum Request {
     ReviewFiles { id: String, params: TargetParams },
     #[serde(rename = "review.findings")]
     ReviewFindings { id: String, params: TargetParams },
+    #[serde(rename = "review.profiles")]
+    ReviewProfiles {
+        id: String,
+        params: crate::services::review_profiles::Params,
+    },
     #[serde(rename = "review.history")]
     ReviewHistory { id: String, params: TargetParams },
     #[serde(rename = "review.threads")]
@@ -507,6 +512,7 @@ impl Request {
             | Self::ProviderPrDetail { id, .. }
             | Self::ProviderUser { id, .. }
             | Self::WorkspaceScopes { id, .. }
+            | Self::ReviewProfiles { id, .. }
             | Self::ReviewHistory { id, .. }
             | Self::ReviewThreads { id, .. }
             | Self::ReviewOutput { id, .. }
@@ -571,6 +577,7 @@ impl Request {
             Self::ProviderPrDetail { .. } => "provider.pr.detail",
             Self::ProviderUser { .. } => "provider.user",
             Self::WorkspaceScopes { .. } => "workspace.scopes",
+            Self::ReviewProfiles { .. } => "review.profiles",
             Self::ReviewHistory { .. } => "review.history",
             Self::ReviewThreads { .. } => "review.threads",
             Self::ReviewOutput { .. } => "review.output",
@@ -830,6 +837,7 @@ impl Request {
                     return Err(invalid_request("`review.reply` message must not be empty"));
                 }
             }
+            Self::ReviewProfiles { params, .. } => params.validate()?,
             Self::ReviewSyncPreview { params, .. }
             | Self::ReviewConflictsPreview { params, .. }
             | Self::ReviewPushPreview { params, .. }
@@ -1195,6 +1203,8 @@ mod tests {
             "valid/response-provider-snapshot-files.json",
             "valid/response-provider-snapshot-diff.json",
             "valid/request-provider-prs.json",
+            "valid/request-review-profiles.json",
+            "valid/response-review-profiles.json",
             "valid/request-provider-browser.json",
             "valid/request-provider-approval-preview.json",
             "valid/request-provider-approval-confirm.json",
@@ -1246,6 +1256,9 @@ mod tests {
             "invalid/request-provider-snapshot-image-missing-hash.json",
             "invalid/request-provider-pr-unsafe-owner.json",
             "invalid/request-provider-pr-local-id.json",
+            "invalid/request-review-profiles-path.json",
+            "invalid/request-review-profiles-owner.json",
+            "invalid/request-review-profiles-local.json",
             "invalid/request-provider-browser-local-id.json",
             "invalid/request-provider-browser-url.json",
             "invalid/request-provider-approval-token.json",
