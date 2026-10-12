@@ -29,6 +29,17 @@ assert(gitBinary, "Git is required");
 const rustc = Bun.which("rustc");
 assert(rustc, "Rust compiler is required for the owned fake agent");
 const root = await mkdtemp(join(tmpdir(), "norn-owned-native-workflow-"));
+const removeOwnedRoot = async () => {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      await rm(root, { recursive: true, force: true });
+      break;
+    } catch (error) {
+      if (attempt >= 20) throw error;
+      await Bun.sleep(100);
+    }
+  }
+};
 const repo = join(root, "checkout with spaces");
 const config = join(root, "config");
 const agent = join(root, "agent");
@@ -102,6 +113,7 @@ await writeFile(
 const clients = new Set<BackendClient>();
 const open = async () => {
   const transport = new ProcessBackendTransport(binary, env);
+  const exited = new Promise<void>((resolveExit) => transport.onExit(() => resolveExit()));
   const methods: string[] = [];
   const request = transport.request.bind(transport);
   transport.request = (method, params) => {
@@ -144,9 +156,23 @@ const open = async () => {
     try {
       await transport.request("shutdown", {});
     } finally {
-      client.close();
-      clients.delete(client);
-      renderer.renderer.destroy();
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        await Promise.race([
+          exited,
+          new Promise<never>((_, reject) => {
+            timer = setTimeout(
+              () => reject(new Error("Owned backend did not exit after shutdown.")),
+              5000,
+            );
+          }),
+        ]);
+      } finally {
+        if (timer) clearTimeout(timer);
+        client.close();
+        clients.delete(client);
+        renderer.renderer.destroy();
+      }
     }
   };
   return { store, renderer, tick, until, stop };
@@ -224,7 +250,10 @@ try {
     await first.until(
       () =>
         first.store.getSnapshot().operation?.state === "succeeded" &&
-        first.store.getSnapshot().history.length === 1,
+        first.store.getSnapshot().history.length === 1 &&
+        first.store.getSnapshot().localRunId !== null &&
+        first.store.getSnapshot().findings.length === 1 &&
+        first.store.getSnapshot().threads.length === 1,
       "Native review and saved run",
     );
     const run = first.store.getSnapshot().localRunId;
@@ -311,8 +340,12 @@ try {
   console.log(
     "Owned OpenTUI/Rust workflow passed: source/layers, diff/finding, fake native review, cancel, restart and missing checkout.",
   );
+} catch (error) {
+  // Preserve the scenario failure even if Windows cleanup also reports a lock.
+  console.error(error);
+  throw error;
 } finally {
   process.chdir(original);
   for (const client of clients) client.close();
-  await rm(root, { recursive: true, force: true });
+  await removeOwnedRoot();
 }

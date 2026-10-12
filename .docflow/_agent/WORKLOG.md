@@ -783,3 +783,11 @@ Plan 0053 completion prepared after implementation `e4264db`, effective only on 
   local gates. origin/main remains actual37763970f4; audit no0067collision.
   Prepared0067receipt is conditional on final-head CI/all3native lanes and actual
   squash. No completion/closure is inferred before that event.
+
+- PR378 opened on receipt8479693672104cf6fcc3d2481e60d0e48a7a24ac.
+  CI38232903789 UI passed; native Linux/macOS exposed harness readiness race:
+  operation succeeded/history remained visible before run/finding/thread refresh.
+  Now waits for all actual saved state, rather than skipping the assertion.
+  Windows cleanup EACCES masked the scenario error: preserve original diagnostic,
+  wait for actual backend exit after shutdown and bounded owned-root cleanup.
+  Corrected native gate and UI typecheck pass locally; own new-head CI pending.
