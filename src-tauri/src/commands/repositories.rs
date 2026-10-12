@@ -1,4 +1,3 @@
-use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 use std::process::Command;
@@ -49,58 +48,16 @@ pub struct RepositoryWorktreeState {
     pub error: Option<String>,
 }
 
-#[derive(Serialize, Debug, Clone, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct RepositoryFileEntry {
-    pub path: String,
-    pub status: RepositoryFileStatus,
-}
-
-#[derive(Serialize, Debug, Clone, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub enum RepositoryFileStatus {
-    Unchanged,
-    Modified,
-    Added,
-    Deleted,
-    Renamed,
-    Untracked,
-    Conflicted,
-}
-
-#[derive(Serialize, Debug, Clone, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct RepositoryFileContent {
-    pub path: String,
-    pub content: String,
-    pub size: u64,
-    pub truncated: bool,
-}
-
-#[derive(Serialize, Debug, Clone, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct RepositoryFileDiff {
-    pub path: String,
-    pub raw_diff: String,
-}
-
-#[derive(Serialize, Debug, Clone, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct RepositoryBlameLine {
-    pub line: u32,
-    pub sha: String,
-    pub short_sha: String,
-    pub author: Option<String>,
-    pub author_email: Option<String>,
-    pub author_time: Option<i64>,
-    pub summary: Option<String>,
-    pub message: Option<String>,
-}
-
-const MAX_REPOSITORY_FILE_BYTES: u64 = 512 * 1024;
-const GIT_BLAME_NO_COMMIT_ERROR: &str = "fatal: no such ref: HEAD";
-const GIT_BLAME_NO_PATH: &str = "fatal: no such path";
-const GIT_SHOW_MESSAGE_MARKER: &str = "\u{1f}NORN_COMMIT_MESSAGE_END\u{1f}";
+#[cfg(test)]
+use crate::services::repository_reader::legacy::{
+    parse_commit_messages, parse_git_blame_line_porcelain, parse_git_status_porcelain_z,
+    GIT_SHOW_MESSAGE_MARKER,
+};
+#[cfg(test)]
+use crate::services::repository_reader::RepositoryFileStatus;
+pub use crate::services::repository_reader::{
+    RepositoryBlameLine, RepositoryFileContent, RepositoryFileDiff, RepositoryFileEntry,
+};
 
 fn git_command(repo_path: &Path) -> Command {
     let mut cmd = Command::new("/usr/bin/git");
@@ -124,25 +81,6 @@ fn run_git_checked(repo_path: &Path, args: &[&str]) -> Result<String, String> {
     let (code, stdout, stderr) = run_git(repo_path, args)?;
     if code == Some(0) {
         Ok(stdout.trim().to_string())
-    } else {
-        Err(format!(
-            "git {} failed with code {:?}: {}{}",
-            args.join(" "),
-            code,
-            stderr.trim(),
-            if stdout.trim().is_empty() {
-                String::new()
-            } else {
-                format!("\nstdout: {}", stdout.trim())
-            }
-        ))
-    }
-}
-
-fn run_git_checked_raw(repo_path: &Path, args: &[&str]) -> Result<String, String> {
-    let (code, stdout, stderr) = run_git(repo_path, args)?;
-    if code == Some(0) {
-        Ok(stdout)
     } else {
         Err(format!(
             "git {} failed with code {:?}: {}{}",
@@ -184,69 +122,6 @@ fn branch_refs(repo_path: &Path, args: &[&str]) -> Result<Vec<String>, String> {
         .filter(|line| !line.is_empty())
         .map(ToString::to_string)
         .collect())
-}
-
-fn file_status_from_porcelain(index_status: char, worktree_status: char) -> RepositoryFileStatus {
-    if index_status == '?' && worktree_status == '?' {
-        return RepositoryFileStatus::Untracked;
-    }
-    if index_status == 'U'
-        || worktree_status == 'U'
-        || matches!(
-            (index_status, worktree_status),
-            ('A', 'A') | ('D', 'D') | ('A', 'U') | ('D', 'U') | ('U', 'A') | ('U', 'D')
-        )
-    {
-        return RepositoryFileStatus::Conflicted;
-    }
-    if index_status == 'D' || worktree_status == 'D' {
-        return RepositoryFileStatus::Deleted;
-    }
-    if index_status == 'R' || worktree_status == 'R' {
-        return RepositoryFileStatus::Renamed;
-    }
-    if index_status == 'A' || worktree_status == 'A' {
-        return RepositoryFileStatus::Added;
-    }
-    if matches!(index_status, 'M' | 'T') || matches!(worktree_status, 'M' | 'T') {
-        return RepositoryFileStatus::Modified;
-    }
-    RepositoryFileStatus::Unchanged
-}
-
-fn parse_git_status_porcelain_z(output: &str) -> BTreeMap<String, RepositoryFileStatus> {
-    let mut statuses = BTreeMap::new();
-    let mut parts = output.split_terminator('\0');
-
-    while let Some(entry) = parts.next() {
-        if entry.len() < 4 {
-            continue;
-        }
-        let mut chars = entry.chars();
-        let index_status = chars.next().unwrap_or(' ');
-        let worktree_status = chars.next().unwrap_or(' ');
-        let _space = chars.next();
-        let path = chars.as_str();
-        if path.is_empty() {
-            continue;
-        }
-
-        let status = file_status_from_porcelain(index_status, worktree_status);
-        if matches!(index_status, 'R' | 'C') || matches!(worktree_status, 'R' | 'C') {
-            let _old_path = parts.next();
-        }
-        statuses.insert(path.to_string(), status);
-    }
-
-    statuses
-}
-
-fn repository_statuses(repo_path: &Path) -> Result<BTreeMap<String, RepositoryFileStatus>, String> {
-    let status_output = run_git_checked_raw(
-        repo_path,
-        &["status", "--porcelain=v1", "-z", "--untracked-files=all"],
-    )?;
-    Ok(parse_git_status_porcelain_z(&status_output))
 }
 
 fn list_branch_options(
@@ -430,6 +305,23 @@ fn configured_repo(workspace: &str, repo: &str) -> Result<PathBuf, String> {
     Ok(repo_path)
 }
 
+// Legacy desktop calls cannot select a provider. Refuse ambiguity while
+// preserving their configured/fallback path resolver until desktop cutover.
+fn configured_readonly_repo(workspace: &str, repo: &str) -> Result<PathBuf, String> {
+    if config::load()
+        .repos
+        .iter()
+        .filter(|entry| entry.workspace == workspace && entry.repo == repo)
+        .count()
+        != 1
+    {
+        return Err("Select one configured repository for this provider.".into());
+    }
+    configured_repo(workspace, repo)?
+        .canonicalize()
+        .map_err(|_| "The selected local checkout is unavailable.".into())
+}
+
 fn validate_repo_relative_path(path: &str) -> Result<(), String> {
     let candidate = Path::new(path);
     if candidate.is_absolute() {
@@ -462,132 +354,6 @@ fn safe_repo_file_path(repo_path: &Path, path: &str) -> Result<PathBuf, String> 
         return Err("Repository file path cannot escape the repository.".to_string());
     }
     Ok(canonical_file)
-}
-
-fn repo_relative_file_path(repo_path: &Path, path: &str) -> Result<PathBuf, String> {
-    validate_repo_relative_path(path)?;
-    Ok(repo_path.join(path))
-}
-
-fn short_sha(sha: &str) -> String {
-    sha.chars().take(8).collect()
-}
-
-fn strip_mail_brackets(value: &str) -> String {
-    value
-        .trim()
-        .trim_start_matches('<')
-        .trim_end_matches('>')
-        .to_string()
-}
-
-fn parse_blame_header(line: &str) -> Option<(String, u32)> {
-    let mut parts = line.split_whitespace();
-    let sha = parts.next()?;
-    if sha.len() < 7 || !sha.chars().all(|ch| ch.is_ascii_hexdigit()) {
-        return None;
-    }
-    let _original_line = parts.next()?.parse::<u32>().ok()?;
-    let final_line = parts.next()?.parse::<u32>().ok()?;
-    Some((sha.to_string(), final_line))
-}
-
-fn parse_git_blame_line_porcelain(output: &str) -> Vec<RepositoryBlameLine> {
-    let mut entries = Vec::new();
-    let mut current: Option<RepositoryBlameLine> = None;
-
-    for line in output.lines() {
-        if let Some((sha, final_line)) = parse_blame_header(line) {
-            if let Some(entry) = current.take() {
-                entries.push(entry);
-            }
-            current = Some(RepositoryBlameLine {
-                line: final_line,
-                short_sha: short_sha(&sha),
-                sha,
-                author: None,
-                author_email: None,
-                author_time: None,
-                summary: None,
-                message: None,
-            });
-            continue;
-        }
-
-        let Some(entry) = current.as_mut() else {
-            continue;
-        };
-
-        if line.starts_with('\t') {
-            if let Some(entry) = current.take() {
-                entries.push(entry);
-            }
-        } else if let Some(author) = line.strip_prefix("author ") {
-            entry.author = Some(author.to_string());
-        } else if let Some(author_email) = line.strip_prefix("author-mail ") {
-            entry.author_email = Some(strip_mail_brackets(author_email));
-        } else if let Some(author_time) = line.strip_prefix("author-time ") {
-            entry.author_time = author_time.parse::<i64>().ok();
-        } else if let Some(summary) = line.strip_prefix("summary ") {
-            entry.summary = Some(summary.to_string());
-        }
-    }
-
-    if let Some(entry) = current {
-        entries.push(entry);
-    }
-
-    entries.sort_by_key(|entry| entry.line);
-    entries
-}
-
-fn is_real_commit_sha(sha: &str) -> bool {
-    !sha.is_empty() && sha.chars().any(|ch| ch != '0')
-}
-
-fn unique_real_shas(entries: &[RepositoryBlameLine]) -> Vec<String> {
-    let mut shas = Vec::new();
-    for entry in entries {
-        if !is_real_commit_sha(&entry.sha) || shas.contains(&entry.sha) {
-            continue;
-        }
-        shas.push(entry.sha.clone());
-    }
-    shas
-}
-
-fn parse_commit_messages(output: &str, shas: &[String]) -> Vec<String> {
-    let mut messages = output
-        .trim_end()
-        .split_terminator(GIT_SHOW_MESSAGE_MARKER)
-        .map(|message| message.trim().to_string())
-        .collect::<Vec<_>>();
-    messages.truncate(shas.len());
-    messages
-}
-
-fn attach_commit_messages(
-    repo_path: &Path,
-    entries: &mut [RepositoryBlameLine],
-) -> Result<(), String> {
-    let shas = unique_real_shas(entries);
-    if shas.is_empty() {
-        return Ok(());
-    }
-
-    let format_arg = format!("--format=%B{}", GIT_SHOW_MESSAGE_MARKER);
-    let mut args = vec!["show", "-s", format_arg.as_str()];
-    args.extend(shas.iter().map(String::as_str));
-    let output = run_git_checked_raw(repo_path, &args)?;
-    let messages = parse_commit_messages(&output, &shas);
-
-    for (sha, message) in shas.iter().zip(messages) {
-        for entry in entries.iter_mut().filter(|entry| entry.sha == *sha) {
-            entry.message = Some(message.clone());
-        }
-    }
-
-    Ok(())
 }
 
 fn editor_file_arg(file_path: &Path, line: Option<u32>, include_column: bool) -> String {
@@ -703,64 +469,8 @@ pub fn list_repository_files(
     workspace: String,
     repo: String,
 ) -> Result<Vec<RepositoryFileEntry>, String> {
-    let repo_path = configured_repo(&workspace, &repo)?;
-    let output = run_git_checked_raw(&repo_path, &["ls-files", "-z", "-co", "--exclude-standard"])?;
-    let statuses = repository_statuses(&repo_path)?;
-    let mut files = output
-        .split_terminator('\0')
-        .filter(|path| !path.is_empty())
-        .map(|path| {
-            let status = statuses
-                .get(path)
-                .cloned()
-                .unwrap_or(RepositoryFileStatus::Unchanged);
-            (
-                path.to_string(),
-                RepositoryFileEntry {
-                    path: path.to_string(),
-                    status,
-                },
-            )
-        })
-        .collect::<BTreeMap<_, _>>();
-
-    for (path, status) in statuses {
-        files
-            .entry(path.clone())
-            .or_insert(RepositoryFileEntry { path, status });
-    }
-
-    Ok(files.into_values().collect())
-}
-
-fn diff_untracked_file(repo_path: &Path, path: &str) -> Result<String, String> {
-    let file_path = repo_relative_file_path(repo_path, path)?;
-    let file_path_str = file_path.to_string_lossy().to_string();
-    let (code, stdout, stderr) = run_git(
-        repo_path,
-        &[
-            "diff",
-            "--no-ext-diff",
-            "--no-index",
-            "--",
-            "/dev/null",
-            &file_path_str,
-        ],
-    )?;
-    if code == Some(0) || code == Some(1) {
-        Ok(stdout)
-    } else {
-        Err(format!(
-            "git diff --no-index failed with code {:?}: {}{}",
-            code,
-            stderr.trim(),
-            if stdout.trim().is_empty() {
-                String::new()
-            } else {
-                format!("\nstdout: {}", stdout.trim())
-            }
-        ))
-    }
+    let root = configured_readonly_repo(&workspace, &repo)?;
+    crate::services::repository_reader::list_at(&root)
 }
 
 #[tauri::command]
@@ -769,20 +479,8 @@ pub fn get_repository_file_diff(
     repo: String,
     path: String,
 ) -> Result<RepositoryFileDiff, String> {
-    let repo_path = configured_repo(&workspace, &repo)?;
-    validate_repo_relative_path(&path)?;
-    let statuses = repository_statuses(&repo_path)?;
-    let status = statuses
-        .get(&path)
-        .cloned()
-        .unwrap_or(RepositoryFileStatus::Unchanged);
-    let raw_diff = if status == RepositoryFileStatus::Untracked {
-        diff_untracked_file(&repo_path, &path)?
-    } else {
-        run_git_checked_raw(&repo_path, &["diff", "--no-ext-diff", "HEAD", "--", &path])?
-    };
-
-    Ok(RepositoryFileDiff { path, raw_diff })
+    let root = configured_readonly_repo(&workspace, &repo)?;
+    crate::services::repository_reader::diff_at(&root, &path)
 }
 
 #[tauri::command]
@@ -791,28 +489,8 @@ pub fn read_repository_file(
     repo: String,
     path: String,
 ) -> Result<RepositoryFileContent, String> {
-    let repo_path = configured_repo(&workspace, &repo)?;
-    let file_path = safe_repo_file_path(&repo_path, &path)?;
-    let metadata = fs::metadata(&file_path).map_err(|e| format!("Failed to read file: {e}"))?;
-    if !metadata.is_file() {
-        return Err("Repository path is not a file.".to_string());
-    }
-    let size = metadata.len();
-    if size > MAX_REPOSITORY_FILE_BYTES {
-        return Err(format!(
-            "File is too large to preview ({} KB limit).",
-            MAX_REPOSITORY_FILE_BYTES / 1024
-        ));
-    }
-    let bytes = fs::read(&file_path).map_err(|e| format!("Failed to read file: {e}"))?;
-    let content = String::from_utf8(bytes)
-        .map_err(|_| "File is not valid UTF-8 and cannot be previewed.".to_string())?;
-    Ok(RepositoryFileContent {
-        path,
-        content,
-        size,
-        truncated: false,
-    })
+    let root = configured_readonly_repo(&workspace, &repo)?;
+    crate::services::repository_reader::content_at(&root, &path)
 }
 
 #[tauri::command]
@@ -821,30 +499,8 @@ pub fn get_repository_file_blame(
     repo: String,
     path: String,
 ) -> Result<Vec<RepositoryBlameLine>, String> {
-    let repo_path = configured_repo(&workspace, &repo)?;
-    let _file_path = safe_repo_file_path(&repo_path, &path)?;
-    let (code, stdout, stderr) = run_git(&repo_path, &["blame", "--line-porcelain", "--", &path])?;
-    if code == Some(0) {
-        let mut entries = parse_git_blame_line_porcelain(&stdout);
-        attach_commit_messages(&repo_path, &mut entries)?;
-        return Ok(entries);
-    }
-
-    let trimmed = stderr.trim();
-    if trimmed == GIT_BLAME_NO_COMMIT_ERROR || trimmed.contains(GIT_BLAME_NO_PATH) {
-        return Ok(Vec::new());
-    }
-
-    Err(format!(
-        "git blame failed with code {:?}: {}{}",
-        code,
-        trimmed,
-        if stdout.trim().is_empty() {
-            String::new()
-        } else {
-            format!("\nstdout: {}", stdout.trim())
-        }
-    ))
+    let root = configured_readonly_repo(&workspace, &repo)?;
+    crate::services::repository_reader::blame_at(&root, &path)
 }
 
 #[tauri::command]

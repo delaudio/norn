@@ -820,3 +820,40 @@ Plan 0053 completion prepared after implementation `e4264db`, effective only on 
   extraction/qualifiedIPC, then native tree/find/editor follow-up for359. Draft
   only while378CI; no nextsource before actualmerge. Singlewriter, no Nornreview,
   delegation, private data, actualagent, providerwrite, release or userstashchange.
+
+
+## 2026-10-12 — plan0068 native repository reader implementation gates
+
+- Extract shipped readonly DTO/parsers and native Git/filesystem readers behind
+  full provider/workspace/repository/root identity. Desktop readonly commands
+  delegate to bounded native services, rejecting ambiguous legacy provider
+  selection while preserving their configured-path fallback. Branch/worktree
+  and external-editor adapters remain for their retained follow-ups.
+- Six strict repository.explore methods + generated/shared contract fixtures,
+  two bounded workers, 20s aggregate deadlines, EOF/shutdown cancellation,
+  secure shared file handles and production typed semantic client validation.
+  Inventory continuation pins raw tracked paths/status/index/HEAD and filters;
+  content/diff continuation pins complete UTF8 bytes. Binary/large/missing/
+  deleted/unborn states are explicit. Blame retains full bounded author/commit
+  text without the legacy delimiter ambiguity; find maps lowercase matching
+  back to original UTF16 positions without a full per-character map.
+- Owned10native tests cover state/rename/conflicts, literal/Unicode/control names,
+  symlink confinement/internal links, limits/unborn/binary, cancellation,
+  delimiter-containing messages,10k-line blame and provider/clone/version drift.
+  Fourclienttests + realstdio all-six-method read/stale/control/shutdown test.
+  Native workflow actual macOS PASS with all six methods including untracked
+  no-index and binary; own exacthead Linux/Windows CI remains required.
+- PASS local:763core+2existingignored,76stdio,6CLI,5onboarding,3binary;
+  root123+tooling/typecheck/lint/build,Archgate17,audit/noGUI;
+  UI232/1454,165unchangednativeframes,typecheck/Storybook; strictallfeatures
+  Clippy/fmt. Doctor100/noissues on changed transport files, no project install.
+- Initial owned test roots had macOS temp path aliases; fixtures now create
+  under the canonical temp directory, matching the service's canonical-root
+  authority. Stdio traversal test expected a correlated error although malformed
+  frames are dropped by the established decoder: corrected proof explicitly
+  rejects any such response and verifies the following valid control request.
+  Initial lint/import/control-regex errors fixed without suppression; allgates
+  green. No Norn review, private files, provider calls, credentials or realagents.
+- Prepared source/receipt are not actual completion. Plan0068 only becomes
+  shipped after own exact-final-head CI and actual squash to currentmain.
+  #359 stays open until tree/find/editor UI proof; ADR0020 stays Accepted.

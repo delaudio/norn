@@ -1,0 +1,19 @@
+{
+  "type": "request",
+  "id": "bad-explore",
+  "method": "repository.explore.content",
+  "params": {
+    "context": {
+      "repository": {
+        "provider": "github",
+        "workspace": "owned",
+        "repo": "same"
+      },
+      "rootId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "path": "../escape",
+    "offset": 0,
+    "maxBytes": 32768,
+    "contentSha256": null
+  }
+}

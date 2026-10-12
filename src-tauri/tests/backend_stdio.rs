@@ -11,6 +11,145 @@ use serde_json::{json, Value};
 
 const LOCAL_SHA: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 
+#[test]
+fn repository_explorer_qualified_pages_reject_drift_and_keep_control() {
+    fn request(backend: &mut Backend, id: &str, method: &str, params: Value) -> Value {
+        backend.send(json!({"type":"request","id":id,"method":method,"params":params}));
+        backend.wait_for(|value| value["id"] == id, Duration::from_secs(10))
+    }
+    let repo = temp_repo();
+    git(
+        repo.path(),
+        &[
+            "remote",
+            "add",
+            "origin",
+            "https://github.com/fixture/demo.git",
+        ],
+    );
+    std::fs::write(repo.path().join("--owned ü.txt"), "base\n").unwrap();
+    git(repo.path(), &["add", "--all"]);
+    git(
+        repo.path(),
+        &[
+            "-c",
+            "commit.gpgsign=false",
+            "commit",
+            "-qm",
+            "Owned complete message",
+        ],
+    );
+    std::fs::write(repo.path().join("new.txt"), "untracked\n").unwrap();
+    let mut backend = Backend::spawn_configured(repo.path());
+    backend.handshake();
+    let info = request(
+        &mut backend,
+        "explore-info",
+        "repository.explore.info",
+        json!({"repository":{"provider":"github","workspace":"fixture","repo":"demo"}}),
+    );
+    assert_eq!(info["ok"], true, "{info}");
+    let context = info["result"]["context"].clone();
+    let params = json!({"context":context,"offset":0,"limit":1,"query":"","changedOnly":false,"version":null});
+    let files = request(
+        &mut backend,
+        "explore-files",
+        "repository.explore.files",
+        params.clone(),
+    );
+    assert_eq!(files["ok"], true, "{files}");
+    assert_eq!(files["result"]["total"], 2);
+    assert_eq!(files["result"]["files"][0]["path"], "--owned ü.txt");
+    let content = request(
+        &mut backend,
+        "explore-content",
+        "repository.explore.content",
+        json!({"context":context,"path":"--owned ü.txt","offset":0,"maxBytes":4,"contentSha256":null}),
+    );
+    assert_eq!(content["ok"], true, "{content}");
+    assert_eq!(content["result"]["text"], "base");
+    assert_eq!(content["result"]["nextOffset"], 4);
+    let sha = content["result"]["contentSha256"].clone();
+    let blame = request(
+        &mut backend,
+        "explore-blame",
+        "repository.explore.blame",
+        json!({"context":context,"path":"--owned ü.txt","offset":0,"limit":32,"contentSha256":sha}),
+    );
+    assert_eq!(blame["ok"], true, "{blame}");
+    assert_eq!(
+        blame["result"]["lines"][0]["message"],
+        "Owned complete message"
+    );
+    let found = request(
+        &mut backend,
+        "explore-find",
+        "repository.explore.find",
+        json!({"context":context,"path":"--owned ü.txt","source":"content","query":"BASE","offset":0,"limit":32,"contentSha256":sha}),
+    );
+    assert_eq!(found["ok"], true, "{found}");
+    assert_eq!(found["result"]["matches"][0]["endUtf16"], 4);
+    let diff = request(
+        &mut backend,
+        "explore-diff",
+        "repository.explore.diff",
+        json!({"context":context,"path":"new.txt","offset":0,"maxBytes":32768,"contentSha256":null}),
+    );
+    assert_eq!(diff["ok"], true, "{diff}");
+    assert!(diff["result"]["text"]
+        .as_str()
+        .unwrap()
+        .contains("+untracked"));
+    std::fs::write(repo.path().join("--owned ü.txt"), "changed\n").unwrap();
+    let stale = request(
+        &mut backend,
+        "explore-stale-content",
+        "repository.explore.content",
+        json!({"context":context,"path":"--owned ü.txt","offset":4,"maxBytes":4,"contentSha256":sha}),
+    );
+    assert_eq!(stale["ok"], false);
+    let mut continuation = params;
+    continuation["offset"] = json!(1);
+    continuation["version"] = files["result"]["version"].clone();
+    assert_eq!(
+        request(
+            &mut backend,
+            "explore-stale-files",
+            "repository.explore.files",
+            continuation
+        )["ok"],
+        false
+    );
+    let mut foreign = context.clone();
+    foreign["repository"]["provider"] = json!("bitbucket");
+    assert_eq!(
+        request(
+            &mut backend,
+            "explore-foreign",
+            "repository.explore.content",
+            json!({"context":foreign,"path":"--owned ü.txt","offset":0,"maxBytes":4,"contentSha256":null})
+        )["ok"],
+        false
+    );
+    // Invalid decoded frames are dropped by the existing protocol contract;
+    // they have no correlated response. The following valid request must still
+    // complete, without any response for the rejected path.
+    backend.send(json!({"type":"request","id":"explore-escape","method":"repository.explore.content","params":{"context":context,"path":"../escape","offset":0,"maxBytes":4,"contentSha256":null}}));
+    backend.send(
+        json!({"type":"request","id":"explore-control","method":"repository.status","params":{}}),
+    );
+    let control = backend.wait_for(
+        |value| {
+            assert_ne!(value["id"], "explore-escape");
+            value["id"] == "explore-control"
+        },
+        Duration::from_secs(5),
+    );
+    assert_eq!(control["ok"], true);
+    request(&mut backend, "explore-shutdown", "shutdown", json!({}));
+    assert!(backend.child.wait().unwrap().success());
+}
+
 #[cfg(unix)]
 #[test]
 fn native_profile_catalog_is_read_only_scoped_and_keeps_stdio_control() {

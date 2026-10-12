@@ -18,12 +18,24 @@ Git is authoritative. Durable history lives in WORKLOG and plan/done.
   diff/blame/path-filter/file-find behavior with exact provider/root, strict typed
   bounded IPC and thin retained desktop adapters. Native tree/find/editor terminal
   UI and actual owned external-editor lifecycle follow before359completion.
-- Predecessor owned gates:753core+2existingignored/75stdio/6CLI/5onboarding/3binary;
-  root123+tooling/typecheck/lint/build/protocol/Archgate17/audit/noGUI;
-  UI228/1433/165nativeframes/typecheck/Storybook; strictClippy/fmt.
-  Doctor65/11DOMwarnings on supportedOpenTUI flexShrink/truncate verified with
-  declarations/nativeframes, unsuppressed. Format2/schema20 rollback coupling and
-  general lifecycle/performance hardening remain future required gates.
+- Plan0068 native source implemented: exact configured provider/root context,
+  bounded 32-row inventory with path/status/index/HEAD continuation hash, secure
+  512KiB text/binary/large/deleted states and 32KiB content/diff pages, complete
+  bounded blame metadata/messages and original UTF16 file/diff find offsets.
+  Six strict generated IPC methods, two reader workers, EOF/shutdown cancellation,
+  production typed client/semantic validation and thin retained desktop readers.
+  Shared secure file handles extracted from captured raster reader unchanged.
+- Local gates PASS:763core+2existingignored/76stdio/6CLI/5onboarding/3binary;
+  root123+tooling/typecheck/lint/build/Archgate17/audit/noGUI;
+  UI232/1454/165nativeframes/typecheck/Storybook; strictallfeaturesClippy/fmt.
+  Doctor100/noissues on changed transport files. Actual owned macOS OpenTUI/
+  Rust workflow now exercises all six explorer IPC methods plus prior capture/
+  review/cancel/restart. Linux/Windows explorer runtime requires own exactheadCI.
+  New10native unit/ownedGit tests include >50k inventory/>8MiB patch refusal;
+  4clienttests reject foreign echo/UTF8/continuation/page/row inconsistencies.
+- Next: source commit, prepared plan0068 receipt, focused PR own finalheadCI and
+  verified squash; then claim native tree/find/editor UI only after actualmerge.
+  #359/#294 remain open; no inferred UI/editor parity from this API slice.
 - Preserve maintainer-closed305/306/357. ADR0020 Accepted until full cutover.
 - Fixtures only; no private profiles/credentials/provider writes/actual agents/
   public release. Never read/copy/stage root unrelated untracked.norn.yaml;

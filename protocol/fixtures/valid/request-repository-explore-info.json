@@ -1,0 +1,12 @@
+{
+  "type": "request",
+  "id": "explore-info",
+  "method": "repository.explore.info",
+  "params": {
+    "repository": {
+      "provider": "github",
+      "workspace": "owned",
+      "repo": "same"
+    }
+  }
+}

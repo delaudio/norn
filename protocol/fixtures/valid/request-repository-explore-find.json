@@ -1,0 +1,21 @@
+{
+  "type": "request",
+  "id": "explore-find",
+  "method": "repository.explore.find",
+  "params": {
+    "context": {
+      "repository": {
+        "provider": "github",
+        "workspace": "owned",
+        "repo": "same"
+      },
+      "rootId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "path": "--literal \u00fc.txt",
+    "source": "content",
+    "query": "owned",
+    "offset": 0,
+    "limit": 32,
+    "contentSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+  }
+}

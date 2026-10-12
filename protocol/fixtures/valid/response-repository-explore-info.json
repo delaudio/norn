@@ -1,0 +1,24 @@
+{
+  "type": "response",
+  "id": "explore-info",
+  "ok": true,
+  "result": {
+    "request": {
+      "repository": {
+        "provider": "github",
+        "workspace": "owned",
+        "repo": "same"
+      }
+    },
+    "context": {
+      "repository": {
+        "provider": "github",
+        "workspace": "owned",
+        "repo": "same"
+      },
+      "rootId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "branch": "main",
+    "headSha": "dddddddddddddddddddddddddddddddddddddddd"
+  }
+}

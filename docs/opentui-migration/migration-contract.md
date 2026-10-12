@@ -169,7 +169,7 @@ removal with maintainer decision; `shared` = Rust/native service reused as-is.
 | Menu-bar sync + tray | desktop | `useMenuBarPrSync`, `lib.rs` `setup_menu_bar` | localStorage snapshot | #306 | retire |
 | Native notifications | desktop | `useMenuBarPrSync`, `App.tsx` | localStorage snapshot | #306 | retire |
 | Automatic sync polling | desktop | `useAutomaticSyncPolling` | `config.rs` | #305 | port |
-| Repository explorer (tree/content/blame/diff/find) | desktop | `RepositoryExplorerPanel`, `localRepoService` | in-memory | #306 | port |
+| Repository explorer (tree/content/blame/diff/find) | desktop | `RepositoryExplorerPanel`, `localRepoService`; bounded native `repository_reader` + typed explorer IPC/client | in-memory | #359 | native readonly API prepared in plan0068; tree/editor UI proof remains |
 | Branch/worktree operations | desktop | `RepositoryBranchesPanel`, `localRepoService` | local git | #306 | port |
 | Review history panel | desktop | `ReviewHistoryPanel` | Rust review store | #306 | port |
 | Analytics: closed-PR metrics, review effectiveness | desktop | `OverviewPanel`, `ClosedPrAnalyticsPanel`, `ReviewEffectivenessDashboard` | Rust review store | #306 | port |
@@ -179,7 +179,7 @@ removal with maintainer decision; `shared` = Rust/native service reused as-is.
 | Jira/Notion context in AI payload | desktop | `useReviewContext`, `jira.ts` | keychain tokens | #303 | port |
 | Clipboard copy | both | `tui/terminal.rs` OSC52, `lib/clipboard.ts` | none | #302 | port |
 | Shortcuts help / theme | desktop | `ShortcutsDialog`, `useTheme` | localStorage | #305 | port |
-| Find in repository | desktop | `RepositoryExplorerPanel` | in-memory | #306 | port |
+| Find in repository | desktop | `RepositoryExplorerPanel`; native selected-file/diff find with original UTF-16 positions | in-memory | #359 | selected-preview API prepared in plan0068; native presentation remains |
 | External file open | desktop | `localRepoService` `open_repository_file_external` | none | #306 | port |
 | Tray + menu-bar review trigger | desktop | `App.runBackgroundMenuReview`, `backgroundReviewStart` | Rust review store | #306 | retire |
 | Readiness preflight / `--skip-readiness` / `--current-repo` | TUI | `tui/mod.rs` | `config.rs` | #299 | port |

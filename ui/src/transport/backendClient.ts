@@ -67,12 +67,25 @@ import type {
   RecordMutation,
   RecordMutationResult,
   RecordPage,
+  RepositoryExploreBlamePage,
+  RepositoryExploreBlameParams,
+  RepositoryExploreContentPage,
+  RepositoryExploreContentParams,
+  RepositoryExploreDiffPage,
+  RepositoryExploreDiffParams,
+  RepositoryExploreFilesPage,
+  RepositoryExploreFilesParams,
+  RepositoryExploreFindPage,
+  RepositoryExploreFindParams,
+  RepositoryExploreInfo,
+  RepositoryExploreInfoParams,
   ReviewProfileCatalog,
   ScopePage,
   WorkspaceReadiness,
   WorkspaceScope,
   WorkspaceSettings,
 } from "../../../src/protocol/generated/protocol";
+import { validExploreParams, validExploreResult } from "./explorationValidation";
 import {
   localPath,
   sameLocalValue,
@@ -1169,6 +1182,78 @@ export class BackendClient {
   async reviewTargets(): Promise<ReviewTarget[]> {
     const result = await this.transport.request("review.targets", {});
     return (result.targets as ReviewTarget[]) ?? [];
+  }
+
+  private async exploreRequest<T>(
+    method: string,
+    params: object,
+    requestType: string,
+    resultType: string,
+  ): Promise<T> {
+    if (!validExploreParams(requestType, params))
+      throw new Error("Invalid repository preview request.");
+    const result = await this.transport.request(method, params as Record<string, unknown>);
+    if (!validExploreResult(resultType, result, params))
+      throw new Error("Invalid or mismatched repository preview response.");
+    return result as T;
+  }
+  async repositoryExploreInfo(params: RepositoryExploreInfoParams): Promise<RepositoryExploreInfo> {
+    return this.exploreRequest(
+      "repository.explore.info",
+      params,
+      "RepositoryExploreInfoParams",
+      "RepositoryExploreInfo",
+    );
+  }
+  async repositoryExploreFiles(
+    params: RepositoryExploreFilesParams,
+  ): Promise<RepositoryExploreFilesPage> {
+    return this.exploreRequest(
+      "repository.explore.files",
+      params,
+      "RepositoryExploreFilesParams",
+      "RepositoryExploreFilesPage",
+    );
+  }
+  async repositoryExploreContent(
+    params: RepositoryExploreContentParams,
+  ): Promise<RepositoryExploreContentPage> {
+    return this.exploreRequest(
+      "repository.explore.content",
+      params,
+      "RepositoryExploreContentParams",
+      "RepositoryExploreContentPage",
+    );
+  }
+  async repositoryExploreDiff(
+    params: RepositoryExploreDiffParams,
+  ): Promise<RepositoryExploreDiffPage> {
+    return this.exploreRequest(
+      "repository.explore.diff",
+      params,
+      "RepositoryExploreDiffParams",
+      "RepositoryExploreDiffPage",
+    );
+  }
+  async repositoryExploreBlame(
+    params: RepositoryExploreBlameParams,
+  ): Promise<RepositoryExploreBlamePage> {
+    return this.exploreRequest(
+      "repository.explore.blame",
+      params,
+      "RepositoryExploreBlameParams",
+      "RepositoryExploreBlamePage",
+    );
+  }
+  async repositoryExploreFind(
+    params: RepositoryExploreFindParams,
+  ): Promise<RepositoryExploreFindPage> {
+    return this.exploreRequest(
+      "repository.explore.find",
+      params,
+      "RepositoryExploreFindParams",
+      "RepositoryExploreFindPage",
+    );
   }
 
   private async localRequest<T>(

@@ -466,6 +466,42 @@ export type Request =
       id: RequestId;
       method: "local.snapshot.list";
       params: LocalListParams;
+    }
+  | {
+      type: "request";
+      id: RequestId;
+      method: "repository.explore.info";
+      params: RepositoryExploreInfoParams;
+    }
+  | {
+      type: "request";
+      id: RequestId;
+      method: "repository.explore.files";
+      params: RepositoryExploreFilesParams;
+    }
+  | {
+      type: "request";
+      id: RequestId;
+      method: "repository.explore.content";
+      params: RepositoryExploreContentParams;
+    }
+  | {
+      type: "request";
+      id: RequestId;
+      method: "repository.explore.diff";
+      params: RepositoryExploreDiffParams;
+    }
+  | {
+      type: "request";
+      id: RequestId;
+      method: "repository.explore.blame";
+      params: RepositoryExploreBlameParams;
+    }
+  | {
+      type: "request";
+      id: RequestId;
+      method: "repository.explore.find";
+      params: RepositoryExploreFindParams;
     };
 export type RequestId = string;
 /**
@@ -603,6 +639,28 @@ export type LocalImageParams = {
   maxBytes: number;
   contentSha256: string | null;
   layer: "committed" | "staged" | "unstaged";
+};
+export type RepositoryExploreFilesParams = {
+  context: RepositoryExploreContext;
+  offset: number;
+  limit: number;
+  query: string;
+  changedOnly: boolean;
+  version: string | null;
+};
+export type RepositoryExploreContentParams = {
+  context: RepositoryExploreContext;
+  path: string;
+  offset: number;
+  maxBytes: number;
+  contentSha256: string | null;
+};
+export type RepositoryExploreDiffParams = {
+  context: RepositoryExploreContext;
+  path: string;
+  offset: number;
+  maxBytes: number;
+  contentSha256: string | null;
 };
 export type OperationState = "accepted" | "running" | "succeeded" | "failed" | "cancelled";
 export type ErrorCode =
@@ -1133,6 +1191,29 @@ export interface LocalListParams {
   limit: number;
   catalogVersion: string | null;
 }
+export interface RepositoryExploreInfoParams {
+  repository: PrRepositoryIdentity;
+}
+export interface RepositoryExploreContext {
+  repository: PrRepositoryIdentity;
+  rootId: string;
+}
+export interface RepositoryExploreBlameParams {
+  context: RepositoryExploreContext;
+  path: string;
+  offset: number;
+  limit: number;
+  contentSha256: string;
+}
+export interface RepositoryExploreFindParams {
+  context: RepositoryExploreContext;
+  path: string;
+  source: "content" | "diff";
+  query: string;
+  offset: number;
+  limit: number;
+  contentSha256: string;
+}
 export interface ResponseOk {
   type: "response";
   id: RequestId;
@@ -1188,7 +1269,13 @@ export interface ResponseOk {
     | LocalReviewProfilesResult
     | LocalImagePage
     | LocalBrowserResult
-    | LocalListPage;
+    | LocalListPage
+    | RepositoryExploreInfo
+    | RepositoryExploreFilesPage
+    | RepositoryExploreContentPage
+    | RepositoryExploreDiffPage
+    | RepositoryExploreBlamePage
+    | RepositoryExploreFindPage;
 }
 export interface DiffFileResult {
   target: TargetIdentity;
@@ -2172,6 +2259,82 @@ export interface LocalSnapshotSummary {
     | ["committed" | "staged" | "unstaged", "committed" | "staged" | "unstaged"]
     | ["committed" | "staged" | "unstaged", "committed" | "staged" | "unstaged", "committed" | "staged" | "unstaged"];
   fileCount: number;
+}
+export interface RepositoryExploreInfo {
+  request: RepositoryExploreInfoParams;
+  context: RepositoryExploreContext;
+  branch: string | null;
+  headSha: string | null;
+}
+export interface RepositoryExploreFilesPage {
+  request: RepositoryExploreFilesParams;
+  version: string;
+  total: number;
+  /**
+   * @minItems 0
+   * @maxItems 32
+   */
+  files: RepositoryExploreFile[];
+  nextOffset: number | null;
+}
+export interface RepositoryExploreFile {
+  path: string;
+  oldPath: string | null;
+  status: "unchanged" | "modified" | "added" | "deleted" | "renamed" | "untracked" | "conflicted";
+}
+export interface RepositoryExploreContentPage {
+  request: RepositoryExploreContentParams;
+  state: "text" | "binary" | "tooLarge" | "missing" | "deleted" | "unsupported";
+  size: number | null;
+  contentSha256: string | null;
+  text: string;
+  nextOffset: number | null;
+}
+export interface RepositoryExploreDiffPage {
+  request: RepositoryExploreDiffParams;
+  baseSha: string | null;
+  totalBytes: number;
+  contentSha256: string;
+  text: string;
+  nextOffset: number | null;
+}
+export interface RepositoryExploreBlamePage {
+  request: RepositoryExploreBlameParams;
+  baseSha: string | null;
+  available: boolean;
+  totalLines: number;
+  /**
+   * @minItems 0
+   * @maxItems 32
+   */
+  lines: RepositoryExploreBlameLine[];
+  nextOffset: number | null;
+}
+export interface RepositoryExploreBlameLine {
+  line: number;
+  sha: string;
+  shortSha: string;
+  author: string | null;
+  authorEmail: string | null;
+  authorTime: number | null;
+  summary: string | null;
+  message: string | null;
+}
+export interface RepositoryExploreFindPage {
+  request: RepositoryExploreFindParams;
+  total: number;
+  /**
+   * @minItems 0
+   * @maxItems 32
+   */
+  matches: RepositoryExploreMatch[];
+  nextOffset: number | null;
+}
+export interface RepositoryExploreMatch {
+  startUtf16: number;
+  endUtf16: number;
+  line: number;
+  columnUtf16: number;
 }
 export interface ResponseError {
   type: "response";
