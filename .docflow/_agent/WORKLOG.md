@@ -728,3 +728,18 @@ Plan 0053 completion prepared after implementation `e4264db`, effective only on 
   origin/main still4644a03; number audit passed with existing0011/0013 advisories.
   Prepared0066receipt is conditional on exact final-head CI and actual squash;
   no completed child/epic claim. Additional source tests did not alter Rust gates.
+
+## 2026-10-12 — verified377merge, plan0067claim
+
+- #377 verified squash63970f499ae1a16c66e02438ec7fdd59f26d4cb5 at08:12:58Z;
+  both requiredCI38220689561 SUCCESS on finalc4278e1efe5ae1f4f0dffd5d6c0d6b3d54fdc1c8.
+  No automatic issue closures; root main ff synced, user stash/untracked untouched.
+  Plan0066receipt now effective. Owned gates:745core/73stdio/6CLI/5onboarding/
+  3binary+2existingignored; root123+tooling/Archgate17; UI219/1346/147frames;
+  typecheck/lint/protocol/audit/strictClippy/fmt/noGUI. Doctor65 false positives
+  on supported custom-renderer truncate remain explicitly recorded, unsuppressed.
+- Plan0067 claimed before code on actual377 for pinned local raster/Pierre/saved
+  snapshot consumers, unsafe legacy fallback rejection and actual owned native
+  UI+Rust full workflow proof. Draft prepared while377CI; no sibling source
+  implementation before actual merge. #358/#294 remain open; preserve306closure
+  and ADR0020 Accepted. Broader retained tasks are not silently inferred done.
