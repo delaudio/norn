@@ -800,3 +800,23 @@ Plan 0053 completion prepared after implementation `e4264db`, effective only on 
   processes are handled explicitly. Unix behavior unchanged. Native Windows CI
   remains required; observed-tree cancellation does not claim JobObject-level
   future descendant/race guarantees (retained hardening).
+
+## 2026-10-12 — verified378merge/358closure, plan0068claim
+
+- PR378 actualsquash8cdd00768eba9b162dd08d6b15717188e77dd455 at10:39:13Z,
+  finalb906071101ba65347b3105358a7fb992a215bb97. All five CI38234834238
+  jobs SUCCESS; actualLinux/macOS/Windowsnativeworkflow andUIpassed.
+  Generalverifyjob repeated on samehead after12m slowAzureUbuntuHTTPdownloads;
+  preserved fourpassjobs, no bypass. Allfrontend/Rust/architecture gatespassed.
+  Normalcancel completed beforeforceattempt409; retryonlyverify114767629843.
+- Rootmain ff synced before nextcheckout/claim. Plan0067receipt effective;
+  #358closed10:40:10Z afterfreshactualacceptancescopeaudit and fullproofupdate.
+  Its broader localreply/fix/globalhistory are retainedfollowups, not added to
+  actual358scope. Maintainer305/306/357closures preserved; ADR0020Accepted.
+- Native Windows API cancellation passes actualowned gate; secureopenedhandle
+  images/cancel/savedrunrestart verified onWindows. Observeddescendant cancellation
+  is not a JobObject race guarantee. Shared globalhardening remains307.
+- Plan0068claimed beforecode on actual378: boundednative readonlyrepository
+  extraction/qualifiedIPC, then native tree/find/editor follow-up for359. Draft
+  only while378CI; no nextsource before actualmerge. Singlewriter, no Nornreview,
+  delegation, private data, actualagent, providerwrite, release or userstashchange.

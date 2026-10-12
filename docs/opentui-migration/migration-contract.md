@@ -254,7 +254,7 @@ Local immutable source/options/capture/read/recheck IPC is documented in
 committed-only branch collectors, separate layers and durable root/provider
 ownership. Native terminal controls, local review payload/cancel/history and
 Pierre consumers use qualified saved evidence. PR377 supplies native controls
-and review/cancel/history. Plan0067 adds pinned raster/Pierre and saved-local
-selection with an owned native workflow gate; it remains conditional on its own
-verified merge. Local reply/fix, global legacy history and the other retained
+and review/cancel/history. Plan0067, PR378 merged at `8cdd007`, supplies pinned raster/Pierre and saved-local
+selection. Its actual owned native OpenTUI/production transport/Rust workflow
+passed on Linux, macOS and Windows. #358 is closed from combined375–378proof. Local reply/fix, global legacy history and the other retained
 workflows remain pending.
