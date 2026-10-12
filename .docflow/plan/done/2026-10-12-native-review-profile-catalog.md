@@ -65,11 +65,37 @@ file editing is part of retained repository/editor integration in #359.
 - Shared native review/policy resolution, explicit provider clone ownership,
   target validation, F6 manual selection and canonical prompt editor.
 
-## Status
+## Prepared completion — effective only after verified merge
 
-- Claimed by: default-agent, 2026-10-12, single writer.
-- Branch: `issue-306-review-profile-catalog`.
-- Location: isolated `/private/tmp/norn-review-profile-catalog`.
-- Blockers: implementation/local gates, predecessor verified merge/rebase,
-  exact-head CI and verified PR integration.
-- Stopped:
+- Implementation commit: `8e57d2a97b43950e3fde99b4932684e6c57ac7d4`.
+- Predecessor PR #373 passed exact-head CI38202396806 and was verified merged
+  as `ac077cd48ff96d6a6248f1ee941dd7904e2d9ce5` at 04:23:57 UTC. Rebased
+  onto the actual squash; main numbering/metadata/link audit passed.
+- Root typecheck,123 Vitest tests plus tooling, lint (0 errors/3 existing infos),
+  generated protocol and Archgate17 checks passed.
+- UI typecheck,197 tests/1,225 assertions and135 native frame fixtures passed.
+  Eight new frames cover catalog/base/error/loading at120x30/50x18; owned
+  native input also proves full128-character wide Unicode names at50x18.
+- Rust no-default full suite passed731 core tests +2 existing ignored,62 real
+  stdio,6 CLI,5 onboarding and3 binary tests. Strict all-features/all-targets
+  Clippy, fmt, no-default all-target compile and no-GUI dependencies passed.
+- Owned native catalog unit/signed policy/Git/stdio tests prove strict targets,
+  profile bounds/default/missing/invalid policy, actual signed precedence,
+  exact checkout/remote/local snapshot, changed snapshots/ambiguous paths,
+  same names across providers, no-clone base and continued control. The owned
+  fake-agent native review tests fetch the catalog before proving selected and
+  null/default profile payloads and pins for both providers.
+- UI verifies full-target/generation late-result fences, reconnect/target reset,
+  cancel, refresh errors, removed names, malformed/oversized/foreign DTOs,
+  paste isolation, explicit choose/start handoff and old-backend fallback.
+- ReactDoctor final64; remaining3 unknown-DOM-property warnings on OpenTUI
+  native `text` properties are proved valid by renderer types/native frames.
+  No rule suppression, dependency installation or unrelated cleanup.
+- Native policy semantics remain unchanged: local override precedence applies
+  through the configured organization resolver; verified-cache maintenance
+  and rollback/signature checks are preserved. No invented profile rewrite API.
+- No Norn review, private profiles/credentials, live provider writes or public
+  release. This item does not close#306/#294, implementADR0020 or waive actual
+  local-workflow/repository/editor/native-profile/install/platform gates.
+- Completion requires this fixed head's required CI and verified squash merge;
+  the prepared done file is not evidence that those have happened.
