@@ -76,11 +76,27 @@ diff/findings/review start/cancel/history/Pierre to these same snapshots before
   ownership, generated stdio protocol and completed profile catalog proof.
 - Native UI/engine/history/Pierre integration is the next bounded #358 slice.
 
-## Status
+## Prepared completion receipt
 
-- Claimed by: default-agent, 2026-10-12, single writer.
-- Branch: `issue-358-local-snapshot-ipc`.
-- Location: isolated `/private/tmp/norn-local-snapshot-ipc`.
-- Blockers: implementation/local gates, predecessor verified merge/rebase,
-  own exact-head CI and verified PR integration. Predecessor verified/rebased.
-- Stopped:
+Implementation commit: `d7ba477bc28dbb3c28f72a041c8f56357ddc8031`.
+This receipt becomes effective only after the final PR head passes both required
+CI jobs and its squash merge to main is verified. No pending PR is shipped proof.
+
+Local gate: root typecheck/123 Vitest tests plus tooling/lint/protocol, Archgate17
+and docflow audit; UI typecheck/201 tests/1,254 assertions/135 native frames;
+Rust744 core tests plus2 existing ignored,64 stdio,6 CLI,5 onboarding,3 binary;
+no-default all-target check, strict all-feature/all-target Clippy, fmt and noGUI.
+ReactDoctor100 with no findings in the three changed TS files; no setup/suppression.
+
+Owned12 local tests prove strict current/configured sources, exact remote owner,
+identical-clone separation, separate overlapping layers, branch-only evidence,
+base movement, detached/unborn state, rename/delete/binary metadata, a9MiB patch,
+UTF-8 chunks, immutable restart/foreign/corrupt/stale data, consistent backup and
+cascade, atomic quota rollback and bounded reservations. Real stdio additionally
+proves both providers, restart, immediate cancel/control and EOF cleanup. Generated
+fixtures agree on safe relative paths after correcting the initially weak schema.
+
+Schema20 durability requires a verified compatible backup and matched rollback in
+#308. No private data/live writes/agents/Norn review/public release was used.
+The next #358 integration must connect native UI/diff/findings/start/cancel/history/
+Pierre to these exact snapshots; #358/#306/#294 remain open. ADR0020 stays Accepted.

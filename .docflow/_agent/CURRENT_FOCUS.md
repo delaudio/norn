@@ -15,9 +15,11 @@ Git is authoritative. Durable history lives in WORKLOG and plan/done.
   squash-merged a3b6e4dcdd62278fb3cd5e781df4f8597e80b5c6 at05:09:19UTC.
   Plan0063 completion is effective. Rebased0064 onto actual main. Implemented
   strict sources, native double capture, separate layers, schema20 durable evidence,
-  bounded pages/recheck/cancel, typed client and owned tests. Local11 core tests,
-  two real stdio scenarios and four client tests passed; full integration gates
-  and exact-head CI/PR merge are pending. Actual local UI/engine remains next.
+  bounded pages/recheck/cancel, typed client and owned tests. Implementationd7ba477
+  passed full gates: Rust744/64stdio, root123+tooling/Archgate17, UI201/1254/135frames;
+  Doctor100, Clippy/fmt/noGUI/protocol/audit. Prepared0064 receipt is ineffective
+  until both exact-head CI jobs and verified squash merge. Actual local
+  UI/engine/history/Pierre remains next; no #358 completion claim.
 - Fixtures only: no live provider writes/private credentials/profiles/releases,
   no root unrelated .norn.yaml read/copy/stage.
 
