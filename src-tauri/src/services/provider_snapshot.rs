@@ -1,9 +1,8 @@
 //! Immutable transient provider evidence, independent of saved review run IDs.
+pub(crate) mod durable;
 mod images;
 use super::bitbucket::workspace_prs::{DetailParams, RepositoryIdentity};
-#[cfg(test)]
-pub use images::ImageSide;
-pub use images::{BrowserSnapshotSource, ImageParams};
+pub use images::{BrowserSnapshotSource, ImageParams, ImageSide};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
@@ -109,8 +108,8 @@ impl DiffParams {
         Ok(())
     }
 }
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct SnapshotFile {
     pub path: String,
     pub old_path: Option<String>,
@@ -119,6 +118,8 @@ pub(crate) struct SnapshotFile {
     pub deletions: u32,
     pub binary: bool,
 }
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct Capture {
     pub request: DetailParams,
     pub title: String,
@@ -127,6 +128,7 @@ pub(crate) struct Capture {
     pub head_sha: String,
     pub destination_sha: String,
     pub base_sha: String,
+    #[serde(skip)]
     pub patch: String,
     pub expected_count: usize,
     pub expected_files: Option<Vec<SnapshotFile>>,
@@ -173,6 +175,12 @@ pub(crate) struct SnapshotData {
     bytes: usize,
     created: Instant,
 }
+impl SnapshotData {
+    pub(crate) fn source_repository(&self) -> Option<&RepositoryIdentity> {
+        self.source_repository.as_ref()
+    }
+}
+
 pub(crate) struct Section {
     file: SnapshotFile,
     start: usize,
@@ -186,6 +194,7 @@ impl Section {
 }
 pub(crate) struct Manager {
     entries: Mutex<VecDeque<Arc<SnapshotData>>>,
+    saved: Mutex<VecDeque<(String, SnapshotRef)>>,
     maximum: usize,
     count: usize,
     ttl: Duration,
@@ -197,6 +206,7 @@ impl Default for Manager {
     fn default() -> Self {
         Self {
             entries: Mutex::new(VecDeque::new()),
+            saved: Mutex::new(VecDeque::new()),
             maximum: CACHE_BYTES,
             count: CACHE_COUNT,
             ttl: TTL,
@@ -218,6 +228,9 @@ impl Manager {
         entries.retain(|entry| entry.created.elapsed() < self.ttl);
     }
     pub fn insert(&self, capture: Capture) -> Result<SnapshotInfo, String> {
+        if self.shutdown.load(std::sync::atomic::Ordering::Acquire) {
+            return Err("Provider snapshot canceled during shutdown.".into());
+        }
         capture.request.validate()?;
         if let Some(source) = &capture.source_repository {
             source.validate()?;
@@ -423,11 +436,11 @@ pub(crate) fn section(file: SnapshotFile, start: usize, end: usize) -> Section {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::config::ReviewProvider;
     const PATCH: &str = include_str!("../../tests/fixtures/provider_snapshot.patch");
-    fn capture(provider: ReviewProvider) -> Capture {
+    pub(crate) fn capture(provider: ReviewProvider) -> Capture {
         Capture {
             request: DetailParams {
                 repository: RepositoryIdentity {

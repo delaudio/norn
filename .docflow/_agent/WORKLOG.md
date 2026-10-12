@@ -505,3 +505,48 @@ Plan 0053 completion prepared after implementation `e4264db`, effective only on 
 - Follow-up verification completed: all 58 stdio tests pass with personal/system
   Git config disabled, strict all-feature/all-target Clippy passes. Existing
   production/local root/UI/core gates remain unchanged; new PR head CI required.
+
+## 2026-10-12 — claim isolated durable provider evidence plan0060
+
+- #370 fixed head `789bd0347eed8b56bdc6ef79ca9f50c1966dc5e2` is in
+  CI38192754060. Local gates passed; no merge/shipped claim yet.
+- Claimed0060 before code in `/private/tmp/norn-provider-evidence-start` on
+  `issue-306-provider-evidence-start`, single agent. Next integration persists
+  exact captured provider evidence and connects native fresh-preview start,
+  saved/restarted readers and replies with optional explicit clone.
+- Verify/merge #370, rebase onto actual squash and audit before next PR.
+  No Norn review, provider writes, private credentials/profiles or release.
+
+## 2026-10-12 — verified predecessor merge during durable evidence integration
+
+- #370 final `bc7c2ca69c5b41de7012d4561805aba1878a389d` passed both
+  CI38193561843 jobs. Verified squash merge at
+  `a529463b523f7e8039068ccc59fe9243baba0e36`, 02:06:45Z. Earlier failure
+  was owned second-clone Git identity; declared synthetic local identity and
+  verified all58 stdio without global/system Git config before repush.
+- Durable evidence work remains isolated/unmerged. SQLite schema18 separates
+  exact raw patch from versioned bounded metadata, content-addresses full scope/
+  provenance and pins, and follows its native owning row via cascading FK.
+  Initial owned tests pass deduplication/restart/hash/cross-scope rejection and
+  consistent backup/cascade cleanup. Connecting saved readers/replies and UI.
+- No shipped/full parity claim; rebase/audit and all final gates still required.
+
+## 2026-10-12 — implement durable provider evidence plan0060
+
+- #370 verified merged at `a529463b523f7e8039068ccc59fe9243baba0e36`; isolated
+  plan0060 rebased onto the actual squash baseline. Collision audit passes.
+- Versioned/content-addressed SQLite exact capture, distinct approval/diff pins,
+  explicit metadata recheck, native no-clone initial/reply, restored saved native
+  readers and bounded UI source/profile/generation fences implemented.
+- Owned fake-agent initial execution and real stdio restart/reply prove exact
+  patch bytes for GitHub/Bitbucket without clone/current PR. Owned HTTP recheck
+  rejects drift without recapture. Existing legacy runs remain byte-preserved.
+- Updated migration assertion to schema18; first complete run's other storage
+  failures were poisoned-lock fallout. Corrected full suite: 712 core plus two
+  existing ignored/59 stdio/six CLI/five onboarding/three bin; strict all-feature/
+  all-target Clippy/fmt, core all-target/no-GUI, root123+tooling/typecheck/lint/
+  protocol/Archgate17, UI177/1088 assertions/typecheck/117 native frames pass.
+- Native F6 profile input includes wide/narrow frames and paste/cancel/default
+  keyboard tests. React Doctor reports no changed-file issues, score64 baseline.
+- No Norn review, live provider writes, private profile/data, releases or full
+  parity/ADR0020 completion. Next: exact-head CI and verified PR squash merge.

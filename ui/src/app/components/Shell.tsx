@@ -104,7 +104,8 @@ function useShellInput(
       if (key.name === "escape") {
         store.cancelReply();
       } else if (key.name === "return") {
-        if (store.getSnapshot().composerKind === "commit") void store.previewCommit(client);
+        if (store.getSnapshot().composerKind === "profile") store.submitReviewProfile();
+        else if (store.getSnapshot().composerKind === "commit") void store.previewCommit(client);
         else void store.submitReply(client);
       } else if (key.name === "backspace") {
         store.backspaceReply();
@@ -120,6 +121,8 @@ function useShellInput(
       store.toggleProvider();
     } else if (key.name === "f3") {
       void store.toggleProviderPreview();
+    } else if (key.name === "f6") {
+      store.beginReviewProfile();
     } else if (key.name === "f5") {
       void store.toggleProviderPreview(true);
     } else if (key.name === "tab") {
@@ -1394,7 +1397,7 @@ export function Shell({ store, client, quit }: ShellProps) {
       {state.composing ? (
         <box height={1} flexShrink={0} paddingX={1} backgroundColor={theme.panel}>
           <text fg={theme.primary} wrapMode="none" truncate>
-            {`${state.composerKind === "commit" ? "Commit" : "Reply"} › ${state.composerText}`}
+            {`${state.composerKind === "profile" ? "Profile (empty = default)" : state.composerKind === "commit" ? "Commit" : "Reply"} › ${state.composerText}`}
           </text>
         </box>
       ) : null}
@@ -1404,8 +1407,8 @@ export function Shell({ store, client, quit }: ShellProps) {
           {state.fixPreview
             ? "y approve · Esc/n dismiss · ↑/↓ scroll effects"
             : wide
-              ? "F2 PRs · q quit · Tab pane · j/k move · i stage finding · d drafts · w refs · m settings · n prompt/viewed · s split · e expand · a fix · r reply · t threads · v chat · f filter · g group · x cancel · u sync · o conflicts · c commit · p push"
-              : "F2 PRs  j/k  ←/→  s  e  Tab  m settings  n prompt  i stage  d drafts  w refs  q"}
+              ? "F2 PRs · F6 profile · q quit · Tab pane · j/k move · i stage finding · d drafts · w refs · m settings · n prompt/viewed · s split · e expand · a fix · r reply · t threads · v chat · f filter · g group · x cancel · u sync · o conflicts · c commit · p push"
+              : "F2 PRs  F6 profile  j/k  ←/→  s  e  Tab  m settings  n prompt  i stage  d drafts  w refs  q"}
         </text>
       </box>
     </box>

@@ -82,6 +82,14 @@ struct Operation {
 
 type Operations = Arc<Mutex<HashMap<String, Operation>>>;
 
+#[derive(Clone)]
+struct ReviewRuntime {
+    engine: ReviewEngine,
+    snapshots: Arc<crate::services::provider_snapshot::Manager>,
+    provider_reads: Arc<AtomicUsize>,
+    shutdown: Arc<AtomicBool>,
+}
+
 struct Backend {
     control: Sender<ServerMessage>,
     events: SyncSender<ServerMessage>,
@@ -192,6 +200,7 @@ pub fn run() -> Result<(), i32> {
             "workspace-scopes".to_string(),
             "provider-pr-reads".to_string(),
             "provider-snapshots".to_string(),
+            "provider-evidence-reviews".to_string(),
             "provider-snapshot-preview".to_string(),
             "draft-staging".to_string(),
             "draft-publication".to_string(),
@@ -678,8 +687,9 @@ fn dispatch(request: Request, backend: &Backend) -> bool {
             }
             let control = backend.control.clone();
             let counter = ActiveCounter(backend.active_diffs.clone());
+            let snapshots = backend.provider_snapshots.clone();
             thread::spawn(move || {
-                diff_file_response(&control, &id, params);
+                diff_file_response(&control, &id, params, &snapshots);
                 counter.decrement();
             });
             false
@@ -846,8 +856,9 @@ fn dispatch(request: Request, backend: &Backend) -> bool {
             }
             let control = backend.control.clone();
             let counter = ActiveCounter(backend.active_files.clone());
+            let snapshots = backend.provider_snapshots.clone();
             thread::spawn(move || {
-                review_files_response(&control, &id, params.target);
+                review_files_response(&control, &id, params.target, &snapshots);
                 counter.decrement();
             });
             false
@@ -908,7 +919,7 @@ fn dispatch(request: Request, backend: &Backend) -> bool {
             thread::spawn(move || {
                 match request {
                     Request::FilePreview { params, .. } => {
-                        file_preview_response(&control, &id, params)
+                        file_preview_response(&control, &id, params, &snapshots)
                     }
                     Request::ProviderSnapshotImage { params, .. } => {
                         let result = if shutdown.load(Ordering::SeqCst) {
@@ -966,7 +977,7 @@ fn dispatch(request: Request, backend: &Backend) -> bool {
             thread::spawn(move || {
                 match request {
                     Request::BrowserOpen { params, .. } => {
-                        browser_open_response(&control, &browser, &id, params.target)
+                        browser_open_response(&control, &browser, &id, params.target, &snapshots)
                     }
                     Request::ProviderSnapshotBrowser { params, .. } => {
                         let result = if shutdown.load(Ordering::SeqCst) {
@@ -1389,8 +1400,9 @@ fn file_preview_response(
     control: &Sender<ServerMessage>,
     id: &str,
     params: protocol::FilePreviewParams,
+    snapshots: &crate::services::provider_snapshot::Manager,
 ) {
-    let result = image_preview_result(&params);
+    let result = image_preview_result(&params, snapshots);
     let response = match result {
         Ok(value) => Response {
             id: id.into(),
@@ -1409,9 +1421,33 @@ fn file_preview_response(
 }
 fn image_preview_result(
     params: &protocol::FilePreviewParams,
+    snapshots: &crate::services::provider_snapshot::Manager,
 ) -> Result<serde_json::Value, ProtocolError> {
     use sha2::{Digest, Sha256};
     let side = params.side.as_deref().unwrap_or("new");
+    if let Some(info) = saved_provider_snapshot(&params.target, snapshots)? {
+        let request = crate::services::provider_snapshot::ImageParams {
+            snapshot: info.snapshot,
+            path: params.path.clone(),
+            side: if side == "old" {
+                crate::services::provider_snapshot::ImageSide::Old
+            } else {
+                crate::services::provider_snapshot::ImageSide::New
+            },
+            offset: params.offset.unwrap_or(0) as usize,
+            max_bytes: params.max_bytes.unwrap_or(192 * 1024) as usize,
+            content_sha256: params.content_sha256.clone(),
+        };
+        let image = snapshots
+            .image(request)
+            .map_err(|message| ProtocolError::new(ProtocolErrorCode::TargetStale, message))?;
+        return Ok(
+            json!({ "path": params.path, "side": side, "available": image.available,
+            "mimeType": image.mime_type, "size": image.size, "dataBase64": image.data_base64,
+            "offset": params.offset.unwrap_or(0), "nextOffset": image.next_offset, "contentSha256": image.content_sha256,
+            "width": image.width, "height": image.height }),
+        );
+    }
     let repo_path = resolve_repo_path(&params.target).ok_or_else(|| {
         ProtocolError::new(
             ProtocolErrorCode::NotFound,
@@ -1608,6 +1644,7 @@ fn browser_open_response(
     browser: &Arc<Mutex<Option<WebDiffServer>>>,
     id: &str,
     target: TargetIdentity,
+    snapshots: &Arc<crate::services::provider_snapshot::Manager>,
 ) {
     let respond = |value: serde_json::Value| {
         let _ = control.send(ServerMessage::Response(Response {
@@ -1625,7 +1662,24 @@ fn browser_open_response(
             error: Some(error),
         }));
     };
-    let state = match browser_diff_state(&target) {
+    let snapshot = match saved_provider_snapshot(&target, snapshots) {
+        Ok(snapshot) => snapshot,
+        Err(error) => {
+            fail(error);
+            return;
+        }
+    };
+    let result = match snapshot {
+        Some(info) => snapshot_browser_state(
+            snapshots,
+            &crate::services::provider_snapshot::BrowserParams {
+                snapshot: info.snapshot,
+            },
+        )
+        .map_err(inline_start_error),
+        None => browser_diff_state(&target),
+    };
+    let state = match result {
         Ok(state) => state,
         Err(error) => {
             fail(error);
@@ -1932,7 +1986,12 @@ fn is_git_repo(repo_path: &Path) -> bool {
         .is_some_and(|output| output.trim() == "true")
 }
 
-fn diff_file_response(control: &Sender<ServerMessage>, id: &str, params: protocol::DiffFileParams) {
+fn diff_file_response(
+    control: &Sender<ServerMessage>,
+    id: &str,
+    params: protocol::DiffFileParams,
+    snapshots: &crate::services::provider_snapshot::Manager,
+) {
     let respond = |value: serde_json::Value| {
         let _ = control.send(ServerMessage::Response(Response {
             id: id.to_string(),
@@ -1950,6 +2009,30 @@ fn diff_file_response(control: &Sender<ServerMessage>, id: &str, params: protoco
         }));
     };
 
+    match saved_provider_snapshot(&params.target, snapshots) {
+        Ok(Some(info)) => {
+            let result = snapshots.get(&info.snapshot).and_then(|data| {
+                scope_to_file(&data.patch, &params.path, params.old_path.as_deref()).ok_or_else(
+                    || "The path is outside this saved review's captured files.".to_string(),
+                )
+            });
+            match result {
+                Ok(diff) => {
+                    let (diff, truncated) = truncate_diff(diff);
+                    respond(
+                        json!({ "target": params.target, "path": params.path, "diff": diff, "truncated": truncated }),
+                    );
+                }
+                Err(message) => fail(ProtocolError::new(ProtocolErrorCode::TargetStale, message)),
+            }
+            return;
+        }
+        Err(error) => {
+            fail(error);
+            return;
+        }
+        Ok(None) => {}
+    }
     let Some(repo_path) = resolve_repo_path(&params.target) else {
         fail(ProtocolError::new(
             ProtocolErrorCode::NotFound,
@@ -2294,7 +2377,12 @@ fn synthetic_new_file_diff(repo_path: &Path, path: &str) -> Option<String> {
     Some(patch)
 }
 
-fn review_files_response(control: &Sender<ServerMessage>, id: &str, target: TargetIdentity) {
+fn review_files_response(
+    control: &Sender<ServerMessage>,
+    id: &str,
+    target: TargetIdentity,
+    snapshots: &crate::services::provider_snapshot::Manager,
+) {
     let respond = |value: serde_json::Value| {
         let _ = control.send(ServerMessage::Response(Response {
             id: id.to_string(),
@@ -2311,6 +2399,19 @@ fn review_files_response(control: &Sender<ServerMessage>, id: &str, target: Targ
             error: Some(error),
         }));
     };
+    match saved_provider_snapshot(&target, snapshots) {
+        Ok(Some(info)) => {
+            // Native inventory is paged through the existing snapshot contract;
+            // never serialize a potentially multi-megabyte array into one frame.
+            respond(json!({ "target": target, "files": [], "providerSnapshot": info }));
+            return;
+        }
+        Err(error) => {
+            fail(error);
+            return;
+        }
+        Ok(None) => {}
+    }
     let Some(repo_path) = resolve_repo_path(&target) else {
         fail(ProtocolError::new(
             ProtocolErrorCode::NotFound,
@@ -2359,6 +2460,31 @@ fn review_files_response(control: &Sender<ServerMessage>, id: &str, target: Targ
         Ok(files) => respond(json!({ "target": target, "files": files })),
         Err(error) => fail(error),
     }
+}
+
+fn saved_provider_snapshot(
+    target: &TargetIdentity,
+    snapshots: &crate::services::provider_snapshot::Manager,
+) -> Result<Option<crate::services::provider_snapshot::SnapshotInfo>, ProtocolError> {
+    if !matches!(target, TargetIdentity::Provider { pr_id: Some(_), .. }) {
+        return Ok(None);
+    }
+    let scope = provider_review_scope(target)?;
+    let data = load_provider_review_store(target).map_err(inline_start_error)?;
+    let TargetIdentity::Provider { run_id, .. } = target else {
+        unreachable!()
+    };
+    let Some(run) = select_review_run(data, run_id.as_deref()) else {
+        return Ok(None);
+    };
+    let Some(id) = run.provider_evidence_id.as_deref() else {
+        return Ok(None);
+    };
+    crate::services::provider_snapshot::durable::load_run(&scope, &run)
+        .map_err(|message| ProtocolError::new(ProtocolErrorCode::TargetStale, message))?;
+    crate::services::provider_snapshot::durable::restore(snapshots, &scope, id)
+        .map(Some)
+        .map_err(|message| ProtocolError::new(ProtocolErrorCode::TargetStale, message))
 }
 
 /// The reviewed base/head revisions for a stored PR target, if the stored review
@@ -2987,9 +3113,15 @@ impl Backend {
         let counter = ActiveCounter(self.active_operations.clone());
         let operation_id = operation_id.to_string();
         let delay = self.operation_delay();
+        let runtime = ReviewRuntime {
+            engine: review_engine(),
+            snapshots: self.provider_snapshots.clone(),
+            provider_reads: self.active_provider_reads.clone(),
+            shutdown: self.shutdown.clone(),
+        };
         thread::spawn(move || {
             run_review_operation(
-                review_engine(),
+                runtime,
                 &writer,
                 &operations,
                 &operation_id,
@@ -3079,7 +3211,7 @@ fn finish_cancelled(
 }
 
 fn run_review_operation(
-    engine: ReviewEngine,
+    runtime: ReviewRuntime,
     writer: &SyncSender<ServerMessage>,
     operations: &Operations,
     operation_id: &str,
@@ -3088,21 +3220,16 @@ fn run_review_operation(
     delay: Duration,
 ) {
     let target = &params.target;
-    match engine {
+    match runtime.engine {
         ReviewEngine::Simulated => {
             run_simulated_review_operation(writer, operations, operation_id, target, cancel, delay);
         }
         ReviewEngine::Fake => {
             run_fake_review_operation(writer, operations, operation_id, target, cancel)
         }
-        ReviewEngine::Real => run_real_review_operation(
-            writer,
-            operations,
-            operation_id,
-            target,
-            cancel,
-            params.profile.as_deref(),
-        ),
+        ReviewEngine::Real => {
+            run_real_review_operation(writer, operations, operation_id, params, cancel, &runtime)
+        }
     }
 }
 
@@ -3168,10 +3295,11 @@ fn run_real_review_operation(
     writer: &SyncSender<ServerMessage>,
     operations: &Operations,
     operation_id: &str,
-    target: &TargetIdentity,
+    params: &protocol::ReviewStartParams,
     cancel: &AtomicBool,
-    profile: Option<&str>,
+    runtime: &ReviewRuntime,
 ) {
+    let target = &params.target;
     set_operation(operations, operation_id, OperationState::Running, 0, None);
     emit_event(
         writer,
@@ -3190,7 +3318,12 @@ fn run_real_review_operation(
         finish_cancelled(writer, operations, operation_id, target, 2);
         return;
     }
-    match start_inline_session(target, profile) {
+    let started = if params.snapshot.is_some() {
+        start_snapshot_session(params, runtime, cancel)
+    } else {
+        start_inline_session(target, params.profile.as_deref())
+    };
+    match started {
         Ok(session) => {
             monitor_inline_session(writer, operations, operation_id, target, cancel, session)
         }
@@ -3354,10 +3487,7 @@ fn start_inline_reply_session(
 ) -> Result<InlineSession, ProtocolError> {
     let store = review_run_store().clone();
     let TargetIdentity::Provider {
-        provider,
-        workspace,
-        repo,
-        pr_id: Some(pr_id),
+        pr_id: Some(_),
         run_id,
         ..
     } = target
@@ -3367,24 +3497,6 @@ fn start_inline_reply_session(
             "replies are available for pull-request reviews",
         ));
     };
-    let repo_path = resolve_repo_path(target).ok_or_else(|| {
-        ProtocolError::new(
-            ProtocolErrorCode::TargetStale,
-            "no reviewable local repository for this target",
-        )
-    })?;
-    let Some((base, head)) = reviewed_range(target)? else {
-        return Err(ProtocolError::new(
-            ProtocolErrorCode::TargetStale,
-            "no stored reviewed range for this pull request",
-        ));
-    };
-    if !revisions_available(&repo_path, &base, &head) {
-        return Err(ProtocolError::new(
-            ProtocolErrorCode::TargetStale,
-            "reviewed revisions are not available in the local checkout",
-        ));
-    }
     let store_data = load_provider_review_store(target).map_err(inline_start_error)?;
     let run = select_review_run(store_data.clone(), run_id.as_deref());
     let thread_id = run
@@ -3408,30 +3520,15 @@ fn start_inline_reply_session(
             )
         })?;
     let run = run.expect("selected run with thread checked");
+    let scope = provider_review_scope(target)?;
+    let (repo_path, title, diff) = provider_run_input(target, &scope, &run)?;
     let source_branch = run.source_branch.clone();
     let destination_branch = run.destination_branch.clone();
-    let (prompt, _) =
-        resolve_inline_prompt_with_profile(target, &repo_path, run.review_profile.as_deref())?;
-    let diff = git(
-        &repo_path,
-        &[
-            "diff",
-            "--no-ext-diff",
-            "--no-textconv",
-            "-M",
-            base.as_str(),
-            head.as_str(),
-        ],
-    )
-    .ok_or_else(|| {
-        ProtocolError::new(
-            ProtocolErrorCode::Internal,
-            "failed to generate the reviewed diff",
-        )
-    })?;
+    let prompt =
+        provider_execution_prompt(target, repo_path.as_deref(), run.review_profile.as_deref())?;
     let base_payload = build_review_payload(
         &prompt,
-        &format!("Pull request #{pr_id}"),
+        &title,
         "pr",
         "This target contains the provider pull-request diff.",
         &source_branch,
@@ -3447,15 +3544,6 @@ fn start_inline_reply_session(
                 .map(|_| config::AiProvider::Claude)
         })
         .unwrap_or_else(|| config::load().ai_provider);
-    let scope = crate::services::review_scope::Scope {
-        provider: match provider {
-            ProviderKind::Github => crate::services::review::ReviewProvider::Github,
-            ProviderKind::Bitbucket => crate::services::review::ReviewProvider::Bitbucket,
-        },
-        workspace: workspace.clone(),
-        repo: repo.clone(),
-        pr_id: *pr_id,
-    };
     let read_scope = scope.clone();
     let cancel_scope = scope.clone();
     let selected_run_id = run.id.clone();
@@ -3464,10 +3552,11 @@ fn start_inline_reply_session(
         crate::services::review::ProviderInlineReviewRequest {
             context: crate::services::review::ProviderInlineContext {
                 scope,
-                repo_path: Some(repo_path),
+                repo_path,
+                provider_evidence_id: run.provider_evidence_id,
                 reviewed_diff_base_sha: run.reviewed_diff_base_sha,
             },
-            title: format!("Pull request #{pr_id}"),
+            title,
             source_branch,
             destination_branch,
             reviewed_base_sha: run.reviewed_base_sha,
@@ -4092,11 +4181,283 @@ fn prompt_with_references(
         .map_err(|message| ProtocolError::new(ProtocolErrorCode::InvalidParams, message))
 }
 
+fn provider_execution_prompt(
+    target: &TargetIdentity,
+    repo_path: Option<&std::path::Path>,
+    profile: Option<&str>,
+) -> Result<String, ProtocolError> {
+    if let Some(path) = repo_path {
+        return resolve_inline_prompt_with_profile(target, path, profile).map(|value| value.0);
+    }
+    if profile.is_some() || crate::organization_policy::organization_policy_is_configured() {
+        return Err(ProtocolError::new(
+            ProtocolErrorCode::InvalidParams,
+            "This review profile or organization policy requires a configured local repository.",
+        ));
+    }
+    let TargetIdentity::Provider {
+        provider,
+        workspace,
+        repo,
+        ..
+    } = target
+    else {
+        return Err(fix_error("Select a provider review."));
+    };
+    let user = crate::services::workspace_data::prompt_for_scope(
+        provider_matches(*provider),
+        workspace,
+        repo,
+    )
+    .map_err(|message| ProtocolError::new(ProtocolErrorCode::Conflict, message))?;
+    prompt_with_references(
+        target,
+        user.filter(|prompt| !prompt.trim().is_empty())
+            .unwrap_or_else(|| resolve_review_prompt(None)),
+    )
+}
+
+fn provider_run_input(
+    target: &TargetIdentity,
+    scope: &crate::services::review_scope::Scope,
+    run: &crate::services::review::ReviewRun,
+) -> Result<(Option<PathBuf>, String, String), ProtocolError> {
+    let repo_path = resolve_repo_path(target);
+    if run.provider_evidence_id.is_some() {
+        let capture = crate::services::provider_snapshot::durable::load_run(scope, run)
+            .map_err(inline_start_error)?;
+        return Ok((repo_path, capture.title, capture.patch));
+    }
+    let path = repo_path.as_deref().ok_or_else(|| {
+        ProtocolError::new(
+            ProtocolErrorCode::TargetStale,
+            "This older saved review requires its configured local repository.",
+        )
+    })?;
+    let base = run
+        .reviewed_diff_base_sha
+        .as_deref()
+        .or(run.reviewed_base_sha.as_deref());
+    let (Some(base), Some(head)) = (base, run.reviewed_head_sha.as_deref()) else {
+        return Err(fix_error("No pinned reviewed range is available."));
+    };
+    if !revisions_available(path, base, head) {
+        return Err(fix_error(
+            "Reviewed revisions are not available in the configured clone.",
+        ));
+    }
+    let diff = git(
+        path,
+        &["diff", "--no-ext-diff", "--no-textconv", "-M", base, head],
+    )
+    .ok_or_else(|| {
+        ProtocolError::new(
+            ProtocolErrorCode::Internal,
+            "Cannot generate the pinned review diff.",
+        )
+    })?;
+    Ok((repo_path, format!("Pull request #{}", scope.pr_id), diff))
+}
+
+fn start_snapshot_session(
+    params: &protocol::ReviewStartParams,
+    runtime: &ReviewRuntime,
+    cancel: &AtomicBool,
+) -> Result<InlineSession, ProtocolError> {
+    start_snapshot_session_with_recheck(params, runtime, cancel, |data| {
+        crate::services::bitbucket::workspace_prs::Api::from_stored(
+            data.info.request.repository.clone(),
+        )?
+        .recheck_snapshot(data)
+    })
+}
+
+fn start_snapshot_session_with_recheck(
+    params: &protocol::ReviewStartParams,
+    runtime: &ReviewRuntime,
+    cancel: &AtomicBool,
+    recheck: impl FnOnce(&crate::services::provider_snapshot::SnapshotData) -> Result<(), String>,
+) -> Result<InlineSession, ProtocolError> {
+    let target = &params.target;
+    let snapshot = params
+        .snapshot
+        .as_ref()
+        .ok_or_else(|| fix_error("Select a provider preview."))?;
+    let scope = provider_review_scope(target)?;
+    if !matches!(target, TargetIdentity::Provider { run_id: None, .. })
+        || snapshot.repository.provider
+            != provider_matches(match scope.provider {
+                crate::services::review::ReviewProvider::Github => ProviderKind::Github,
+                crate::services::review::ReviewProvider::Bitbucket => ProviderKind::Bitbucket,
+            })
+        || snapshot.repository.workspace != scope.workspace
+        || snapshot.repository.repo != scope.repo
+        || snapshot.pr_id != scope.pr_id
+    {
+        return Err(fix_error(
+            "The provider preview belongs to a different target.",
+        ));
+    }
+    // Cache ownership and expiry are proved before even constructing a credentialed API.
+    let data = runtime
+        .snapshots
+        .get(snapshot)
+        .map_err(|message| ProtocolError::new(ProtocolErrorCode::TargetStale, message))?;
+    let cancelled = || cancel.load(Ordering::Acquire) || runtime.shutdown.load(Ordering::Acquire);
+    if cancelled() {
+        return Err(ProtocolError::new(
+            ProtocolErrorCode::Cancelled,
+            "Review canceled before execution.",
+        ));
+    }
+    runtime
+        .provider_reads
+        .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| {
+            (n < 2).then_some(n + 1)
+        })
+        .map_err(|_| {
+            ProtocolError::new(
+                ProtocolErrorCode::Conflict,
+                "Two provider reads are already in progress; wait before starting this review.",
+            )
+        })?;
+    let checked = recheck(&data);
+    runtime.provider_reads.fetch_sub(1, Ordering::SeqCst);
+    checked.map_err(|message| ProtocolError::new(ProtocolErrorCode::TargetStale, message))?;
+    if cancelled() {
+        return Err(ProtocolError::new(
+            ProtocolErrorCode::Cancelled,
+            "Review canceled before execution.",
+        ));
+    }
+    let repo_path = resolve_repo_path(target);
+    let prompt =
+        provider_execution_prompt(target, repo_path.as_deref(), params.profile.as_deref())?;
+    let payload = build_review_payload(
+        &prompt,
+        &data.info.title,
+        "pr",
+        "This target contains the exact captured provider pull-request diff.",
+        &data.info.source_branch,
+        &data.info.destination_branch,
+        &data.patch,
+    );
+    let evidence_id = crate::services::provider_snapshot::durable::save(&scope, &data)
+        .map_err(inline_start_error)?;
+    if cancelled() {
+        return Err(ProtocolError::new(
+            ProtocolErrorCode::Cancelled,
+            "Review canceled before execution.",
+        ));
+    }
+    let store = review_run_store().clone();
+    let read_scope = scope.clone();
+    let cancel_scope = scope.clone();
+    let started = crate::services::review::start_provider_inline_review_native(
+        store.clone(),
+        crate::services::review::ProviderInlineReviewRequest {
+            context: crate::services::review::ProviderInlineContext {
+                scope,
+                repo_path,
+                provider_evidence_id: Some(evidence_id),
+                reviewed_diff_base_sha: Some(data.info.base_sha.clone()),
+            },
+            title: data.info.title.clone(),
+            source_branch: data.info.source_branch.clone(),
+            destination_branch: data.info.destination_branch.clone(),
+            reviewed_base_sha: Some(data.info.destination_sha.clone()),
+            reviewed_head_sha: Some(data.info.head_sha.clone()),
+            payload,
+            ai_provider: config::load().ai_provider,
+            review_profile: params.profile.clone(),
+        },
+    )
+    .map_err(inline_start_error)?;
+    let read_store = store.clone();
+    Ok(InlineSession {
+        thread_id: started.thread_id,
+        read: Box::new(move || {
+            crate::services::review::get_provider_ai_review_run_state_native(
+                &read_store,
+                &read_scope,
+            )
+        }),
+        cancel: Box::new(move || {
+            crate::services::review::cancel_provider_inline_review_native(&store, &cancel_scope)
+                .map(|_| ())
+        }),
+    })
+}
+
 fn start_inline_session(
     target: &TargetIdentity,
     profile: Option<&str>,
 ) -> Result<InlineSession, ProtocolError> {
     let store = review_run_store().clone();
+    if matches!(target, TargetIdentity::Provider { pr_id: Some(_), .. }) {
+        let scope = provider_review_scope(target)?;
+        let run_id = match target {
+            TargetIdentity::Provider { run_id, .. } => run_id.as_deref(),
+            _ => None,
+        };
+        if let Some(saved) = select_review_run(
+            load_provider_review_store(target).map_err(inline_start_error)?,
+            run_id,
+        ) {
+            if saved.provider_evidence_id.is_some() {
+                let (repo_path, title, diff) = provider_run_input(target, &scope, &saved)?;
+                let prompt = provider_execution_prompt(target, repo_path.as_deref(), profile)?;
+                let payload = build_review_payload(
+                    &prompt,
+                    &title,
+                    "pr",
+                    "This target contains the exact captured provider pull-request diff.",
+                    &saved.source_branch,
+                    &saved.destination_branch,
+                    &diff,
+                );
+                let read_scope = scope.clone();
+                let cancel_scope = scope.clone();
+                let started = crate::services::review::start_provider_inline_review_native(
+                    store.clone(),
+                    crate::services::review::ProviderInlineReviewRequest {
+                        context: crate::services::review::ProviderInlineContext {
+                            scope,
+                            repo_path,
+                            provider_evidence_id: saved.provider_evidence_id,
+                            reviewed_diff_base_sha: saved.reviewed_diff_base_sha,
+                        },
+                        title,
+                        source_branch: saved.source_branch,
+                        destination_branch: saved.destination_branch,
+                        reviewed_base_sha: saved.reviewed_base_sha,
+                        reviewed_head_sha: saved.reviewed_head_sha,
+                        payload,
+                        ai_provider: config::load().ai_provider,
+                        review_profile: profile.map(ToOwned::to_owned),
+                    },
+                )
+                .map_err(inline_start_error)?;
+                let read_store = store.clone();
+                return Ok(InlineSession {
+                    thread_id: started.thread_id,
+                    read: Box::new(move || {
+                        crate::services::review::get_provider_ai_review_run_state_native(
+                            &read_store,
+                            &read_scope,
+                        )
+                    }),
+                    cancel: Box::new(move || {
+                        crate::services::review::cancel_provider_inline_review_native(
+                            &store,
+                            &cancel_scope,
+                        )
+                        .map(|_| ())
+                    }),
+                });
+            }
+        }
+    }
     let repo_path = resolve_repo_path(target).ok_or_else(|| {
         ProtocolError::new(
             ProtocolErrorCode::TargetStale,
@@ -4181,6 +4542,7 @@ fn start_inline_session(
                     context: crate::services::review::ProviderInlineContext {
                         scope,
                         repo_path: Some(repo_path.clone()),
+                        provider_evidence_id: saved.provider_evidence_id,
                         reviewed_diff_base_sha: saved.reviewed_diff_base_sha,
                     },
                     title: format!("Pull request #{pr_id}"),
@@ -4476,6 +4838,201 @@ fn write_frame(stdout: &mut impl Write, message: ServerMessage) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn exact_preview_starts_real_native_pipeline_without_clone_and_persists_evidence() {
+        use crate::services::provider_snapshot::{tests::capture, Manager};
+        use std::os::unix::fs::PermissionsExt;
+        struct RestoreEnvironment(Vec<(&'static str, Option<std::ffi::OsString>)>);
+        impl Drop for RestoreEnvironment {
+            fn drop(&mut self) {
+                for (key, previous) in &self.0 {
+                    if let Some(value) = previous {
+                        std::env::set_var(key, value);
+                    } else {
+                        std::env::remove_var(key);
+                    }
+                }
+            }
+        }
+        let _lock = crate::review_storage::TEST_DATA_DIR_ENV_LOCK
+            .lock()
+            .unwrap();
+        let owned = tempfile::tempdir().unwrap();
+        let agent = owned.path().join("owned-agent");
+        let input = owned.path().join("agent-input");
+        std::fs::write(&agent, format!("#!/bin/sh\ncat > '{}'\nprintf '%s\\n' '{{\"result\":\"Exact initial capture complete.\"}}'\n", input.display())).unwrap();
+        std::fs::set_permissions(&agent, std::fs::Permissions::from_mode(0o755)).unwrap();
+        std::fs::write(
+            owned.path().join("settings.json"),
+            r#"{"repos":[],"aiProvider":"claude","defaultDiffView":"unified","theme":"dark"}"#,
+        )
+        .unwrap();
+        let mut restore = RestoreEnvironment(Vec::new());
+        for (key, path) in [
+            ("NORN_CONFIG_DIR", owned.path()),
+            ("NORN_REVIEW_DATA_DIR", owned.path()),
+            ("NORN_REVIEW_AGENT_BIN", agent.as_path()),
+        ] {
+            restore.0.push((key, std::env::var_os(key)));
+            std::env::set_var(key, path);
+        }
+        for provider in [
+            config::ReviewProvider::Github,
+            config::ReviewProvider::Bitbucket,
+        ] {
+            let snapshots = Arc::new(Manager::default());
+            let captured = capture(provider);
+            let patch = captured.patch.clone();
+            let info = snapshots.insert(captured).unwrap();
+            let runtime = ReviewRuntime {
+                engine: ReviewEngine::Real,
+                snapshots,
+                provider_reads: Arc::new(AtomicUsize::new(0)),
+                shutdown: Arc::new(AtomicBool::new(false)),
+            };
+            let target = TargetIdentity::Provider {
+                provider: match provider {
+                    config::ReviewProvider::Github => ProviderKind::Github,
+                    config::ReviewProvider::Bitbucket => ProviderKind::Bitbucket,
+                },
+                workspace: info.request.repository.workspace.clone(),
+                repo: info.request.repository.repo.clone(),
+                pr_id: Some(info.request.pr_id),
+                run_id: None,
+            };
+            let params = protocol::ReviewStartParams {
+                target: target.clone(),
+                profile: None,
+                snapshot: Some(info.snapshot.clone()),
+            };
+            let session = start_snapshot_session_with_recheck(
+                &params,
+                &runtime,
+                &AtomicBool::new(false),
+                |_| Ok(()),
+            )
+            .unwrap();
+            let deadline = Instant::now() + Duration::from_secs(10);
+            loop {
+                let state = (session.read)().unwrap();
+                if state.status != crate::services::review::AiReviewRunStatus::Running {
+                    assert_eq!(
+                        state.status,
+                        crate::services::review::AiReviewRunStatus::Succeeded,
+                        "{state:?}"
+                    );
+                    break;
+                }
+                assert!(
+                    Instant::now() < deadline,
+                    "owned fake agent did not terminate"
+                );
+                thread::sleep(Duration::from_millis(10));
+            }
+            assert!(std::fs::read_to_string(&input).unwrap().contains(&patch));
+            let scope = provider_review_scope(&target).unwrap();
+            let saved = crate::services::review_scope::load_owned(&scope)
+                .unwrap()
+                .unwrap();
+            let run = saved.review_runs.last().unwrap();
+            assert_ne!(run.id, info.snapshot.snapshot_id);
+            assert_eq!(
+                run.reviewed_base_sha.as_deref(),
+                Some(info.destination_sha.as_str())
+            );
+            assert_eq!(
+                run.reviewed_diff_base_sha.as_deref(),
+                Some(info.base_sha.as_str())
+            );
+            assert_eq!(
+                crate::services::provider_snapshot::durable::load_run(&scope, run)
+                    .unwrap()
+                    .patch,
+                patch
+            );
+        }
+    }
+
+    #[test]
+    fn snapshot_start_fences_cache_ownership_drift_cancel_and_shutdown_before_agent() {
+        use crate::services::provider_snapshot::{tests::capture, Manager};
+        for provider in [
+            config::ReviewProvider::Github,
+            config::ReviewProvider::Bitbucket,
+        ] {
+            let snapshots = Arc::new(Manager::default());
+            let info = snapshots.insert(capture(provider)).unwrap();
+            let runtime = ReviewRuntime {
+                engine: ReviewEngine::Real,
+                snapshots,
+                provider_reads: Arc::new(AtomicUsize::new(0)),
+                shutdown: Arc::new(AtomicBool::new(false)),
+            };
+            let params = protocol::ReviewStartParams {
+                target: TargetIdentity::Provider {
+                    provider: match provider {
+                        config::ReviewProvider::Github => ProviderKind::Github,
+                        config::ReviewProvider::Bitbucket => ProviderKind::Bitbucket,
+                    },
+                    workspace: info.request.repository.workspace.clone(),
+                    repo: info.request.repository.repo.clone(),
+                    pr_id: Some(info.request.pr_id),
+                    run_id: None,
+                },
+                profile: None,
+                snapshot: Some(info.snapshot.clone()),
+            };
+            let cancel = AtomicBool::new(false);
+            let mut wrong = params.clone();
+            wrong.snapshot.as_mut().unwrap().repository.repo = "foreign".into();
+            assert!(
+                start_snapshot_session_with_recheck(&wrong, &runtime, &cancel, |_| panic!(
+                    "foreign capture reached credentials"
+                ))
+                .is_err()
+            );
+            wrong = params.clone();
+            wrong.snapshot.as_mut().unwrap().snapshot_id = "0".repeat(64);
+            assert!(
+                start_snapshot_session_with_recheck(&wrong, &runtime, &cancel, |_| panic!(
+                    "missing capture reached credentials"
+                ))
+                .is_err()
+            );
+            cancel.store(true, Ordering::Release);
+            assert!(
+                start_snapshot_session_with_recheck(&params, &runtime, &cancel, |_| panic!(
+                    "canceled capture reached credentials"
+                ))
+                .is_err()
+            );
+            cancel.store(false, Ordering::Release);
+            assert!(
+                start_snapshot_session_with_recheck(&params, &runtime, &cancel, |_| Err(
+                    "Owned PR drift".into()
+                ))
+                .is_err()
+            );
+            assert_eq!(runtime.provider_reads.load(Ordering::Acquire), 0);
+            assert!(
+                start_snapshot_session_with_recheck(&params, &runtime, &cancel, |_| {
+                    runtime.shutdown.store(true, Ordering::Release);
+                    Ok(())
+                })
+                .is_err()
+            );
+            assert_eq!(runtime.provider_reads.load(Ordering::Acquire), 0);
+            runtime.snapshots.stop();
+            assert!(
+                start_snapshot_session_with_recheck(&params, &runtime, &cancel, |_| panic!(
+                    "stopped capture reached credentials"
+                ))
+                .is_err()
+            );
+        }
+    }
 
     #[test]
     fn native_snapshot_browser_preserves_exact_evidence_without_local_checkout_or_run() {

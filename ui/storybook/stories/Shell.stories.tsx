@@ -204,3 +204,6 @@ export const ProviderPreviewImage120x30: Story = {
 export const ProviderPreviewImage50x15: Story = {
   args: { frameId: "shell-provider-preview-image-50x15" },
 };
+
+export const ReviewProfile: Story = { args: { frameId: "shell-review-profile-120x30" } };
+export const CompactReviewProfile: Story = { args: { frameId: "shell-review-profile-50x15" } };

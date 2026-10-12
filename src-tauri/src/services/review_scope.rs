@@ -26,7 +26,7 @@ impl Scope {
         )
     }
 
-    fn owns(&self, run: &ReviewRun) -> bool {
+    pub(crate) fn owns(&self, run: &ReviewRun) -> bool {
         run.provider == self.provider
             && run.workspace == self.workspace
             && run.repo == self.repo

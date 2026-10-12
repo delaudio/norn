@@ -157,6 +157,7 @@ export interface ShellSnapshot {
   providerReads: boolean;
   providerSnapshots: boolean;
   providerPreview: boolean;
+  providerEvidenceReviews: boolean;
   liveSnapshot: ProviderSnapshotInfo | null;
   snapshotLoading: boolean;
   settingsOpen: boolean;
@@ -189,7 +190,8 @@ export interface ShellSnapshot {
   fixPreview: FixPreview | null;
   fixPreviewLoading: boolean;
   fixState: FixState | null;
-  composerKind: "reply" | "commit";
+  composerKind: "reply" | "commit" | "profile";
+  selectedReviewProfile: string | null;
   composing: boolean;
   composerText: string;
   diffExpanded: boolean;
@@ -220,6 +222,8 @@ const INITIAL: ShellSnapshot = {
   providerReads: false,
   providerSnapshots: false,
   providerPreview: false,
+  providerEvidenceReviews: false,
+  selectedReviewProfile: null,
   liveSnapshot: null,
   snapshotLoading: false,
   settingsOpen: false,
@@ -851,6 +855,7 @@ export class ShellStore {
         picker: this.mergeRemote(buildPicker(repositories, targets, scopes)),
         providerReads: ready.capabilities.includes("provider-pr-reads"),
         providerSnapshots: ready.capabilities.includes("provider-snapshot-preview"),
+        providerEvidenceReviews: ready.capabilities.includes("provider-evidence-reviews"),
         selectedPicker: 0,
         generation: this.state.generation + 1,
         files: [],
@@ -885,10 +890,15 @@ export class ShellStore {
     // immediately, so a late failure never becomes an unhandled rejection. A
     // file-listing failure (for example a historical review whose revisions are
     // unavailable locally) must not hide findings the backend can still return.
-    const filesOutcome = client.reviewFiles(target).then(
-      (value) => ({ ok: true as const, value }),
-      (error: unknown) => ({ ok: false as const, error }),
-    );
+    const filesOutcome = client
+      .reviewFiles(
+        target,
+        () => generation === this.state.generation && this.state.status !== "closed",
+      )
+      .then(
+        (value) => ({ ok: true as const, value }),
+        (error: unknown) => ({ ok: false as const, error }),
+      );
     const findingsOutcome = client.reviewFindings(target).then(
       (value) => ({ ok: true as const, value }),
       (error: unknown) => ({ ok: false as const, error }),
@@ -901,7 +911,12 @@ export class ShellStore {
           0,
           files.value.findIndex((file) => file.path === path),
         );
-        this.update({ files: files.value, selectedFile, notice: null });
+        this.update({
+          files: files.value,
+          selectedFile,
+          liveSnapshot: client.reviewSourceSnapshot?.(target) ?? null,
+          notice: null,
+        });
       } else {
         this.update({ files: [], error: message(files.error) });
       }
@@ -1089,6 +1104,7 @@ export class ShellStore {
       fixPreviewLoading: false,
       fixState: null,
       composerKind: "reply",
+      selectedReviewProfile: null,
       composing: false,
       composerText: "",
       diff: null,
@@ -1162,7 +1178,7 @@ export class ShellStore {
     this.update({ diffLoading: true, diffError: null });
     try {
       const snapshot = this.state.liveSnapshot;
-      const result = this.state.providerPreview
+      const result = snapshot
         ? {
             path: file.path,
             diff: await client.providerSnapshotPatch(
@@ -1416,7 +1432,7 @@ export class ShellStore {
   }
 
   async startReview(client: BackendClient): Promise<void> {
-    if (this.state.providerPreview) {
+    if (this.state.providerPreview && !this.state.providerEvidenceReviews) {
       this.update({ notice: "Starting a review from this PR preview is not available yet." });
       return;
     }
@@ -1431,6 +1447,11 @@ export class ShellStore {
       });
       return;
     }
+    const snapshot = this.state.providerPreview ? this.state.liveSnapshot?.snapshot : null;
+    if (this.state.providerPreview && !snapshot) {
+      this.update({ notice: "Wait for a verified PR preview before starting its review." });
+      return;
+    }
     const active = this.state.operation;
     if (active && (active.state === "accepted" || active.state === "running")) {
       return;
@@ -1438,7 +1459,11 @@ export class ShellStore {
     const generation = this.state.generation;
     this.starting = true;
     try {
-      const result = await client.startReview(target);
+      const result = await client.startReview(
+        target,
+        this.state.selectedReviewProfile,
+        snapshot ?? null,
+      );
       this.operationTarget = target;
       this.operationKind = "review";
       this.operationGeneration = generation;
@@ -1615,6 +1640,9 @@ export class ShellStore {
         this.update({
           picker,
           selectedPicker: next,
+          providerPreview: false,
+          liveSnapshot: null,
+          snapshotLoading: false,
           generation: generation + 1,
           fixPreview: null,
           fixState: null,
@@ -1691,7 +1719,7 @@ export class ShellStore {
       const errorField = side === "old" ? "beforeError" : "afterError";
       try {
         const snapshot = this.state.liveSnapshot;
-        const result = this.state.providerPreview
+        const result = snapshot
           ? await client.providerSnapshotImage(snapshot!.snapshot, file.path, side, current)
           : await client.filePreview(target, file.path, side, current);
         if (current()) {
@@ -1712,6 +1740,47 @@ export class ShellStore {
     const field = side === "old" ? "before" : "after";
     const errorField = side === "old" ? "beforeError" : "afterError";
     this.update({ preview: { ...preview, [field]: null, [errorField]: error } });
+  }
+
+  beginReviewProfile(): void {
+    if (
+      this.requestInFlight() ||
+      this.state.operation?.state === "running" ||
+      this.state.operation?.state === "accepted"
+    )
+      return;
+    this.update({
+      composing: true,
+      composerKind: "profile",
+      composerText: this.state.selectedReviewProfile ?? "",
+    });
+  }
+
+  submitReviewProfile(): void {
+    const profile = this.state.composerText;
+    if (
+      profile &&
+      (Array.from(profile).length > 128 ||
+        profile.trim() !== profile ||
+        Array.from(profile).some((character) => {
+          const code = character.codePointAt(0)!;
+          return code < 32 || (code >= 127 && code <= 159);
+        }))
+    ) {
+      this.update({
+        notice:
+          "Use a profile name of at most 128 characters, without control characters or surrounding spaces.",
+      });
+      return;
+    }
+    this.update({
+      selectedReviewProfile: profile || null,
+      composing: false,
+      composerText: "",
+      notice: profile
+        ? `Review profile: ${profile}. Press Enter to start.`
+        : "Using the repository's default review profile.",
+    });
   }
 
   beginReply(): void {
@@ -2008,7 +2077,7 @@ export class ShellStore {
     try {
       if (this.state.providerPreview && !this.state.liveSnapshot)
         throw new Error("Wait for a verified PR preview before opening its browser diff.");
-      const result = this.state.providerPreview
+      const result = this.state.liveSnapshot
         ? await client.providerSnapshotBrowser(
             this.state.liveSnapshot!.snapshot,
             () => generation === this.state.generation,

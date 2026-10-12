@@ -309,6 +309,8 @@ pub struct ReviewRun {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reviewed_diff_base_sha: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_evidence_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reviewed_head_sha: Option<String>,
     pub status: AiReviewRunStatus,
     pub turn_kind: AiReviewTurnKind,
@@ -677,6 +679,7 @@ pub(crate) struct ProviderInlineContext {
     pub scope: super::review_scope::Scope,
     pub repo_path: Option<PathBuf>,
     pub reviewed_diff_base_sha: Option<String>,
+    pub provider_evidence_id: Option<String>,
 }
 
 pub(crate) struct ProviderInlineReviewRequest {
@@ -2265,6 +2268,7 @@ fn materialize_review_run(
         destination_branch: destination_branch.to_string(),
         reviewed_base_sha: reviewed_base_sha.map(ToOwned::to_owned),
         reviewed_diff_base_sha: None,
+        provider_evidence_id: None,
         reviewed_head_sha: reviewed_head_sha.map(ToOwned::to_owned),
         status: AiReviewRunStatus::Succeeded,
         turn_kind,
@@ -6005,6 +6009,8 @@ fn run_inline_review_pipeline(
     .map_err(ReviewPipelineFailure::provider)?;
     review_run.reviewed_diff_base_sha =
         native_context.and_then(|context| context.reviewed_diff_base_sha.clone());
+    review_run.provider_evidence_id =
+        native_context.and_then(|context| context.provider_evidence_id.clone());
     let thread = find_review_thread_mut(&mut review_store, &thread_id)
         .map_err(ReviewPipelineFailure::internal)?;
     append_review_message(
@@ -6114,10 +6120,28 @@ pub fn start_inline_review_native(
     )
 }
 
+fn validate_provider_evidence_request(request: &ProviderInlineReviewRequest) -> Result<(), String> {
+    let Some(id) = request.context.provider_evidence_id.as_deref() else {
+        return Ok(());
+    };
+    let capture = super::provider_snapshot::durable::load(&request.context.scope, id)?;
+    if request.reviewed_base_sha.as_deref() != Some(capture.destination_sha.as_str())
+        || request.reviewed_head_sha.as_deref() != Some(capture.head_sha.as_str())
+        || request.context.reviewed_diff_base_sha.as_deref() != Some(capture.base_sha.as_str())
+        || request.source_branch != capture.source_branch
+        || request.destination_branch != capture.destination_branch
+        || !request.payload.contains(&capture.patch)
+    {
+        return Err("The review request does not match its saved provider evidence.".into());
+    }
+    Ok(())
+}
+
 pub(crate) fn start_provider_inline_review_native(
     store: AiReviewRunStore,
     request: ProviderInlineReviewRequest,
 ) -> Result<AiReviewRunState, String> {
+    validate_provider_evidence_request(&request)?;
     let workspace = request.context.scope.workspace.clone();
     let repo = request.context.scope.repo.clone();
     let thread_title = request.title.clone();
@@ -6921,6 +6945,7 @@ pub(crate) fn reply_provider_inline_review_native(
     thread_id: String,
     user_message: String,
 ) -> Result<AiReviewRunState, String> {
+    validate_provider_evidence_request(&request)?;
     let workspace = request.context.scope.workspace.clone();
     let repo = request.context.scope.repo.clone();
     let id = request.context.scope.pr_id;
@@ -7000,6 +7025,7 @@ fn reply_inline_review_for_target(
             .ok_or("The selected review conversation is unavailable.")?;
         if selected.reviewed_base_sha != reviewed_base_sha
             || selected.reviewed_head_sha != reviewed_head_sha
+            || selected.provider_evidence_id != context.provider_evidence_id
             || selected.reviewed_diff_base_sha != context.reviewed_diff_base_sha
             || selected.source_branch != source_branch
             || selected.destination_branch != destination_branch

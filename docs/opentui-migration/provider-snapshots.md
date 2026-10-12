@@ -2,8 +2,9 @@
 
 Internal evidence for #357 / plans 0056–0057. PR #367 supplies immutable
 snapshots and the typed bridge. Plan 0057 connects native terminal and Pierre
-previews; review-start integration, explicit approval and native external
-provider browsing remain subsequent #357 work.
+previews; plan 0060 connects exact-evidence review start and durable saved
+readers/replies. Explicit approval and native external provider browsing remain
+retained work under #306.
 No saved review run is created by a snapshot read.
 
 ## Evidence boundary
@@ -115,9 +116,9 @@ The preview runs through existing file navigation, diff modes, syntax and search
 Inventory, patches and images are fenced by provider/repository/PR/opaque handle
 and selection generation. Findings, threads and their anchors are cleared in a
 current preview and restored from the saved run on return. Agent replies and
-mutations cannot borrow the saved run while displaying a newer diff. Starting
-AI from the cached evidence is a separate required delivery; Enter currently
-reports that limitation. Clipboard copies the verified selected preview diff.
+mutations cannot borrow the saved run while displaying a newer diff. With the provider-evidence-reviews capability, Enter starts AI from the exact
+active snapshot after an explicit native metadata recheck. Older backends
+report that limitation. F6 chooses a profile name; empty input uses the default. Clipboard copies the verified selected preview diff.
 
 `provider.snapshot.image` validates the complete cached handle and allowlisted
 path/side before touching credentials. It preserves fork source repository
@@ -165,3 +166,44 @@ Native API references: [GitHub commits](https://docs.github.com/en/rest/git/comm
 [contents/symlinks](https://docs.github.com/en/rest/repos/contents#get-repository-content),
 [Bitbucket source metadata](https://developer.atlassian.com/cloud/bitbucket/rest/api-group-source/),
 and [Windows shell dispatch](https://learn.microsoft.com/en-us/windows/win32/api/shellapi/nf-shellapi-shellexecutew).
+
+
+## Durable review evidence (plan 0060)
+
+A start from a preview verifies full scope/cache ownership/expiry before
+credentials, uses the bounded two-read gate, and rechecks head, destination,
+branches, title, fork provenance and GitHub inventory count. Drift requires
+explicit refresh; no new diff or merge base is substituted. Cancellation and
+shutdown are checked around the read and persistence boundary.
+
+Schema 18 stores versioned capture metadata and exact UTF-8 patch bytes in a
+content-addressed SQLite table owned by the native provider row. SHA-256 covers
+scope, pins, metadata and raw patch with length prefixes. Records are immutable
+and deduplicated; metadata is bounded to 16 MiB, patch to 8 MiB, total evidence
+to 128 MiB and 1000 records. Full storage rejects a start instead of deleting
+saved evidence. Native row deletion cascades to its evidence; legacy cleanup
+cannot delete native rows, and consistent backup includes these records.
+
+Completed runs store the durable evidence ID and distinct destination-approval,
+head and actual diff-base pins. They never store a transient preview handle as
+run identity. Saved readers verify native owner/hash/version/inventory/pins,
+then rehydrate a fresh bounded cache handle without a current PR query or clone.
+Missing/corrupt evidence fails without current-PR/checkout fallback. Older runs
+without this ID retain their existing clone-dependent behavior.
+
+Initial and reply execution pass optional explicit clone context to the shared
+Rust engine; no clone cannot imply cwd or providerless configuration. Named
+local profiles and organization policy require the configured repository.
+Required local analyzers still require a clean checkout at the captured head.
+The UI sends the exact preview reference and selected/default profile, then
+switches to the actual completed saved run with selection generation fences.
+Saved image/Pierre reads use captured immutable source pins through the same
+validated snapshot image boundary; provider credentials can still be required
+to fetch immutable raster bytes absent from the bounded transient image cache.
+
+Owned tests prove initial no-clone fake-agent execution, exact bytes and pins,
+GitHub/Bitbucket restart/reply without a clone or current PR query, deduplication,
+backup/retention/corruption and request ownership/drift/cancel/shutdown fences.
+Profile input has wide/narrow native frames and keyboard/paste tests. Full
+provider parity, catalog/editor, recovery/platform/install and cutover work
+remain open; this receipt does not close #306 or the epic.

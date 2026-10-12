@@ -209,8 +209,8 @@ filters, per-repository pages and metadata/reviewers in plan 0055 (PR #366).
 [Immutable provider snapshots](./provider-snapshots.md), plan 0056 / PR #367,
 provide complete pinned evidence. Plan 0057 / PR #368 (merged at `1f9b3d3`) connects native pre-review file/diff,
 fork image and authenticated Pierre previews while preserving actual saved runs.
-Review-start from the exact cached evidence, explicit PR approval and external
-provider browsing remain required. These bounded deliveries do not close
+Plan 0060 connects review-start from exact durable cached evidence. Explicit PR
+approval and external provider browsing remain required. These bounded deliveries do not close
 #306 or retire any retained capability. #357 was closed by the maintainer at
 2026-10-11 22:01:23Z; preserve that state while verifying remaining provider
 workflows under #306.
@@ -225,8 +225,12 @@ preview. That integration must pass exact evidence, profile, cancellation,
 reply/fix and approval verification before retained review parity is complete. Plan 0059 connects native scoped initial/reply execution,
 explicit profile resolution, isolated agents and scoped approved filesystem
 operations. It preserves legacy run ownership and distinct approval/diff pins.
-Fresh-preview review start still awaits durable cached-evidence integration;
-this delivery does not close the full parity row.
+Plan 0060 persists content-addressed exact provider evidence separately from
+conversation JSON, starts fresh captures with explicit pin/provenance rechecks,
+and restores saved files/diffs/replies without a clone. F6 selects a bounded
+profile name, with empty input choosing the repository default; catalog/editor
+parity and explicit provider approval/external browsing remain retained work.
+These deliveries do not close the full parity row.
 
 - **First vertical slice (#301):** real file → diff → finding through the Rust
   backend and the OpenTUI client, measured on a large diff. Material

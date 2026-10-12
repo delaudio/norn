@@ -289,8 +289,59 @@
           "minLength": 1,
           "maxLength": 128,
           "pattern": "^[^ \\u0000-\\u001f\\u007f-\\u009f](?:[^\\u0000-\\u001f\\u007f-\\u009f]*[^ \\u0000-\\u001f\\u007f-\\u009f])?$"
+        },
+        "snapshot": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ProviderSnapshotRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
-      }
+      },
+      "allOf": [
+        {
+          "if": {
+            "required": [
+              "snapshot"
+            ],
+            "properties": {
+              "snapshot": {
+                "type": "object"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "target": {
+                "type": "object",
+                "required": [
+                  "kind",
+                  "provider",
+                  "workspace",
+                  "repo",
+                  "prId"
+                ],
+                "properties": {
+                  "kind": {
+                    "const": "provider"
+                  },
+                  "prId": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 2147483647
+                  },
+                  "runId": {
+                    "type": "null"
+                  }
+                }
+              }
+            }
+          }
+        }
+      ]
     },
     "OperationControlParams": {
       "type": "object",
@@ -486,6 +537,9 @@
           "items": {
             "$ref": "#/definitions/ChangedFile"
           }
+        },
+        "providerSnapshot": {
+          "$ref": "#/definitions/ProviderSnapshotInfo"
         }
       }
     },

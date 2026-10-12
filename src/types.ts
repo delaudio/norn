@@ -461,6 +461,7 @@ export interface ReviewRun {
   destinationBranch: string;
   reviewedBaseSha?: string | null;
   reviewedDiffBaseSha?: string | null;
+  providerEvidenceId?: string | null;
   reviewedHeadSha?: string | null;
   status: AiReviewRunStatus;
   turnKind: AiReviewTurnKind;

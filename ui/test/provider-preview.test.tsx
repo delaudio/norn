@@ -215,3 +215,86 @@ test("canonical local-only saved scopes never become provider previews or issue 
     client.close();
   }
 });
+
+test("preview review start carries exact capture plus explicit profile when supported", async () => {
+  class EvidenceTransport extends FakeProviderTransport {
+    async start() {
+      const ready = await super.start();
+      return { ...ready, capabilities: [...ready.capabilities, "provider-evidence-reviews"] };
+    }
+    async request(method: string, params: Record<string, unknown>) {
+      if (method === "review.start") {
+        this.calls.push({ method, params: structuredClone(params) });
+        return { operationId: "exact-capture-operation", state: "accepted", sequence: 0 };
+      }
+      return super.request(method, params);
+    }
+  }
+  const transport = new EvidenceTransport();
+  const client = new BackendClient(transport);
+  const store = new ShellStore();
+  try {
+    await store.connect(client);
+    await store.selectProviderPr(providerFixtureRepositories[1]!, 8, "Owned", "OPEN");
+    const captured = store.getSnapshot().liveSnapshot!.snapshot;
+    store.beginReviewProfile();
+    store.appendReplyText("security");
+    store.submitReviewProfile();
+    expect(store.getSnapshot().selectedReviewProfile).toBe("security");
+    await store.startReview(client);
+    expect(transport.calls.find((call) => call.method === "review.start")?.params).toEqual({
+      target: { kind: "provider", ...captured.repository, prId: captured.prId },
+      profile: "security",
+      snapshot: captured,
+    });
+    store.beginReply();
+    expect(store.getSnapshot().composing).toBe(false);
+  } finally {
+    store.cancelSyntax();
+    client.close();
+  }
+});
+
+for (const width of [120, 50])
+  test(`F6 profile input preserves cancel/default and fences pasted shortcuts at ${width} columns`, async () => {
+    const client = new BackendClient(new FakeProviderTransport());
+    const store = new ShellStore();
+    await store.connect(client);
+    const renderer = await createTestRenderer({ width, height: width === 50 ? 15 : 30 });
+    const ui = mountApp(renderer.renderer, store, client);
+    const render = async () => {
+      await settle();
+      await renderer.renderOnce();
+    };
+    try {
+      renderer.mockInput.pressKey(KeyCodes.F6);
+      await render();
+      expect(renderer.captureCharFrame()).toContain("Profile (empty = default)");
+      await renderer.mockInput.pasteBracketedText("security");
+      renderer.mockInput.pressEnter();
+      await render();
+      expect(store.getSnapshot().selectedReviewProfile).toBe("security");
+      renderer.mockInput.pressKey(KeyCodes.F6);
+      await render();
+      await renderer.mockInput.pasteBracketedText("q\nx\n");
+      renderer.mockInput.pressEnter();
+      await render();
+      expect(store.getSnapshot().composing).toBe(true);
+      expect(store.getSnapshot().status).not.toBe("closed");
+      expect(store.getSnapshot().selectedReviewProfile).toBe("security");
+      renderer.mockInput.pressEscape();
+      await Bun.sleep(60);
+      await render();
+      expect(store.getSnapshot().composing).toBe(false);
+      expect(store.getSnapshot().selectedReviewProfile).toBe("security");
+      store.beginReviewProfile();
+      for (let i = 0; i < 8; i++) store.backspaceReply();
+      store.submitReviewProfile();
+      expect(store.getSnapshot().selectedReviewProfile).toBeNull();
+    } finally {
+      ui.unmount();
+      store.cancelSyntax();
+      client.close();
+      renderer.renderer.destroy();
+    }
+  });

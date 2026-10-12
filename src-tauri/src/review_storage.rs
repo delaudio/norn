@@ -1,3 +1,4 @@
+pub(crate) mod provider_evidence;
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::Write;
@@ -48,7 +49,7 @@ const APP_DIR: &str = "norn";
 const LEGACY_APP_DIR: &str = "lachesi";
 pub(crate) const DB_FILE: &str = "norn.sqlite3";
 pub(crate) const LEGACY_DB_FILE: &str = "lachesi.sqlite3";
-const LATEST_SCHEMA_VERSION: i64 = 17;
+const LATEST_SCHEMA_VERSION: i64 = 18;
 const LEGACY_REVIEWS_DIR: &str = "reviews";
 const LEGACY_REVIEWS_MIGRATION_MARKER: &str = ".legacy-reviews-imported-v1";
 const MAX_ADMINISTRATIVE_AUDIT_TIMESTAMP_MS: i64 = 4_102_444_800_000;
@@ -1267,6 +1268,26 @@ fn migrate(conn: &mut Connection) -> Result<(), String> {
         ).map_err(|error| error.to_string())?;
         migration.commit().map_err(|error| error.to_string())?;
     }
+
+    let migration = conn
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .map_err(|_| "Cannot prepare provider evidence storage.".to_string())?;
+    migration.execute_batch(
+        "CREATE TABLE IF NOT EXISTS provider_review_evidence (
+          evidence_id TEXT PRIMARY KEY CHECK(length(evidence_id) = 64),
+          tenant_id TEXT NOT NULL DEFAULT 'local' CHECK(tenant_id = 'local'),
+          scope_key TEXT NOT NULL,
+          metadata_json TEXT NOT NULL CHECK(length(CAST(metadata_json AS BLOB)) BETWEEN 1 AND 16777216),
+          patch BLOB NOT NULL CHECK(length(patch) <= 8388608),
+          created_at TEXT NOT NULL,
+          FOREIGN KEY(tenant_id, scope_key) REFERENCES ai_review_stores(tenant_id, review_key) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_provider_evidence_scope ON provider_review_evidence(scope_key);
+        INSERT OR IGNORE INTO schema_migrations(version) VALUES (18);"
+    ).map_err(|_| "Cannot migrate provider evidence storage.".to_string())?;
+    migration
+        .commit()
+        .map_err(|_| "Cannot commit provider evidence storage.".to_string())?;
 
     Ok(())
 }
@@ -6800,7 +6821,7 @@ mod tests {
                 .expect("read migration versions");
             assert_eq!(
                 versions,
-                vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17]
+                vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18]
             );
             let store_columns: Vec<String> = conn
                 .prepare("PRAGMA table_info(ai_review_stores)")

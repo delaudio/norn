@@ -180,6 +180,8 @@ pub struct ReviewStartParams {
     pub target: TargetIdentity,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub profile: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub snapshot: Option<crate::services::provider_snapshot::SnapshotRef>,
 }
 
 /// Parameters for the control methods (`repository.status`, `operation.status`,
@@ -720,6 +722,34 @@ impl Request {
             }
             Self::ReviewStart { params, .. } => {
                 params.target.validate()?;
+                if let Some(snapshot) = &params.snapshot {
+                    snapshot
+                        .validate()
+                        .map_err(|_| invalid_request("Invalid review snapshot."))?;
+                    let TargetIdentity::Provider {
+                        provider,
+                        workspace,
+                        repo,
+                        pr_id: Some(pr_id),
+                        run_id: None,
+                    } = &params.target
+                    else {
+                        return Err(invalid_request("A provider preview target without a saved run is required for snapshot review."));
+                    };
+                    let snapshot_provider = match snapshot.repository.provider {
+                        crate::config::ReviewProvider::Github => ProviderKind::Github,
+                        crate::config::ReviewProvider::Bitbucket => ProviderKind::Bitbucket,
+                    };
+                    if snapshot_provider != *provider
+                        || snapshot.repository.workspace != *workspace
+                        || snapshot.repository.repo != *repo
+                        || snapshot.pr_id != *pr_id
+                    {
+                        return Err(invalid_request(
+                            "The review snapshot belongs to a different target.",
+                        ));
+                    }
+                }
                 if params.profile.as_ref().is_some_and(|profile| {
                     profile.is_empty()
                         || profile.chars().count() > 128
@@ -1108,6 +1138,7 @@ mod tests {
             "valid/ready.json",
             "valid/request-diff-file.json",
             "valid/request-review-start.json",
+            "valid/request-review-start-snapshot.json",
             "valid/request-operation-cancel.json",
             "valid/request-provider-snapshot.json",
             "valid/request-provider-snapshot-files.json",
@@ -1152,6 +1183,9 @@ mod tests {
             "invalid/version-mismatch.json",
             "invalid/bad-target.json",
             "invalid/request-provider-snapshot-local.json",
+            "invalid/request-review-snapshot-local.json",
+            "invalid/request-review-snapshot-repository.json",
+            "invalid/request-review-snapshot-saved.json",
             "invalid/request-provider-snapshot-id.json",
             "invalid/request-provider-snapshot-offset.json",
             "invalid/request-provider-snapshot-image-offset.json",
