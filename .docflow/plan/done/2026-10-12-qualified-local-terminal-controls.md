@@ -115,10 +115,43 @@ Preserve the maintainer's#306 closure without inventing child or cutover proof.
 - Existing native Shell diff/operation/storybook behavior; following local pinned
   images/Pierre/saved-history/unsafe fallback/full workflow proof before#358 ends.
 
-## Status
+## Prepared completion receipt
 
-- Claimed by: default-agent, 2026-10-12, single writer.
-- Branch: issue-358-local-terminal-controls.
-- Location: isolated /private/tmp/norn-local-terminal-controls, actual376mainbase.
-- Blockers: implementation/local gates/own exact-head CI/verified PR squash merge.
-- Stopped:
+Implementation commit: `db8bc372d4c03f2ad5bcfaacdb79e9653e36d761`.
+Effective only after the PR final head passes both required CI jobs and its actual
+squash merge to main is verified. Prepared status is not shipped proof.
+
+Local gate: root typecheck/123 Vitest+tooling/lint/protocol/Archgate17/audit;
+UI typecheck/219tests/1346assertions/147 native frames; Rust745core+
+2existingignored/73stdio/6CLI/5onboarding/3binary; noDefault allTargets,
+strict allFeatures/allTargets Clippy, fmt/noGUI. ReactDoctor completed:65,
+9 no-unknown-property warnings solely on supported OpenTUI truncate. Installed
+TextBufferRenderable.d.ts declares truncate?:boolean; native frames demonstrate
+its behavior. These DOM-rule warnings are renderer false positives, not suppressed.
+
+Nine actual owned Git/fake native child stdio scenarios establish native local
+policy/default/owner/root/layers/pins/history/cancel/EOF behavior. The added live
+profile case rejects foreign roots/remote identity and invalid native policy,
+without creating an agent. Existing tests supply native clean/unborn/detached/
+source-ambiguity/capture-storage proof; terminal/full Rust workflow proof is still
+subsequent required work, not inferred from these independent lanes.
+
+Eight owned Shell/renderer cases cover 120x30/50x18/paste; capture cancellation and
+foreign root echoes; independent same-path layer finding choices; qualified native
+profile selection; configured GitHub/Bitbucket/root distinctions and working/base/
+layer recapture; previous-thread/run selection across refresh; operation events
+before response and foreign-target rejection. Four aggregate/client tests cover
+paged options/root drift/late selection, complete UTF8 patch hashing and invalid
+hash, foreign/duplicate profile catalogs and source/layer bounds. A production
+subprocess fixture responds after31s, proving the local request does not race the
+native Git30s budget. Provider behavior continues through existing suite coverage.
+
+Twelve new native Storybook frames cover source/base/layers/loading/error/local
+profile in wide and narrow views. Existing frame changes are only the F4/footer.
+No changes to Makefile/justfile recipes. No private profiles/credentials/provider
+write/actual agent/release, Norn review, delegation or user stash mutation.
+
+#358/#294 remain open; preserve maintainer-closed#306 and ADR0020 Accepted.
+Pinned images/Pierre, qualified saved snapshots/global history, unsafe legacy
+fallback elimination, local reply/fix and actual native UI+Rust full workflow
+proof remain required before local parity and eventual removal/cutover.

@@ -32,7 +32,9 @@ Git is authoritative. Durable history lives in WORKLOG and plan/done.
   Native9 owned stdio scenarios passed, including actual profile/policy source.
   Doctor65 reports9 renderer false positives on supported OpenTUI
   TextBufferOptions.truncate; no source suppression or renderer behavior change.
-  Preparing implementation commit/PR; exact-head CI/actual squash still required.
+  Source commit db8bc372d4c03f2ad5bcfaacdb79e9653e36d761. Prepared plan/done
+  receipt remains ineffective until both required CI jobs pass on exact final head
+  and its actual PR/squash is verified. Root main still4644a03. No0066 merge yet.
 - Fresh GitHub timeline confirms maintainer closed#306at01:22:44Z without
   associated commit. Preserve it; previous open-state descriptions were stale.
   Its child workflows and cutover proof remain required. #358/#294 still open.
