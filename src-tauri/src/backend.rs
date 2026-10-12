@@ -4839,6 +4839,122 @@ fn write_frame(stdout: &mut impl Write, message: ServerMessage) {
 mod tests {
     use super::*;
 
+    #[cfg(unix)]
+    #[test]
+    fn exact_preview_starts_real_native_pipeline_without_clone_and_persists_evidence() {
+        use crate::services::provider_snapshot::{tests::capture, Manager};
+        use std::os::unix::fs::PermissionsExt;
+        struct RestoreEnvironment(Vec<(&'static str, Option<std::ffi::OsString>)>);
+        impl Drop for RestoreEnvironment {
+            fn drop(&mut self) {
+                for (key, previous) in &self.0 {
+                    if let Some(value) = previous {
+                        std::env::set_var(key, value);
+                    } else {
+                        std::env::remove_var(key);
+                    }
+                }
+            }
+        }
+        let _lock = crate::review_storage::TEST_DATA_DIR_ENV_LOCK
+            .lock()
+            .unwrap();
+        let owned = tempfile::tempdir().unwrap();
+        let agent = owned.path().join("owned-agent");
+        let input = owned.path().join("agent-input");
+        std::fs::write(&agent, format!("#!/bin/sh\ncat > '{}'\nprintf '%s\\n' '{{\"result\":\"Exact initial capture complete.\"}}'\n", input.display())).unwrap();
+        std::fs::set_permissions(&agent, std::fs::Permissions::from_mode(0o755)).unwrap();
+        std::fs::write(
+            owned.path().join("settings.json"),
+            r#"{"repos":[],"aiProvider":"claude","defaultDiffView":"unified","theme":"dark"}"#,
+        )
+        .unwrap();
+        let mut restore = RestoreEnvironment(Vec::new());
+        for (key, path) in [
+            ("NORN_CONFIG_DIR", owned.path()),
+            ("NORN_REVIEW_DATA_DIR", owned.path()),
+            ("NORN_REVIEW_AGENT_BIN", agent.as_path()),
+        ] {
+            restore.0.push((key, std::env::var_os(key)));
+            std::env::set_var(key, path);
+        }
+        for provider in [
+            config::ReviewProvider::Github,
+            config::ReviewProvider::Bitbucket,
+        ] {
+            let snapshots = Arc::new(Manager::default());
+            let captured = capture(provider);
+            let patch = captured.patch.clone();
+            let info = snapshots.insert(captured).unwrap();
+            let runtime = ReviewRuntime {
+                engine: ReviewEngine::Real,
+                snapshots,
+                provider_reads: Arc::new(AtomicUsize::new(0)),
+                shutdown: Arc::new(AtomicBool::new(false)),
+            };
+            let target = TargetIdentity::Provider {
+                provider: match provider {
+                    config::ReviewProvider::Github => ProviderKind::Github,
+                    config::ReviewProvider::Bitbucket => ProviderKind::Bitbucket,
+                },
+                workspace: info.request.repository.workspace.clone(),
+                repo: info.request.repository.repo.clone(),
+                pr_id: Some(info.request.pr_id),
+                run_id: None,
+            };
+            let params = protocol::ReviewStartParams {
+                target: target.clone(),
+                profile: None,
+                snapshot: Some(info.snapshot.clone()),
+            };
+            let session = start_snapshot_session_with_recheck(
+                &params,
+                &runtime,
+                &AtomicBool::new(false),
+                |_| Ok(()),
+            )
+            .unwrap();
+            let deadline = Instant::now() + Duration::from_secs(10);
+            loop {
+                let state = (session.read)().unwrap();
+                if state.status != crate::services::review::AiReviewRunStatus::Running {
+                    assert_eq!(
+                        state.status,
+                        crate::services::review::AiReviewRunStatus::Succeeded,
+                        "{state:?}"
+                    );
+                    break;
+                }
+                assert!(
+                    Instant::now() < deadline,
+                    "owned fake agent did not terminate"
+                );
+                thread::sleep(Duration::from_millis(10));
+            }
+            assert!(std::fs::read_to_string(&input).unwrap().contains(&patch));
+            let scope = provider_review_scope(&target).unwrap();
+            let saved = crate::services::review_scope::load_owned(&scope)
+                .unwrap()
+                .unwrap();
+            let run = saved.review_runs.last().unwrap();
+            assert_ne!(run.id, info.snapshot.snapshot_id);
+            assert_eq!(
+                run.reviewed_base_sha.as_deref(),
+                Some(info.destination_sha.as_str())
+            );
+            assert_eq!(
+                run.reviewed_diff_base_sha.as_deref(),
+                Some(info.base_sha.as_str())
+            );
+            assert_eq!(
+                crate::services::provider_snapshot::durable::load_run(&scope, run)
+                    .unwrap()
+                    .patch,
+                patch
+            );
+        }
+    }
+
     #[test]
     fn snapshot_start_fences_cache_ownership_drift_cancel_and_shutdown_before_agent() {
         use crate::services::provider_snapshot::{tests::capture, Manager};

@@ -890,10 +890,15 @@ export class ShellStore {
     // immediately, so a late failure never becomes an unhandled rejection. A
     // file-listing failure (for example a historical review whose revisions are
     // unavailable locally) must not hide findings the backend can still return.
-    const filesOutcome = client.reviewFiles(target, () => generation === this.state.generation && this.state.status !== "closed").then(
-      (value) => ({ ok: true as const, value }),
-      (error: unknown) => ({ ok: false as const, error }),
-    );
+    const filesOutcome = client
+      .reviewFiles(
+        target,
+        () => generation === this.state.generation && this.state.status !== "closed",
+      )
+      .then(
+        (value) => ({ ok: true as const, value }),
+        (error: unknown) => ({ ok: false as const, error }),
+      );
     const findingsOutcome = client.reviewFindings(target).then(
       (value) => ({ ok: true as const, value }),
       (error: unknown) => ({ ok: false as const, error }),
@@ -906,7 +911,12 @@ export class ShellStore {
           0,
           files.value.findIndex((file) => file.path === path),
         );
-        this.update({ files: files.value, selectedFile, liveSnapshot: client.reviewSourceSnapshot?.(target) ?? null, notice: null });
+        this.update({
+          files: files.value,
+          selectedFile,
+          liveSnapshot: client.reviewSourceSnapshot?.(target) ?? null,
+          notice: null,
+        });
       } else {
         this.update({ files: [], error: message(files.error) });
       }
@@ -1449,7 +1459,11 @@ export class ShellStore {
     const generation = this.state.generation;
     this.starting = true;
     try {
-      const result = await client.startReview(target, this.state.selectedReviewProfile, snapshot ?? null);
+      const result = await client.startReview(
+        target,
+        this.state.selectedReviewProfile,
+        snapshot ?? null,
+      );
       this.operationTarget = target;
       this.operationKind = "review";
       this.operationGeneration = generation;
@@ -1729,18 +1743,44 @@ export class ShellStore {
   }
 
   beginReviewProfile(): void {
-    if (this.requestInFlight() || this.state.operation?.state === "running" || this.state.operation?.state === "accepted") return;
-    this.update({ composing: true, composerKind: "profile", composerText: this.state.selectedReviewProfile ?? "" });
+    if (
+      this.requestInFlight() ||
+      this.state.operation?.state === "running" ||
+      this.state.operation?.state === "accepted"
+    )
+      return;
+    this.update({
+      composing: true,
+      composerKind: "profile",
+      composerText: this.state.selectedReviewProfile ?? "",
+    });
   }
 
   submitReviewProfile(): void {
     const profile = this.state.composerText;
-    if (profile && (Array.from(profile).length > 128 || profile.trim() !== profile || /[\u0000-\u001f\u007f-\u009f]/u.test(profile))) {
-      this.update({ notice: "Use a profile name of at most 128 characters, without control characters or surrounding spaces." });
+    if (
+      profile &&
+      (Array.from(profile).length > 128 ||
+        profile.trim() !== profile ||
+        Array.from(profile).some((character) => {
+          const code = character.codePointAt(0)!;
+          return code < 32 || (code >= 127 && code <= 159);
+        }))
+    ) {
+      this.update({
+        notice:
+          "Use a profile name of at most 128 characters, without control characters or surrounding spaces.",
+      });
       return;
     }
-    this.update({ selectedReviewProfile: profile || null, composing: false, composerText: "",
-      notice: profile ? `Review profile: ${profile}. Press Enter to start.` : "Using the repository's default review profile." });
+    this.update({
+      selectedReviewProfile: profile || null,
+      composing: false,
+      composerText: "",
+      notice: profile
+        ? `Review profile: ${profile}. Press Enter to start.`
+        : "Using the repository's default review profile.",
+    });
   }
 
   beginReply(): void {

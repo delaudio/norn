@@ -64,6 +64,7 @@ approval/external provider browsing and broader history/cutover remain separate.
 
 - Claimed by: default-agent, 2026-10-12, `issue-306-provider-evidence-start`.
 - Location: isolated `/private/tmp/norn-provider-evidence-start`, based on fixed
-  PR #370 head `789bd0347eed8b56bdc6ef79ca9f50c1966dc5e2`.
-- Blockers: implementation/gates and verified predecessor merge before PR.
+  PR #370 head `789bd0347eed8b56bdc6ef79ca9f50c1966dc5e2`, subsequently rebased
+  onto verified main squash `a529463b523f7e8039068ccc59fe9243baba0e36`.
+- Blockers: final gates/receipt/PR exact-head CI and verified merge.
 - Stopped:

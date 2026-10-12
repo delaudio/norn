@@ -323,6 +323,17 @@ async function fixPreviewScene() {
   return { client, store };
 }
 
+async function reviewProfileScene() {
+  const { client, store, ready } = readyStore(
+    new FakeBackendTransport({ repositories, targets, files, findings }),
+  );
+  await ready;
+  await store.selectPicker(2);
+  store.beginReviewProfile();
+  store.appendReplyText("security");
+  return { client, store };
+}
+
 async function commitComposerScene() {
   const { client, store, ready } = readyStore(
     new FakeBackendTransport({ repositories, targets, files, findings }),
@@ -1096,6 +1107,8 @@ const scenes: Scene[] = [
     rows: 15,
     build: () => branchScene("conflicts"),
   },
+  { id: "shell-review-profile-120x30", cols: 120, rows: 30, build: reviewProfileScene },
+  { id: "shell-review-profile-50x15", cols: 50, rows: 15, build: reviewProfileScene },
   { id: "shell-commit-composer-120x30", cols: 120, rows: 30, build: commitComposerScene },
   { id: "shell-commit-preview-120x30", cols: 120, rows: 30, build: commitPreviewScene },
   { id: "shell-push-preview-120x30", cols: 120, rows: 30, build: pushPreviewScene },

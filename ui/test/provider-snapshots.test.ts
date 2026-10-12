@@ -196,10 +196,21 @@ test("saved review inventory restores captured source with full target and gener
   for (const fault of ["none", "scope", "stale"]) {
     let current = true;
     const transport = new SnapshotTransport((method, request) => {
-      if (method === "review.files") return { target, files: [], providerSnapshot: fault === "scope" ? { ...info, request: { ...info.request, prId: 8 } } : info };
+      if (method === "review.files")
+        return {
+          target,
+          files: [],
+          providerSnapshot:
+            fault === "scope" ? { ...info, request: { ...info.request, prId: 8 } } : info,
+        };
       if (fault === "stale") current = false;
       const offset = Number(request.offset);
-      return { request, files: [file(offset ? "second" : "first")], total: 2, nextOffset: offset ? null : 1 };
+      return {
+        request,
+        files: [file(offset ? "second" : "first")],
+        total: 2,
+        nextOffset: offset ? null : 1,
+      };
     });
     const client = new BackendClient(transport);
     const result = client.reviewFiles(target, () => current);
@@ -217,11 +228,19 @@ test("saved review inventory restores captured source with full target and gener
 
 test("starting exact preview carries selected profile and rejects saved or foreign targets before transport", async () => {
   const target = { kind: "provider", ...repository, prId: 7 } as const;
-  const transport = new SnapshotTransport(() => ({ operationId: "owned-op", state: "accepted", sequence: 0 }));
+  const transport = new SnapshotTransport(() => ({
+    operationId: "owned-op",
+    state: "accepted",
+    sequence: 0,
+  }));
   const client = new BackendClient(transport);
   await client.startReview(target, "security", snapshot);
   expect(transport.calls[0]?.params).toEqual({ target, profile: "security", snapshot });
-  await expect(client.startReview({ ...target, runId: "saved-run" }, null, snapshot)).rejects.toThrow();
-  await expect(client.startReview({ ...target, repo: "foreign" }, null, snapshot)).rejects.toThrow();
+  await expect(
+    client.startReview({ ...target, runId: "saved-run" }, null, snapshot),
+  ).rejects.toThrow();
+  await expect(
+    client.startReview({ ...target, repo: "foreign" }, null, snapshot),
+  ).rejects.toThrow();
   expect(transport.calls).toHaveLength(1);
 });

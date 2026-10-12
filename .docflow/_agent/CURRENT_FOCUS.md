@@ -12,7 +12,10 @@ Git is authoritative. Durable history lives in WORKLOG and plan/done.
   predecessor #370 subsequently verified merged at `a529463b523f7e8039068ccc59fe9243baba0e36`
   after exact final-head `bc7c2ca` CI38193561843 passed. The first CI failure was
   an owned clone missing local Git identity; all58 stdio also pass with personal/
-  system Git config disabled. Rebase onto actual squash and audit before PR.
+  system Git config disabled. Rebased onto the actual squash baseline; collision
+  audit passed. Local gates pass: root123, UI177/1088/117frames, Rust712+two
+  ignored/59stdio/six CLI/five onboarding/three bin, strict Clippy/fmt/no-GUI/
+  protocol/Archgate17. Preparing receipt/PR; exact-head CI/merge required.
 - State: durable exact provider evidence, no-clone review start and saved restart
   files/diff/images/Pierre/reply integration. UI profile/source/generation fences.
 - Predecessor local gate: root123+tooling/UI172/1057 assertions/115frames,

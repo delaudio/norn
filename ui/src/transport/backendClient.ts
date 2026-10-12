@@ -220,9 +220,18 @@ function snapshotPath(path: string): boolean {
 export class BackendClient {
   private readonly reviewSources = new Map<string, ProviderSnapshotInfo>();
   private reviewSourceKey(target: TargetIdentity): string {
-    return JSON.stringify(target.kind === "provider"
-      ? [target.kind, target.provider, target.workspace, target.repo, target.prId ?? null, target.runId ?? null]
-      : [target.kind, target.localSnapshotSha256]);
+    return JSON.stringify(
+      target.kind === "provider"
+        ? [
+            target.kind,
+            target.provider,
+            target.workspace,
+            target.repo,
+            target.prId ?? null,
+            target.runId ?? null,
+          ]
+        : [target.kind, target.localSnapshotSha256],
+    );
   }
   reviewSourceSnapshot(target: TargetIdentity): ProviderSnapshotInfo | null {
     return this.reviewSources.get(this.reviewSourceKey(target)) ?? null;
@@ -914,31 +923,50 @@ export class BackendClient {
     return result as unknown as DiffFileResult;
   }
 
-  async reviewFiles(target: TargetIdentity, current: () => boolean = () => true): Promise<ChangedFile[]> {
+  async reviewFiles(
+    target: TargetIdentity,
+    current: () => boolean = () => true,
+  ): Promise<ChangedFile[]> {
     if (!current()) throw new Error("Review selection changed.");
     const result = await this.transport.request("review.files", { target });
     if (!current()) throw new Error("Review selection changed.");
-    if (!validPublicationDTO("ReviewFilesResult", result)) throw new Error("Invalid saved review file response.");
+    if (!validPublicationDTO("ReviewFilesResult", result))
+      throw new Error("Invalid saved review file response.");
     const echoed = result.target as TargetIdentity;
     const key = this.reviewSourceKey(target);
-    if (this.reviewSourceKey(echoed) !== key) throw new Error("Saved files belong to a different review.");
+    if (this.reviewSourceKey(echoed) !== key)
+      throw new Error("Saved files belong to a different review.");
     this.reviewSources.delete(key);
     if (result.providerSnapshot !== undefined) {
       const info = result.providerSnapshot as ProviderSnapshotInfo;
-      if (target.kind !== "provider" || !validPublicationDTO("ProviderSnapshotInfo", info)
-        || [info.request, info.snapshot].some((source) => source.prId !== target.prId
-          || source.repository.provider !== target.provider || source.repository.workspace !== target.workspace
-          || source.repository.repo !== target.repo)
-        || info.headSha.length !== info.baseSha.length || info.headSha.length !== info.destinationSha.length
-        || (info.fileCount === 0) !== (info.patchBytes === 0)) {
+      if (
+        target.kind !== "provider" ||
+        !validPublicationDTO("ProviderSnapshotInfo", info) ||
+        [info.request, info.snapshot].some(
+          (source) =>
+            source.prId !== target.prId ||
+            source.repository.provider !== target.provider ||
+            source.repository.workspace !== target.workspace ||
+            source.repository.repo !== target.repo,
+        ) ||
+        info.headSha.length !== info.baseSha.length ||
+        info.headSha.length !== info.destinationSha.length ||
+        (info.fileCount === 0) !== (info.patchBytes === 0)
+      ) {
         throw new Error("Saved provider evidence belongs to a different review or range.");
       }
       const files = await this.providerSnapshotInventory(info, current);
       if (!current()) throw new Error("Review selection changed.");
-      while (this.reviewSources.size >= 64) this.reviewSources.delete(this.reviewSources.keys().next().value!);
+      while (this.reviewSources.size >= 64)
+        this.reviewSources.delete(this.reviewSources.keys().next().value!);
       this.reviewSources.set(key, info);
-      return files.map((file) => ({ path: file.path, oldPath: file.oldPath, status: file.status,
-        additions: file.additions, deletions: file.deletions }));
+      return files.map((file) => ({
+        path: file.path,
+        oldPath: file.oldPath,
+        status: file.status,
+        additions: file.additions,
+        deletions: file.deletions,
+      }));
     }
     return (result.files as ChangedFile[]) ?? [];
   }
@@ -1193,10 +1221,18 @@ export class BackendClient {
     snapshot: ProviderSnapshotRef | null = null,
   ): Promise<OperationStatus> {
     const params = { target, profile, ...(snapshot ? { snapshot } : {}) };
-    if (!validPublicationDTO("ReviewStartParams", params)) throw new Error("Invalid review start parameters.");
-    if (snapshot && (target.kind !== "provider" || target.runId != null || snapshot.prId !== target.prId
-      || snapshot.repository.provider !== target.provider || snapshot.repository.workspace !== target.workspace
-      || snapshot.repository.repo !== target.repo)) throw new Error("Review preview belongs to a different target.");
+    if (!validPublicationDTO("ReviewStartParams", params))
+      throw new Error("Invalid review start parameters.");
+    if (
+      snapshot &&
+      (target.kind !== "provider" ||
+        target.runId != null ||
+        snapshot.prId !== target.prId ||
+        snapshot.repository.provider !== target.provider ||
+        snapshot.repository.workspace !== target.workspace ||
+        snapshot.repository.repo !== target.repo)
+    )
+      throw new Error("Review preview belongs to a different target.");
     const result = await this.transport.request("review.start", params);
     return result as unknown as OperationStatus;
   }
