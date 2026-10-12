@@ -1,0 +1,34 @@
+{
+  "type": "response",
+  "id": "owned",
+  "ok": true,
+  "result": {
+    "request": {
+      "snapshot": {
+        "source": {
+          "kind": "current"
+        },
+        "repository": {
+          "provider": "github",
+          "workspace": "owned",
+          "repo": "same"
+        },
+        "rootId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "snapshotId": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+      },
+      "offset": 0,
+      "limit": 32
+    },
+    "runs": [
+      {
+        "runId": "run-owned",
+        "createdAt": "1",
+        "status": "succeeded",
+        "turnKind": "initial",
+        "findingsCount": 0
+      }
+    ],
+    "total": 1,
+    "nextOffset": null
+  }
+}

@@ -16,7 +16,11 @@ fn key(snapshot: &SnapshotRef) -> Result<String, String> {
         &snapshot.snapshot_id,
     )
 }
-fn ensure_owner(connection: &Connection, info: &Info, create: bool) -> Result<(), String> {
+fn ensure_owner(
+    connection: &Connection,
+    info: &Info,
+    create: bool,
+) -> Result<AiReviewStoreData, String> {
     let snapshot = &info.snapshot;
     let key = key(snapshot)?;
     let row:Option<(String,String,u32,String,Option<String>)>=connection.query_row(
@@ -54,6 +58,7 @@ fn ensure_owner(connection: &Connection, info: &Info, create: bool) -> Result<()
         {
             return Err(invalid());
         }
+        return Ok(owned);
     } else if create {
         let empty = serde_json::to_string(&AiReviewStoreData::default()).map_err(|_| invalid())?;
         upsert_review_json_for_connection(
@@ -72,7 +77,10 @@ fn ensure_owner(connection: &Connection, info: &Info, create: bool) -> Result<()
     } else {
         return Err(invalid());
     }
-    Ok(())
+    Ok(AiReviewStoreData::default())
+}
+pub(crate) fn owned_store(info: &Info) -> Result<AiReviewStoreData, String> {
+    ensure_owner(&open()?, info, false)
 }
 pub(crate) fn save(info: &Info, json: &str) -> Result<(), String> {
     info.snapshot.validate()?;

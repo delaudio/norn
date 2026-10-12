@@ -19,7 +19,18 @@ Git is authoritative. Durable history lives in WORKLOG and plan/done.
   Connect exact captured local source to native engine/payload/operation/cancel
   and durable history/findings/output first. Actual local terminal controls,
   immutable preview/Pierre and full workflow proof remain the next #358 slice.
-  No new lifecycle implementation or gates claimed yet.
+  Qualified native start/recheck/cancel and bounded local history/findings/output/
+  conversations are implemented in the isolated branch; local final gates pass:
+  Rust745 core/72stdio/6CLI/5onboarding/3binary+2existingignored; root123+tooling,
+  lint/protocol/Archgate17/audit; UI206/1277/135frames; Doctor100;
+  noDefault allTargets/strict allFeature allTarget Clippy/fmt/noGUI. PR pending.
+  Eight real owned native child/stdio cases cover providers/wrong defaults/layers/
+  base/missing checkout/clone/persistence/cancel/EOF/preflight/failure/oversize/publication.
+  Observed failures led to RAII read-permit release and compact-envelope private
+  resume redaction; preserve logs. Required-preflight test also separated provider
+  clean-commit checks from captured Local dirty/opaque evidence. Cancellation
+  remains in the native context through policy/preflight/retries. Client five/23.
+  Actual UI/Pierre proof is still a following slice, not claimed from backend tests.
 - Fixtures only: no live provider writes/private credentials/profiles/releases,
   no root unrelated .norn.yaml read/copy/stage.
 

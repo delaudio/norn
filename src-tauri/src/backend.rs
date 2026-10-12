@@ -229,6 +229,7 @@ pub fn run() -> Result<(), i32> {
             "review".to_string(),
             "review-profile-catalog".to_string(),
             "local-snapshots".to_string(),
+            "local-evidence-reviews".to_string(),
         ],
     }));
 
@@ -370,6 +371,94 @@ fn dispatch(request: Request, backend: &Backend) -> bool {
     let id = request.id().to_string();
     let method = request.method();
     match request {
+        Request::LocalReviewStart { params, .. } => {
+            if backend
+                .active_operations
+                .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| {
+                    (n < MAX_ACTIVE_OPERATIONS).then_some(n + 1)
+                })
+                .is_err()
+            {
+                backend.fail(
+                    &id,
+                    ProtocolError::new(
+                        ProtocolErrorCode::Conflict,
+                        "Too many active review operations.",
+                    ),
+                );
+                return false;
+            }
+            let operation_id = format!(
+                "op-{}",
+                backend.next_operation.fetch_add(1, Ordering::SeqCst)
+            );
+            backend.start_local_review(&id, &operation_id, params);
+            false
+        }
+        Request::LocalReviewHistory { .. }
+        | Request::LocalReviewFindings { .. }
+        | Request::LocalReviewOutput { .. }
+        | Request::LocalReviewThreads { .. } => {
+            let active = backend.active_local.clone();
+            if active
+                .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| {
+                    (n < 2).then_some(n + 1)
+                })
+                .is_err()
+            {
+                backend.fail(
+                    &id,
+                    ProtocolError::new(
+                        ProtocolErrorCode::Conflict,
+                        "Two local evidence requests are already running.",
+                    ),
+                );
+                return false;
+            }
+            let counter = ActiveCounter(active);
+            let manager = backend.local_snapshots.clone();
+            let shutdown = backend.shutdown.clone();
+            let control = backend.control.clone();
+            thread::spawn(move || {
+                let result = match request {
+                    Request::LocalReviewHistory { params, .. } => {
+                        crate::services::local_reviews::history(&manager, params).map(|v| json!(v))
+                    }
+                    Request::LocalReviewFindings { params, .. } => {
+                        crate::services::local_reviews::findings(&manager, params).map(|v| json!(v))
+                    }
+                    Request::LocalReviewOutput { params, .. } => {
+                        crate::services::local_reviews::output(&manager, params).map(|v| json!(v))
+                    }
+                    Request::LocalReviewThreads { params, .. } => {
+                        crate::services::local_reviews::threads(&manager, params).map(|v| json!(v))
+                    }
+                    _ => unreachable!(),
+                };
+                if !shutdown.load(Ordering::Acquire) && !manager.stopped() {
+                    let response = match result {
+                        Ok(value) => Response {
+                            id,
+                            ok: true,
+                            result: Some(value),
+                            error: None,
+                        },
+                        Err(message) => Response {
+                            id,
+                            ok: false,
+                            result: None,
+                            error: Some(ProtocolError::new(
+                                ProtocolErrorCode::TargetStale,
+                                message,
+                            )),
+                        },
+                    };
+                    let _ = control.send(ServerMessage::Response(response));
+                }
+                counter.decrement();
+            });
+            false
+        }
         Request::LocalSnapshotCancel { params, .. } => {
             match backend.local_snapshots.cancel(params.clone()) {
                 Ok(canceled) => {
@@ -3412,6 +3501,117 @@ impl Backend {
         });
     }
 
+    fn start_local_review(
+        &self,
+        request_id: &str,
+        operation_id: &str,
+        params: crate::services::local_reviews::StartParams,
+    ) {
+        let mut nonce = [0; 32];
+        if getrandom::getrandom(&mut nonce).is_err() {
+            self.active_operations.fetch_sub(1, Ordering::SeqCst);
+            self.fail(
+                request_id,
+                inline_start_error("Cannot register a local review capture.".into()),
+            );
+            return;
+        }
+        let capture_id = hex::encode(nonce);
+        let ticket =
+            match self
+                .local_snapshots
+                .reserve(crate::services::local_snapshot::CancelParams {
+                    source: params.snapshot.source.clone(),
+                    capture_id: capture_id.clone(),
+                }) {
+                Ok(ticket) => ticket,
+                Err(message) => {
+                    self.active_operations.fetch_sub(1, Ordering::SeqCst);
+                    self.fail(
+                        request_id,
+                        ProtocolError::new(ProtocolErrorCode::Conflict, message),
+                    );
+                    return;
+                }
+            };
+        let target = TargetIdentity::Local {
+            local_snapshot_sha256: params.snapshot.snapshot_id.clone(),
+        };
+        let cancel = Arc::new(AtomicBool::new(false));
+        if let Ok(mut operations) = self.operations.lock() {
+            prune_terminal_operations(&mut operations);
+            operations.insert(
+                operation_id.into(),
+                Operation {
+                    cancel: cancel.clone(),
+                    state: OperationState::Accepted,
+                    sequence: 0,
+                    error: None,
+                },
+            );
+        } else {
+            self.active_operations.fetch_sub(1, Ordering::SeqCst);
+            self.fail(
+                request_id,
+                inline_start_error("Cannot register a local review operation.".into()),
+            );
+            return;
+        }
+        self.respond(
+            request_id,
+            json!({"request":params,"target":target,"operationId":operation_id,"state":"accepted"}),
+        );
+        let writer = self.events.clone();
+        let operations = self.operations.clone();
+        let manager = self.local_snapshots.clone();
+        let reads = self.active_local.clone();
+        let shutdown = self.shutdown.clone();
+        let counter = ActiveCounter(self.active_operations.clone());
+        let operation_id = operation_id.to_string();
+        thread::spawn(move || {
+            emit_event(
+                &writer,
+                &operations,
+                &operation_id,
+                &target,
+                1,
+                OperationEvent::State {
+                    state: OperationState::Running,
+                    error: None,
+                },
+                OperationState::Running,
+                None,
+            );
+            let result = start_captured_local_session(
+                &params, &manager, &reads, &shutdown, &cancel, capture_id, ticket,
+            );
+            if cancel.load(Ordering::Acquire)
+                || shutdown.load(Ordering::Acquire)
+                || manager.stopped()
+            {
+                if let Ok(session) = result {
+                    let _ = (session.cancel)();
+                }
+                finish_cancelled(&writer, &operations, &operation_id, &target, 2);
+            } else {
+                match result {
+                    Ok(session) => monitor_inline_session(
+                        &writer,
+                        &operations,
+                        &operation_id,
+                        &target,
+                        &cancel,
+                        session,
+                    ),
+                    Err(error) => {
+                        emit_failed(&writer, &operations, &operation_id, &target, 2, error)
+                    }
+                }
+            }
+            counter.decrement();
+        });
+    }
+
     fn start_review(
         &self,
         request_id: &str,
@@ -4372,6 +4572,159 @@ struct InlineSession {
     thread_id: Option<String>,
     read: Box<dyn Fn() -> Option<crate::services::review::AiReviewRunState> + Send>,
     cancel: Box<dyn Fn() -> Result<(), String> + Send>,
+}
+
+#[allow(clippy::too_many_arguments)]
+// This permit covers fallible/cancelable local start work. Release on every
+// return, including stale rechecks and EOF, rather than leaking the read budget.
+struct LocalReadPermit(Arc<AtomicUsize>);
+impl Drop for LocalReadPermit {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
+fn start_captured_local_session(
+    params: &crate::services::local_reviews::StartParams,
+    manager: &Arc<crate::services::local_snapshot::Manager>,
+    reads: &Arc<AtomicUsize>,
+    shutdown: &Arc<AtomicBool>,
+    cancel: &Arc<AtomicBool>,
+    capture_id: String,
+    ticket: crate::services::local_snapshot::Ticket,
+) -> Result<InlineSession, ProtocolError> {
+    params.validate().map_err(inline_start_error)?;
+    let canceled =
+        || cancel.load(Ordering::Acquire) || shutdown.load(Ordering::Acquire) || manager.stopped();
+    if canceled() {
+        return Err(ProtocolError::new(
+            ProtocolErrorCode::Cancelled,
+            "Local review canceled before execution.",
+        ));
+    }
+    reads
+        .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| {
+            (n < 2).then_some(n + 1)
+        })
+        .map_err(|_| {
+            ProtocolError::new(
+                ProtocolErrorCode::Conflict,
+                "Two local evidence requests are already running.",
+            )
+        })?;
+    let read_permit = LocalReadPermit(reads.clone());
+    let native_cancel = ticket.cancellation();
+    let bridge_done = Arc::new(AtomicBool::new(false));
+    let bridge = thread::spawn({
+        let done = bridge_done.clone();
+        let cancel = cancel.clone();
+        let shutdown = shutdown.clone();
+        move || {
+            while !done.load(Ordering::Acquire) {
+                if cancel.load(Ordering::Acquire) || shutdown.load(Ordering::Acquire) {
+                    native_cancel.cancel();
+                    break;
+                }
+                thread::sleep(Duration::from_millis(10));
+            }
+        }
+    });
+    let checked = manager.recheck_reserved(
+        crate::services::local_snapshot::RecheckParams {
+            snapshot: params.snapshot.clone(),
+            capture_id,
+        },
+        ticket,
+    );
+    bridge_done.store(true, Ordering::Release);
+    let _ = bridge.join();
+    if canceled() {
+        return Err(ProtocolError::new(
+            ProtocolErrorCode::Cancelled,
+            "Local review canceled before execution.",
+        ));
+    }
+    checked.map_err(|message| ProtocolError::new(ProtocolErrorCode::TargetStale, message))?;
+    let (data, existing) = crate::services::local_reviews::store(manager, &params.snapshot)
+        .map_err(|message| ProtocolError::new(ProtocolErrorCode::TargetStale, message))?;
+    if existing.review_runs.len() >= 1000 || existing.threads.len() >= 1000 {
+        return Err(inline_start_error(
+            "The saved local review has reached its run limit.".into(),
+        ));
+    }
+    drop(read_permit);
+    let info = &data.info;
+    let repo = &info.snapshot.repository;
+    let policy_target = TargetIdentity::Provider {
+        provider: match repo.provider {
+            config::ReviewProvider::Github => ProviderKind::Github,
+            config::ReviewProvider::Bitbucket => ProviderKind::Bitbucket,
+        },
+        workspace: repo.workspace.clone(),
+        repo: repo.repo.clone(),
+        pr_id: None,
+        run_id: None,
+    };
+    let (prompt, selected_profile) =
+        resolve_inline_prompt_with_profile(&policy_target, data.root(), params.profile.as_deref())?;
+    let mut layered = String::new();
+    for (kind, patch) in data.layers() {
+        let label = match kind {
+            crate::local_review::LocalReviewDiffLayerKind::Committed => "Committed",
+            crate::local_review::LocalReviewDiffLayerKind::Staged => "Staged",
+            crate::local_review::LocalReviewDiffLayerKind::Unstaged => "Unstaged",
+        };
+        layered.push_str(&format!("\n## {label} layer\n"));
+        layered.push_str(patch);
+    }
+    let payload = build_review_payload(
+        &prompt,
+        &format!("Local review · {}", info.branch),
+        if info.comparison.mode == crate::services::local_snapshot::Mode::Branch { "branch" } else { "working-tree" },
+        "Each labeled layer is independent captured evidence. The same path may have incompatible hunks in different layers; name its layer in findings. Untracked contents and unselected layers are excluded.",
+        &info.branch,
+        info.comparison.base_ref.as_deref().unwrap_or("working tree"),
+        &layered,
+    );
+    if canceled() {
+        return Err(ProtocolError::new(
+            ProtocolErrorCode::Cancelled,
+            "Local review canceled before execution.",
+        ));
+    }
+    let store = review_run_store().clone();
+    let workspace = repo.workspace.clone();
+    let repository = repo.repo.clone();
+    let snapshot = info.snapshot.snapshot_id.clone();
+    let started = crate::services::review::start_captured_local_inline_review_native(
+        store.clone(),
+        &data,
+        payload,
+        selected_profile,
+        cancel.clone(),
+    )
+    .map_err(inline_start_error)?;
+    let read_store = store.clone();
+    let read_workspace = workspace.clone();
+    let read_repo = repository.clone();
+    let read_snapshot = snapshot.clone();
+    Ok(InlineSession {
+        thread_id: started.thread_id,
+        read: Box::new(move || {
+            get_local_ai_review_run_state_native(
+                &read_store,
+                &read_workspace,
+                &read_repo,
+                &read_snapshot,
+            )
+            .ok()
+            .flatten()
+        }),
+        cancel: Box::new(move || {
+            cancel_local_inline_review_native(&store, &workspace, &repository, &snapshot)
+                .map(|_| ())
+        }),
+    })
 }
 
 fn ai_review_timeout_secs() -> u64 {

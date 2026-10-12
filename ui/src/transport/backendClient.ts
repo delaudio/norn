@@ -21,6 +21,15 @@ import type {
   LocalOptionsResult,
   LocalRecheckParams,
   LocalRecheckResult,
+  LocalReviewAccepted,
+  LocalReviewFindingsPage,
+  LocalReviewFindingsParams,
+  LocalReviewHistoryPage,
+  LocalReviewHistoryParams,
+  LocalReviewOutput,
+  LocalReviewQueryParams,
+  LocalReviewStartParams,
+  LocalReviewThreads,
   LocalSnapshotInfo,
   LocalSnapshotRef,
   ProviderApprovalConfirmParams,
@@ -1278,6 +1287,140 @@ export class BackendClient {
         new Bun.CryptoHasher("sha256").update(result.text).digest("hex") !== result.contentSha256)
     )
       throw new Error("Invalid local evidence diff page.");
+    return result;
+  }
+
+  async localReviewStart(params: LocalReviewStartParams): Promise<LocalReviewAccepted> {
+    const request = { ...params, profile: params.profile ?? null };
+    if (
+      request.profile !== null &&
+      (request.profile.trim() !== request.profile ||
+        /\p{Cc}/u.test(request.profile) ||
+        [...request.profile].length > 128 ||
+        Buffer.byteLength(request.profile) > 512)
+    )
+      throw new Error("Invalid local review profile.");
+    const result = await this.localRequest<LocalReviewAccepted>(
+      "local.review.start",
+      request,
+      "LocalReviewStartParams",
+      "LocalReviewAccepted",
+    );
+    if (result.target.localSnapshotSha256 !== request.snapshot.snapshotId)
+      throw new Error("Local operation does not match the selected snapshot.");
+    return result;
+  }
+  async localReviewHistory(params: LocalReviewHistoryParams): Promise<LocalReviewHistoryPage> {
+    const result = await this.localRequest<LocalReviewHistoryPage>(
+      "local.review.history",
+      params,
+      "LocalReviewHistoryParams",
+      "LocalReviewHistoryPage",
+    );
+    this.localPage(params, result.runs.length, result.total, result.nextOffset);
+    if (
+      new Set(result.runs.map((run) => run.runId)).size !== result.runs.length ||
+      result.runs.some((run) => Buffer.byteLength(run.runId) > 256 || /\p{Cc}/u.test(run.runId))
+    )
+      throw new Error("Invalid local history page.");
+    return result;
+  }
+  private localPage(
+    params: { offset: number; limit: number },
+    count: number,
+    total: number,
+    next: number | null,
+  ): void {
+    const end = params.offset + count;
+    if (
+      count > params.limit ||
+      end > total ||
+      (next !== null ? next !== end || end >= total || count === 0 : end !== total)
+    )
+      throw new Error("Invalid local review page.");
+  }
+  private localRun(request: { runId?: string | null }, actual: string | null): void {
+    if (
+      (request.runId != null && actual !== request.runId) ||
+      (actual !== null && (Buffer.byteLength(actual) > 256 || /\p{Cc}/u.test(actual)))
+    )
+      throw new Error("Local response does not match the selected run.");
+  }
+  async localReviewFindings(params: LocalReviewFindingsParams): Promise<LocalReviewFindingsPage> {
+    const request = { ...params, runId: params.runId ?? null };
+    this.localRun(request, request.runId);
+    const result = await this.localRequest<LocalReviewFindingsPage>(
+      "local.review.findings",
+      request,
+      "LocalReviewFindingsParams",
+      "LocalReviewFindingsPage",
+    );
+    this.localRun(request, result.runId);
+    this.localPage(params, result.findings.length, result.total, result.nextOffset);
+    const rank = { committed: 0, staged: 1, unstaged: 2 };
+    if (
+      (result.runId === null && result.total !== 0) ||
+      new Set(result.findings.map((finding) => finding.id)).size !== result.findings.length ||
+      result.findings.some(
+        (finding) =>
+          Buffer.byteLength(finding.id) > 256 ||
+          /\p{Cc}/u.test(finding.id) ||
+          Buffer.byteLength(finding.title) > 4096 ||
+          Buffer.byteLength(finding.summary) > 8192 ||
+          (finding.anchor === null
+            ? finding.candidateLayers.length !== 0
+            : !localPath(finding.anchor.path) ||
+              (finding.anchor.endLine !== null &&
+                finding.anchor.endLine < finding.anchor.startLine)) ||
+          finding.candidateLayers.some(
+            (layer, index, layers) => index > 0 && rank[layer] <= rank[layers[index - 1]!],
+          ),
+      )
+    )
+      throw new Error("Invalid local finding page.");
+    return result;
+  }
+  async localReviewOutput(params: LocalReviewQueryParams): Promise<LocalReviewOutput> {
+    const request = { ...params, runId: params.runId ?? null };
+    this.localRun(request, request.runId);
+    const result = await this.localRequest<LocalReviewOutput>(
+      "local.review.output",
+      request,
+      "LocalReviewQueryParams",
+      "LocalReviewOutput",
+    );
+    this.localRun(request, result.runId);
+    if (Buffer.byteLength(result.text) > 64 * 1024 || !result.text.trim())
+      throw new Error("Local output exceeds the terminal limit.");
+    return result;
+  }
+  async localReviewThreads(params: LocalReviewQueryParams): Promise<LocalReviewThreads> {
+    const request = { ...params, runId: params.runId ?? null };
+    this.localRun(request, request.runId);
+    const result = await this.localRequest<LocalReviewThreads>(
+      "local.review.threads",
+      request,
+      "LocalReviewQueryParams",
+      "LocalReviewThreads",
+    );
+    this.localRun(request, result.runId);
+    if (
+      new Set(result.threads.map((thread) => thread.id)).size !== result.threads.length ||
+      result.threads.filter((thread) => thread.selected).length > 1 ||
+      (result.runId === null && result.threads.some((thread) => thread.selected)) ||
+      result.threads.some(
+        (thread) =>
+          Buffer.byteLength(thread.id) > 256 ||
+          /\p{Cc}/u.test(thread.id) ||
+          Buffer.byteLength(thread.latestRunId) > 256 ||
+          /\p{Cc}/u.test(thread.latestRunId) ||
+          new Set(thread.messages.map((message) => message.id)).size !== thread.messages.length ||
+          thread.messages.some(
+            (message) => Buffer.byteLength(message.id) > 256 || /\p{Cc}/u.test(message.id),
+          ),
+      )
+    )
+      throw new Error("Invalid local conversation response.");
     return result;
   }
 

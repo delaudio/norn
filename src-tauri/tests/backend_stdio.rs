@@ -4017,3 +4017,608 @@ fn local_capture_immediate_cancel_and_eof_keep_control_and_exit_bounded() {
         .lines()
         .any(|line| serde_json::from_str::<Value>(line).unwrap()["id"] == "eof-capture"));
 }
+
+/// Owned native Local fixture: the configured default deliberately names the
+/// other provider and a different checkout. Qualified Current never uses it.
+#[cfg(unix)]
+struct CapturedLocalFixture {
+    repo: tempfile::TempDir,
+    _wrong: tempfile::TempDir,
+    config: tempfile::TempDir,
+    data: tempfile::TempDir,
+    agent: tempfile::TempDir,
+    backend: Backend,
+    snapshot: Value,
+}
+#[cfg(unix)]
+impl CapturedLocalFixture {
+    fn new(provider: &str, script: &str, branch: bool) -> Self {
+        use std::os::unix::fs::PermissionsExt;
+        let repo = temp_repo();
+        git(repo.path(), &["checkout", "-b", "feature"]);
+        git(
+            repo.path(),
+            &[
+                "remote",
+                "add",
+                "origin",
+                &format!(
+                    "https://{}.org/owned/same.git",
+                    if provider == "github" {
+                        "github"
+                    } else {
+                        "bitbucket"
+                    }
+                )
+                .replace("github.org", "github.com"),
+            ],
+        );
+        std::fs::write(repo.path().join("same.txt"), "base\n").unwrap();
+        git(repo.path(), &["add", "same.txt"]);
+        git(repo.path(), &["commit", "-m", "base"]);
+        git(repo.path(), &["branch", "comparison"]);
+        if branch {
+            std::fs::write(repo.path().join("same.txt"), "committed\n").unwrap();
+            git(repo.path(), &["add", "same.txt"]);
+            git(repo.path(), &["commit", "-m", "change"]);
+        }
+        std::fs::write(repo.path().join("same.txt"), "staged\n").unwrap();
+        git(repo.path(), &["add", "same.txt"]);
+        std::fs::write(repo.path().join("same.txt"), "unstaged 世界\n").unwrap();
+        std::fs::write(
+            repo.path().join("private-untracked.txt"),
+            "EXCLUDED_UNTRACKED_SECRET\n",
+        )
+        .unwrap();
+        let wrong = temp_repo();
+        let config = tempfile::tempdir().unwrap();
+        let data = tempfile::tempdir().unwrap();
+        let agent = tempfile::tempdir().unwrap();
+        let settings = json!({"aiProvider":"claude","repos":[{"provider":if provider=="github"{"bitbucket"}else{"github"},"workspace":"owned","repo":"same","localPath":wrong.path().canonicalize().unwrap()}],"defaultDiffView":"unified","theme":"dark"});
+        std::fs::write(config.path().join("settings.json"), settings.to_string()).unwrap();
+        std::fs::write(repo.path().join(".norn.yaml"), "version: 0.1\nreview:\n  profile: security\nprofiles:\n  default: {}\n  security: {}\n").unwrap();
+        let script = script.replace("@AGENT@", agent.path().to_str().unwrap());
+        let binary = agent.path().join("fake-agent");
+        std::fs::write(&binary, script).unwrap();
+        std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let mut backend = Self::spawn(repo.path(), config.path(), data.path(), agent.path());
+        backend.handshake();
+        let comparison = json!({"source":{"kind":"current"},"mode":if branch{"branch"}else{"workingTree"},"baseRef":if branch{Some("comparison")}else{None},"layers":if branch{json!(["committed"])}else{json!(["staged","unstaged"])}});
+        backend.send(json!({"type":"request","id":"owned-capture","method":"local.snapshot","params":{"captureId":"d".repeat(64),"comparison":comparison}}));
+        let response = backend.wait_for(|v| v["id"] == "owned-capture", Duration::from_secs(10));
+        assert_eq!(response["ok"], true, "{response}");
+        let snapshot = response["result"]["info"]["snapshot"].clone();
+        assert_eq!(snapshot["repository"]["provider"], provider);
+        Self {
+            repo,
+            _wrong: wrong,
+            config,
+            data,
+            agent,
+            backend,
+            snapshot,
+        }
+    }
+    fn spawn(repo: &Path, config: &Path, data: &Path, agent: &Path) -> Backend {
+        Backend::spawn_env(
+            repo,
+            &[
+                ("NORN_CONFIG_DIR", config.to_str().unwrap()),
+                ("NORN_REVIEW_DATA_DIR", data.to_str().unwrap()),
+                ("NORN_REVIEW_ENGINE", "real"),
+                (
+                    "NORN_REVIEW_AGENT_BIN",
+                    agent.join("fake-agent").to_str().unwrap(),
+                ),
+                ("NORN_BACKEND_REPO_PATH", repo.to_str().unwrap()),
+            ],
+        )
+    }
+    fn start(&mut self) -> String {
+        self.backend.send(json!({"type":"request","id":"owned-start","method":"local.review.start","params":{"snapshot":self.snapshot,"profile":null}}));
+        let response = self
+            .backend
+            .wait_for(|v| v["id"] == "owned-start", Duration::from_secs(5));
+        assert_eq!(response["ok"], true, "{response}");
+        assert_eq!(
+            response["result"]["target"]["localSnapshotSha256"],
+            self.snapshot["snapshotId"]
+        );
+        response["result"]["operationId"].as_str().unwrap().into()
+    }
+    fn terminal(&mut self, operation: &str) -> Value {
+        let deadline = std::time::Instant::now() + Duration::from_secs(15);
+        loop {
+            let frame = self
+                .backend
+                .next(deadline.saturating_duration_since(std::time::Instant::now()))
+                .expect("owned local terminal event");
+            assert!(
+                !frame.to_string().contains("private-owned-session"),
+                "private native resume id leaked in stream"
+            );
+            if frame["operationId"] == operation
+                && ["succeeded", "failed", "cancelled"]
+                    .iter()
+                    .any(|state| frame["event"]["state"] == *state)
+            {
+                return frame;
+            }
+        }
+    }
+    fn read(&mut self, method: &str, extra: Value) -> Value {
+        let mut params = json!({"snapshot":self.snapshot});
+        params
+            .as_object_mut()
+            .unwrap()
+            .extend(extra.as_object().unwrap().clone());
+        self.backend
+            .send(json!({"type":"request","id":"owned-read","method":method,"params":params}));
+        self.backend
+            .wait_for(|v| v["id"] == "owned-read", Duration::from_secs(10))
+    }
+    fn restart(&mut self) {
+        self.backend
+            .send(json!({"type":"request","id":"owned-stop","method":"shutdown","params":{}}));
+        self.backend
+            .wait_for(|v| v["id"] == "owned-stop", Duration::from_secs(5));
+        assert!(self.backend.child.wait().unwrap().success());
+        self.backend = Self::spawn(
+            self.repo.path(),
+            self.config.path(),
+            self.data.path(),
+            self.agent.path(),
+        );
+        self.backend.handshake();
+    }
+}
+#[cfg(unix)]
+const CAPTURED_LOCAL_AGENT: &str = r#"#!/bin/sh
+pwd > '@AGENT@/cwd'
+cat > '@AGENT@/payload'
+printf '%s\n' '{"result": "Owned native local review complete.\n\n```json\n{\"schemaVersion\": \"norn.review.v1\", \"findings\": [{\"title\": \"Owned layer finding\", \"body\": \"The same path occurs in separate layers.\", \"severity\": \"major\", \"category\": \"bug\", \"confidence\": \"high\", \"file\": \"same.txt\", \"line\": 1}]}\n```\n", "session_id": "private-owned-session"}'
+"#;
+#[cfg(unix)]
+#[test]
+fn captured_local_native_review_uses_exact_owner_layers_and_restores_history() {
+    for provider in ["github", "bitbucket"] {
+        let mut f = CapturedLocalFixture::new(provider, CAPTURED_LOCAL_AGENT, false);
+        let operation = f.start();
+        let terminal = f.terminal(&operation);
+        assert_eq!(terminal["event"]["state"], "succeeded", "{terminal}");
+        let cwd = std::fs::read_to_string(f.agent.path().join("cwd")).unwrap();
+        assert_eq!(
+            Path::new(cwd.trim()).canonicalize().unwrap(),
+            f.repo.path().canonicalize().unwrap()
+        );
+        let payload = std::fs::read_to_string(f.agent.path().join("payload")).unwrap();
+        assert!(payload.contains("## Staged layer\n") && payload.contains("## Unstaged layer\n"));
+        assert!(
+            payload.contains("+staged\n")
+                && payload.contains("-staged\n")
+                && payload.contains("+unstaged 世界\n")
+        );
+        assert!(!payload.contains("EXCLUDED_UNTRACKED_SECRET"));
+        let history = f.read("local.review.history", json!({"offset":0,"limit":1}));
+        assert_eq!(history["ok"], true, "{history}");
+        assert_eq!(history["result"]["total"], 1);
+        let run = history["result"]["runs"][0]["runId"].clone();
+        let output = f.read("local.review.output", json!({"runId":run}));
+        assert_eq!(output["ok"], true, "{output}");
+        assert_eq!(
+            output["result"]["text"],
+            "Owned native local review complete."
+        );
+        let findings = f.read(
+            "local.review.findings",
+            json!({"runId":run,"offset":0,"limit":1}),
+        );
+        assert_eq!(findings["ok"], true, "{findings}");
+        assert_eq!(findings["result"]["total"], 1, "{findings}");
+        assert_eq!(
+            findings["result"]["findings"][0]["candidateLayers"],
+            json!(["staged", "unstaged"])
+        );
+        let threads = f.read("local.review.threads", json!({"runId":run}));
+        assert_eq!(threads["ok"], true, "{threads}");
+        assert_eq!(threads["result"]["threads"][0]["selected"], true);
+        assert!(!threads.to_string().contains("private-owned-session"));
+        let connection = rusqlite::Connection::open(f.data.path().join("norn.sqlite3")).unwrap();
+        let stored: (String, String) = connection
+            .query_row(
+                "SELECT target_kind,store_json FROM ai_review_stores WHERE target_kind='local'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        let store: Value = serde_json::from_str(&stored.1).unwrap();
+        assert_eq!(store["reviewRuns"][0]["provider"], provider);
+        assert_eq!(store["reviewRuns"][0]["reviewProfile"], "security");
+        assert_eq!(
+            store["reviewRuns"][0]["reviewedHeadSha"],
+            f.snapshot["snapshotId"]
+        );
+        assert!(store["reviewRuns"][0]["prId"].as_u64().unwrap() >= 2147483648);
+        drop(connection);
+        std::fs::write(f.repo.path().join("same.txt"), "changed after review\n").unwrap();
+        f.restart();
+        assert_eq!(
+            f.read("local.review.output", json!({"runId":run}))["result"]["text"],
+            output["result"]["text"]
+        );
+        assert_eq!(
+            f.read("local.review.history", json!({"offset":0,"limit":1}))["result"],
+            history["result"]
+        );
+        assert_eq!(
+            f.read("local.review.output", json!({"runId":"not-owned"}))["ok"],
+            false
+        );
+        let original = f.snapshot.clone();
+        f.snapshot["repository"]["provider"] = json!(if provider == "github" {
+            "bitbucket"
+        } else {
+            "github"
+        });
+        assert_eq!(
+            f.read("local.review.history", json!({"offset":0,"limit":1}))["ok"],
+            false
+        );
+        f.snapshot = original;
+        std::fs::remove_file(f.agent.path().join("cwd")).unwrap();
+        let stale = f.start();
+        assert_eq!(f.terminal(&stale)["event"]["error"]["code"], "targetStale");
+        assert!(!f.agent.path().join("cwd").exists());
+    }
+}
+#[cfg(unix)]
+#[test]
+fn captured_local_native_branch_excludes_dirty_layers_and_base_movement_fails() {
+    let mut f = CapturedLocalFixture::new("github", CAPTURED_LOCAL_AGENT, true);
+    let operation = f.start();
+    let terminal = f.terminal(&operation);
+    assert_eq!(terminal["event"]["state"], "succeeded", "{terminal}");
+    let payload = std::fs::read_to_string(f.agent.path().join("payload")).unwrap();
+    assert!(payload.contains("## Committed layer\n") && payload.contains("+committed\n"));
+    assert!(
+        !payload.contains("## Staged layer\n")
+            && !payload.contains("+staged\n")
+            && !payload.contains("+unstaged")
+    );
+    std::fs::remove_file(f.agent.path().join("cwd")).unwrap();
+    git(f.repo.path(), &["branch", "-f", "comparison", "HEAD"]);
+    let operation = f.start();
+    assert_eq!(
+        f.terminal(&operation)["event"]["error"]["code"],
+        "targetStale"
+    );
+    assert!(!f.agent.path().join("cwd").exists());
+}
+#[cfg(unix)]
+#[test]
+fn captured_local_native_cancel_kills_child_and_eof_fences_queued_start() {
+    let script = r#"#!/bin/sh
+cat > '@AGENT@/payload'
+printf started > '@AGENT@/started'
+sleep 10
+printf late > '@AGENT@/late'
+printf '%s\n' '{"result":"late"}'
+"#;
+    let mut f = CapturedLocalFixture::new("bitbucket", script, false);
+    let operation = f.start();
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    while !f.agent.path().join("started").exists() {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "owned native child never started"
+        );
+        thread::sleep(Duration::from_millis(20));
+    }
+    f.backend.send(json!({"type":"request","id":"owned-cancel","method":"operation.cancel","params":{"operationId":operation}}));
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    let mut acknowledged = false;
+    let mut terminal = None;
+    while !acknowledged || terminal.is_none() {
+        let frame = f
+            .backend
+            .next(deadline.saturating_duration_since(std::time::Instant::now()))
+            .expect("cancel response and terminal event");
+        if frame["id"] == "owned-cancel" {
+            acknowledged = true;
+            assert_eq!(frame["ok"], true);
+        }
+        if frame["operationId"] == operation && frame["event"]["state"] == "cancelled" {
+            terminal = Some(frame);
+        }
+    }
+    assert_eq!(terminal.unwrap()["event"]["state"], "cancelled");
+    assert!(!f.agent.path().join("late").exists());
+    f.restart();
+    std::fs::remove_file(f.agent.path().join("started")).unwrap();
+    let mut command = Command::new(env!("CARGO_BIN_EXE_norn-backend"));
+    command
+        .current_dir(f.repo.path())
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .env("NORN_CONFIG_DIR", f.config.path())
+        .env("NORN_REVIEW_DATA_DIR", f.data.path())
+        .env("NORN_BACKEND_REPO_PATH", f.repo.path())
+        .env("NORN_REVIEW_ENGINE", "real")
+        .env("NORN_REVIEW_AGENT_BIN", f.agent.path().join("fake-agent"));
+    let mut eof = command.spawn().unwrap();
+    let mut input = eof.stdin.take().unwrap();
+    let request = json!({"type":"request","id":"owned-eof","method":"local.review.start","params":{"snapshot":f.snapshot,"profile":null}});
+    input
+        .write_all(
+            format!(
+                "{}\n{request}\n",
+                json!({"type":"hello","protocolVersion":1,"client":{"name":"owned","version":"1"}})
+            )
+            .as_bytes(),
+        )
+        .unwrap();
+    drop(input);
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    loop {
+        if let Some(status) = eof.try_wait().unwrap() {
+            assert!(status.success());
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "EOF did not stop queued local review"
+        );
+        thread::sleep(Duration::from_millis(20));
+    }
+    assert!(
+        !f.agent.path().join("started").exists(),
+        "queued local agent launched after EOF"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn captured_local_native_failures_and_oversized_payload_never_spawn_a_late_child() {
+    let mut f = CapturedLocalFixture::new(
+        "github",
+        "#!/bin/sh\ncat > '@AGENT@/payload'\nprintf started > '@AGENT@/started'\nexit 7\n",
+        false,
+    );
+    let operation = f.start();
+    let failed = f.terminal(&operation);
+    assert_eq!(failed["event"]["state"], "failed", "{failed}");
+    assert!(f.agent.path().join("started").exists());
+    std::fs::remove_file(f.agent.path().join("started")).unwrap();
+    // A selected profile must be known in the actual captured checkout.
+    f.backend.send(json!({"type":"request","id":"unknown-profile","method":"local.review.start","params":{"snapshot":f.snapshot,"profile":"unknown"}}));
+    let accepted = f
+        .backend
+        .wait_for(|v| v["id"] == "unknown-profile", Duration::from_secs(5));
+    let operation = accepted["result"]["operationId"].as_str().unwrap();
+    assert_eq!(f.terminal(operation)["event"]["state"], "failed");
+    assert!(!f.agent.path().join("started").exists());
+    std::fs::write(
+        f.repo.path().join("same.txt"),
+        format!("{}\n", "x".repeat(9 * 1024 * 1024)),
+    )
+    .unwrap();
+    f.backend.send(json!({"type":"request","id":"large-capture","method":"local.snapshot","params":{"captureId":"e".repeat(64),"comparison":{"source":{"kind":"current"},"mode":"workingTree","baseRef":null,"layers":["unstaged"]}}}));
+    let captured = f
+        .backend
+        .wait_for(|v| v["id"] == "large-capture", Duration::from_secs(15));
+    assert_eq!(captured["ok"], true, "{captured}");
+    assert!(captured["result"]["info"]["patchBytes"].as_u64().unwrap() > 8 * 1024 * 1024);
+    f.snapshot = captured["result"]["info"]["snapshot"].clone();
+    let operation = f.start();
+    let failed = f.terminal(&operation);
+    assert_eq!(failed["event"]["state"], "failed", "{failed}");
+    assert!(
+        failed["event"]["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("payload"),
+        "{failed}"
+    );
+    assert!(!f.agent.path().join("started").exists());
+}
+#[cfg(unix)]
+#[test]
+fn captured_local_native_read_survives_missing_checkout_and_rejects_bounded_store_corruption() {
+    let mut f = CapturedLocalFixture::new("bitbucket", CAPTURED_LOCAL_AGENT, false);
+    let operation = f.start();
+    let terminal = f.terminal(&operation);
+    assert_eq!(terminal["event"]["state"], "succeeded", "{terminal}");
+    let history = f.read("local.review.history", json!({"offset":0,"limit":32}));
+    let run = history["result"]["runs"][0]["runId"].clone();
+    f.backend
+        .send(json!({"type":"request","id":"missing-stop","method":"shutdown","params":{}}));
+    f.backend
+        .wait_for(|v| v["id"] == "missing-stop", Duration::from_secs(5));
+    assert!(f.backend.child.wait().unwrap().success());
+    std::fs::remove_dir_all(f.repo.path()).unwrap();
+    f.backend = CapturedLocalFixture::spawn(
+        f._wrong.path(),
+        f.config.path(),
+        f.data.path(),
+        f.agent.path(),
+    );
+    f.backend.handshake();
+    assert_eq!(
+        f.read("local.review.output", json!({"runId":run}))["result"]["text"],
+        "Owned native local review complete."
+    );
+    let connection = rusqlite::Connection::open(f.data.path().join("norn.sqlite3")).unwrap();
+    let oversized = "x".repeat(16 * 1024 * 1024 + 1);
+    connection
+        .execute(
+            "UPDATE ai_review_stores SET store_json=?1 WHERE target_kind='local'",
+            [oversized],
+        )
+        .unwrap();
+    assert_eq!(
+        f.read("local.review.history", json!({"offset":0,"limit":32}))["ok"],
+        false
+    );
+    assert_eq!(
+        f.read("local.review.output", json!({"runId":run}))["ok"],
+        false
+    );
+}
+#[cfg(unix)]
+#[test]
+fn captured_local_native_current_source_rejects_same_name_clone_before_agent() {
+    let mut f = CapturedLocalFixture::new("github", CAPTURED_LOCAL_AGENT, false);
+    let clone = tempfile::tempdir().unwrap();
+    git(
+        clone.path(),
+        &[
+            "clone",
+            "--no-hardlinks",
+            f.repo.path().to_str().unwrap(),
+            ".",
+        ],
+    );
+    git(
+        clone.path(),
+        &[
+            "remote",
+            "set-url",
+            "origin",
+            "https://github.com/owned/same.git",
+        ],
+    );
+    std::fs::write(clone.path().join("same.txt"), "staged\n").unwrap();
+    git(clone.path(), &["add", "same.txt"]);
+    std::fs::write(clone.path().join("same.txt"), "unstaged 世界\n").unwrap();
+    std::fs::write(
+        clone.path().join(".norn.yaml"),
+        "version: 0.1\nreview:\n  profile: security\nprofiles:\n  default: {}\n  security: {}\n",
+    )
+    .unwrap();
+    f.backend
+        .send(json!({"type":"request","id":"clone-stop","method":"shutdown","params":{}}));
+    f.backend
+        .wait_for(|v| v["id"] == "clone-stop", Duration::from_secs(5));
+    assert!(f.backend.child.wait().unwrap().success());
+    f.backend =
+        CapturedLocalFixture::spawn(clone.path(), f.config.path(), f.data.path(), f.agent.path());
+    f.backend.handshake();
+    let operation = f.start();
+    assert_eq!(
+        f.terminal(&operation)["event"]["error"]["code"],
+        "targetStale"
+    );
+    assert!(!f.agent.path().join("cwd").exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn captured_local_native_history_pages_preserve_runs_and_local_ids_cannot_publish() {
+    let mut f = CapturedLocalFixture::new("github", CAPTURED_LOCAL_AGENT, false);
+    let first = f.start();
+    assert_eq!(f.terminal(&first)["event"]["state"], "succeeded");
+    let first_history = f.read("local.review.history", json!({"offset":0,"limit":1}));
+    let first_run = first_history["result"]["runs"][0]["runId"].clone();
+    let second = f.start();
+    assert_eq!(f.terminal(&second)["event"]["state"], "succeeded");
+    let latest = f.read("local.review.history", json!({"offset":0,"limit":1}));
+    assert_eq!(latest["result"]["total"], 2);
+    assert_eq!(latest["result"]["nextOffset"], 1);
+    assert_ne!(latest["result"]["runs"][0]["runId"], first_run);
+    let older = f.read("local.review.history", json!({"offset":1,"limit":1}));
+    assert_eq!(older["result"]["runs"][0]["runId"], first_run);
+    assert_eq!(older["result"]["nextOffset"], Value::Null);
+    let findings = f.read(
+        "local.review.findings",
+        json!({"runId":first_run,"offset":0,"limit":1}),
+    );
+    assert_eq!(findings["result"]["runId"], first_run);
+    assert_eq!(findings["result"]["total"], 1);
+    assert_eq!(
+        f.read("local.review.history", json!({"offset":3,"limit":1}))["ok"],
+        false
+    );
+    let id = u32::from_str_radix(&f.snapshot["snapshotId"].as_str().unwrap()[..8], 16).unwrap()
+        | 0x80000000;
+    let scope = json!({"provider":"github","workspace":"owned","repo":"same","prId":id});
+    f.backend.send(json!({"type":"request","id":"local-publish","method":"publication.prepare","params":{"scope":scope,"localIds":["not-a-provider-draft"]}}));
+    // Invalid high-bit publication scope is rejected during strict decoding,
+    // before dispatch or credentials. Malformed frames have no response id.
+    f.backend.send(
+        json!({"type":"request","id":"publish-control","method":"repository.status","params":{}}),
+    );
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    loop {
+        let response = f
+            .backend
+            .next(deadline.saturating_duration_since(std::time::Instant::now()))
+            .expect("control after rejected local publication");
+        assert_ne!(
+            response["id"], "local-publish",
+            "local publication reached dispatch"
+        );
+        if response["id"] == "publish-control" {
+            assert_eq!(response["ok"], true);
+            break;
+        }
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn captured_local_native_cancel_during_required_preflight_fences_agent_launch() {
+    let mut f = CapturedLocalFixture::new("github", CAPTURED_LOCAL_AGENT, false);
+    let preflight = f.agent.path().join("preflight.sh");
+    std::fs::write(
+        &preflight,
+        format!(
+            "#!/bin/sh\nprintf started > '{}'\nsleep 5\nprintf complete > '{}'\n",
+            f.agent.path().join("preflight-started").display(),
+            f.agent.path().join("preflight-complete").display()
+        ),
+    )
+    .unwrap();
+    let command = format!("/bin/sh '{}'", preflight.display());
+    let policy=format!("version: 0.1\nreview:\n  profile: security\nprofiles:\n  security:\n    analyzers:\n      preflight: required\nanalyzers:\n  preflight:\n    enabled: true\n    required: true\n    command: {}\n",serde_json::to_string(&command).unwrap());
+    std::fs::write(f.repo.path().join(".norn.yaml"), policy).unwrap();
+    let operation = f.start();
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    while !f.agent.path().join("preflight-started").exists() {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "required native preflight never started"
+        );
+        thread::sleep(Duration::from_millis(20));
+    }
+    f.backend.send(json!({"type":"request","id":"preflight-cancel","method":"operation.cancel","params":{"operationId":operation}}));
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    let mut acknowledged = false;
+    let mut canceled = false;
+    while !acknowledged || !canceled {
+        let frame = f
+            .backend
+            .next(deadline.saturating_duration_since(std::time::Instant::now()))
+            .expect("preflight cancel response/event");
+        if frame["id"] == "preflight-cancel" {
+            assert_eq!(frame["ok"], true);
+            acknowledged = true;
+        }
+        if frame["operationId"] == operation && frame["event"]["state"] == "cancelled" {
+            canceled = true;
+        }
+    }
+    f.backend
+        .send(json!({"type":"request","id":"preflight-stop","method":"shutdown","params":{}}));
+    f.backend
+        .wait_for(|v| v["id"] == "preflight-stop", Duration::from_secs(5));
+    assert!(f.backend.child.wait().unwrap().success());
+    assert!(
+        !f.agent.path().join("cwd").exists(),
+        "agent launched after canceled native preflight"
+    );
+    assert!(
+        !f.agent.path().join("preflight-complete").exists(),
+        "canceled preflight completed late"
+    );
+}

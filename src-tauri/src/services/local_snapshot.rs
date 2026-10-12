@@ -4,7 +4,7 @@ use super::bitbucket::workspace_prs::RepositoryIdentity;
 use crate::local_review::{
     GitRunControl, LocalReviewCancellation, LocalReviewDiffLayerKind as Layer,
 };
-pub(crate) use capture::Manager;
+pub(crate) use capture::{Data, Manager, Ticket};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
