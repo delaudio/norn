@@ -1105,3 +1105,20 @@ Plan 0053 completion prepared after implementation `e4264db`, effective only on 
   removed; exact console restoration/reaping/all-case execution stay required.
 - Only owned test harness/docs change; production UI/Rust gates unchanged.
   Native Windows four-case proof still pending;0070 remains todo.
+
+## 2026-10-12 — actual381 receipt and0071 repository-operations claim
+
+- PR381 actually squashed 29f5e2a63efca38fccb0f332d812fde80f11354b at2026-10-12T17:03:36Z.
+  Exacte883fc9f8a0f181d99283f56ffade41788816dda passed all five
+  CI38280325908 checks. Windows independently observes native73 and UI73
+  cause; all four native terminal cases pass on all3OS. No check bypass.
+- Rootmain fast-forwarded; user stash and unrelated untracked config intact.
+  Reconcile0070 done/parity only now; combined379/380/381 completes359.
+- Claim0071 before code, isolated issue-360-repository-operations checkout
+  on actual381main. Preserve shipped branch/status/checkout/fetch/pull/stash
+  with bounded provider-aware native services and explicit one-use approval.
+- Prior standalone owned smart-Git CGI proxy research proves both provider
+  origin identities unchanged with real fetch/ff-pull through loopback only.
+  This is research, not future native acceptance; fail-closed tests required.
+- Plan/audit before implementation; no unrelated user config/profile read.
+  ADR0020 Accepted,360/294 active; no Norn review or delegation.

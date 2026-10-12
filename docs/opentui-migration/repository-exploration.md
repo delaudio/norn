@@ -105,5 +105,9 @@ Storybook frames cover wide/narrow tree, previews, find and unavailable states.
 
 Existing desktop component/parser tests, shared raster regression tests, core
 and CLI gates remain required. No provider HTTP, credentials, actual agent or
-private profile is needed for these proofs. #359 remains open for the actual
-external-editor lifecycle proof and final parity assessment.
+private profile is needed for these proofs. The complete explorer and explicit editor baseline is now preserved through
+PR379/b15d80b, PR380/d623231 and PR381/29f5e2a. Exact editor source
+e883fc9 passed all five CI38280325908 jobs, including actual GUI IPC and
+terminal success/error/Ctrl-C/backend-death on Linux/macOS/Windows. Native
+console modes/focus and owned editor cleanup are proven. This completes #359;
+branch/worktree operations remain separately owned by #360.
