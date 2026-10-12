@@ -677,3 +677,19 @@ Plan 0053 completion prepared after implementation `e4264db`, effective only on 
   closure without inventing child parity/cutover proof. PR#376 body removes an
   unintended GitHub closing reference to#358 caused by a negated closure sentence.
   Actual #358/#294 remain open; required child implementation continues.
+
+## 2026-10-12 — verified#376 merge, plan0066 claim
+
+- #376 actual squash4644a03739c78fbe7e687edbb7a03d54f8366c13 at07:12:32Z,
+  final19610d53dc067148367371ee56dd346bfcab2a3f both requiredCI38214976426
+  SUCCESS: UI06:56:27Z and verify07:10:53Z (14m51sjob). No auto-closure links;
+  #358/#294 remain open, maintainer-closed#306 preserved. Root main ff synced;
+  unrelated .norn.yaml and existing5f69c995stash preserved without reading.
+- Plan0065 receipt effective only from this verified merge. Proof remains eight
+  actual owned native child/stdio scenarios and full gates listed in its receipt.
+  API does not establish actual UI/Pierre/local full workflow parity by itself.
+- Plan0066 claimed before source edits in isolated branch/worktree on actual376.
+  Existing shell gets exact local source/base/layer capture, snapshot consumers,
+  native lifecycle/profiles and owned wide/narrow input/frames. Following pinned
+  preview/Pierre/saved history/unsafe fallback/full workflow proof is still required.
+  No new0066implementation or gate success claimed yet; no Norn review/delegation.
