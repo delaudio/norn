@@ -5,6 +5,7 @@ import type {
 } from "../../../src/protocol/generated/protocol";
 import type { BackendClient } from "../transport/backendClient";
 import { BackendRequestError } from "../transport/types";
+import { protectConsoleInterrupts } from "./consoleControl";
 
 export interface EditorSnapshot {
   busy: boolean;
@@ -71,8 +72,12 @@ export class EditorController {
         return;
       }
       if (params.mode === "terminal") {
+        await protectConsoleInterrupts();
+        if (!current()) return;
         this.renderer.suspend();
         suspended = true;
+        await protectConsoleInterrupts();
+        if (!current()) return;
       }
       const opened = await this.client.repositoryEditorOpen(
         { context: params.context, token: prepared.token },

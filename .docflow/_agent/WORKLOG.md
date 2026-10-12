@@ -1069,3 +1069,24 @@ Plan 0053 completion prepared after implementation `e4264db`, effective only on 
   UI typecheck/lint/fmt and all four production macOS PTY cases pass. New exact
   head Windows Ctrl-C/backend-death proof and all five checks remain required.
   https://learn.microsoft.com/en-us/windows/console/setconsolemode
+
+## 2026-10-12 — PR381 UI console interrupt ownership
+
+- Exact010bf1fbc7a5e64c4cdddeaae61f5d35d933e75b CI38274290427 passes
+  verify/UI/Linux/macOS. Windows native review, GUI IPC and ConPTY success/
+  error pass. Ctrl-C kills the editor and UI (C000013A); backend death returns
+  UI255 instead of the test's guessed1. Four-case acceptance still pending.
+- Add a UI-only fixed kernel32 SetConsoleCtrlHandler binding and reassert its
+  protection before/after renderer suspension. Restore/release once at UI
+  exit, including cleanup failure. Rust engine communication remains stdio;
+  no Rust library, shared engine memory or caller-controlled native symbol.
+- Derive backend-death expected status from the actual owned native process
+  and require the UI's exact exit-cause message. Failure facts include native
+  before/after console modes; all four cases and exact restoration remain.
+- Local253UItests/1588assertions/48files, root/UItypes, lint,195nativeframes,
+  Storybook, Archgate17, audit and four production macOS PTY cases pass.
+  Online Doctor failed npm401; offline registry lookup missed its cache.
+  Existing cached CLI ran directly:25files, no diagnostics; score service
+  unavailable. No credentials/config read or installation/setup changes.
+- Keep0070 todo and359 open until final exact-head five-job proof and actual
+  verified squash. Current Rust767core/76stdio/Clippy proof remains unchanged.

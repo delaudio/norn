@@ -44,6 +44,8 @@ try {
         $Facts=@{witnessExit=$Session.ExitCode}
         $ModesFile=Join-Path $Editors 'changed-modes.txt'
         if(Test-Path $ModesFile){$Facts.editorModes=[IO.File]::ReadAllText($ModesFile)}
+        $ConsoleModesFile=Join-Path $Editors 'console-modes.txt'
+        if(Test-Path $ConsoleModesFile){$Facts.consoleModes=[IO.File]::ReadAllText($ConsoleModesFile)}
         $PidFile=Join-Path $Editors 'editor.pid'
         if(Test-Path $PidFile){$Facts.editorAlive=[bool](Get-Process -Id ([uint32][IO.File]::ReadAllText($PidFile)) -ErrorAction SilentlyContinue)}
         $InputFile=Join-Path $Editors 'input.txt'
@@ -66,11 +68,17 @@ try {
   if ($Actual -ne ('+1'+"`n"+$Source)) {throw ('Editor argv changed: '+$Actual)}
   $EditorPid=[uint32][IO.File]::ReadAllText((Join-Path $Editors 'editor.pid'))
   $UiPid=[uint32][IO.File]::ReadAllText((Join-Path $Editors 'ui.pid'))
+  $Expected=0
   if ($Case -eq 'backend-death') {
     $WrapperPid=[OwnedConPty]::Parent($EditorPid);$BackendPid=[OwnedConPty]::Parent($WrapperPid)
     $Process=Get-Process -Id $BackendPid
     if ([OwnedConPty]::Parent($BackendPid) -ne $UiPid -or $Process.Path -ne $Backend) {throw 'Death test does not own this backend'}
     $Process.Kill()
+    if(!$Process.WaitForExit(5000)){throw 'Owned backend did not terminate'}
+    $BackendExit=$Process.ExitCode
+    # Bun's process.exit preserves the low exit-status byte. Derive it from
+    # this actual owned native process, rather than guessing Kill's status.
+    $Expected=$BackendExit -band 255
   } else {
     if ($Case -eq 'interrupt') {$Session.Send([string][char]3)}
     elseif ($Case -eq 'failure') {$Session.Send("fail`r`n")}
@@ -80,9 +88,8 @@ try {
     $Session.Send('q')
   }
   AwaitOwned { $Session.ExitCode -ne -1 } 'Production UI did not quit'
-  $Expected=if($Case -eq 'backend-death'){1}else{0}
-  # Bun reports native Windows forced termination as 1.
   if ($Session.ExitCode -ne $Expected) {throw ('Unexpected UI exit '+$Session.ExitCode)}
+  if($Case -eq 'backend-death' -and !$Session.Output.Contains('norn-backend exited with code '+$BackendExit+'.')){throw 'UI did not report the actual backend exit cause'}
   AwaitOwned { !(Get-Process -Id $EditorPid -ErrorAction SilentlyContinue) } 'Owned editor remained orphaned' $true
   $Modes=[IO.File]::ReadAllLines((Join-Path $Editors 'console-modes.txt'))
   if($Modes.Count -ne 2 -or $Modes[0] -ne $Modes[1]){throw 'Native console modes were not restored'}

@@ -3,6 +3,7 @@
 // terminal on normal quit, Ctrl+C, backend death and initialization failure.
 
 import { createCliRenderer, RendererControlState } from "@opentui/core";
+import { restoreConsoleInterrupts } from "./app/consoleControl";
 import { ShellStore } from "./app/store";
 import { theme } from "./app/theme";
 import { mountApp } from "./app/ui";
@@ -34,6 +35,12 @@ async function main(): Promise<void> {
       if (renderer?.controlState === RendererControlState.EXPLICIT_SUSPENDED)
         await new Promise<void>((resolve) => setTimeout(resolve, 150));
       renderer?.destroy();
+      try {
+        restoreConsoleInterrupts();
+      } catch (error) {
+        console.error(error instanceof Error ? error.message : "Console cleanup failed.");
+        code ||= 1;
+      }
       if (message) console.error(message);
       process.exit(code);
     })();
@@ -67,6 +74,13 @@ async function main(): Promise<void> {
     store?.cancelSyntax();
     await client?.close();
     renderer?.destroy();
+    try {
+      restoreConsoleInterrupts();
+    } catch (cleanupError) {
+      console.error(
+        cleanupError instanceof Error ? cleanupError.message : "Console cleanup failed.",
+      );
+    }
     console.error(error instanceof Error ? error.message : String(error));
     process.exit(1);
   }
