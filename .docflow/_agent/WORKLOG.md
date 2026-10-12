@@ -1177,3 +1177,13 @@ Plan 0053 completion prepared after implementation `e4264db`, effective only on 
   Doctor pass (2maintainability warnings; no rendering-ref error).
 - Keep0071/360todo and require all5checks on the final updated PR head before
   any merge. ADR0020Accepted; no delegation/Norn review/private profiles.
+
+## 2026-10-12 - #360 reconciliation
+
+- PR #382 squash-merged as `49a4867` after all five exact-head required jobs
+  passed (verify, ui, native-workflow on macOS/Ubuntu/Windows). #360's typed
+  approved repository operations and native branch panel are shipped.
+- Moved plan `0071-native-repository-operations.md` to
+  `plan/done/2026-10-12-native-repository-operations.md`; updated the parity
+  matrix row to merged with the commit and CI evidence; kept no code change.
+- #360 can now be closed with the merge evidence; epic #294 continues with #361.
