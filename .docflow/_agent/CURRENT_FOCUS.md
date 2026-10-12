@@ -10,7 +10,8 @@ Git is authoritative. Durable history lives in WORKLOG and plan/done.
 - **Merged baseline:** PR #367 at `22b5b1a441593b2dce9423dd3006b0b143dabf2b`;
   exact `5718adb` UI and verify green (verify 11m45s), merged 2026-10-12 local.
 - **Current state:** plan 0057 implementation/local gate complete; preparing
-  verified PR, not merged yet. Native previews preserve saved-run identity and
+  verified PR, not merged yet. Feature `8f7c5cb`; prepared receipt conditional
+  on exact-head CI and verified squash merge. Native previews preserve saved-run identity and
   share bounded immutable fork raster/Pierre evidence; F3/F5 and EOF fences.
 - **Gate:** root 123 tests plus tooling/typecheck/lint/protocol, UI 172 tests/
   1057 asserts/115 native frames (ten new, 105 unchanged), Rust 697 core plus

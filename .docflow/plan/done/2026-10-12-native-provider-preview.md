@@ -125,3 +125,24 @@ does not replace verification of the retained workflows.
 - GitHub immutable blobs: https://docs.github.com/en/rest/git/blobs#get-a-blob
 - GitHub content/symlink semantics: https://docs.github.com/en/rest/repos/contents#get-repository-content
 - Bitbucket commit-file metadata/raw/attributes: https://developer.atlassian.com/cloud/bitbucket/rest/api-group-source/
+
+
+## Prepared completion receipt
+
+Prepared 2026-10-12 for verified PR integration. This path becomes a completion
+record only when the exact PR head passes CI and is squash merged into main.
+
+- Feature commit: `8f7c5cbdc914098a3b109991056e20486b129543`.
+- Local gate: root typecheck/123 tests plus tooling/lint/protocol; UI typecheck,
+  172 tests/1057 assertions/115 native frames (105 unchanged, ten new); Rust
+  697 core with two existing ignored/53 stdio/six CLI/five onboarding/three bin
+  tests; strict all-feature/all-target Clippy/fmt/no-GUI and Archgate 12/12.
+- Docflow metadata/INDEX/required sections/relative links and main-number audit
+  pass; existing 0011/0013 coverage and ARCH007 length advisories unchanged.
+- React Doctor 64/100: three native OpenTUI property false positives, no errors,
+  complexity findings or suppression. Actual native renderer/type/input/frame
+  verification passes. No Norn review/private profile/real provider mutation.
+- Owning ADR 0020 remains Accepted: retained provider review start/approval,
+  broader parity, recovery, installed-platform and final cutover are unfinished.
+- Maintainer closure of #357 is preserved; retained follow-ons are tracked by
+  #306. No retirement or goal completion is inferred from that closure.
