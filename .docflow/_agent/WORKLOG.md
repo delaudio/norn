@@ -607,3 +607,15 @@ Plan 0053 completion prepared after implementation `e4264db`, effective only on 
 - Prepared plan/done receipt namesd503f9b; effective only after exact-head CI and
   verified merge. #306/epic remain open, ADR0020 Accepted; preserve maintainer
   closures. No Norn review/live provider writes/private profiles/public releases.
+
+
+## 2026-10-12 — Claim native review profile catalog (plan0063)
+
+- #373 is open at fixed2db1dcb; CI38202396806 UI passed, verify in progress.
+  No shipped claim until actual merge. New isolated branch starts at that fixed
+  predecessor and must rebase on the verified squash before its own PR.
+- Port the desktop's actual read-only catalog/default selection, using exact
+  native policy/target/path ownership. Do not invent a profile rewrite API:
+  retained policy-file editing belongs to #359; canonical prompt editing exists.
+- Claim written before code; owned fixtures only, no unrelated root .norn.yaml,
+  private credentials/profiles, live provider writes, Norn reviews or releases.
