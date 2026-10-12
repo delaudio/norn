@@ -905,3 +905,16 @@ Plan 0053 completion prepared after implementation `e4264db`, effective only on 
 - Keep0069 in todo until actual source squash. #359/#294 remain open for editor
   lifecycle/finalparity and remainingepic. ADR0020 remains Accepted; preserve
   maintainerclosures/rootprivatefile/userstash. No Norn code review/delegation.
+
+## 2026-10-12 — verified380merge, plan0070claim
+
+- PR380 actually MERGEDd623231b16215a8d828764bfdfe48349c6d73254 at12:43:36Z.
+  All5CI38249399379 SUCCESS on exact99b33bdbe73befa2b2ef25be30171f657cb8bea3;
+  real3OS native F8/filter/file/content/diff/blame/find/return PASS. No retry/bypass.
+- Reconcile0069 done only from actual source completion and update parity.
+  Claim0070 editor/real terminal lifecycle before code on actual380main.
+  Rust validated platform adapters and child ownership; native suspend/resume
+  and owned POSIX PTY/Windows ConPTY proof, no protocol stdio as editor terminal.
+- Rootmain ff synced, privatefile/userstash intact. #359/#294 remain open;
+  maintainerclosures preserved, ADR0020 Accepted untilcutover. No delegated
+  agent/Norn code review/privateprofile/live provider writes/releases.
