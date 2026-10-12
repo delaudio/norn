@@ -490,3 +490,18 @@ Plan 0053 completion prepared after implementation `e4264db`, effective only on 
   checkout. Scoped fix-state lookup preserves each provider's lifecycle.
 - Prepared plan/done receipt is conditional on exact-head CI and verified PR
   squash merge; full ADR0020/#306/epic remain incomplete.
+
+## 2026-10-12 — fix provider cancellation fixture CI identity
+
+- #370 CI38192754060 passed UI but failed verify at the second owned clone's
+  Git commit. Linux runner has no global identity; clone does not copy the
+  original repository-local user.name/user.email. Production code was not the
+  failing operation.
+- The fixture now declares a local synthetic name/email in the cloned repo.
+  Targeted independent-cancel test passes with GIT_CONFIG_GLOBAL=/dev/null and
+  GIT_CONFIG_NOSYSTEM=1. Running the whole stdio suite in that same isolation
+  and strict Clippy before push; exact new-head CI/merge still required.
+
+- Follow-up verification completed: all 58 stdio tests pass with personal/system
+  Git config disabled, strict all-feature/all-target Clippy passes. Existing
+  production/local root/UI/core gates remain unchanged; new PR head CI required.

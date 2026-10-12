@@ -79,3 +79,13 @@ after exact-head CI succeeds and the PR is verified squash-merged into main.
   public releases. Optional diff-base omission preserves old saved/public output.
 - Fresh-preview review start still requires durable cached provider evidence.
   No full parity/epic completion or owning ADR status advancement is claimed.
+
+### CI fixture identity follow-up
+
+CI38192754060 on the initial PR #370 head passed UI but failed the owned
+second-clone Git commit: clone does not copy repository-local author identity,
+and the Linux runner has no personal global Git config. The clone fixture now
+sets its own synthetic user.name/user.email. The targeted cancellation test
+passes with global/system Git configuration disabled. All 58 stdio tests pass
+under that isolation; strict all-feature/all-target Clippy also passes. Exact new-head CI and verified merge remain
+required; this prepared receipt is not a shipped claim.

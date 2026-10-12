@@ -12,7 +12,11 @@ Git is authoritative. Durable history lives in WORKLOG and plan/done.
   after exact final-head CI38190456486 passed both jobs, 2026-10-12 01:22:43Z.
 - State: native context/profile/initial/reply/fix integration implemented;
   local gates passed and rebased onto the actual squash baseline with no
-  tree changes; collision audit passed. Preparing PR; exact-head CI/merge pending.
+  tree changes; collision audit passed. PR #370 opened. CI38192754060 failed at the owned second-clone
+  fixture commit because clone does not copy local Git identity. Declared owned
+  local identity; targeted test passed with global/system Git config disabled.
+  All 58 stdio tests pass with global/system Git config disabled; strict Clippy
+  passes. Updating PR #370; exact new-head CI/merge pending.
 - Fresh-preview review start stays unavailable until durable cached evidence.
 - #369 local gate: 705 core+two ignored/55 stdio/six CLI/five onboarding/three
   bin, root123/UI172+1057asserts/115frames, strict Clippy/fmt/no-GUI/Archgate/audit.

@@ -1556,6 +1556,13 @@ fn native_provider_sessions_cancel_independently_with_same_names_ids_and_threads
             ".",
         ],
     );
+    // Git clone does not copy repository-local identity. Own both commits even
+    // on CI hosts without a user-global Git configuration.
+    git(other.path(), &["config", "user.name", "Norn owned fixture"]);
+    git(
+        other.path(),
+        &["config", "user.email", "owned-fixture@example.invalid"],
+    );
     let db = rusqlite::Connection::open(fixture._data.path().join("norn.sqlite3")).unwrap();
     let legacy: String = db
         .query_row(
