@@ -972,3 +972,23 @@ Plan 0053 completion prepared after implementation `e4264db`, effective only on 
   passes. UI250/1580,195frames/Storybook, strict Clippy, core765+2ignored and
   dev-inclusive noGUI gate pass; Doctor18files no diagnostics/score66. Keep plan
   pending and obtain all5 checks on the corrected head before actual merge.
+
+## 2026-10-12 — PR381 Windows protocol-pipe follow-up
+
+- Exact c6e35f65d24e9324a48b4c6dd8281c24c6e9abdb CI38267198082
+  passed UI and full native Linux/macOS workflows, including four real PTY
+  handoff/restoration cases. Windows failed its existing slow-agent cancellation
+  scenario before the editor steps; ConPTY is still unobserved.
+- Windows exposed an unhandled asynchronous FileSink.write EPIPE during
+  shutdown. Await write/flush/end in order, catch synchronous/asynchronous pipe
+  closure, keep draining output and retain the five-second owned reap fallback.
+  A real owned subprocess closes both protocol handles before exit7; regression
+  test checks the actual reaped exit and idempotent close without unhandled
+  rejection. Ordinary request writes handle asynchronous rejection too.
+- Owned native workflow uses fresh statSync for the slow-agent receipt, awaits
+  backend closes before fixture cleanup and includes operation logs in failure
+  diagnostics. No claim about the original Windows cancellation cause yet;
+  corrected-head CI must supply proof or a more precise failure.
+- Local UI251/1582/47files, typecheck, full owned general workflow and all four
+  production macOS PTY cases pass after transport changes. No Rust code changed.
+  Keep0070 todo, #359 open and require all five actual-head checks before merge.

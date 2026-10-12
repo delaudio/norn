@@ -1,6 +1,7 @@
 // Real OpenTUI input/rendering + production stdio transport + no-default Rust.
 // Every repository, settings file, stored run and agent belongs to this process.
 import assert from "node:assert/strict";
+import { statSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { delimiter, dirname, join, resolve } from "node:path";
@@ -140,6 +141,7 @@ const open = async () => {
         error: store.getSnapshot().error,
         notice: store.getSnapshot().notice,
         operation: store.getSnapshot().operation?.state,
+        operationLogs: store.getSnapshot().operation?.logs,
         focus: store.getSnapshot().focus,
         layers: store.getSnapshot().findingLayers,
         profile: store.getSnapshot().profileOpen,
@@ -169,7 +171,7 @@ const open = async () => {
         ]);
       } finally {
         if (timer) clearTimeout(timer);
-        client.close();
+        await client.close();
         clients.delete(client);
         renderer.renderer.destroy();
       }
@@ -403,10 +405,15 @@ try {
     await rm(join(agent, "started"));
     await rm(join(agent, "completed"));
     first.renderer.mockInput.pressEnter();
+    const agentStarted = () => {
+      try {
+        return statSync(join(agent, "started")).size > 0;
+      } catch {
+        return false;
+      }
+    };
     await first.until(
-      () =>
-        first.store.getSnapshot().operation?.state === "running" &&
-        Bun.file(join(agent, "started")).size > 0,
+      () => first.store.getSnapshot().operation?.state === "running" && agentStarted(),
       "Owned slow child start",
     );
     first.renderer.mockInput.pressKey("x");
@@ -465,6 +472,6 @@ try {
   throw error;
 } finally {
   process.chdir(original);
-  for (const client of clients) client.close();
+  await Promise.all([...clients].map((client) => client.close()));
   await removeOwnedRoot();
 }

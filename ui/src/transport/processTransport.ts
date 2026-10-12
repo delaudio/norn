@@ -172,26 +172,6 @@ export class ProcessBackendTransport implements BackendTransport {
     this.closed = true;
     this.readyReject?.(new Error("backend transport closed"));
     this.failPending(new Error("backend transport closed"));
-    try {
-      // Native editor/process guards must run before the parent disappears.
-      // Protocol output remains drained while shutdown/EOF cancels owned work.
-      this.proc.stdin.write(
-        encodeFrame({
-          type: "request",
-          id: `ui-close-${this.nextId++}`,
-          method: "shutdown",
-          params: {},
-        }),
-      );
-      void Promise.resolve(this.proc.stdin.flush()).catch(() => {});
-      void Promise.resolve(this.proc.stdin.end()).catch(() => {});
-    } catch {
-      try {
-        this.proc.kill("SIGKILL");
-      } catch {
-        /* Already exited. */
-      }
-    }
     this.closing = (async () => {
       const timer = setTimeout(() => {
         try {
@@ -201,6 +181,27 @@ export class ProcessBackendTransport implements BackendTransport {
         }
       }, 5000);
       try {
+        // Windows pipe writes can reject asynchronously. Await each step so
+        // shutdown precedes EOF and a broken pipe cannot become an unhandled
+        // rejection. Keep draining output and allow native guards to finish.
+        try {
+          await this.proc.stdin.write(
+            encodeFrame({
+              type: "request",
+              id: `ui-close-${this.nextId++}`,
+              method: "shutdown",
+              params: {},
+            }),
+          );
+          await this.proc.stdin.flush();
+        } catch {
+          /* The backend may already have closed its input. */
+        }
+        try {
+          await this.proc.stdin.end();
+        } catch {
+          /* Already closed; the bounded reap below still owns the process. */
+        }
         await this.proc.exited;
       } finally {
         clearTimeout(timer);
@@ -213,14 +214,14 @@ export class ProcessBackendTransport implements BackendTransport {
     if (this.closed || !this.proc.stdin) {
       return;
     }
-    try {
-      this.proc.stdin.write(encodeFrame(message));
-      void Promise.resolve(this.proc.stdin.flush()).catch((error: unknown) => {
+    void (async () => {
+      try {
+        await this.proc.stdin.write(encodeFrame(message));
+        await this.proc.stdin.flush();
+      } catch (error: unknown) {
         this.failPending(error instanceof Error ? error : new Error(String(error)));
-      });
-    } catch (error) {
-      this.failPending(error instanceof Error ? error : new Error(String(error)));
-    }
+      }
+    })();
   }
 
   /// Drain backend stderr so a full pipe can never block the backend. Backend

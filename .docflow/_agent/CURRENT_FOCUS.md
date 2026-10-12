@@ -21,7 +21,10 @@ Git is authoritative. Durable history lives in WORKLOG and plan/done.
   mock dependency/--lib lanes and explicit busy/startup readiness; preserve
   CLI binaries across desktop library tests and bound the owned CLI probe.
   Local finalUI250/1580,195frames, four PTY cases, full765core/dev-noGUI,
-  desktopIPC4 and owned general workflow pass; corrected-head CI pending.
+  desktopIPC4 and owned general workflow pass. CI38267198082 proves actual
+  Linux/macOS editor PTY cases; Windows slow-agent gate fails before ConPTY.
+  Await asynchronous pipe writes/shutdown and add real closed-pipe regression;
+  local UI251/1582 and four PTY cases pass, new exact-head CI still required.
 - Keep0070 todo until actual verified merge. #359/#294 remain open pending
   editor/fullparity; preserve maintainer305/306/357closures; ADR0020 Accepted
   until fullcutover. No private profiles/credentials/providerwrites/actualagents.

@@ -82,10 +82,10 @@ arbitrary finding anchors, private profiles or general process-execution API.
   macOS PTY proves input, literal argv, real mode changes and restore after
   success/nonzero/Ctrl-C/backend death; GUI IPC proves both providers, stale
   file/root, symlink escape, missing paths and token replay/context rejection.
-- Local gates observed: root/UI typecheck, root123+tooling, UI250/1580,195
+- Local gates observed: root/UI typecheck, root123+tooling, UI251/1582,195
   native frames/Storybook, Rust765+2ignored/76stdio/6CLI/5onboarding/noGUI,
   Archgate17, audit, strict all-feature Clippy including final native adapter
-  test rerun. React Doctor17files: no diagnostics,
+  test rerun. React Doctor18files: no diagnostics,
   score66. No installation/setup files added by Doctor.
 - Blockers: own exact-head3OS CI (Windows ConPTY unobserved)/actualmerge.
 - Stopped:
