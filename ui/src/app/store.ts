@@ -526,6 +526,19 @@ export function anchorPresent(text: string, line: number, side: "old" | "new"): 
 }
 
 export class ShellStore {
+  private launchRepository: RepositorySummary | null = null;
+  private scopedPicker(picker: PickerEntry[]): PickerEntry[] {
+    const repo = this.launchRepository;
+    return repo
+      ? picker.filter(
+          (entry) =>
+            entry.provider === repo.provider &&
+            entry.workspace === repo.workspace &&
+            entry.repo === repo.repo &&
+            (entry.kind !== "working-tree" || !!entry.localSource),
+        )
+      : picker;
+  }
   private localRequest = 0;
   private localCapture: { captureId: string; source: LocalSource } | null = null;
   private readonly remoteEntries = new Map<string, PickerEntry>();
@@ -540,10 +553,10 @@ export class ShellStore {
   }
   private mergeRemote(picker: PickerEntry[]): PickerEntry[] {
     const existing = new Set(picker.map((entry) => this.pickerScope(entry)));
-    return [
+    return this.scopedPicker([
       ...picker,
       ...[...this.remoteEntries].filter(([key]) => !existing.has(key)).map(([, entry]) => entry),
-    ];
+    ]);
   }
   toggleProvider(): void {
     if (this.state.providerOpen) {
@@ -1420,7 +1433,7 @@ export class ShellStore {
     const generation = this.state.generation;
     const target = this.activeTarget();
     const selectedEntry = this.state.picker[this.state.selectedPicker];
-    const [repositories, targets, readiness, scopes] = await Promise.all([
+    const [configuredRepositories, targets, readiness, scopes] = await Promise.all([
       client.repositories(),
       client.reviewTargets(),
       this.state.readiness ? client.readiness() : Promise.resolve(null),
@@ -1428,6 +1441,7 @@ export class ShellStore {
     ]);
     if (generation !== this.state.generation || this.state.status === "closed") return;
     setTheme(settings.theme);
+    const repositories = this.launchRepository ? [this.launchRepository] : configuredRepositories;
     const picker = this.mergeRemote(buildPicker(repositories, targets, scopes));
     const selected = picker.findIndex((entry) =>
       this.state.providerPreview && selectedEntry
@@ -1449,7 +1463,10 @@ export class ShellStore {
     await this.selectPicker(Math.max(0, selected));
   }
 
-  async connect(client: BackendClient): Promise<void> {
+  async connect(
+    client: BackendClient,
+    mode: "workspace" | "current-repo" = "workspace",
+  ): Promise<void> {
     this.client = client;
     this.update({ status: "connecting", error: null });
     try {
@@ -1469,13 +1486,37 @@ export class ShellStore {
           this.update({ notice: "Readiness could not be checked. Press m to inspect settings." });
         }
       }
-      const [repositories, targets, scopes] = await Promise.all([
-        client.repositories(),
-        client.reviewTargets(),
-        ready.capabilities.includes("workspace-scopes")
-          ? client.workspaceScopes()
-          : Promise.resolve([]),
-      ]);
+      let repositories: RepositorySummary[];
+      let targets: ReviewTarget[] = [];
+      let scopes: WorkspaceScope[] = [];
+      if (mode === "current-repo") {
+        if (!ready.capabilities.includes("local-snapshots"))
+          throw new Error(
+            "Current-repository detection is unavailable. Update norn-backend or use --workspace.",
+          );
+        try {
+          const options = await client.localOptions({
+            source: { kind: "current" },
+            offset: 0,
+            limit: 1,
+          });
+          this.launchRepository = { ...options.repository, localPath: null };
+          repositories = [this.launchRepository];
+        } catch (error) {
+          throw new Error(
+            `Cannot open PRs for the current repository: ${message(error)}. Launch from a supported Git repository or use --workspace.`,
+          );
+        }
+      } else {
+        this.launchRepository = null;
+        [repositories, targets, scopes] = await Promise.all([
+          client.repositories(),
+          client.reviewTargets(),
+          ready.capabilities.includes("workspace-scopes")
+            ? client.workspaceScopes()
+            : Promise.resolve([]),
+        ]);
+      }
       this.update({
         serverVersion: ready.serverVersion,
         repositories,
@@ -1512,7 +1553,9 @@ export class ShellStore {
         highlightSide: "new",
         scrollRequest: 0,
       });
-      if (this.state.localAvailable) {
+      if (mode === "current-repo") {
+        this.update({ providerOpen: true });
+      } else if (this.state.localAvailable) {
         await this.openLocalComparison(client, { kind: "current" });
         await this.applyLocalComparison(client);
       } else await this.loadSnapshot(client, this.state.generation);
@@ -2387,6 +2430,7 @@ export class ShellStore {
     });
     if (state === "succeeded" || state === "failed" || state === "cancelled") {
       void this.refreshCompletedOperation(operation.id, state);
+      if (state === "failed") void this.resyncOperation();
     }
   }
 
@@ -2421,14 +2465,16 @@ export class ShellStore {
         if (current?.id !== operation.id) continue;
         const omitted = needsSnapshot || snapshot.sequence > current.sequence + 1;
         if (snapshot.sequence >= current.sequence) {
+          const errorText = snapshot.error
+            ? `Operation ${snapshot.state}: ${snapshot.error.message.slice(0, 2048)}`
+            : null;
           const logs =
-            snapshot.error &&
-            (snapshot.sequence > current.sequence || snapshot.state !== current.state)
+            errorText && !current.logs.some((entry) => entry.text === errorText)
               ? [
                   ...current.logs,
                   {
                     id: this.nextLogId++,
-                    text: `Operation ${snapshot.state}: ${snapshot.error.message.slice(0, 2048)}`,
+                    text: errorText,
                   },
                 ].slice(-100)
               : current.logs;

@@ -27,6 +27,7 @@ import {
   FakePublicationTransport,
   publicationFixtureScope,
 } from "../src/transport/fakePublicationTransport";
+import { CurrentTransport } from "../test/fixtures/current-provider-backend";
 import { EditorExplorerFixture } from "../test/fixtures/editor-backend";
 import { ExplorerFixture } from "../test/fixtures/explorer-backend";
 import { LocalTransport } from "../test/fixtures/local-backend";
@@ -862,6 +863,27 @@ async function publicationScene(mode: "drafts" | "preview" | "partial" | "status
   };
 }
 
+async function currentRepositoryScene(provider: "github" | "bitbucket") {
+  const client = new BackendClient(new CurrentTransport(provider));
+  const store = new ShellStore();
+  await store.connect(client, "current-repo");
+  return {
+    client,
+    store,
+    afterMount: async (test: Awaited<ReturnType<typeof createTestRenderer>>) => {
+      for (let i = 0; i < 12; i++) {
+        await Bun.sleep(0);
+        await test.renderOnce();
+      }
+      const content = test.captureCharFrame();
+      if (!content.includes("PULL REQUESTS") || !content.includes(`${provider} change 7`))
+        throw new Error("Current-repository PR startup did not render");
+      if (content.includes(`${provider === "github" ? "bitbucket" : "github"} change 7`))
+        throw new Error("Startup included a foreign repository");
+    },
+  };
+}
+
 async function providerScene(
   kind:
     | "list"
@@ -1026,6 +1048,30 @@ async function savedLocalScene(kind: "list" | "next" | "empty" | "loading" | "er
   return { client, store };
 }
 const scenes: Scene[] = [
+  {
+    id: "current-repository-github-120x30",
+    cols: 120,
+    rows: 30,
+    build: () => currentRepositoryScene("github"),
+  },
+  {
+    id: "current-repository-github-50x15",
+    cols: 50,
+    rows: 15,
+    build: () => currentRepositoryScene("github"),
+  },
+  {
+    id: "current-repository-bitbucket-120x30",
+    cols: 120,
+    rows: 30,
+    build: () => currentRepositoryScene("bitbucket"),
+  },
+  {
+    id: "current-repository-bitbucket-50x15",
+    cols: 50,
+    rows: 15,
+    build: () => currentRepositoryScene("bitbucket"),
+  },
   ...(
     [
       "tree",

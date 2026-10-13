@@ -4,6 +4,16 @@
 
 - `../../adr/0020-opentui-rust-stdio-workspace.md`
 
+## Maintainer scope revision (2026-10-13)
+
+The TUI is the baseline; desktop polling parity is no longer a migration
+requirement. Keep already merged useful scheduler/help behavior, but scope any
+remaining refresh work to the current terminal target and preserve unsaved
+state. It must not turn global desktop history into the startup screen or
+trigger captures, Git writes, agent runs or publication. Plan 0074 owns the
+current-repository entry correction. Original criteria below record prior
+intent; they do not authorize new desktop-only work.
+
 ## Scope
 
 Restore the shipped automatic-refresh semantics in the OpenTUI workspace. Port

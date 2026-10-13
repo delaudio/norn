@@ -5,6 +5,16 @@
 - `../../adr/0020-opentui-rust-stdio-workspace.md`
 - `../../adr/0007-headless-review-cli.md`
 
+## Maintainer scope revision (2026-10-13)
+
+Desktop parity is retired. Keep already merged global-history/job/thread APIs
+and optional panels; do not make desktop analytics, metric sync or remaining
+provider-less global history UX prerequisites for the terminal cutover.
+Correctness of any exposed identity/action remains required. Plan 0074 restores
+current-repository PR startup independently. Original criteria below record
+historical intent; desktop-only unimplemented criteria are withdrawn.
+Do not mark this item shipped merely because its scope changed.
+
 ## Scope
 
 Port the desktop's global review history into the OpenTUI workspace. Add a

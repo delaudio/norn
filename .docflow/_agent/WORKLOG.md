@@ -1187,3 +1187,23 @@ Plan 0053 completion prepared after implementation `e4264db`, effective only on 
   `plan/done/2026-10-12-native-repository-operations.md`; updated the parity
   matrix row to merged with the commit and CI evidence; kept no code change.
 - #360 can now be closed with the merge evidence; epic #294 continues with #361.
+
+
+## 2026-10-13 — Current-repository entry and TUI baseline
+
+- Maintainer explicitly chooses the shipped TUI as baseline and retires desktop
+  parity. Plan 0074 owns the urgent startup correction in an isolated worktree.
+- Production startup now resolves read-only Git origin identity and opens only
+  that repository's PRs; no global targets/history or automatic local capture.
+  Explicit workspace mode remains available. Failed final events fetch actual
+  backend errors even at an equal event/status sequence, without log duplicates.
+- Revised ADR0020/migration contract and issues294/306/307/308/309/361/363;
+ 362/364 retired as not planned, not implemented. Existing data, recovery
+ archive, stores and non-destructive import/export remain protected.
+- Verification: root typecheck/tests and Archgate17 pass; UI285tests and
+ typecheck pass;215actual native frames match, Storybook build passes; lint
+ has3existing informational suggestions. Changed-file React Doctor reports no
+ issues (score API unavailable). ADR/index/link/plan-collision audit passes.
+- Source PR/CI/merge evidence remains pending;0074 stays todo. ADR0020 stays
+ Accepted because packaging/cutover are unfinished. User's root .norn.yaml
+ and stash are untouched; no Norn review, live providers or private profiles.

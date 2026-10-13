@@ -4,6 +4,13 @@ Git is authoritative. Durable history lives in WORKLOG and plan/done.
 
 ## Active state
 
+- 2026-10-13: plan 0074 claimed by the single writer in isolated
+  `/private/tmp/norn-current-repo-first`, branch `fix/current-repo-first`.
+  Maintainer explicitly chooses the old TUI as baseline and retires desktop
+  parity. Restore current-repository PR startup; do not repeat the user's
+  plans 0072/0073 work, delete stored data or use Norn for review.
+  Historical entries below are superseded where they mandate desktop parity.
+
 - Unlimited epic294 goal; single writer, no delegation/Norn review per user.
 - PR381 actually MERGED 29f5e2a63efca38fccb0f332d812fde80f11354b at2026-10-12T17:03:36Z.
   All5CI38280325908 SUCCESS on e883fc9f8a0f181d99283f56ffade41788816dda,

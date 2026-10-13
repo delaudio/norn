@@ -397,3 +397,16 @@ export const RepositoryRecovery: Story = {
 export const CompactLongRepositoryApproval: Story = {
   args: { frameId: "repository-operations-long-preview-50x20" },
 };
+
+export const CurrentRepositoryGitHub: Story = {
+  args: { frameId: "current-repository-github-120x30" },
+};
+export const CompactCurrentRepositoryGitHub: Story = {
+  args: { frameId: "current-repository-github-50x15" },
+};
+export const CurrentRepositoryBitbucket: Story = {
+  args: { frameId: "current-repository-bitbucket-120x30" },
+};
+export const CompactCurrentRepositoryBitbucket: Story = {
+  args: { frameId: "current-repository-bitbucket-50x15" },
+};

@@ -4,6 +4,7 @@
 
 import { createCliRenderer, RendererControlState } from "@opentui/core";
 import { restoreConsoleInterrupts } from "./app/consoleControl";
+import { launchMode } from "./app/launchMode";
 import { ShellStore } from "./app/store";
 import { theme } from "./app/theme";
 import { mountApp } from "./app/ui";
@@ -13,8 +14,13 @@ import { ProcessBackendTransport } from "./transport/processTransport";
 const HELP = [
   "Norn OpenTUI workspace",
   "",
+  "Default: pull requests for the Git repository in the current directory.",
+  "--current-repo: default mode · --workspace: all configured repositories",
+  "",
   "j/k or ↑/↓: move selection · Tab: switch pane (detail scrolls with j/k)",
-  "Enter: start review · x: cancel · q or Ctrl+C: quit",
+  "PR list: Enter detail · Space open diff · r refresh · m settings",
+  "Review workspace: Enter start review · x cancel · F2 PRs · F4 local",
+  "q or Ctrl+C: quit",
 ].join("\n");
 
 async function main(): Promise<void> {
@@ -50,6 +56,7 @@ async function main(): Promise<void> {
   });
   process.on("SIGTERM", () => quit(143));
   try {
+    const mode = launchMode(process.argv.slice(2));
     client = new BackendClient(new ProcessBackendTransport());
     renderer = await createCliRenderer({
       exitOnCtrlC: false,
@@ -69,7 +76,7 @@ async function main(): Promise<void> {
           : undefined,
       );
     });
-    await store.connect(client);
+    await store.connect(client, mode);
   } catch (error) {
     store?.cancelSyntax();
     await client?.close();
