@@ -18,6 +18,7 @@ export function SettingsPanel({
   const state = useSyncExternalStore(settings.subscribe, settings.getSnapshot);
   const scroll = useRef<ScrollBoxRenderable | null>(null);
   const fields = settings.fields();
+  const terminal = shell.getSnapshot().terminalLayout;
   useEffect(() => {
     scroll.current?.scrollChildIntoView(`setting-${state.selected}`);
   }, [state.selected]);
@@ -56,7 +57,7 @@ export function SettingsPanel({
     ) {
       savePreferences();
     } else if (key.ctrl && key.name === "d") shell.toggleData();
-    else if (key.ctrl && key.name === "t") void settings.previewImportedTheme(client);
+    else if (!terminal && key.ctrl && key.name === "t") void settings.previewImportedTheme(client);
     else if (key.ctrl && key.name === "r") void settings.refreshReadiness(client);
     else if (key.ctrl && key.name === "k") void settings.saveCredential(client);
     else if (key.name === "escape" || key.name === "q") shell.toggleSettings();
@@ -64,8 +65,8 @@ export function SettingsPanel({
     else if (key.name === "k" || key.name === "up") settings.move(-1);
     else if (key.name === "return" || (shell.getSnapshot().terminalLayout && key.name === "e"))
       settings.beginEdit();
-    else if (key.name === "a") settings.addRepository();
-    else if (key.name === "d") settings.removeRepository();
+    else if (!terminal && key.name === "a") settings.addRepository();
+    else if (!terminal && key.name === "d") settings.removeRepository();
     else if (key.name === "x") settings.requestClear();
   });
   usePaste((event) => {
@@ -81,8 +82,9 @@ export function SettingsPanel({
           : "Settings · Enter edit/cycle · Esc discard and close"}
       </text>
       <text fg={theme.muted} height={1} flexShrink={0} truncate>
-        Ctrl+D user data · Ctrl+S preferences · Ctrl+K credential · a add repo · d remove repo · x
-        clear keychain
+        {terminal
+          ? "Ctrl+K save credential · Ctrl+R check tools · x clear keychain"
+          : "Ctrl+D user data · Ctrl+S preferences · Ctrl+K credential · a add repo · d remove repo · x clear keychain"}
       </text>
       <text fg={theme.muted} height={1} flexShrink={0} truncate>
         Secrets stay in the OS store. Existing environment credentials are preserved.
@@ -104,9 +106,11 @@ export function SettingsPanel({
           {state.notice}
         </text>
       ) : null}
-      <text fg={theme.muted} height={1} flexShrink={0} truncate>
-        Ctrl+T preview imported theme · Ctrl+Y stage · Ctrl+S save
-      </text>
+      {!terminal ? (
+        <text fg={theme.muted} height={1} flexShrink={0} truncate>
+          Ctrl+T preview imported theme · Ctrl+Y stage · Ctrl+S save
+        </text>
+      ) : null}
       {state.themeLoading ? (
         <text fg={theme.warning} height={1} flexShrink={0}>
           Reading imported theme…
@@ -121,6 +125,7 @@ export function SettingsPanel({
       ) : null}
       <text fg={theme.secondary} height={1} flexShrink={0} truncate>
         {state.credentials
+          .filter((status) => !terminal || status.provider === state.credentialProvider)
           .map(
             (status) =>
               `${status.provider}: ${status.available ? status.source : "not configured"}`,

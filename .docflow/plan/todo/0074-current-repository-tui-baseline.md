@@ -27,6 +27,12 @@ must not hide metadata. Fence late detail responses by full provider scope. Reus
 services, not the desktop-style standalone PR browser. Add native keyboard,
 modal/input-fencing, narrow/wide frame and default-entry lifecycle evidence.
 
+The terminal Settings modal shows the selected agent model/effort, diff/theme,
+and current provider credentials/tool readiness. It excludes global repository
+editing, unrelated agents and desktop integrations, preserving hidden values
+on save. Provider evidence failures must identify parsing or inventory stages
+without leaking patch content; valid suppressed-empty Git context is supported.
+
 ## Exit Criteria
 
 1. Default production startup resolves the backend's launch repository using

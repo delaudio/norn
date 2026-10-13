@@ -4,23 +4,78 @@ use super::*;
 use crate::services::provider_snapshot::{self as snapshot, Capture, Section, SnapshotFile};
 
 impl Api {
+    // Bitbucket PR metadata may carry an abbreviated hash. Resolve it through
+    // the authenticated, fixed-origin commit endpoint before pinning evidence.
+    fn snapshot_revision(
+        &self,
+        revision: Option<&str>,
+        repository: &RepositoryIdentity,
+        started: Instant,
+    ) -> Result<String, String> {
+        let invalid = || {
+            "Provider commit identity could not be verified. Refresh the PR; no review was started."
+                .to_string()
+        };
+        let revision = revision.ok_or_else(&invalid)?;
+        if matches!(revision.len(), 40 | 64) {
+            return snapshot::full_sha(revision).map_err(|_| invalid());
+        }
+        if self.repository.provider != ReviewProvider::Bitbucket
+            || !(7..40).contains(&revision.len())
+            || !revision.bytes().all(|byte| byte.is_ascii_hexdigit())
+        {
+            return Err(invalid());
+        }
+        let (commit, _) = self.get(
+            &format!(
+                "{}/repositories/{}/{}/commit/{}",
+                self.root,
+                encode_path_segment(&repository.workspace),
+                encode_path_segment(&repository.repo),
+                revision
+            ),
+            started,
+        )?;
+        let full = snapshot::full_sha(
+            commit
+                .get("hash")
+                .and_then(Value::as_str)
+                .ok_or_else(&invalid)?,
+        )
+        .map_err(|_| invalid())?;
+        if !full.starts_with(&revision.to_ascii_lowercase())
+            || commit
+                .pointer("/repository/full_name")
+                .and_then(Value::as_str)
+                != Some(format!("{}/{}", repository.workspace, repository.repo).as_str())
+        {
+            return Err(invalid());
+        }
+        Ok(full)
+    }
+
     pub(crate) fn recheck_snapshot(&self, data: &snapshot::SnapshotData) -> Result<(), String> {
         let info = &data.info;
         info.request.validate()?;
         if info.request.repository != self.repository {
             return Err(error());
         }
+        let started = Instant::now();
         let (current, _) = self.get(
             &format!("{}/{}", self.collection(), info.request.pr_id),
-            Instant::now(),
+            started,
         )?;
         let (detail, _) = parse_metadata(self.repository.provider, &current, info.request.pr_id)?;
-        let head = snapshot::full_sha(detail.source_commit_hash.as_deref().ok_or_else(error)?)?;
-        let destination = snapshot::full_sha(
-            detail
-                .destination_commit_hash
-                .as_deref()
-                .ok_or_else(error)?,
+        let source_repository = snapshot_source_repository(&current, self.repository.provider)?;
+        let head = self.snapshot_revision(
+            detail.source_commit_hash.as_deref(),
+            source_repository.as_ref().unwrap_or(&self.repository),
+            started,
+        )?;
+        let destination = self.snapshot_revision(
+            detail.destination_commit_hash.as_deref(),
+            &self.repository,
+            started,
         )?;
         if head != info.head_sha
             || destination != info.destination_sha
@@ -48,12 +103,15 @@ impl Api {
         let (before, _) = self.get(&pr_url, started)?;
         let (detail, _) = parse_metadata(self.repository.provider, &before, params.pr_id)?;
         let source_repository = snapshot_source_repository(&before, self.repository.provider)?;
-        let head = snapshot::full_sha(detail.source_commit_hash.as_deref().ok_or_else(error)?)?;
-        let destination = snapshot::full_sha(
-            detail
-                .destination_commit_hash
-                .as_deref()
-                .ok_or_else(error)?,
+        let head = self.snapshot_revision(
+            detail.source_commit_hash.as_deref(),
+            source_repository.as_ref().unwrap_or(&self.repository),
+            started,
+        )?;
+        let destination = self.snapshot_revision(
+            detail.destination_commit_hash.as_deref(),
+            &self.repository,
+            started,
         )?;
         if head.len() != destination.len() {
             return Err(error());
@@ -121,7 +179,7 @@ impl Api {
                 let mut paths = HashSet::new();
                 loop {
                     let (json, _) = self.get(
-                        &format!("{collection}?topic=false&pagelen=100&page={page}"),
+                        &format!("{collection}?topic=false&renames=true&pagelen=100&page={page}"),
                         started,
                     )?;
                     bytes += serde_json::to_vec(&json).map_err(|_| error())?.len();
@@ -203,6 +261,19 @@ impl Api {
         let (after, _) = self.get(&pr_url, started)?;
         let (after_detail, _) = parse_metadata(self.repository.provider, &after, params.pr_id)?;
         validate_stable_pull_request_snapshot(&detail, &after_detail)?;
+        if self.snapshot_revision(
+            after_detail.source_commit_hash.as_deref(),
+            source_repository.as_ref().unwrap_or(&self.repository),
+            started,
+        )? != head
+            || self.snapshot_revision(
+                after_detail.destination_commit_hash.as_deref(),
+                &self.repository,
+                started,
+            )? != destination
+        {
+            return Err("The pull request commits changed during capture. Refresh explicitly before starting a review.".into());
+        }
         if snapshot_source_repository(&after, self.repository.provider)? != source_repository {
             return Err(error());
         }
@@ -449,14 +520,17 @@ pub(crate) fn snapshot_sections_with_limit(
     let mut state: Option<FileState> = None;
     let mut start = 0;
     let mut offset = 0;
-    for raw in patch.split_inclusive('\n') {
+    for (line_index, raw) in patch.split_inclusive('\n').enumerate() {
+        let invalid = || {
+            format!("Provider diff format could not be verified at line {}. Refresh the PR; no review was started.", line_index + 1)
+        };
         let line = raw.strip_suffix('\n').unwrap_or(raw);
         if let Some(header) = line.strip_prefix("diff --git ") {
             if let Some(previous) = state.take() {
-                sections.push(previous.finish(start, offset)?);
+                sections.push(previous.finish(start, offset).map_err(|_| invalid())?);
             }
             if sections.len() >= snapshot::FILE_LIMIT {
-                return Err(snapshot::invalid());
+                return Err(invalid());
             }
             start = offset;
             state = Some(FileState {
@@ -466,17 +540,23 @@ pub(crate) fn snapshot_sections_with_limit(
             offset += raw.len();
             continue;
         }
-        let file = state.as_mut().ok_or_else(snapshot::invalid)?;
+        let file = state.as_mut().ok_or_else(&invalid)?;
         if line == "\\ No newline at end of file" {
             if !file.newline_marker_allowed {
-                return Err(snapshot::invalid());
+                return Err(invalid());
             }
             file.newline_marker_allowed = false;
             offset += raw.len();
             continue;
         }
         if file.old_remaining != 0 || file.new_remaining != 0 {
+            // Git diff.suppressBlankEmpty omits the context prefix on empty
+            // lines. Both sides must still consume exactly one context line.
             match line.as_bytes().first() {
+                None if file.old_remaining > 0 && file.new_remaining > 0 => {
+                    file.old_remaining -= 1;
+                    file.new_remaining -= 1;
+                }
                 Some(b' ') if file.old_remaining > 0 && file.new_remaining > 0 => {
                     file.old_remaining -= 1;
                     file.new_remaining -= 1;
@@ -489,28 +569,28 @@ pub(crate) fn snapshot_sections_with_limit(
                     file.new_remaining -= 1;
                     file.additions += 1;
                 }
-                _ => return Err(snapshot::invalid()),
+                _ => return Err(invalid()),
             }
             file.newline_marker_allowed = true;
         } else if let Some(hunk) = line.strip_prefix("@@ ") {
             file.newline_marker_allowed = false;
             if file.old.is_none() || file.new.is_none() || file.binary {
-                return Err(snapshot::invalid());
+                return Err(invalid());
             }
-            let (ranges, _) = hunk.split_once(" @@").ok_or_else(snapshot::invalid)?;
+            let (ranges, _) = hunk.split_once(" @@").ok_or_else(&invalid)?;
             let parts = ranges.split_whitespace().collect::<Vec<_>>();
             if parts.len() != 2 {
-                return Err(snapshot::invalid());
+                return Err(invalid());
             }
-            let (old, old_count) = range(parts[0], '-').map_err(|_| snapshot::invalid())?;
-            let (new, new_count) = range(parts[1], '+').map_err(|_| snapshot::invalid())?;
+            let (old, old_count) = range(parts[0], '-').map_err(|_| invalid())?;
+            let (new, new_count) = range(parts[1], '+').map_err(|_| invalid())?;
             if old < file.old_end
                 || new < file.new_end
                 || old_count == 0 && new_count == 0
                 || file.old == Some(None) && old_count != 0
                 || file.new == Some(None) && new_count != 0
             {
-                return Err(snapshot::invalid());
+                return Err(invalid());
             }
             file.old_end = old + old_count;
             file.new_end = new + new_count;
@@ -519,12 +599,12 @@ pub(crate) fn snapshot_sections_with_limit(
             file.has_hunk = true;
         } else if let Some(value) = line.strip_prefix("--- ") {
             if file.old.is_some() || file.new.is_some() || file.has_hunk {
-                return Err(snapshot::invalid());
+                return Err(invalid());
             }
             file.old = Some(path(value, "a/")?);
         } else if let Some(value) = line.strip_prefix("+++ ") {
             if file.old.is_none() || file.new.is_some() || file.has_hunk {
-                return Err(snapshot::invalid());
+                return Err(invalid());
             }
             file.new = Some(path(value, "b/")?);
         } else if let Some(value) = line
@@ -532,7 +612,7 @@ pub(crate) fn snapshot_sections_with_limit(
             .or_else(|| line.strip_prefix("copy from "))
         {
             if file.from.is_some() || file.has_hunk {
-                return Err(snapshot::invalid());
+                return Err(invalid());
             }
             file.copied = line.starts_with("copy");
             file.from = path(value, "")?;
@@ -541,12 +621,12 @@ pub(crate) fn snapshot_sections_with_limit(
             .or_else(|| line.strip_prefix("copy to "))
         {
             if file.to.is_some() || file.has_hunk || file.copied != line.starts_with("copy") {
-                return Err(snapshot::invalid());
+                return Err(invalid());
             }
             file.to = path(value, "")?;
         } else if line.starts_with("Binary files ") && line.ends_with(" differ") {
             if file.has_hunk || file.binary {
-                return Err(snapshot::invalid());
+                return Err(invalid());
             }
             file.binary = true;
             file.binary_paths = Some(line[13..line.len() - 7].into());
@@ -556,41 +636,41 @@ pub(crate) fn snapshot_sections_with_limit(
             || line.starts_with("new mode ")
         {
             if file.has_hunk || file.binary {
-                return Err(snapshot::invalid());
+                return Err(invalid());
             }
-            let mode = line.rsplit(' ').next().ok_or_else(snapshot::invalid)?;
+            let mode = line.rsplit(' ').next().ok_or_else(&invalid)?;
             if mode.len() != 6 || !mode.bytes().all(|b| (b'0'..=b'7').contains(&b)) {
-                return Err(snapshot::invalid());
+                return Err(invalid());
             }
             if line.starts_with("old mode") && file.old_mode.replace(mode.into()).is_some() {
-                return Err(snapshot::invalid());
+                return Err(invalid());
             }
             if line.starts_with("new mode") && file.new_mode.replace(mode.into()).is_some() {
-                return Err(snapshot::invalid());
+                return Err(invalid());
             }
             if line.starts_with("new file") && file.added
                 || line.starts_with("deleted file") && file.deleted
             {
-                return Err(snapshot::invalid());
+                return Err(invalid());
             }
             file.mode = true;
             file.added |= line.starts_with("new file");
             file.deleted |= line.starts_with("deleted file");
         } else if let Some(value) = line.strip_prefix("index ") {
             if file.has_hunk || file.binary {
-                return Err(snapshot::invalid());
+                return Err(invalid());
             }
             let parts = value.split_whitespace().collect::<Vec<_>>();
             if !(1..=2).contains(&parts.len()) {
-                return Err(snapshot::invalid());
+                return Err(invalid());
             }
-            let (old, new) = parts[0].split_once("..").ok_or_else(snapshot::invalid)?;
+            let (old, new) = parts[0].split_once("..").ok_or_else(&invalid)?;
             if [old, new].iter().any(|id| {
                 id.is_empty() || id.len() > 64 || !id.bytes().all(|b| b.is_ascii_hexdigit())
             }) || parts.get(1).is_some_and(|mode| {
                 mode.len() != 6 || !mode.bytes().all(|b| (b'0'..=b'7').contains(&b))
             }) {
-                return Err(snapshot::invalid());
+                return Err(invalid());
             }
         } else if let Some(value) = line
             .strip_prefix("similarity index ")
@@ -603,15 +683,15 @@ pub(crate) fn snapshot_sections_with_limit(
                     .and_then(|v| v.parse::<u32>().ok())
                     .is_none_or(|n| n > 100)
             {
-                return Err(snapshot::invalid());
+                return Err(invalid());
             }
         } else if !line.is_empty() {
-            return Err(snapshot::invalid());
+            return Err(invalid());
         }
         offset += raw.len();
     }
     if let Some(state) = state {
-        sections.push(state.finish(start, offset)?);
+        sections.push(state.finish(start, offset).map_err(|_| "Provider diff ended with an incomplete or inconsistent file section. Refresh the PR; no review was started.".to_string())?);
     }
     let mut paths = HashSet::new();
     // Repeated sections for one provider file are incomplete/contradictory,

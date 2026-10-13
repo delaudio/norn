@@ -79,3 +79,21 @@ test("difWindow collapses large diffs around the anchor and expands on demand", 
   expect(diffWindow(100, 10, false, 2000)).toEqual({ start: 0, end: 100, collapsed: false });
   expect(diffWindow(5000, 2500, true, 2000)).toEqual({ start: 0, end: 5000, collapsed: false });
 });
+
+test("suppressed empty context preserves finding anchors and split line numbers", () => {
+  const patch = "diff --git a/x b/x\n--- a/x\n+++ b/x\n@@ -1,3 +1,3 @@\n-old\n+new\n\n tail\n";
+  const lines = diffLines(patch, 3, "new");
+  expect(lines.find((line) => line.highlighted)?.text).toBe(" tail");
+  expect(lines.find((line) => line.text === "" && line.oldNumber === 2)?.newNumber).toBe(2);
+  expect(lines.at(-1)?.newNumber).toBeNull();
+  for (const side of ["old", "new"] as const) {
+    expect(anchorPresent(patch, 2, side)).toBe(true);
+    expect(anchorPresent(patch, 3, side)).toBe(true);
+    expect(anchorPresent(patch, 4, side)).toBe(false);
+  }
+  expect(
+    splitRows(lines).some(
+      (row) => row.kind === "pair" && row.left?.oldNumber === 3 && row.right?.newNumber === 3,
+    ),
+  ).toBe(true);
+});

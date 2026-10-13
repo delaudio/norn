@@ -393,19 +393,23 @@ export function diffLines(text: string, highlight: number | null, side: "old" | 
   let oldLine = 0;
   let newLine = 0;
   let inHunk = false;
+  let oldRemaining = 0;
+  let newRemaining = 0;
   for (const raw of text.split("\n")) {
     let fg: string = theme.text;
     let highlighted = false;
     let kind: DiffLineKind = "context";
     let oldNumber: number | null = null;
     let newNumber: number | null = null;
-    const hunk = raw.match(/^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
+    const hunk = raw.match(/^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/);
     if (hunk) {
       fg = theme.muted;
       kind = "hunk";
       inHunk = true;
       oldLine = Number.parseInt(hunk[1] ?? "0", 10);
-      newLine = Number.parseInt(hunk[2] ?? "0", 10);
+      newLine = Number.parseInt(hunk[3] ?? "0", 10);
+      oldRemaining = Number(hunk[2] ?? 1);
+      newRemaining = Number(hunk[4] ?? 1);
     } else if (!inHunk) {
       // File headers and other pre-hunk metadata are not source lines.
       fg = theme.muted;
@@ -419,13 +423,15 @@ export function diffLines(text: string, highlight: number | null, side: "old" | 
       newNumber = newLine;
       highlighted = highlight !== null && side === "new" && newLine === highlight;
       newLine += 1;
+      newRemaining -= 1;
     } else if (raw.startsWith("-")) {
       fg = theme.error;
       kind = "del";
       oldNumber = oldLine;
       highlighted = highlight !== null && side === "old" && oldLine === highlight;
       oldLine += 1;
-    } else if (raw.startsWith(" ")) {
+      oldRemaining -= 1;
+    } else if (raw.startsWith(" ") || (raw === "" && oldRemaining > 0 && newRemaining > 0)) {
       kind = "context";
       oldNumber = oldLine;
       newNumber = newLine;
@@ -433,7 +439,9 @@ export function diffLines(text: string, highlight: number | null, side: "old" | 
         highlight !== null &&
         ((side === "new" && newLine === highlight) || (side === "old" && oldLine === highlight));
       oldLine += 1;
+      oldRemaining -= 1;
       newLine += 1;
+      newRemaining -= 1;
     }
     lines.push({ rawIndex: lines.length, text: raw, fg, highlighted, kind, oldNumber, newNumber });
   }
@@ -1312,11 +1320,12 @@ export function Shell({ store, client, quit }: ShellProps) {
     return () => data.dispose();
   }, [data, state.dataOpen]);
   const settings = useMemo(() => new SettingsStore(), []);
+  const settingsProvider = state.terminalLayout ? (state.repositories[0]?.provider ?? null) : null;
   useEffect(() => {
     if (!state.settingsOpen) return;
-    void settings.load(client);
+    void settings.load(client, settingsProvider, state.terminalLayout);
     return () => settings.dispose();
-  }, [settings, client, state.settingsOpen]);
+  }, [settings, client, state.settingsOpen, settingsProvider, state.terminalLayout]);
   useEffect(() => {
     if (!["accepted", "running"].includes(state.operation?.state ?? "")) return;
     const timer = setInterval(() => void store.pollOperation(), 1000);

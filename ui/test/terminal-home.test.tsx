@@ -142,6 +142,16 @@ test("Settings is a modal over the terminal home; paste cannot launch diff or re
     const frame = app.renderer.captureCharFrame();
     expect(frame).toContain("PR FILTER");
     expect(frame).toContain("Settings");
+    for (const unwanted of [
+      "Jira URL",
+      "Repo 1",
+      "Codex model",
+      "OpenCode model",
+      "Automatic PR sync",
+      "add repo",
+    ])
+      expect(frame).not.toContain(unwanted);
+    expect(frame).toContain("Claude model");
     await app.renderer.mockInput.pasteBracketedText("ggbaq");
     await app.settle();
     expect(
@@ -431,3 +441,25 @@ test("a late description cannot replace the next selected PR and filters hide st
     await app.cleanup();
   }
 });
+
+for (const provider of ["github", "bitbucket"] as const) {
+  test(`a retries ${provider} evidence before starting exactly one review`, async () => {
+    const app = await fixture(provider);
+    try {
+      app.transport.fault = "snapshot";
+      await app.key("a");
+      expect(app.store.getSnapshot().error).not.toBeNull();
+      expect(app.transport.calls.some((call) => call.method === "review.start")).toBe(false);
+      app.transport.fault = null;
+      await app.key("a");
+      const starts = app.transport.calls.filter((call) => call.method === "review.start");
+      expect(starts).toHaveLength(1);
+      expect(starts[0]?.params).toMatchObject({
+        target: { provider, workspace: "synthetic", repo: "review", prId: 7 },
+        snapshot: { repository: { provider, workspace: "synthetic", repo: "review" }, prId: 7 },
+      });
+    } finally {
+      await app.cleanup();
+    }
+  });
+}

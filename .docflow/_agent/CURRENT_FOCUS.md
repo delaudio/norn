@@ -4,6 +4,12 @@ Git is authoritative. Durable history lives in WORKLOG and plan/done.
 
 ## Active state
 
+- 2026-10-13 latest feedback: a blocked by generic snapshot error; reproduce
+  valid Git suppressed-empty context with owned Bitbucket fixtures, preserve
+  inventory validation and provide safe failure-stage diagnostics. Scope modal
+  Settings to current provider and selected agent; retain hidden global values.
+  Build a matched backend in isolated cloned cache; no private provider calls.
+
 - 2026-10-13 latest correction: PR394 remains open; current-repository filtering
   alone failed the maintainer's UX requirement. Plan0074 now restores the actual
   terminal home (filters/PRs/AI), modal Settings, Enter load/a explicit review,

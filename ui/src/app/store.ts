@@ -505,15 +505,19 @@ export function anchorPresent(text: string, line: number, side: "old" | "new"): 
   let oldLine = 0;
   let newLine = 0;
   let inHunk = false;
+  let oldRemaining = 0;
+  let newRemaining = 0;
   for (const raw of text.split("\n")) {
-    const hunk = raw.match(/^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
+    const hunk = raw.match(/^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/);
     if (hunk) {
       oldLine = Number.parseInt(hunk[1] ?? "0", 10);
-      newLine = Number.parseInt(hunk[2] ?? "0", 10);
+      newLine = Number.parseInt(hunk[3] ?? "0", 10);
+      oldRemaining = Number(hunk[2] ?? 1);
+      newRemaining = Number(hunk[4] ?? 1);
       inHunk = true;
       continue;
     }
-    if (!inHunk || raw === "" || raw.startsWith("\\")) {
+    if (!inHunk || raw.startsWith("\\")) {
       continue;
     }
     if (raw.startsWith("-")) {
@@ -521,6 +525,7 @@ export function anchorPresent(text: string, line: number, side: "old" | "new"): 
         return true;
       }
       oldLine += 1;
+      oldRemaining -= 1;
       continue;
     }
     if (raw.startsWith("+")) {
@@ -528,14 +533,17 @@ export function anchorPresent(text: string, line: number, side: "old" | "new"): 
         return true;
       }
       newLine += 1;
+      newRemaining -= 1;
       continue;
     }
-    if (raw.startsWith(" ")) {
+    if (raw.startsWith(" ") || (raw === "" && oldRemaining > 0 && newRemaining > 0)) {
       if ((side === "old" && oldLine === line) || (side === "new" && newLine === line)) {
         return true;
       }
       oldLine += 1;
+      oldRemaining -= 1;
       newLine += 1;
+      newRemaining -= 1;
     }
   }
   return false;

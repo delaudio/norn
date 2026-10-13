@@ -1269,3 +1269,32 @@ Plan 0053 completion prepared after implementation `e4264db`, effective only on 
   (score API unavailable). No real provider/credential/agent access in tests.
 - Same PR394/plan0074 remains pending until the new head has verified CI and
   actually merges. The installed legacy launcher is untouched.
+
+
+## 2026-10-13 — Current-repository review evidence and compact Settings
+
+Plan0074 / PR394: maintainer reports a blocked behind generic provider snapshot
+error and a desktop-style global Settings inventory. Preserve verified evidence;
+resolve abbreviated Bitbucket metadata to full commits using authenticated
+fixed-origin endpoints, validate prefix/repository, and recheck at capture and
+review start. Align rename handling across diffstat/patch. Parse Git suppressed
+empty context with exact hunk counts; preserve inline positions and native
+split/anchor navigation. Failure diagnostics expose stage/line/count, never
+patch content or credentials. No live provider/agent used; maintainer PR still
+requires a matched-backend user trial to identify its exact previous failure.
+
+Terminal Settings shows only selected agent/model/effort, diff/theme and current
+provider credentials. Hide folder inventory, Jira/sync and other agent models;
+keep hidden draft values and repository paths unchanged on save. Unknown launch
+identity still gets compact Settings with GitHub/Bitbucket credential choice.
+Owned native tests fence paste, verify modal contents and explicit a retry with
+pinned evidence for both providers.
+
+Validation: core library776 passed/2ignored with owned loopback fixture permission;
+initial sandbox run rejected52 loopback binds, so it is not passing evidence.
+UI310 suite passed plus two new a retry tests; root tests/typechecks,
+UI typecheck, strict core Clippy, Archgate17, lint (three existing infos),
+221native golden frames and Storybook build. Changed-delta React Doctor found no
+issues (score API unavailable). APFS clone of build cache isolates backend
+compilation from root workspace; matched backend built in this worktree.
+Plan stays todo / ADR0020 Accepted until verified integration and final cutover.
