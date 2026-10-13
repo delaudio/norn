@@ -574,6 +574,18 @@ export type Request =
       id: RequestId;
       method: "review.metrics.effectiveness";
       params: ReviewEffectivenessParams;
+    }
+  | {
+      type: "request";
+      id: RequestId;
+      method: "review.job";
+      params: ReviewJobParams;
+    }
+  | {
+      type: "request";
+      id: RequestId;
+      method: "review.job.cancel";
+      params: ReviewJobParams;
     };
 export type RequestId = string;
 /**
@@ -1363,6 +1375,9 @@ export interface ReviewEffectivenessParams {
   fromMs?: number | null;
   toMs?: number | null;
 }
+export interface ReviewJobParams {
+  id: string;
+}
 export interface ResponseOk {
   type: "response";
   id: RequestId;
@@ -1434,7 +1449,8 @@ export interface ResponseOk {
     | RepositoryOperationStatus
     | ReviewJobsResult
     | ClosedPrMetricsResult
-    | ReviewEffectivenessResult;
+    | ReviewEffectivenessResult
+    | ReviewJobResult;
 }
 export interface DiffFileResult {
   target: TargetIdentity;
@@ -2702,6 +2718,9 @@ export interface RepositoryReviewEffectiveness {
   workspace: string;
   repo: string;
   summary: ReviewEffectivenessSummary;
+}
+export interface ReviewJobResult {
+  job: ReviewJobSummary;
 }
 export interface ResponseError {
   type: "response";

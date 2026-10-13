@@ -3105,6 +3105,21 @@ export class ShellStore {
     this.update({ selectedJob: (this.state.selectedJob + delta + length) % length });
   }
 
+  /// Cancel the selected stored job by exact id; terminal jobs are left alone.
+  async cancelSelectedJob(client: BackendClient): Promise<void> {
+    const job = this.state.jobs[this.state.selectedJob];
+    if (!job) {
+      return;
+    }
+    try {
+      const updated = await client.cancelReviewJob(job.id);
+      const jobs = this.state.jobs.map((entry) => (entry.id === updated.id ? updated : entry));
+      this.update({ jobs, notice: `Cancelled ${updated.id}` });
+    } catch (error) {
+      this.update({ error: message(error) });
+    }
+  }
+
   /// Open the selected job's review target when a matching stored review exists.
   async selectJob(): Promise<void> {
     const job = this.state.jobs[this.state.selectedJob];

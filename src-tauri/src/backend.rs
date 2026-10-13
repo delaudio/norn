@@ -1621,6 +1621,20 @@ fn dispatch(request: Request, backend: &Backend) -> bool {
             };
             false
         }
+        Request::ReviewJob { params, .. } => {
+            match review_job_response(&params.id) {
+                Ok(value) => backend.respond(&id, value),
+                Err(error) => backend.fail(&id, error),
+            };
+            false
+        }
+        Request::ReviewJobCancel { params, .. } => {
+            match review_job_cancel_response(&params.id) {
+                Ok(value) => backend.respond(&id, value),
+                Err(error) => backend.fail(&id, error),
+            };
+            false
+        }
         Request::ReviewJobs { params, .. } => {
             match review_jobs_response(&params) {
                 Ok(value) => backend.respond(&id, value),
@@ -2206,6 +2220,73 @@ fn review_closed_metrics_response() -> Result<serde_json::Value, ProtocolError> 
         .map(|metric| serde_json::to_value(metric).unwrap_or(serde_json::Value::Null))
         .collect::<Vec<_>>();
     Ok(json!({ "metrics": metrics }))
+}
+
+/// A single stored review job by exact id.
+fn review_job_response(id: &str) -> Result<serde_json::Value, ProtocolError> {
+    let job = crate::review_storage::get_review_job(id)
+        .map_err(|error| {
+            ProtocolError::new(ProtocolErrorCode::Internal, format!("review job: {error}"))
+        })?
+        .ok_or_else(|| {
+            ProtocolError::new(
+                ProtocolErrorCode::NotFound,
+                format!("unknown review job: {id}"),
+            )
+        })?;
+    Ok(json!({ "job": review_job_json(job) }))
+}
+
+/// Cancel a stored review job by exact id. Terminal jobs are not re-cancelled.
+fn review_job_cancel_response(id: &str) -> Result<serde_json::Value, ProtocolError> {
+    let job = crate::review_storage::get_review_job(id)
+        .map_err(|error| {
+            ProtocolError::new(ProtocolErrorCode::Internal, format!("review job: {error}"))
+        })?
+        .ok_or_else(|| {
+            ProtocolError::new(
+                ProtocolErrorCode::NotFound,
+                format!("unknown review job: {id}"),
+            )
+        })?;
+    // Only queued jobs can be cancelled truthfully here: a running job is
+    // executed elsewhere and marking it cancelled without stopping it would be
+    // a false completion acknowledgment.
+    if job.status != crate::review_storage::ReviewJobStatus::Queued {
+        return Err(ProtocolError::new(
+            ProtocolErrorCode::TargetStale,
+            format!("review job {id} is not queued and cannot be cancelled locally"),
+        ));
+    }
+    let job = crate::review_storage::update_review_job_status(
+        id,
+        crate::review_storage::ReviewJobStatus::Cancelled,
+        None,
+        None,
+    )
+    .map_err(|error| {
+        ProtocolError::new(ProtocolErrorCode::Internal, format!("review job: {error}"))
+    })?;
+    Ok(json!({ "job": review_job_json(job) }))
+}
+
+fn review_job_json(job: crate::review_storage::ReviewJob) -> serde_json::Value {
+    json!({
+        "id": job.id,
+        "workspace": job.workspace,
+        "repo": job.repo,
+        "prId": job.pr_id,
+        "prTitle": job.pr_title,
+        "sourceBranch": job.source_branch,
+        "destinationBranch": job.destination_branch,
+        "status": serde_json::to_value(job.status).unwrap_or_else(|_| json!("unknown")),
+        "trigger": job.trigger,
+        "threadId": job.thread_id,
+        "error": job.error,
+        "createdAt": job.created_at,
+        "startedAt": job.started_at,
+        "finishedAt": job.finished_at,
+    })
 }
 
 /// Bounded global review history from stored jobs, newest first.

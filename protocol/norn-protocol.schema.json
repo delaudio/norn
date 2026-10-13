@@ -243,7 +243,9 @@
         "workspace.scopes",
         "review.jobs",
         "review.metrics.closed",
-        "review.metrics.effectiveness"
+        "review.metrics.effectiveness",
+        "review.job",
+        "review.job.cancel"
       ]
     },
     "DiffFileParams": {
@@ -8415,6 +8417,31 @@
           "$ref": "#/definitions/ReviewEffectivenessReport"
         }
       }
+    },
+    "ReviewJobParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "ReviewJobResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "job"
+      ],
+      "properties": {
+        "job": {
+          "$ref": "#/definitions/ReviewJobSummary"
+        }
+      }
     }
   },
   "oneOf": [
@@ -10757,6 +10784,54 @@
               "$ref": "#/definitions/ReviewEffectivenessParams"
             }
           }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "type": {
+              "const": "request"
+            },
+            "id": {
+              "$ref": "#/definitions/RequestId"
+            },
+            "method": {
+              "const": "review.job"
+            },
+            "params": {
+              "$ref": "#/definitions/ReviewJobParams"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "type": {
+              "const": "request"
+            },
+            "id": {
+              "$ref": "#/definitions/RequestId"
+            },
+            "method": {
+              "const": "review.job.cancel"
+            },
+            "params": {
+              "$ref": "#/definitions/ReviewJobParams"
+            }
+          }
         }
       ]
     },
@@ -10982,6 +11057,9 @@
             },
             {
               "$ref": "#/definitions/ReviewEffectivenessResult"
+            },
+            {
+              "$ref": "#/definitions/ReviewJobResult"
             }
           ]
         }

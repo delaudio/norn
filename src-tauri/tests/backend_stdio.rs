@@ -1347,6 +1347,34 @@ fn review_effectiveness_returns_a_report() {
 }
 
 #[test]
+fn review_job_unknown_id_fails() {
+    let repo = temp_repo();
+    let data_dir = tempfile::tempdir().expect("data dir");
+    let mut backend = Backend::spawn_env(
+        repo.path(),
+        &[(
+            "NORN_REVIEW_DATA_DIR",
+            data_dir.path().to_str().expect("data dir"),
+        )],
+    );
+    backend.handshake();
+    for method in ["review.job", "review.job.cancel"] {
+        let request_id = format!("req-{method}");
+        backend.send(json!({
+            "type": "request",
+            "id": request_id,
+            "method": method,
+            "params": { "id": "missing-job" }
+        }));
+        let response = backend.wait_for(
+            |v| v["type"] == "response" && v["id"] == request_id,
+            Duration::from_secs(5),
+        );
+        assert_eq!(response["ok"], false, "response: {response}");
+    }
+}
+
+#[test]
 fn malformed_frames_do_not_stop_the_backend() {
     let repo = temp_repo();
     let mut backend = Backend::spawn(repo.path());

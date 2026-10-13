@@ -451,6 +451,16 @@ export class FakeBackendTransport implements BackendTransport {
         return { runs: this.options.history ?? [] };
       case "review.jobs":
         return { jobs: this.options.jobs ?? [], offset: params.offset ?? 0 };
+      case "review.job": {
+        const job = (this.options.jobs ?? []).find((entry) => entry.id === params.id);
+        if (!job) throw new Error("unknown review job");
+        return { job };
+      }
+      case "review.job.cancel": {
+        const job = (this.options.jobs ?? []).find((entry) => entry.id === params.id);
+        if (!job) throw new Error("unknown review job");
+        return { job: { ...job, status: "cancelled" } };
+      }
       case "review.metrics.closed":
         return { metrics: this.options.closedMetrics ?? [] };
       case "review.metrics.effectiveness":

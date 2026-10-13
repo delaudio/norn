@@ -29,6 +29,9 @@ GitHub issue: #361 (epic #294 step 12/15).
   (`shift+M`) and effectiveness (`shift+E`).
 - Case-sensitive shortcuts are handled before the lowercase branches that share
   the letter (fixes `H`/`M`/`E`/`B` being swallowed by `h`/`m`/`e`/`b`).
+- `review.job` returns a job by exact id and `review.job.cancel` cancels a
+  **queued** job only (running/terminal jobs return `TargetStale` instead of a
+  false cancellation).
 - `cargo clippy -D warnings`, `cargo test`, `pnpm run lint/typecheck/test`, the
   `ui` job and `archgate check` pass.
 

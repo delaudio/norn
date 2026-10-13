@@ -1953,6 +1953,16 @@ export class BackendClient {
     return result.report as unknown as ReviewEffectivenessReport;
   }
 
+  async reviewJob(id: string): Promise<ReviewJobSummary> {
+    const result = await this.transport.request("review.job", { id });
+    return result.job as unknown as ReviewJobSummary;
+  }
+
+  async cancelReviewJob(id: string): Promise<ReviewJobSummary> {
+    const result = await this.transport.request("review.job.cancel", { id });
+    return result.job as unknown as ReviewJobSummary;
+  }
+
   async reviewClosedMetrics(): Promise<ClosedPrMetric[]> {
     const result = await this.transport.request("review.metrics.closed", {});
     return (result.metrics as ClosedPrMetric[]) ?? [];
