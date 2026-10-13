@@ -871,7 +871,8 @@
         "createdAt",
         "status",
         "turnKind",
-        "findingsCount"
+        "findingsCount",
+        "threadId"
       ],
       "properties": {
         "runId": {
@@ -890,6 +891,12 @@
         "findingsCount": {
           "type": "integer",
           "minimum": 0
+        },
+        "threadId": {
+          "type": [
+            "string",
+            "null"
+          ]
         }
       }
     },

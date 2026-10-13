@@ -1563,6 +1563,7 @@ export interface ReviewRunSummary {
   status: string;
   turnKind: string;
   findingsCount: number;
+  threadId: string | null;
 }
 export interface RecordPage {
   key: string;

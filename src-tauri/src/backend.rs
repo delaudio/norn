@@ -2345,6 +2345,7 @@ fn review_history_response(target: &TargetIdentity) -> Result<serde_json::Value,
                         "createdAt": run.created_at,
                         "status": serde_json::to_value(run.status).unwrap_or_else(|_| json!("unknown")),
                         "turnKind": serde_json::to_value(run.turn_kind).unwrap_or_else(|_| json!("initial")),
+                        "threadId": run.thread_id,
                         "findingsCount": run.findings.len(),
                     })
                 })

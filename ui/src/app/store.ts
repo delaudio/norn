@@ -2233,6 +2233,26 @@ export class ShellStore {
     this.update({ conversationOpen: !this.state.conversationOpen });
   }
 
+  /// Open the conversation thread of the most recent stored run (run -> thread).
+  async openThreadForLatestRun(): Promise<void> {
+    const run = this.state.history[0];
+    if (!run) {
+      this.update({ notice: "No stored review runs for this target." });
+      return;
+    }
+    if (!run.threadId) {
+      this.update({ notice: "The latest run has no conversation thread." });
+      return;
+    }
+    const index = this.state.threads.findIndex((thread) => thread.id === run.threadId);
+    if (index < 0) {
+      this.update({ notice: "The run's thread is not in the loaded conversation list." });
+      return;
+    }
+    this.update({ selectedThread: index });
+    await this.selectThread();
+  }
+
   async selectThread(): Promise<void> {
     const thread = this.state.threads[this.state.selectedThread];
     if (!thread?.latestRunId || !this.client) {

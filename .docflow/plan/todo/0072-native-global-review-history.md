@@ -32,6 +32,8 @@ GitHub issue: #361 (epic #294 step 12/15).
 - `review.job` returns a job by exact id and `review.job.cancel` cancels a
   **queued** job only (running/terminal jobs return `TargetStale` instead of a
   false cancellation).
+- Run summaries expose `threadId`; `shift+T` opens the latest run's
+  conversation thread (run -> thread), closing the cross-navigation loop.
 - `cargo clippy -D warnings`, `cargo test`, `pnpm run lint/typecheck/test`, the
   `ui` job and `archgate check` pass.
 
