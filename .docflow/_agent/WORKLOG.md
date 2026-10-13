@@ -1363,3 +1363,35 @@ lint, Archgate17 and React Doctor pass; browser asset bundle rebuilt in owned
 worktree. No live provider/agent or Norn review. Existing browser server caches
 its assets; maintainer must quit/restart TUI and create a new g→b session.
 No backend/source-store change. PR394 remains open;0074pending until actualmerge.
+
+
+## 2026-10-13 — Browser file tree and native click support
+
+Plan0074 / PR394: reuse FileTree for the authenticated viewer with search,
+expandable folders, selected row, hide/show and per-file navigation anchors.
+Tree deduplicates repeated local paths while retaining every Pierre section;
+images navigate to their actual preview. Anchors use encoded paths and only one
+per repeated path. Viewer keeps independently scrolling sidebar/content.
+
+OpenTUI mouse reporting was enabled, but native diff Select rows lacked click
+handlers. Add readonly clickable rows that invoke the existing store selection
+and diff/preview loading pipeline, plus pane focus. Home clicks select/load PRs
+or Local, filter, start review explicitly, open diff/settings/files, refresh/quit.
+Diff choice supports native/browser/cancel clicks; cancelling fences a pending
+read's dependent actions. Settings fields edit/cycle by click, Save/Close mirror
+keyboard actions. Background clicks stay blocked during modal/loading state.
+Thread compact lists cannot accidentally be interpreted as file rows.
+
+Native mouse events test filter/PR selection, native diff, second/image file,
+diff focus, settings editing/close, blocked background AI, browser diff and
+explicit AI button. Web tests cover search/click/collapse visibility, image
+preview navigation and unique repeated-path anchors. Async fixture waits now
+require full Markdown paint and complete image/diff reads rather than fixed
+short sleeps, retaining positive assertions and golden baselines.
+
+Validation:317UI tests,127root tests plus tooling, typechecks, lint, Archgate17,
+223native golden frames/Storybook and rebuilt browser bundle pass. React Doctor
+changed delta has no issues (score service unavailable). ADR0020r6/contract/plan
+updated under maintainer direction. No Norn review, private provider/agent calls,
+user data changes or backend rebuild. Keep0074pending until verified actual merge;
+restart TUI/browser session to load rebuilt web assets.

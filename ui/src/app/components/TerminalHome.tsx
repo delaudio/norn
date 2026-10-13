@@ -142,6 +142,10 @@ export function TerminalHome({
       setBusy(false);
     }
   };
+  const dismissDiffPrompt = () => {
+    revision.current++;
+    shell.promptTerminalDiff(false);
+  };
   useKeyboard((key) => {
     const state = shell.getSnapshot();
     if (
@@ -160,7 +164,7 @@ export function TerminalHome({
     }
     if (key.ctrl || key.meta || key.super || key.option) return;
     if (state.terminalDiffPrompt) {
-      if (key.name === "escape" || key.name === "q") shell.promptTerminalDiff(false);
+      if (key.name === "escape" || key.name === "q") dismissDiffPrompt();
       else if (key.name === "g") void act("diff");
       else if (key.name === "b") void act("browser");
       return;
@@ -239,7 +243,11 @@ export function TerminalHome({
     if (mouseAvailable()) setFocus(pane);
   };
   const select = (key: string) => {
-    if (mouseAvailable()) providers.selectRow(key);
+    if (mouseAvailable()) {
+      providers.selectRow(key);
+      setFocus("list");
+      void act("load");
+    }
   };
   const entry = state.picker[state.selectedPicker];
   const loaded = local
@@ -309,7 +317,19 @@ export function TerminalHome({
             </text>
             <scrollbox ref={list} flexGrow={1} minHeight={0} scrollY>
               {local ? (
-                <text id="home-local:current" fg={theme.primary} height={1} truncate>
+                <text
+                  id="home-local:current"
+                  onMouseDown={(event) => {
+                    event.stopPropagation();
+                    if (event.button === 0 && mouseAvailable()) {
+                      setFocus("list");
+                      void act("load");
+                    }
+                  }}
+                  fg={theme.primary}
+                  height={1}
+                  truncate
+                >
                   ▶ Working tree · Enter configure base/layers
                 </text>
               ) : (
@@ -487,11 +507,40 @@ export function TerminalHome({
           </scrollbox>
         </box>
       </box>
-      <text height={2} flexShrink={0} fg={theme.muted}>
-        {width >= 80
-          ? "f filter · Tab pane · j/k move · Enter load · a AI review · g diff · b web diff · s settings · r refresh · F8 files · q quit"
-          : "f filter · g diff · a AI · s settings\nTab pane · j/k · Enter load · F8 files · q quit"}
-      </text>
+      <box height={2} flexShrink={0} flexDirection="column">
+        <text height={1} fg={theme.muted} truncate>
+          f filter · Tab pane · j/k move · Enter load · a AI review · g diff · b web diff · s
+          settings · q quit
+        </text>
+        <box height={1} flexDirection="row">
+          {[
+            { label: "AI", run: () => void act("review") },
+            { label: "Diff", run: () => shell.promptTerminalDiff(true) },
+            { label: "Settings", run: () => shell.toggleSettings() },
+            {
+              label: "Refresh",
+              run: () =>
+                local
+                  ? void shell.openLocalComparison(client, { kind: "current" })
+                  : providers.refresh(client),
+            },
+            { label: "Files", run: () => shell.toggleExplorer() },
+            { label: "Quit", run: quit },
+          ].map((action) => (
+            <text
+              id={`home-action-${action.label}`}
+              key={action.label}
+              width={action.label.length + 2}
+              fg={theme.primary}
+              bg={theme.element}
+              onMouseDown={(event) => {
+                event.stopPropagation();
+                if (event.button === 0 && mouseAvailable()) action.run();
+              }}
+            >{` ${action.label} `}</text>
+          ))}
+        </box>
+      </box>
       {state.terminalDiffPrompt && (
         <box
           position="absolute"
@@ -506,9 +555,36 @@ export function TerminalHome({
           flexDirection="column"
         >
           <text fg={theme.primary}>Open diff</text>
-          <text fg={theme.text}>g · Native terminal Git diff</text>
-          <text fg={theme.text}>b · Browser diff viewer</text>
-          <text fg={theme.muted}>Esc · Cancel</text>
+          <text
+            id="home-choice-native"
+            fg={theme.text}
+            onMouseDown={(event) => {
+              event.stopPropagation();
+              if (event.button === 0 && !pending.current) void act("diff");
+            }}
+          >
+            g · Native terminal Git diff
+          </text>
+          <text
+            id="home-choice-browser"
+            fg={theme.text}
+            onMouseDown={(event) => {
+              event.stopPropagation();
+              if (event.button === 0 && !pending.current) void act("browser");
+            }}
+          >
+            b · Browser diff viewer
+          </text>
+          <text
+            id="home-choice-cancel"
+            fg={theme.muted}
+            onMouseDown={(event) => {
+              event.stopPropagation();
+              if (event.button === 0) dismissDiffPrompt();
+            }}
+          >
+            Esc · Cancel
+          </text>
         </box>
       )}
     </box>

@@ -1029,7 +1029,20 @@ async function providerPreviewScene(kind: "github" | "bitbucket" | "saved" | "er
   if (kind === "image") {
     store.cycleFocus();
     store.move(1);
-    for (let i = 0; i < 10; i++) await Bun.sleep(0);
+    const deadline = Date.now() + 2000;
+    while (
+      (store.getSnapshot().diffLoading ||
+        !store.getSnapshot().preview?.before ||
+        !store.getSnapshot().preview?.after) &&
+      Date.now() < deadline
+    )
+      await Bun.sleep(1);
+    if (
+      store.getSnapshot().diffLoading ||
+      !store.getSnapshot().preview?.before ||
+      !store.getSnapshot().preview?.after
+    )
+      throw new Error("Provider image scene did not finish its owned reads");
   }
   return { client, store };
 }

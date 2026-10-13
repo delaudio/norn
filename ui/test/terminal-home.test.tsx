@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 import type { ScrollBoxRenderable } from "@opentui/core";
 import { createTestRenderer, KeyCodes } from "@opentui/core/testing";
+import { providerPrKey } from "../src/app/providerStore";
 import { ShellStore } from "../src/app/store";
 import { mountApp } from "../src/app/ui";
 import { BackendClient } from "../src/transport/backendClient";
@@ -11,7 +12,7 @@ async function fixture(provider: "github" | "bitbucket", width = 120) {
   const client = new BackendClient(transport);
   const store = new ShellStore();
   await store.connect(client, "current-repo");
-  const renderer = await createTestRenderer({ width, height: 30 });
+  const renderer = await createTestRenderer({ width, height: 30, useMouse: true });
   const ui = mountApp(renderer.renderer, store, client);
   const unsubscribe = client.onOperationEvent((event) => store.applyEvent(event));
   const settle = async () => {
@@ -38,6 +39,23 @@ async function fixture(provider: "github" | "bitbucket", width = 120) {
     }
     await renderer.renderOnce();
   };
+  const click = async (id: string) => {
+    const node = renderer.renderer.root.findDescendantById(id);
+    expect(node).not.toBeNull();
+    await renderer.mockMouse.click(node!.x + Math.min(1, node!.width - 1), node!.y);
+    await settle();
+    const deadline = Date.now() + 2000;
+    while (
+      (store.getSnapshot().snapshotLoading ||
+        store.getSnapshot().diffLoading ||
+        transport.activeReads > 0) &&
+      Date.now() < deadline
+    ) {
+      await Bun.sleep(1);
+      await renderer.renderOnce();
+    }
+    await renderer.renderOnce();
+  };
   const cleanup = async () => {
     unsubscribe();
     ui.unmount();
@@ -51,7 +69,7 @@ async function fixture(provider: "github" | "bitbucket", width = 120) {
     await Bun.sleep(1);
     await renderer.renderOnce();
   }
-  return { transport, client, store, renderer, key, settle, cleanup };
+  return { transport, client, store, renderer, key, click, settle, cleanup };
 }
 
 for (const provider of ["github", "bitbucket"] as const) {
@@ -453,6 +471,14 @@ test("a late description cannot replace the next selected PR and filters hide st
     await app.key("return");
     await app.key("j");
     await app.settle();
+    const paintDeadline = Date.now() + 2000;
+    while (
+      !app.renderer.captureCharFrame().includes("Current PR eight description") &&
+      Date.now() < paintDeadline
+    ) {
+      await Bun.sleep(1);
+      await app.renderer.renderOnce();
+    }
     expect(app.renderer.captureCharFrame()).toContain("Current PR eight description");
     release();
     await app.settle();
@@ -557,6 +583,60 @@ test("description and AI output have independent keyboard scroll and focus", asy
     app.renderer.mockInput.pressTab({ shift: true });
     await app.settle();
     expect(app.store.getSnapshot().terminalHomeFocus).toBe("review");
+  } finally {
+    await app.cleanup();
+  }
+});
+
+test("native mouse selects PR/filter, opens diff and switches the selected file", async () => {
+  const app = await fixture("github");
+  try {
+    app.transport.images = true;
+    await app.click("home-filter-DRAFT");
+    expect(app.store.getSnapshot().terminalFilter).toBe("DRAFT");
+    await app.click(
+      `home-${providerPrKey({ provider: "github", workspace: "synthetic", repo: "review" }, 8)}`,
+    );
+    expect(app.store.getSnapshot().terminalHomeFocus).toBe("list");
+    expect(app.store.getSnapshot().files).toHaveLength(2);
+    expect(app.transport.calls.some((call) => call.method === "review.start")).toBe(false);
+    await app.click("home-action-Diff");
+    expect(app.store.getSnapshot().terminalDiffPrompt).toBe(true);
+    await app.click("home-choice-cancel");
+    expect(app.store.getSnapshot().terminalDiffPrompt).toBe(false);
+    await app.click("home-action-Diff");
+    await app.click("home-choice-native");
+    expect(app.store.getSnapshot().terminalHomeOpen).toBe(false);
+    await app.click("files-list-row-1");
+    expect(app.store.getSnapshot().selectedFile).toBe(1);
+    expect(app.store.getSnapshot().diff?.path).toBe("picture.png");
+    expect(app.store.getSnapshot().focus).toBe("files");
+    await app.click("detail");
+    expect(app.store.getSnapshot().focus).toBe("diff");
+  } finally {
+    await app.cleanup();
+  }
+});
+
+test("native mouse opens and closes settings and cannot start a review through the overlay", async () => {
+  const app = await fixture("bitbucket");
+  try {
+    await app.click("home-action-Settings");
+    expect(app.store.getSnapshot().settingsOpen).toBe(true);
+    await app.click("home-action-AI");
+    expect(app.transport.calls.some((call) => call.method === "review.start")).toBe(false);
+    await app.click("setting-1");
+    expect(app.renderer.captureCharFrame()).toContain("Typing changes this draft");
+    await app.click("settings-close");
+    expect(app.store.getSnapshot().settingsOpen).toBe(false);
+    await app.click("home-action-Diff");
+    await app.click("home-choice-browser");
+    expect(
+      app.transport.calls.filter((call) => call.method === "provider.snapshot.browser"),
+    ).toHaveLength(1);
+    expect(app.store.getSnapshot().terminalHomeOpen).toBe(true);
+    await app.click("home-action-AI");
+    expect(app.transport.calls.filter((call) => call.method === "review.start")).toHaveLength(1);
   } finally {
     await app.cleanup();
   }

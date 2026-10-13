@@ -2402,6 +2402,29 @@ export class ShellStore {
     this.update({ conversationOpen: true });
   }
 
+  private terminalClickAvailable(): boolean {
+    return (
+      this.state.status === "ready" &&
+      this.state.terminalLayout &&
+      !this.state.terminalHomeOpen &&
+      !this.state.settingsOpen &&
+      !this.state.helpOpen &&
+      !this.state.jobsOpen &&
+      !this.state.composing &&
+      !this.state.fixPreview &&
+      !this.state.profileOpen
+    );
+  }
+  clickTerminalFile(index: number): void {
+    if (!this.terminalClickAvailable() || !Number.isInteger(index) || !this.state.files[index])
+      return;
+    this.update({ focus: "files" });
+    this.move(index - this.state.selectedFile);
+  }
+  clickTerminalDiff(): void {
+    if (this.terminalClickAvailable()) this.update({ focus: "diff" });
+  }
+
   cycleFocus(): void {
     const order: ShellFocus[] = ["repositories", "files", "findings", "diff"];
     const index = order.indexOf(this.state.focus);

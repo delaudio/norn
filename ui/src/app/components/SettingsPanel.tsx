@@ -1,3 +1,4 @@
+/** biome-ignore-all lint/a11y/noStaticElementInteractions: Native terminal fields/buttons retain Enter/e, s and Esc keyboard equivalents; these are not DOM elements. */
 import type { ScrollBoxRenderable } from "@opentui/core";
 import { useKeyboard, usePaste } from "@opentui/react";
 import { useEffect, useRef, useSyncExternalStore } from "react";
@@ -89,6 +90,35 @@ export function SettingsPanel({
       <text fg={theme.muted} height={1} flexShrink={0} truncate>
         Secrets stay in the OS store. Existing environment credentials are preserved.
       </text>
+      {terminal && (
+        <box height={1} flexShrink={0} flexDirection="row">
+          <text
+            id="settings-save"
+            width={8}
+            fg={theme.primary}
+            onMouseDown={(event) => {
+              event.stopPropagation();
+              if (event.button === 0 && !state.clearConfirmation && !state.themePreview)
+                savePreferences();
+            }}
+          >
+            {" "}
+            Save{" "}
+          </text>
+          <text
+            id="settings-close"
+            width={8}
+            fg={theme.primary}
+            onMouseDown={(event) => {
+              event.stopPropagation();
+              if (event.button === 0 && !state.saving) shell.toggleSettings();
+            }}
+          >
+            {" "}
+            Close{" "}
+          </text>
+        </box>
+      )}
       {state.loading ? <text fg={theme.muted}>Loading preferences…</text> : null}
       {state.credentialsLoading ? (
         <text fg={theme.muted}>Checking OS credential status…</text>
@@ -155,6 +185,20 @@ export function SettingsPanel({
         {fields.map((field, index) => (
           <box
             id={`setting-${index}`}
+            onMouseDown={(event) => {
+              event.stopPropagation();
+              if (
+                event.button === 0 &&
+                !state.editing &&
+                !state.saving &&
+                !state.loading &&
+                !state.clearConfirmation &&
+                !state.themePreview
+              ) {
+                settings.select(field.id);
+                settings.beginEdit();
+              }
+            }}
             key={field.id}
             flexDirection="column"
             flexShrink={0}

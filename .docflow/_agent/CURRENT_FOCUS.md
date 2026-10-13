@@ -4,6 +4,11 @@ Git is authoritative. Durable history lives in WORKLOG and plan/done.
 
 ## Active state
 
+- 2026-10-13 latest request: browser file tree and terminal clicks. Reuse React
+  FileTree with per-file/image anchors; native mouse events select PR/filter/file,
+  focus panes, operate toolbar/diff-choice/settings with modal fences. Native
+  event tests and browser tree navigation tests; same PR394/plan0074.
+
 - 2026-10-13 browser regression: full75-file PR passed to singular PatchDiff.
   Parse with real Pierre API, render FileDiff per file, safe original-patch
   fallback, regression fixture75files. Rebuild browser assets in owned worktree;

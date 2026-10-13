@@ -78,7 +78,9 @@ be retired once terminal workflow preservation and cutover safety are proven.
 5. The shipped Ratatui TUI is the behavioral baseline. The maintainer-directed
    layout uses a horizontal top filter menu, AI output on the right and a central
    column with the PR list above its independently scrolling description. Review
-   and description use native Markdown styled with the active terminal theme. These
+   and description use native Markdown styled with the active terminal theme.
+   Mouse selection/actions retain keyboard equivalents and modal safety; the
+   browser viewer provides a searchable folder tree and file navigation. These
    workflows remain together, Settings is modal, and `g` selects the native or
    authenticated browser diff (`b`), preserving focus/filter/selection on return.
    Its review workflows
@@ -132,6 +134,7 @@ be retired once terminal workflow preservation and cutover safety are proven.
 
 | Date | Revision | Author | Change |
 |------|----------|--------|--------|
+| 2026-10-13 | r6 | default-agent | Maintainer requests browser file tree and terminal click navigation/actions, retaining keyboard equivalents, explicit review starts and modal fencing. |
 | 2026-10-13 | r5 | default-agent | Maintainer moves AI output to the right and requests native Markdown colors from the active terminal theme for review/description. |
 | 2026-10-13 | r4 | default-agent | Maintainer refines terminal presentation: horizontal top filters, left AI output, PR list above independent description in the central column. Workflow and security scope unchanged. |
 | 2026-10-13 | r3 | default-agent | Corrected the baseline to preserve the terminal main-screen panels, Settings overlay, explicit AI action and native/browser diff choice rather than using the standalone provider browser as home. |
@@ -146,3 +149,4 @@ be retired once terminal workflow preservation and cutover safety are proven.
 | Maintainer | delaudio | 2026-10-13 | "TUI come riferimento; ritira la parità desktop" |
 | Maintainer | delaudio | 2026-10-13 | requested top filters, left review output, central PR list/description |
 | Maintainer | delaudio | 2026-10-13 | requested right AI pane and OpenTUI-themed Markdown |
+| Maintainer | delaudio | 2026-10-13 | requested web file tree and terminal click support |

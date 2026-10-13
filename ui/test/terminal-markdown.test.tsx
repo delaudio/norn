@@ -30,7 +30,11 @@ for (const width of [100, 32]) {
               (span) =>
                 span.text.includes(text) && span.fg.toInts().slice(0, 3).join(",") === rgb(color),
             );
-        while (!colored("Heading", theme.primary) && Date.now() < deadline) {
+        while (
+          (!colored("Heading", theme.primary) ||
+            !renderer.captureCharFrame().includes("Second item")) &&
+          Date.now() < deadline
+        ) {
           await Bun.sleep(1);
           await renderer.renderOnce();
         }

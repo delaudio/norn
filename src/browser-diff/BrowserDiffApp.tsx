@@ -2,7 +2,8 @@ import { Moon, Sun } from "@phosphor-icons/react";
 import { parsePatchFiles } from "@pierre/diffs";
 import { FileDiff } from "@pierre/diffs/react";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { parseUnifiedDiff } from "@/lib/diff";
+import { FileTree } from "@/components/diff/FileTree";
+import { fileDisplayPath, fileKey, parseUnifiedDiff } from "@/lib/diff";
 import type { ImageDiffMetadata, ReviewFileData } from "@/lib/imageDiff";
 import {
   countReviewFileChanges,
@@ -13,6 +14,8 @@ import {
   mergeImageDiffstat,
 } from "@/lib/imageDiff";
 import type { DiffstatEntry, DiffViewMode } from "@/types";
+
+import { browserFileAnchor } from "./fileAnchor";
 
 const POLL_INTERVAL_MS = 1_200;
 const BROWSER_IMAGE_EXTENSIONS = [".gif", ".jpeg", ".jpg", ".png", ".webp"];
@@ -124,6 +127,8 @@ export function BrowserDiffApp() {
   const [remoteState, setRemoteState] = useState<BrowserDiffState | null>(null);
   const [viewMode, setViewMode] = useState<Exclude<DiffViewMode, "conversation">>("split");
   const [error, setError] = useState<string | null>(null);
+  const [showFiles, setShowFiles] = useState(true);
+  const [selectedFileKey, setSelectedFileKey] = useState<string | null>(null);
   const [theme, setTheme] = useState<"dark" | "light">("dark");
 
   const loadState = useCallback(async (knownVersion: number, signal: AbortSignal) => {
@@ -227,6 +232,29 @@ export function BrowserDiffApp() {
     [files],
   );
 
+  const treeFiles = useMemo(() => {
+    const paths = new Set<string>();
+    return files.filter((file) => {
+      const path = fileDisplayPath(file);
+      if (paths.has(path)) return false;
+      paths.add(path);
+      return true;
+    });
+  }, [files]);
+  const firstDiffByPath = useMemo(() => {
+    const first = new Map<string, (typeof pierre.files)[number]>();
+    for (const file of pierre.files) if (!first.has(file.name)) first.set(file.name, file);
+    return first;
+  }, [pierre.files]);
+  const imagePaths = new Set(imageFiles.map(fileDisplayPath));
+  const selectFile = (file: ReviewFileData) => {
+    setSelectedFileKey(fileKey(file));
+    const target =
+      document.getElementById(browserFileAnchor(fileDisplayPath(file))) ??
+      document.getElementById("browser-raw-patch");
+    target?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
+
   const populationWarning = remoteState?.populationFailed
     ? "Some diff data could not be loaded. Return to Norn and open the browser diff again to retry."
     : null;
@@ -234,8 +262,8 @@ export function BrowserDiffApp() {
   const stateError = files.length === 0 ? activeWarning : null;
 
   return (
-    <main className="min-h-full bg-background text-foreground">
-      <header className="flex min-h-16 flex-wrap items-center gap-4 border-b border-border bg-background px-5 py-3">
+    <main className="flex h-screen flex-col overflow-hidden bg-background text-foreground">
+      <header className="flex min-h-16 shrink-0 flex-wrap items-center gap-4 border-b border-border bg-background px-5 py-3">
         <div className="flex min-w-0 flex-1 items-center gap-3">
           <span className="shrink-0 rounded-md bg-primary px-2 py-1 text-[11px] font-bold tracking-wide text-primary-foreground">
             NORN DIFF
@@ -298,6 +326,14 @@ export function BrowserDiffApp() {
           >
             {theme === "dark" ? <Sun size={15} /> : <Moon size={15} />}
           </button>
+          <button
+            type="button"
+            onClick={() => setShowFiles((value) => !value)}
+            aria-expanded={showFiles}
+            className="rounded-md border border-border px-2 py-1 text-xs"
+          >
+            Files
+          </button>
           <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
             <span className="size-2 rounded-full bg-[var(--success)] shadow-[0_0_8px_var(--success)]" />
             Live
@@ -311,48 +347,68 @@ export function BrowserDiffApp() {
         </div>
       )}
 
-      <section className="min-h-0">
-        {stateError ? (
-          <div className="px-5 py-8 text-sm text-muted-foreground">{stateError}</div>
-        ) : !remoteState ? (
-          <div className="px-5 py-8 text-sm text-muted-foreground">Loading review target…</div>
-        ) : (
-          <>
-            {pierre.files.map((fileDiff) => (
-              <FileDiff
-                key={`${fileDiff.cacheKey}:${fileDiff.prevName ?? ""}:${fileDiff.name}`}
-                fileDiff={fileDiff}
-                options={{
-                  theme: theme === "dark" ? "github-dark" : "github-light",
-                  diffStyle: viewMode,
-                }}
-                disableWorkerPool
-              />
-            ))}
-            {pierre.error && (
-              <div className="px-5 py-4">
-                <p role="alert" className="mb-3 text-sm text-destructive">
-                  {pierre.error}
-                </p>
-                <pre className="whitespace-pre-wrap break-words text-xs">{remoteState.diff}</pre>
-              </div>
-            )}
-            {imageFiles.map((file) => (
-              <BrowserImagePanel
-                key={`${file.imageDiff!.oldPath}->${file.imageDiff!.newPath}`}
-                file={file}
-              />
-            ))}
-            {(remoteState.diff ?? "").trim().length === 0 && imageFiles.length === 0 ? (
-              <div className="px-5 py-8 text-sm text-muted-foreground">
-                {remoteState.targetKind === "local"
-                  ? "No unpublished local changes."
-                  : "No changes in this pull request."}
-              </div>
-            ) : null}
-          </>
+      <div className="flex min-h-0 flex-1">
+        {showFiles && (
+          <aside className="w-64 max-w-[40vw] shrink-0 border-r border-border">
+            <FileTree files={treeFiles} activeFileKey={selectedFileKey} onSelect={selectFile} />
+          </aside>
         )}
-      </section>
+        <section className="min-h-0 min-w-0 flex-1 overflow-auto">
+          {stateError ? (
+            <div className="px-5 py-8 text-sm text-muted-foreground">{stateError}</div>
+          ) : !remoteState ? (
+            <div className="px-5 py-8 text-sm text-muted-foreground">Loading review target…</div>
+          ) : (
+            <>
+              {pierre.files.map((fileDiff) => (
+                <article
+                  key={`${fileDiff.cacheKey}:${fileDiff.prevName ?? ""}:${fileDiff.name}`}
+                  id={
+                    !imagePaths.has(fileDiff.name) &&
+                    firstDiffByPath.get(fileDiff.name) === fileDiff
+                      ? browserFileAnchor(fileDiff.name)
+                      : undefined
+                  }
+                >
+                  <FileDiff
+                    fileDiff={fileDiff}
+                    options={{
+                      theme: theme === "dark" ? "github-dark" : "github-light",
+                      diffStyle: viewMode,
+                    }}
+                    disableWorkerPool
+                  />
+                </article>
+              ))}
+              {pierre.error && (
+                <div className="px-5 py-4">
+                  <p role="alert" className="mb-3 text-sm text-destructive">
+                    {pierre.error}
+                  </p>
+                  <pre id="browser-raw-patch" className="whitespace-pre-wrap break-words text-xs">
+                    {remoteState.diff}
+                  </pre>
+                </div>
+              )}
+              {imageFiles.map((file) => (
+                <article
+                  key={`${file.imageDiff!.oldPath}->${file.imageDiff!.newPath}`}
+                  id={browserFileAnchor(fileDisplayPath(file))}
+                >
+                  <BrowserImagePanel file={file} />
+                </article>
+              ))}
+              {(remoteState.diff ?? "").trim().length === 0 && imageFiles.length === 0 ? (
+                <div className="px-5 py-8 text-sm text-muted-foreground">
+                  {remoteState.targetKind === "local"
+                    ? "No unpublished local changes."
+                    : "No changes in this pull request."}
+                </div>
+              ) : null}
+            </>
+          )}
+        </section>
+      </div>
     </main>
   );
 }

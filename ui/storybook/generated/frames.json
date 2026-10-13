@@ -1548,9 +1548,19 @@
       {
         "spans": [
           {
-            "text": "f filter · Tab pane · j/k move · Enter load · a AI review · g diff · b web diff · s settings · r refresh · F8 files · q ",
-            "width": 120,
+            "text": "f filter · Tab pane · j/k move · Enter load · a AI review · g diff · b web diff · s settings · q quit",
+            "width": 101,
             "fg": "rgba(128,128,128,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "                   ",
+            "width": 19,
+            "fg": "rgba(255,255,255,1)",
             "bg": "rgba(10,10,10,1)",
             "attributes": 0,
             "bold": false,
@@ -1562,18 +1572,18 @@
       {
         "spans": [
           {
-            "text": "quit",
-            "width": 4,
-            "fg": "rgba(128,128,128,1)",
-            "bg": "rgba(10,10,10,1)",
+            "text": " AI  Diff  Settings  Refresh  Files  Quit ",
+            "width": 42,
+            "fg": "rgba(122,162,247,1)",
+            "bg": "rgba(30,30,30,1)",
             "attributes": 0,
             "bold": false,
             "italic": false,
             "underline": false
           },
           {
-            "text": "                                                                                                                    ",
-            "width": 116,
+            "text": "                                                                              ",
+            "width": 78,
             "fg": "rgba(255,255,255,1)",
             "bg": "rgba(10,10,10,1)",
             "attributes": 0,
@@ -2264,19 +2274,9 @@
       {
         "spans": [
           {
-            "text": "f filter · g diff · a AI · s settings",
-            "width": 37,
+            "text": "f filter · Tab pane · j/k move · Enter load · a AI",
+            "width": 50,
             "fg": "rgba(128,128,128,1)",
-            "bg": "rgba(10,10,10,1)",
-            "attributes": 0,
-            "bold": false,
-            "italic": false,
-            "underline": false
-          },
-          {
-            "text": "             ",
-            "width": 13,
-            "fg": "rgba(255,255,255,1)",
             "bg": "rgba(10,10,10,1)",
             "attributes": 0,
             "bold": false,
@@ -2288,18 +2288,18 @@
       {
         "spans": [
           {
-            "text": "Tab pane · j/k · Enter load · F8 files · q quit",
-            "width": 47,
-            "fg": "rgba(128,128,128,1)",
-            "bg": "rgba(10,10,10,1)",
+            "text": " AI  Diff  Settings  Refresh  Files  Quit ",
+            "width": 42,
+            "fg": "rgba(122,162,247,1)",
+            "bg": "rgba(30,30,30,1)",
             "attributes": 0,
             "bold": false,
             "italic": false,
             "underline": false
           },
           {
-            "text": "   ",
-            "width": 3,
+            "text": "        ",
+            "width": 8,
             "fg": "rgba(255,255,255,1)",
             "bg": "rgba(10,10,10,1)",
             "attributes": 0,
@@ -2672,9 +2672,9 @@
             "underline": false
           },
           {
-            "text": "github: not configured",
-            "width": 22,
-            "fg": "rgba(158,206,106,1)",
+            "text": " Save ",
+            "width": 6,
+            "fg": "rgba(122,162,247,1)",
             "bg": "rgba(10,10,10,1)",
             "attributes": 0,
             "bold": false,
@@ -2682,8 +2682,28 @@
             "underline": false
           },
           {
-            "text": "                                                                 ",
-            "width": 65,
+            "text": "  ",
+            "width": 2,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": " Close ",
+            "width": 7,
+            "fg": "rgba(122,162,247,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "                                                                        ",
+            "width": 72,
             "fg": "rgba(255,255,255,1)",
             "bg": "rgba(10,10,10,1)",
             "attributes": 0,
@@ -2756,9 +2776,9 @@
             "underline": false
           },
           {
-            "text": "Tools: git found · claude found · codex found · opencode found · Ctrl+R refresh",
-            "width": 79,
-            "fg": "rgba(128,128,128,1)",
+            "text": "github: not configured",
+            "width": 22,
+            "fg": "rgba(158,206,106,1)",
             "bg": "rgba(10,10,10,1)",
             "attributes": 0,
             "bold": false,
@@ -2766,8 +2786,8 @@
             "underline": false
           },
           {
-            "text": "        ",
-            "width": 8,
+            "text": "                                                                 ",
+            "width": 65,
             "fg": "rgba(255,255,255,1)",
             "bg": "rgba(10,10,10,1)",
             "attributes": 0,
@@ -2831,6 +2851,100 @@
           },
           {
             "text": "  #8 github ch",
+            "width": 14,
+            "fg": "rgba(238,238,238,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "│",
+            "width": 1,
+            "fg": "rgba(122,162,247,1)",
+            "bg": "rgba(20,20,20,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "Tools: git found · claude found · codex found · opencode found · Ctrl+R refresh",
+            "width": 79,
+            "fg": "rgba(128,128,128,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "        ",
+            "width": 8,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "│",
+            "width": 1,
+            "fg": "rgba(122,162,247,1)",
+            "bg": "rgba(20,20,20,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "              ",
+            "width": 14,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "│",
+            "width": 1,
+            "fg": "rgba(128,128,128,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": "│",
+            "width": 1,
+            "fg": "rgba(122,162,247,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "  Next page · ",
             "width": 14,
             "fg": "rgba(238,238,238,1)",
             "bg": "rgba(10,10,10,1)",
@@ -2924,9 +3038,9 @@
             "underline": false
           },
           {
-            "text": "  Next page · ",
+            "text": "              ",
             "width": 14,
-            "fg": "rgba(238,238,238,1)",
+            "fg": "rgba(255,255,255,1)",
             "bg": "rgba(10,10,10,1)",
             "attributes": 0,
             "bold": false,
@@ -3112,19 +3226,9 @@
       {
         "spans": [
           {
-            "text": "│",
-            "width": 1,
+            "text": "└──────────────",
+            "width": 15,
             "fg": "rgba(122,162,247,1)",
-            "bg": "rgba(10,10,10,1)",
-            "attributes": 0,
-            "bold": false,
-            "italic": false,
-            "underline": false
-          },
-          {
-            "text": "              ",
-            "width": 14,
-            "fg": "rgba(255,255,255,1)",
             "bg": "rgba(10,10,10,1)",
             "attributes": 0,
             "bold": false,
@@ -3206,9 +3310,9 @@
       {
         "spans": [
           {
-            "text": "└──────────────",
+            "text": "┌──────────────",
             "width": 15,
-            "fg": "rgba(122,162,247,1)",
+            "fg": "rgba(128,128,128,1)",
             "bg": "rgba(10,10,10,1)",
             "attributes": 0,
             "bold": false,
@@ -3290,9 +3394,19 @@
       {
         "spans": [
           {
-            "text": "┌──────────────",
-            "width": 15,
+            "text": "│",
+            "width": 1,
             "fg": "rgba(128,128,128,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "PR DESCRIPTION",
+            "width": 14,
+            "fg": "rgba(122,162,247,1)",
             "bg": "rgba(10,10,10,1)",
             "attributes": 0,
             "bold": false,
@@ -3384,9 +3498,9 @@
             "underline": false
           },
           {
-            "text": "PR DESCRIPTION",
+            "text": "#7 github chan",
             "width": 14,
-            "fg": "rgba(122,162,247,1)",
+            "fg": "rgba(238,238,238,1)",
             "bg": "rgba(10,10,10,1)",
             "attributes": 0,
             "bold": false,
@@ -3478,7 +3592,7 @@
             "underline": false
           },
           {
-            "text": "#7 github chan",
+            "text": "feature/7 → ma",
             "width": 14,
             "fg": "rgba(238,238,238,1)",
             "bg": "rgba(10,10,10,1)",
@@ -3520,80 +3634,6 @@
           {
             "text": "                                  ",
             "width": 34,
-            "fg": "rgba(255,255,255,1)",
-            "bg": "rgba(10,10,10,1)",
-            "attributes": 0,
-            "bold": false,
-            "italic": false,
-            "underline": false
-          },
-          {
-            "text": "│",
-            "width": 1,
-            "fg": "rgba(122,162,247,1)",
-            "bg": "rgba(20,20,20,1)",
-            "attributes": 0,
-            "bold": false,
-            "italic": false,
-            "underline": false
-          },
-          {
-            "text": "              ",
-            "width": 14,
-            "fg": "rgba(255,255,255,1)",
-            "bg": "rgba(10,10,10,1)",
-            "attributes": 0,
-            "bold": false,
-            "italic": false,
-            "underline": false
-          },
-          {
-            "text": "│",
-            "width": 1,
-            "fg": "rgba(128,128,128,1)",
-            "bg": "rgba(10,10,10,1)",
-            "attributes": 0,
-            "bold": false,
-            "italic": false,
-            "underline": false
-          }
-        ]
-      },
-      {
-        "spans": [
-          {
-            "text": "│",
-            "width": 1,
-            "fg": "rgba(128,128,128,1)",
-            "bg": "rgba(10,10,10,1)",
-            "attributes": 0,
-            "bold": false,
-            "italic": false,
-            "underline": false
-          },
-          {
-            "text": "feature/7 → ma",
-            "width": 14,
-            "fg": "rgba(238,238,238,1)",
-            "bg": "rgba(10,10,10,1)",
-            "attributes": 0,
-            "bold": false,
-            "italic": false,
-            "underline": false
-          },
-          {
-            "text": "│",
-            "width": 1,
-            "fg": "rgba(122,162,247,1)",
-            "bg": "rgba(20,20,20,1)",
-            "attributes": 0,
-            "bold": false,
-            "italic": false,
-            "underline": false
-          },
-          {
-            "text": "                                                                                        ",
-            "width": 88,
             "fg": "rgba(255,255,255,1)",
             "bg": "rgba(10,10,10,1)",
             "attributes": 0,
@@ -4430,9 +4470,19 @@
       {
         "spans": [
           {
-            "text": "f filter · Tab pane · j/k move · Enter load · a AI review · g diff · b web diff · s settings · r refresh · F8 files · q ",
-            "width": 120,
+            "text": "f filter · Tab pane · j/k move · Enter load · a AI review · g diff · b web diff · s settings · q quit",
+            "width": 101,
             "fg": "rgba(128,128,128,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "                   ",
+            "width": 19,
+            "fg": "rgba(255,255,255,1)",
             "bg": "rgba(10,10,10,1)",
             "attributes": 0,
             "bold": false,
@@ -4444,18 +4494,18 @@
       {
         "spans": [
           {
-            "text": "quit",
-            "width": 4,
-            "fg": "rgba(128,128,128,1)",
-            "bg": "rgba(10,10,10,1)",
+            "text": " AI  Diff  Settings  Refresh  Files  Quit ",
+            "width": 42,
+            "fg": "rgba(122,162,247,1)",
+            "bg": "rgba(30,30,30,1)",
             "attributes": 0,
             "bold": false,
             "italic": false,
             "underline": false
           },
           {
-            "text": "                                                                                                                    ",
-            "width": 116,
+            "text": "                                                                              ",
+            "width": 78,
             "fg": "rgba(255,255,255,1)",
             "bg": "rgba(10,10,10,1)",
             "attributes": 0,
@@ -4808,6 +4858,110 @@
             "underline": false
           },
           {
+            "text": " Save ",
+            "width": 6,
+            "fg": "rgba(122,162,247,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "  ",
+            "width": 2,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": " Close ",
+            "width": 7,
+            "fg": "rgba(122,162,247,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "                            ",
+            "width": 28,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "│",
+            "width": 1,
+            "fg": "rgba(122,162,247,1)",
+            "bg": "rgba(20,20,20,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "│",
+            "width": 1,
+            "fg": "rgba(128,128,128,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          }
+        ]
+      },
+      {
+        "spans": [
+          {
+            "text": "│▶",
+            "width": 2,
+            "fg": "rgba(122,162,247,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "│",
+            "width": 1,
+            "fg": "rgba(122,162,247,1)",
+            "bg": "rgba(20,20,20,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(255,255,255,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
             "text": "github: not configured",
             "width": 22,
             "fg": "rgba(158,206,106,1)",
@@ -4862,9 +5016,19 @@
       {
         "spans": [
           {
-            "text": "│▶",
-            "width": 2,
+            "text": "│",
+            "width": 1,
             "fg": "rgba(122,162,247,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": " ",
+            "width": 1,
+            "fg": "rgba(238,238,238,1)",
             "bg": "rgba(10,10,10,1)",
             "attributes": 0,
             "bold": false,
@@ -4946,19 +5110,9 @@
       {
         "spans": [
           {
-            "text": "│",
-            "width": 1,
+            "text": "└─",
+            "width": 2,
             "fg": "rgba(122,162,247,1)",
-            "bg": "rgba(10,10,10,1)",
-            "attributes": 0,
-            "bold": false,
-            "italic": false,
-            "underline": false
-          },
-          {
-            "text": " ",
-            "width": 1,
-            "fg": "rgba(238,238,238,1)",
             "bg": "rgba(10,10,10,1)",
             "attributes": 0,
             "bold": false,
@@ -5040,9 +5194,9 @@
       {
         "spans": [
           {
-            "text": "└─",
+            "text": "┌─",
             "width": 2,
-            "fg": "rgba(122,162,247,1)",
+            "fg": "rgba(128,128,128,1)",
             "bg": "rgba(10,10,10,1)",
             "attributes": 0,
             "bold": false,
@@ -5093,100 +5247,6 @@
             "text": "▀",
             "width": 1,
             "fg": "rgba(154,158,163,1)",
-            "bg": "rgba(37,37,39,1)",
-            "attributes": 0,
-            "bold": false,
-            "italic": false,
-            "underline": false
-          },
-          {
-            "text": " ",
-            "width": 1,
-            "fg": "rgba(255,255,255,1)",
-            "bg": "rgba(10,10,10,1)",
-            "attributes": 0,
-            "bold": false,
-            "italic": false,
-            "underline": false
-          },
-          {
-            "text": "│",
-            "width": 1,
-            "fg": "rgba(122,162,247,1)",
-            "bg": "rgba(20,20,20,1)",
-            "attributes": 0,
-            "bold": false,
-            "italic": false,
-            "underline": false
-          },
-          {
-            "text": " ",
-            "width": 1,
-            "fg": "rgba(255,255,255,1)",
-            "bg": "rgba(10,10,10,1)",
-            "attributes": 0,
-            "bold": false,
-            "italic": false,
-            "underline": false
-          },
-          {
-            "text": "│",
-            "width": 1,
-            "fg": "rgba(128,128,128,1)",
-            "bg": "rgba(10,10,10,1)",
-            "attributes": 0,
-            "bold": false,
-            "italic": false,
-            "underline": false
-          }
-        ]
-      },
-      {
-        "spans": [
-          {
-            "text": "┌─",
-            "width": 2,
-            "fg": "rgba(128,128,128,1)",
-            "bg": "rgba(10,10,10,1)",
-            "attributes": 0,
-            "bold": false,
-            "italic": false,
-            "underline": false
-          },
-          {
-            "text": "│",
-            "width": 1,
-            "fg": "rgba(122,162,247,1)",
-            "bg": "rgba(20,20,20,1)",
-            "attributes": 0,
-            "bold": false,
-            "italic": false,
-            "underline": false
-          },
-          {
-            "text": " ",
-            "width": 1,
-            "fg": "rgba(255,255,255,1)",
-            "bg": "rgba(10,10,10,1)",
-            "attributes": 0,
-            "bold": false,
-            "italic": false,
-            "underline": false
-          },
-          {
-            "text": "  Claude model (blank = default): (defaul",
-            "width": 41,
-            "fg": "rgba(238,238,238,1)",
-            "bg": "rgba(10,10,10,1)",
-            "attributes": 0,
-            "bold": false,
-            "italic": false,
-            "underline": false
-          },
-          {
-            "text": " ",
-            "width": 1,
-            "fg": "rgba(255,255,255,1)",
             "bg": "rgba(37,37,39,1)",
             "attributes": 0,
             "bold": false,
@@ -5376,19 +5436,9 @@
       {
         "spans": [
           {
-            "text": "f filter · g diff · a AI · s settings",
-            "width": 37,
+            "text": "f filter · Tab pane · j/k move · Enter load · a AI",
+            "width": 50,
             "fg": "rgba(128,128,128,1)",
-            "bg": "rgba(10,10,10,1)",
-            "attributes": 0,
-            "bold": false,
-            "italic": false,
-            "underline": false
-          },
-          {
-            "text": "             ",
-            "width": 13,
-            "fg": "rgba(255,255,255,1)",
             "bg": "rgba(10,10,10,1)",
             "attributes": 0,
             "bold": false,
@@ -5400,18 +5450,18 @@
       {
         "spans": [
           {
-            "text": "Tab pane · j/k · Enter load · F8 files · q quit",
-            "width": 47,
-            "fg": "rgba(128,128,128,1)",
-            "bg": "rgba(10,10,10,1)",
+            "text": " AI  Diff  Settings  Refresh  Files  Quit ",
+            "width": 42,
+            "fg": "rgba(122,162,247,1)",
+            "bg": "rgba(30,30,30,1)",
             "attributes": 0,
             "bold": false,
             "italic": false,
             "underline": false
           },
           {
-            "text": "   ",
-            "width": 3,
+            "text": "        ",
+            "width": 8,
             "fg": "rgba(255,255,255,1)",
             "bg": "rgba(10,10,10,1)",
             "attributes": 0,
@@ -6772,9 +6822,19 @@
       {
         "spans": [
           {
-            "text": "f filter · Tab pane · j/k move · Enter load · a AI review · g diff · b web diff · s settings · r refresh · F8 files · q ",
-            "width": 120,
+            "text": "f filter · Tab pane · j/k move · Enter load · a AI review · g diff · b web diff · s settings · q quit",
+            "width": 101,
             "fg": "rgba(128,128,128,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "                   ",
+            "width": 19,
+            "fg": "rgba(255,255,255,1)",
             "bg": "rgba(10,10,10,1)",
             "attributes": 0,
             "bold": false,
@@ -6786,18 +6846,18 @@
       {
         "spans": [
           {
-            "text": "quit",
-            "width": 4,
-            "fg": "rgba(128,128,128,1)",
-            "bg": "rgba(10,10,10,1)",
+            "text": " AI  Diff  Settings  Refresh  Files  Quit ",
+            "width": 42,
+            "fg": "rgba(122,162,247,1)",
+            "bg": "rgba(30,30,30,1)",
             "attributes": 0,
             "bold": false,
             "italic": false,
             "underline": false
           },
           {
-            "text": "                                                                                                                    ",
-            "width": 116,
+            "text": "                                                                              ",
+            "width": 78,
             "fg": "rgba(255,255,255,1)",
             "bg": "rgba(10,10,10,1)",
             "attributes": 0,
@@ -7348,19 +7408,9 @@
       {
         "spans": [
           {
-            "text": "f filter · g diff · a AI · s settings",
-            "width": 37,
+            "text": "f filter · Tab pane · j/k move · Enter load · a AI",
+            "width": 50,
             "fg": "rgba(128,128,128,1)",
-            "bg": "rgba(10,10,10,1)",
-            "attributes": 0,
-            "bold": false,
-            "italic": false,
-            "underline": false
-          },
-          {
-            "text": "             ",
-            "width": 13,
-            "fg": "rgba(255,255,255,1)",
             "bg": "rgba(10,10,10,1)",
             "attributes": 0,
             "bold": false,
@@ -7372,18 +7422,18 @@
       {
         "spans": [
           {
-            "text": "Tab pane · j/k · Enter load · F8 files · q quit",
-            "width": 47,
-            "fg": "rgba(128,128,128,1)",
-            "bg": "rgba(10,10,10,1)",
+            "text": " AI  Diff  Settings  Refresh  Files  Quit ",
+            "width": 42,
+            "fg": "rgba(122,162,247,1)",
+            "bg": "rgba(30,30,30,1)",
             "attributes": 0,
             "bold": false,
             "italic": false,
             "underline": false
           },
           {
-            "text": "   ",
-            "width": 3,
+            "text": "        ",
+            "width": 8,
             "fg": "rgba(255,255,255,1)",
             "bg": "rgba(10,10,10,1)",
             "attributes": 0,
@@ -8944,9 +8994,19 @@
       {
         "spans": [
           {
-            "text": "f filter · Tab pane · j/k move · Enter load · a AI review · g diff · b web diff · s settings · r refresh · F8 files · q ",
-            "width": 120,
+            "text": "f filter · Tab pane · j/k move · Enter load · a AI review · g diff · b web diff · s settings · q quit",
+            "width": 101,
             "fg": "rgba(128,128,128,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "                   ",
+            "width": 19,
+            "fg": "rgba(255,255,255,1)",
             "bg": "rgba(10,10,10,1)",
             "attributes": 0,
             "bold": false,
@@ -8958,18 +9018,18 @@
       {
         "spans": [
           {
-            "text": "quit",
-            "width": 4,
-            "fg": "rgba(128,128,128,1)",
-            "bg": "rgba(10,10,10,1)",
+            "text": " AI  Diff  Settings  Refresh  Files  Quit ",
+            "width": 42,
+            "fg": "rgba(122,162,247,1)",
+            "bg": "rgba(30,30,30,1)",
             "attributes": 0,
             "bold": false,
             "italic": false,
             "underline": false
           },
           {
-            "text": "                                                                                                                    ",
-            "width": 116,
+            "text": "                                                                              ",
+            "width": 78,
             "fg": "rgba(255,255,255,1)",
             "bg": "rgba(10,10,10,1)",
             "attributes": 0,
@@ -10000,19 +10060,9 @@
       {
         "spans": [
           {
-            "text": "f filter · g diff · a AI · s settings",
-            "width": 37,
+            "text": "f filter · Tab pane · j/k move · Enter load · a AI",
+            "width": 50,
             "fg": "rgba(128,128,128,1)",
-            "bg": "rgba(10,10,10,1)",
-            "attributes": 0,
-            "bold": false,
-            "italic": false,
-            "underline": false
-          },
-          {
-            "text": "             ",
-            "width": 13,
-            "fg": "rgba(255,255,255,1)",
             "bg": "rgba(10,10,10,1)",
             "attributes": 0,
             "bold": false,
@@ -10024,18 +10074,18 @@
       {
         "spans": [
           {
-            "text": "Tab pane · j/k · Enter load · F8 files · q quit",
-            "width": 47,
-            "fg": "rgba(128,128,128,1)",
-            "bg": "rgba(10,10,10,1)",
+            "text": " AI  Diff  Settings  Refresh  Files  Quit ",
+            "width": 42,
+            "fg": "rgba(122,162,247,1)",
+            "bg": "rgba(30,30,30,1)",
             "attributes": 0,
             "bold": false,
             "italic": false,
             "underline": false
           },
           {
-            "text": "   ",
-            "width": 3,
+            "text": "        ",
+            "width": 8,
             "fg": "rgba(255,255,255,1)",
             "bg": "rgba(10,10,10,1)",
             "attributes": 0,
@@ -11426,9 +11476,19 @@
       {
         "spans": [
           {
-            "text": "f filter · Tab pane · j/k move · Enter load · a AI review · g diff · b web diff · s settings · r refresh · F8 files · q ",
-            "width": 120,
+            "text": "f filter · Tab pane · j/k move · Enter load · a AI review · g diff · b web diff · s settings · q quit",
+            "width": 101,
             "fg": "rgba(128,128,128,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "                   ",
+            "width": 19,
+            "fg": "rgba(255,255,255,1)",
             "bg": "rgba(10,10,10,1)",
             "attributes": 0,
             "bold": false,
@@ -11440,18 +11500,18 @@
       {
         "spans": [
           {
-            "text": "quit",
-            "width": 4,
-            "fg": "rgba(128,128,128,1)",
-            "bg": "rgba(10,10,10,1)",
+            "text": " AI  Diff  Settings  Refresh  Files  Quit ",
+            "width": 42,
+            "fg": "rgba(122,162,247,1)",
+            "bg": "rgba(30,30,30,1)",
             "attributes": 0,
             "bold": false,
             "italic": false,
             "underline": false
           },
           {
-            "text": "                                                                                                                    ",
-            "width": 116,
+            "text": "                                                                              ",
+            "width": 78,
             "fg": "rgba(255,255,255,1)",
             "bg": "rgba(10,10,10,1)",
             "attributes": 0,
@@ -12092,19 +12152,9 @@
       {
         "spans": [
           {
-            "text": "f filter · g diff · a AI · s settings",
-            "width": 37,
+            "text": "f filter · Tab pane · j/k move · Enter load · a AI",
+            "width": 50,
             "fg": "rgba(128,128,128,1)",
-            "bg": "rgba(10,10,10,1)",
-            "attributes": 0,
-            "bold": false,
-            "italic": false,
-            "underline": false
-          },
-          {
-            "text": "             ",
-            "width": 13,
-            "fg": "rgba(255,255,255,1)",
             "bg": "rgba(10,10,10,1)",
             "attributes": 0,
             "bold": false,
@@ -12116,18 +12166,18 @@
       {
         "spans": [
           {
-            "text": "Tab pane · j/k · Enter load · F8 files · q quit",
-            "width": 47,
-            "fg": "rgba(128,128,128,1)",
-            "bg": "rgba(10,10,10,1)",
+            "text": " AI  Diff  Settings  Refresh  Files  Quit ",
+            "width": 42,
+            "fg": "rgba(122,162,247,1)",
+            "bg": "rgba(30,30,30,1)",
             "attributes": 0,
             "bold": false,
             "italic": false,
             "underline": false
           },
           {
-            "text": "   ",
-            "width": 3,
+            "text": "        ",
+            "width": 8,
             "fg": "rgba(255,255,255,1)",
             "bg": "rgba(10,10,10,1)",
             "attributes": 0,
@@ -13518,9 +13568,19 @@
       {
         "spans": [
           {
-            "text": "f filter · Tab pane · j/k move · Enter load · a AI review · g diff · b web diff · s settings · r refresh · F8 files · q ",
-            "width": 120,
+            "text": "f filter · Tab pane · j/k move · Enter load · a AI review · g diff · b web diff · s settings · q quit",
+            "width": 101,
             "fg": "rgba(128,128,128,1)",
+            "bg": "rgba(10,10,10,1)",
+            "attributes": 0,
+            "bold": false,
+            "italic": false,
+            "underline": false
+          },
+          {
+            "text": "                   ",
+            "width": 19,
+            "fg": "rgba(255,255,255,1)",
             "bg": "rgba(10,10,10,1)",
             "attributes": 0,
             "bold": false,
@@ -13532,18 +13592,18 @@
       {
         "spans": [
           {
-            "text": "quit",
-            "width": 4,
-            "fg": "rgba(128,128,128,1)",
-            "bg": "rgba(10,10,10,1)",
+            "text": " AI  Diff  Settings  Refresh  Files  Quit ",
+            "width": 42,
+            "fg": "rgba(122,162,247,1)",
+            "bg": "rgba(30,30,30,1)",
             "attributes": 0,
             "bold": false,
             "italic": false,
             "underline": false
           },
           {
-            "text": "                                                                                                                    ",
-            "width": 116,
+            "text": "                                                                              ",
+            "width": 78,
             "fg": "rgba(255,255,255,1)",
             "bg": "rgba(10,10,10,1)",
             "attributes": 0,
@@ -14184,19 +14244,9 @@
       {
         "spans": [
           {
-            "text": "f filter · g diff · a AI · s settings",
-            "width": 37,
+            "text": "f filter · Tab pane · j/k move · Enter load · a AI",
+            "width": 50,
             "fg": "rgba(128,128,128,1)",
-            "bg": "rgba(10,10,10,1)",
-            "attributes": 0,
-            "bold": false,
-            "italic": false,
-            "underline": false
-          },
-          {
-            "text": "             ",
-            "width": 13,
-            "fg": "rgba(255,255,255,1)",
             "bg": "rgba(10,10,10,1)",
             "attributes": 0,
             "bold": false,
@@ -14208,18 +14258,18 @@
       {
         "spans": [
           {
-            "text": "Tab pane · j/k · Enter load · F8 files · q quit",
-            "width": 47,
-            "fg": "rgba(128,128,128,1)",
-            "bg": "rgba(10,10,10,1)",
+            "text": " AI  Diff  Settings  Refresh  Files  Quit ",
+            "width": 42,
+            "fg": "rgba(122,162,247,1)",
+            "bg": "rgba(30,30,30,1)",
             "attributes": 0,
             "bold": false,
             "italic": false,
             "underline": false
           },
           {
-            "text": "   ",
-            "width": 3,
+            "text": "        ",
+            "width": 8,
             "fg": "rgba(255,255,255,1)",
             "bg": "rgba(10,10,10,1)",
             "attributes": 0,

@@ -23,7 +23,10 @@ shows the PR/local-target list above the independent description. Each text
 pane scrolls independently; Tab/Shift+Tab cycles focus. Review and PR description
 use native OpenTUI Markdown, styled with the active dark/light theme. Remote
 code fences render without fetching additional language grammar assets. Settings opens as a modal
-with `s`. `Enter` loads the selected target without starting an agent; `a`
+with `s`. Mouse clicks select filters, PRs and diff files, focus panes and invoke
+explicit toolbar/settings/diff-choice actions; modal backgrounds stay fenced.
+The web viewer retains an expandable searchable file tree with file navigation.
+`Enter` loads the selected target without starting an agent; `a`
 explicitly starts AI review. `g` opens the diff-choice modal: `g` selects the
 native Git diff, `b` opens the authenticated browser diff viewer. In the diff,
 `g` or Escape returns to the same home filter and PR. `b` means the diff viewer,

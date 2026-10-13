@@ -1,5 +1,5 @@
 import type { FileDiffMetadata } from "@pierre/diffs";
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { StrictMode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { BrowserDiffApp, type BrowserDiffState, browserDiffApiUrl } from "./BrowserDiffApp";
@@ -25,6 +25,8 @@ vi.mock("@pierre/diffs/react", () => ({
     </pre>
   ),
 }));
+
+import { browserFileAnchor } from "./fileAnchor";
 
 const rawDiff = `diff --git a/src/example.ts b/src/example.ts
 index 1111111..2222222 100644
@@ -170,6 +172,11 @@ describe("BrowserDiffApp", () => {
       `${sessionRoot}/api/file-preview?path=images%2Fchanged.png&side=new`,
     );
     expect(screen.getByText("new image")).toBeInTheDocument();
+    const target = document.getElementById(browserFileAnchor("images/changed.png"))!;
+    target.scrollIntoView = vi.fn();
+    fireEvent.click(screen.getByRole("button", { name: /changed.png/ }));
+    expect(target.scrollIntoView).toHaveBeenCalled();
+    expect(target.querySelector("img")).not.toBeNull();
   });
   it("renders every file in a 75-file provider patch through Pierre's real parser", async () => {
     const patch = Array.from({ length: 75 }, (_, i) =>
@@ -218,5 +225,35 @@ describe("BrowserDiffApp", () => {
     expect(files[0]).toHaveAttribute("data-file-name", "src/example.ts");
     expect(files[1]).toHaveAttribute("data-file-name", "src/example.ts");
     expect(files[0].dataset.cacheKey).not.toBe(files[1].dataset.cacheKey);
+    expect(
+      Array.from(document.querySelectorAll("article[id]")).filter(
+        (node) => node.id === browserFileAnchor("src/example.ts"),
+      ),
+    ).toHaveLength(1);
+    expect(screen.getAllByRole("button", { name: /example.ts/ })).toHaveLength(1);
+  });
+  it("shows a searchable file tree whose clicks scroll to the corresponding diff", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        stateResponse("Tree navigation", 1, {
+          diff: rawDiff + rawDiff.split("src/example.ts").join("docs/readme.md"),
+        }),
+      ),
+    );
+    render(<BrowserDiffApp />);
+    await screen.findByText("Tree navigation");
+    expect(screen.getByRole("navigation", { name: "Changed files" })).toBeInTheDocument();
+    const target = document.getElementById(browserFileAnchor("docs/readme.md"))!;
+    target.scrollIntoView = vi.fn();
+    const button = screen.getByRole("button", { name: /readme.md/ });
+    fireEvent.click(button);
+    expect(target.scrollIntoView).toHaveBeenCalledWith({ behavior: "smooth", block: "start" });
+    expect(button).toHaveAttribute("aria-current", "true");
+    fireEvent.change(screen.getByRole("searchbox"), { target: { value: "readme" } });
+    expect(screen.queryByRole("button", { name: /example.ts/ })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /readme.md/ })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Files" }));
+    expect(screen.queryByRole("navigation", { name: "Changed files" })).not.toBeInTheDocument();
   });
 });

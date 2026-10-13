@@ -1,3 +1,4 @@
+/** biome-ignore-all lint/a11y/noStaticElementInteractions: OpenTUI boxes are native terminal renderables; the shell provides keyboard equivalents for mouse focus. */
 import {
   CliRenderEvents,
   type ImageRenderProtocol,
@@ -39,6 +40,7 @@ import { startSyncScheduler } from "../syncScheduler";
 import type { DiffSyntax } from "../syntaxTypes";
 import { theme } from "../theme";
 import { WorkspaceStore } from "../workspaceStore";
+import { ClickableList } from "./ClickableList";
 import { ConversationPanel } from "./ConversationPanel";
 import { DataPanel } from "./DataPanel";
 import { DraftPanel } from "./DraftPanel";
@@ -977,6 +979,7 @@ function ListPanel({
   selectedIndex,
   showDescription = false,
   showSelectionIndicator = true,
+  onPick,
 }: {
   id: string;
   title: string;
@@ -985,23 +988,28 @@ function ListPanel({
   selectedIndex: number;
   showDescription?: boolean;
   showSelectionIndicator?: boolean;
+  onPick?: (index: number) => void;
 }) {
   return (
     <>
       <text fg={focused ? theme.primary : theme.muted}>{title}</text>
-      <select
-        id={id}
-        flexGrow={1}
-        minHeight={0}
-        options={options}
-        selectedIndex={selectedIndex}
-        showDescription={showDescription}
-        showSelectionIndicator={showSelectionIndicator}
-        backgroundColor={theme.panel}
-        textColor={theme.text}
-        selectedBackgroundColor={theme.element}
-        selectedTextColor={theme.primary}
-      />
+      {onPick ? (
+        <ClickableList id={id} options={options} selectedIndex={selectedIndex} onSelect={onPick} />
+      ) : (
+        <select
+          id={id}
+          flexGrow={1}
+          minHeight={0}
+          options={options}
+          selectedIndex={selectedIndex}
+          showDescription={showDescription}
+          showSelectionIndicator={showSelectionIndicator}
+          backgroundColor={theme.panel}
+          textColor={theme.text}
+          selectedBackgroundColor={theme.element}
+          selectedTextColor={theme.primary}
+        />
+      )}
     </>
   );
 }
@@ -1640,6 +1648,11 @@ export function Shell({ store, client, quit }: ShellProps) {
           >
             <ListPanel
               id={compactPanel.id}
+              onPick={
+                state.terminalLayout && compactPanel.id === "files-list"
+                  ? (index) => store.clickTerminalFile(index)
+                  : undefined
+              }
               title={compactPanel.title}
               focused
               options={compactPanel.options}
@@ -1650,6 +1663,9 @@ export function Shell({ store, client, quit }: ShellProps) {
         )}
         <box
           id="detail"
+          onMouseDown={(event) => {
+            if (event.button === 0) store.clickTerminalDiff();
+          }}
           flexGrow={1}
           minWidth={0}
           paddingX={2}

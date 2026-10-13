@@ -54,6 +54,11 @@ without leaking patch content; valid suppressed-empty Git context is supported.
    data preservation, Rust/headless contracts and terminal quality remain gates.
 7. Root typecheck/tests/Archgate and UI typecheck/tests pass before integration.
 
+Terminal clicks select filters/PRs/files, focus text panes and open explicit
+review/diff/settings actions. Modals fence background clicks and retain keyboard
+equivalents. Browser sidebar provides searchable expandable file folders with
+click-to-diff navigation, including image previews and repeated local paths.
+
 Browser diff must parse complete multi-file patches with Pierre and pass one
 file metadata object per renderer, including large PRs. Parser failure displays
 the original patch instead of crashing the viewer.
