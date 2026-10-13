@@ -15,13 +15,15 @@ unsaved drafts. Surface syncing/error status in the shell.
 
 GitHub issue: #363 (epic #294 step 12/15).
 
-Out of scope (tracked): the offline timer fencing proofs on fake clocks and
-background operation completion/recovery panels.
+Out of scope (tracked): background operation completion/recovery panels beyond
+the existing shells.
 
 ## Exit Criteria
 
 - `syncIntervalMs` maps only the retained intervals and treats everything else
-  as off; unit-tested.
+  as off; the `startSyncScheduler` timer is unit-tested with fake timers (off
+  starts nothing; each retained interval fires; stop clears it), and `refresh`
+  is proven single-in-flight.
 - The shell schedules refresh from the configured interval, and `refresh`
   updates the global history without touching the selection or drafts.
 - `?` opens a keyboard-help overlay built from a single binding catalogue that

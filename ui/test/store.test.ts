@@ -1194,3 +1194,24 @@ test("cancels the selected review job by exact id", async () => {
   expect(store.getSnapshot().jobs[0]?.status).toBe("cancelled");
   expect(store.getSnapshot().notice).toContain("Cancelled");
 });
+
+test("refresh ignores a second call while one is in flight", async () => {
+  const transport = new FakeBackendTransport({ repositories, jobs: [] });
+  const original = transport.request.bind(transport);
+  let calls = 0;
+  transport.request = (method, params) => {
+    if (method === "review.jobs") {
+      calls += 1;
+      return new Promise((resolve) => {
+        setTimeout(() => resolve(original(method, params)), 10);
+      });
+    }
+    return original(method, params);
+  };
+  const store = new ShellStore();
+  const client = new BackendClient(transport);
+  await store.connect(client);
+  await Promise.all([store.refresh(client), store.refresh(client)]);
+  expect(calls).toBe(1);
+  expect(store.getSnapshot().syncing).toBe(false);
+});
