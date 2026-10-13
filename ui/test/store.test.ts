@@ -1162,3 +1162,35 @@ test("global history opens and navigates to a stored review target", async () =>
   expect(picker?.kind).toBe("review");
   expect(picker?.runId).toBe("run-1");
 });
+
+test("cancels the selected review job by exact id", async () => {
+  const store = new ShellStore();
+  const client = new BackendClient(
+    new FakeBackendTransport({
+      repositories,
+      jobs: [
+        {
+          id: "job-1",
+          workspace: "acme",
+          repo: "payments",
+          prId: 42,
+          prTitle: "Title",
+          sourceBranch: "feature/x",
+          destinationBranch: "main",
+          status: "queued",
+          trigger: "manual",
+          threadId: null,
+          error: null,
+          createdAt: "2026-01-01T00:00:00Z",
+          startedAt: null,
+          finishedAt: null,
+        },
+      ],
+    }),
+  );
+  await store.connect(client);
+  await store.toggleJobs(client);
+  await store.cancelSelectedJob(client);
+  expect(store.getSnapshot().jobs[0]?.status).toBe("cancelled");
+  expect(store.getSnapshot().notice).toContain("Cancelled");
+});

@@ -187,6 +187,8 @@ function useShellInput(
         store.moveJob(-1);
       } else if (key.name === "return") {
         void store.selectJob();
+      } else if (key.name === "c") {
+        void store.cancelSelectedJob(client);
       }
       return;
     }

@@ -159,6 +159,13 @@ pub struct ReviewJobsParams {
     pub offset: Option<u32>,
 }
 
+/// Parameters for `review.job` and `review.job.cancel`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ReviewJobParams {
+    pub id: String,
+}
+
 /// Parameters for `review.metrics.effectiveness`.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -589,6 +596,10 @@ pub enum Request {
         #[serde(default)]
         params: EmptyParams,
     },
+    #[serde(rename = "review.job")]
+    ReviewJob { id: String, params: ReviewJobParams },
+    #[serde(rename = "review.job.cancel")]
+    ReviewJobCancel { id: String, params: ReviewJobParams },
     #[serde(rename = "review.jobs")]
     ReviewJobs {
         id: String,
@@ -745,6 +756,8 @@ impl Request {
             | Self::ReviewProfiles { id, .. }
             | Self::ReviewHistory { id, .. }
             | Self::ReviewJobs { id, .. }
+            | Self::ReviewJob { id, .. }
+            | Self::ReviewJobCancel { id, .. }
             | Self::ReviewClosedMetrics { id, .. }
             | Self::ReviewEffectiveness { id, .. }
             | Self::ReviewThreads { id, .. }
@@ -844,6 +857,8 @@ impl Request {
             Self::ReviewProfiles { .. } => "review.profiles",
             Self::ReviewHistory { .. } => "review.history",
             Self::ReviewJobs { .. } => "review.jobs",
+            Self::ReviewJob { .. } => "review.job",
+            Self::ReviewJobCancel { .. } => "review.job.cancel",
             Self::ReviewClosedMetrics { .. } => "review.metrics.closed",
             Self::ReviewEffectiveness { .. } => "review.metrics.effectiveness",
             Self::ReviewThreads { .. } => "review.threads",
@@ -1196,6 +1211,8 @@ impl Request {
             Self::RepositoryStatus { .. }
             | Self::ReviewTargets { .. }
             | Self::ReviewJobs { .. }
+            | Self::ReviewJob { .. }
+            | Self::ReviewJobCancel { .. }
             | Self::ReviewClosedMetrics { .. }
             | Self::ReviewEffectiveness { .. }
             | Self::OperationStatus { .. }
