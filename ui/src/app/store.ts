@@ -3146,6 +3146,12 @@ export class ShellStore {
     if (!job) {
       return;
     }
+    if (job.legacy) {
+      this.update({
+        notice: `Legacy job ${job.id} is shown read-only and has no provider target.`,
+      });
+      return;
+    }
     const index = this.state.picker.findIndex(
       (entry) =>
         entry.kind === "review" &&

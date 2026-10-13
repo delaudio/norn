@@ -34,6 +34,9 @@ GitHub issue: #361 (epic #294 step 12/15).
   false cancellation).
 - Run summaries expose `threadId`; `shift+T` opens the latest run's
   conversation thread (run -> thread), closing the cross-navigation loop.
+- Jobs that cannot be mapped to a configured provider repository are flagged
+  `legacy` and shown read-only (labelled "legacy (read-only)"); they cannot open
+  a provider target, publication or fix approval.
 - `cargo clippy -D warnings`, `cargo test`, `pnpm run lint/typecheck/test`, the
   `ui` job and `archgate check` pass.
 

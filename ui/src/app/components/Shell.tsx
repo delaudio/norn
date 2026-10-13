@@ -1668,7 +1668,7 @@ export function Shell({ store, client, quit }: ShellProps) {
                 wrapMode="none"
                 truncate
               >
-                {`${index === state.selectedJob ? "▶ " : "  "}${job.workspace}/${job.repo}#${job.prId} · ${job.status} · ${job.createdAt}`}
+                {`${index === state.selectedJob ? "▶ " : "  "}${job.workspace}/${job.repo}#${job.prId} · ${job.status}${job.legacy ? " · legacy (read-only)" : ""} · ${job.createdAt}`}
               </text>
             ))
           )}

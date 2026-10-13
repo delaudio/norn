@@ -2222,6 +2222,18 @@ fn review_closed_metrics_response() -> Result<serde_json::Value, ProtocolError> 
     Ok(json!({ "metrics": metrics }))
 }
 
+/// Whether a stored job cannot be mapped to a configured provider repository, so
+/// it must be shown as a read-only local legacy entry.
+fn is_legacy_job(job: &crate::review_storage::ReviewJob) -> bool {
+    if job.workspace.is_empty() || job.repo.is_empty() {
+        return true;
+    }
+    !config::load()
+        .repos
+        .iter()
+        .any(|repo| repo.workspace == job.workspace && repo.repo == job.repo)
+}
+
 /// A single stored review job by exact id.
 fn review_job_response(id: &str) -> Result<serde_json::Value, ProtocolError> {
     let job = crate::review_storage::get_review_job(id)
@@ -2281,6 +2293,7 @@ fn review_job_json(job: crate::review_storage::ReviewJob) -> serde_json::Value {
         "destinationBranch": job.destination_branch,
         "status": serde_json::to_value(job.status).unwrap_or_else(|_| json!("unknown")),
         "trigger": job.trigger,
+        "legacy": is_legacy_job(&job),
         "threadId": job.thread_id,
         "error": job.error,
         "createdAt": job.created_at,
@@ -2299,11 +2312,17 @@ fn review_jobs_response(
     let jobs = crate::review_storage::list_recent_review_jobs(fetch).map_err(|error| {
         ProtocolError::new(ProtocolErrorCode::Internal, format!("review jobs: {error}"))
     })?;
+    let configured = config::load().repos;
     let jobs = jobs
         .into_iter()
         .skip(offset as usize)
         .take(limit as usize)
         .map(|job| {
+            let legacy = job.workspace.is_empty()
+                || job.repo.is_empty()
+                || !configured
+                    .iter()
+                    .any(|repo| repo.workspace == job.workspace && repo.repo == job.repo);
             json!({
                 "id": job.id,
                 "workspace": job.workspace,
@@ -2314,6 +2333,7 @@ fn review_jobs_response(
                 "destinationBranch": job.destination_branch,
                 "status": serde_json::to_value(job.status).unwrap_or_else(|_| json!("unknown")),
                 "trigger": job.trigger,
+                "legacy": legacy,
                 "threadId": job.thread_id,
                 "error": job.error,
                 "createdAt": job.created_at,
