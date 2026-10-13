@@ -35,6 +35,7 @@ import {
   visibleFindings,
 } from "../store";
 import { syncIntervalMs } from "../syncSchedule";
+import { startSyncScheduler } from "../syncScheduler";
 import type { DiffSyntax } from "../syntaxTypes";
 import { theme } from "../theme";
 import { WorkspaceStore } from "../workspaceStore";
@@ -1120,17 +1121,12 @@ function WorkspaceStatus({ state }: { state: ShellSnapshot }) {
 export function Shell({ store, client, quit }: ShellProps) {
   const state = useSyncExternalStore(store.subscribe, store.getSnapshot);
   const syncMs = syncIntervalMs(state.syncIntervalSeconds);
-  useEffect(() => {
-    if (syncMs === null) {
-      return;
-    }
+  useEffect(
     // At most one refresh runs at a time (guarded in the store); the timer is
     // cleared on interval/settings change, disconnect and unmount.
-    const id = setInterval(() => {
-      void store.refresh(client);
-    }, syncMs);
-    return () => clearInterval(id);
-  }, [syncMs, store, client]);
+    () => startSyncScheduler(syncMs, () => void store.refresh(client)),
+    [syncMs, store, client],
+  );
   const providers = useMemo(() => new ProviderStore(), []);
   const explorer = useMemo(() => new ExplorerStore(), []);
   const explorerEntry = state.picker[state.selectedPicker];
