@@ -19,10 +19,22 @@ for (const [width, height] of [
     const renderer = await createTestRenderer({ width, height });
     const ui = mountApp(renderer.renderer, store, client);
     const settle = async () => {
-      for (let i = 0; i < 8; i++) {
-        await Bun.sleep(0);
+      for (let i = 0; i < 20; i++) {
+        await Bun.sleep(1);
         await renderer.renderOnce();
       }
+    };
+    // Poll for an expected frame instead of assuming a fixed number of yields
+    // is enough for the async preview/apply to resolve and render.
+    const waitForFrame = async (text: string) => {
+      for (let i = 0; i < 150; i++) {
+        await Bun.sleep(2);
+        await renderer.renderOnce();
+        if (renderer.captureCharFrame().includes(text)) {
+          return true;
+        }
+      }
+      return false;
     };
     try {
       renderer.mockInput.pressKey(KeyCodes.F8);
@@ -31,8 +43,7 @@ for (const [width, height] of [
       await settle();
       expect(renderer.captureCharFrame()).toContain("BRANCHES");
       renderer.mockInput.pressEnter();
-      await settle();
-      expect(renderer.captureCharFrame()).toContain("CONFIRM GIT OPERATION");
+      expect(await waitForFrame("CONFIRM GIT OPERATION")).toBe(true);
       await renderer.mockInput.pasteBracketedText("y\nf\np\ns\n");
       await settle();
       expect(fixture.operationCalls.some((call) => call.method.endsWith(".apply"))).toBe(false);
@@ -42,7 +53,7 @@ for (const [width, height] of [
           renderer.mockInput.pressKey("d", { ctrl: true });
           await settle();
         }
-        expect(renderer.captureCharFrame()).toContain("TARGET-END");
+        expect(await waitForFrame("TARGET-END")).toBe(true);
         expect(fixture.operationCalls.some((call) => call.method.endsWith(".apply"))).toBe(false);
       }
       renderer.mockInput.pressKey("y");
@@ -53,7 +64,7 @@ for (const [width, height] of [
       renderer.mockInput.pressEscape();
       await Bun.sleep(30);
       await settle();
-      expect(renderer.captureCharFrame()).toContain("FILES");
+      expect(await waitForFrame("FILES")).toBe(true);
       renderer.mockInput.pressEscape();
       await Bun.sleep(30);
       await settle();
