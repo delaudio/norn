@@ -75,8 +75,10 @@ be retired once terminal workflow preservation and cutover safety are proven.
 4. The OpenTUI client is the only interactive UI after cutover, and its
    components are covered by native-frame Storybook scenarios with screenshot
    regressions and input tests.
-5. The shipped Ratatui TUI is the behavioral baseline: filter/PR-list/AI-review
-   panels remain together, Settings is modal, and `g` selects the native or
+5. The shipped Ratatui TUI is the behavioral baseline. The maintainer-directed
+   layout uses a horizontal top filter menu, AI output on the left and a central
+   column with the PR list above its independently scrolling description. These
+   workflows remain together, Settings is modal, and `g` selects the native or
    authenticated browser diff (`b`), preserving focus/filter/selection on return.
    Its review workflows
    are preserved with test evidence. Mandatory parity with desktop-only
@@ -129,6 +131,7 @@ be retired once terminal workflow preservation and cutover safety are proven.
 
 | Date | Revision | Author | Change |
 |------|----------|--------|--------|
+| 2026-10-13 | r4 | default-agent | Maintainer refines terminal presentation: horizontal top filters, left AI output, PR list above independent description in the central column. Workflow and security scope unchanged. |
 | 2026-10-13 | r3 | default-agent | Corrected the baseline to preserve the terminal main-screen panels, Settings overlay, explicit AI action and native/browser diff choice rather than using the standalone provider browser as home. |
 | 2026-10-13 | r2 | default-agent | Maintainer chooses the shipped TUI as the behavioral baseline, requires current-repository PR startup and retires mandatory desktop-only parity. Data preservation and Rust/headless/cutover safeguards remain. |
 | 2026-10-09 | r1 | default-agent | Accepted the OpenTUI React over Rust stdio backend migration and the retirement of the Ratatui and Tauri surfaces, superseding the terminal UI decision. |
@@ -139,3 +142,4 @@ be retired once terminal workflow preservation and cutover safety are proven.
 |------|------|------|-----------|
 | Maintainer | delaudio | 2026-10-09 | authorized through epic #294 |
 | Maintainer | delaudio | 2026-10-13 | "TUI come riferimento; ritira la parità desktop" |
+| Maintainer | delaudio | 2026-10-13 | requested top filters, left review output, central PR list/description |

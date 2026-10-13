@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import type { ScrollBoxRenderable } from "@opentui/core";
 import { createTestRenderer, KeyCodes } from "@opentui/core/testing";
 import { ShellStore } from "../src/app/store";
 import { mountApp } from "../src/app/ui";
@@ -54,7 +55,7 @@ for (const provider of ["github", "bitbucket"] as const) {
       try {
         const frame = app.renderer.captureCharFrame();
         for (const label of [
-          "PR FILTER",
+          "PR DESCRIPTION",
           "Open",
           "Draft",
           "Merged",
@@ -63,6 +64,24 @@ for (const provider of ["github", "bitbucket"] as const) {
           "AI REVIEW",
         ])
           expect(frame).toContain(label);
+        const lines = frame.split("\n");
+        const menu = lines.findIndex(
+          (line) => line.includes("Open") && line.includes("Draft") && line.includes("Local"),
+        );
+        const reviewHeader = lines.findIndex((line) => line.includes("AI REVIEW"));
+        const listHeader = lines.findIndex((line) => line.includes("PULL REQUESTS"));
+        const descriptionHeader = lines.findIndex((line) => line.includes("PR DESCRIPTION"));
+        expect(menu).toBeGreaterThanOrEqual(0);
+        expect(menu).toBeLessThan(reviewHeader);
+        expect(reviewHeader).toBe(listHeader);
+        expect(lines[reviewHeader]!.indexOf("AI REVIEW")).toBeLessThan(
+          lines[listHeader]!.indexOf("PULL REQUESTS"),
+        );
+        expect(descriptionHeader).toBeGreaterThan(listHeader);
+        expect(lines[descriptionHeader]!.indexOf("PR DESCRIPTION")).toBe(
+          lines[listHeader]!.indexOf("PULL REQUESTS"),
+        );
+        expect(frame).not.toContain("PR FILTER");
         expect(frame).not.toContain("TARGETS");
         expect(app.store.getSnapshot().terminalHomeOpen).toBe(true);
         await app.key("f");
@@ -136,11 +155,13 @@ test("Settings is a modal over the terminal home; paste cannot launch diff or re
   const app = await fixture("github");
   try {
     await app.key("tab");
+    expect(app.store.getSnapshot().terminalHomeFocus).toBe("description");
+    await app.key("tab");
     expect(app.store.getSnapshot().terminalHomeFocus).toBe("review");
     await app.key("s");
     expect(app.store.getSnapshot().settingsOpen).toBe(true);
     const frame = app.renderer.captureCharFrame();
-    expect(frame).toContain("PR FILTER");
+    expect(frame).toContain("AI REVIEW");
     expect(frame).toContain("Settings");
     for (const unwanted of [
       "Jira URL",
@@ -379,7 +400,7 @@ for (const provider of ["github", "bitbucket"] as const) {
     test(`the selected ${provider} PR description loads independently at ${width} columns`, async () => {
       const app = await fixture(provider, width);
       try {
-        expect(app.renderer.captureCharFrame()).toContain("Actual synthetic description");
+        expect(app.renderer.captureCharFrame()).toMatch(/Actual synthetic[│\s]+description/);
         const detail = app.transport.calls.filter((call) => call.method === "provider.pr.detail");
         expect(detail).toHaveLength(1);
         expect(detail[0]?.params).toEqual({
@@ -390,7 +411,7 @@ for (const provider of ["github", "bitbucket"] as const) {
         app.transport.fault = "snapshot";
         await app.key("return");
         expect(app.store.getSnapshot().error).not.toBeNull();
-        expect(app.renderer.captureCharFrame()).toContain("Actual synthetic description");
+        expect(app.renderer.captureCharFrame()).toMatch(/Actual synthetic[│\s]+description/);
         expect(app.store.getSnapshot().terminalHomeOpen).toBe(true);
       } finally {
         await app.cleanup();
@@ -463,3 +484,74 @@ for (const provider of ["github", "bitbucket"] as const) {
     }
   });
 }
+
+test("description and AI output have independent keyboard scroll and focus", async () => {
+  const app = await fixture("github");
+  const request = app.transport.request.bind(app.transport);
+  app.transport.request = async (method, params) => {
+    if (method === "review.history")
+      return {
+        runs: [
+          {
+            runId: "owned-saved",
+            createdAt: "2026-10-13T00:00:00Z",
+            status: "completed",
+            turnKind: "initial",
+            threadId: null,
+            findingsCount: 0,
+          },
+        ],
+      };
+    if (method === "review.output")
+      return {
+        target: params.target,
+        runId: "owned-saved",
+        text: Array.from({ length: 60 }, (_, i) => `AI output line ${i}`).join("\n"),
+      };
+    const result = await request(method, params);
+    if (method === "provider.pr.detail")
+      return {
+        ...result,
+        detail: {
+          ...(result.detail as Record<string, unknown>),
+          descriptionRaw: Array.from({ length: 60 }, (_, i) => `Description line ${i}`).join("\n"),
+        },
+      };
+    return result;
+  };
+  try {
+    await app.key("return");
+    const review = app.renderer.renderer.root.findDescendantById(
+      "home-review-scroll",
+    ) as ScrollBoxRenderable;
+    const description = app.renderer.renderer.root.findDescendantById(
+      "home-description-scroll",
+    ) as ScrollBoxRenderable;
+    expect(review.scrollTop).toBe(0);
+    await app.key("tab");
+    expect(app.store.getSnapshot().terminalHomeFocus).toBe("description");
+    await app.key("\u001b[6~");
+    expect(description.scrollTop).toBeGreaterThan(0);
+    expect(review.scrollTop).toBe(0);
+    const descriptionPosition = description.scrollTop;
+    await app.key("tab");
+    await app.key("\u001b[6~");
+    expect(review.scrollTop).toBeGreaterThan(0);
+    expect(description.scrollTop).toBe(descriptionPosition);
+    await app.key("tab");
+    expect(app.store.getSnapshot().terminalHomeFocus).toBe("filters");
+    await app.key("tab");
+    expect(app.store.getSnapshot().terminalHomeFocus).toBe("list");
+    await app.key("j");
+    expect(description.scrollTop).toBe(0);
+    expect(review.scrollTop).toBe(0);
+    app.renderer.mockInput.pressTab({ shift: true });
+    await app.settle();
+    expect(app.store.getSnapshot().terminalHomeFocus).toBe("filters");
+    app.renderer.mockInput.pressTab({ shift: true });
+    await app.settle();
+    expect(app.store.getSnapshot().terminalHomeFocus).toBe("review");
+  } finally {
+    await app.cleanup();
+  }
+});

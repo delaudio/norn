@@ -1298,3 +1298,26 @@ UI typecheck, strict core Clippy, Archgate17, lint (three existing infos),
 issues (score API unavailable). APFS clone of build cache isolates backend
 compilation from root workspace; matched backend built in this worktree.
 Plan stays todo / ADR0020 Accepted until verified integration and final cutover.
+
+
+## 2026-10-13 — Maintainer-directed terminal layout refinement
+
+Plan0074 / PR394: use the horizontal button style inspected read-only in
+~/dev/under/src/menu.ts and app.ts. Top Open/Draft/Merged/Local choices replace
+the vertical filter column. Left AI output/logs/findings are independent from
+the central PR list above PR description. Tab/Shift+Tab cycles filters, list,
+description, review; j/k and PageUp/PageDown scroll the focused text pane.
+Selection resets each scroll; diff return and settings input fences remain.
+Explicit text wrapping and reserved scrollbar space prevent narrow-pane text
+clipping. Preserve current-repository scope and Rust operation/evidence contracts.
+
+ADR0020r4 and migration contract reflect the maintainer's presentation refinement,
+without expanding desktop parity. Native geometry tests check horizontal menu,
+left output, PR/description alignment at120/50columns for both providers;
+independent scroll/selection reset and reverse focus pass. Two new actual native
+Storybook frames show saved AI output alongside description, wide/compact.
+Validation: root tests/typechecks, UI typecheck, Archgate17, lint (three existing
+infos), React Doctor changed delta (13 DOM-property false positives for typed
+native text wrapMode; no DOM exists and native wrap tests pass; score unavailable),223native
+frames and Storybook build pass. No backend change or rebuild needed for layout.
+Keep0074pending until verified actual merge; root working tree/user config untouched.

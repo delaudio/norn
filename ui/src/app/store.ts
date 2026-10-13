@@ -198,7 +198,7 @@ export interface ShellSnapshot {
   findingStage: { target: DraftTarget; findingId: string } | null;
   terminalLayout: boolean;
   terminalHomeOpen: boolean;
-  terminalHomeFocus: "filters" | "list" | "review";
+  terminalHomeFocus: "filters" | "list" | "description" | "review";
   terminalFilter: "OPEN" | "DRAFT" | "MERGED" | "LOCAL";
   terminalDiffPrompt: boolean;
   terminalReview: {

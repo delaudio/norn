@@ -8,11 +8,12 @@ import { type ShellSnapshot, type ShellStore, visibleFindings } from "../store";
 import { theme } from "../theme";
 
 const filters = ["OPEN", "DRAFT", "MERGED", "LOCAL"] as const;
-type Focus = "filters" | "list" | "review";
+type Focus = ShellSnapshot["terminalHomeFocus"];
+const panes: Focus[] = ["filters", "list", "description", "review"];
 type Action = "load" | "diff" | "browser" | "review";
 
-// The Ratatui main-screen contract: filters, targets and AI review remain
-// together. ProviderPanel is an optional browser, not the terminal home.
+// Keep terminal workflows together: top filters, review output on the left,
+// PR list and independent description on the right.
 export function TerminalHome({
   shell,
   providers,
@@ -34,6 +35,7 @@ export function TerminalHome({
   const revision = useRef(0);
   const list = useRef<ScrollBoxRenderable | null>(null);
   const review = useRef<ScrollBoxRenderable | null>(null);
+  const description = useRef<ScrollBoxRenderable | null>(null);
   const local = state.terminalFilter === "LOCAL";
   const rows = providers.rows().filter((row) => row.kind !== "repository");
   const row = providers.selectedRow();
@@ -52,7 +54,10 @@ export function TerminalHome({
     if (!local && selection && remote.detailKey !== selection) providers.showDetail(client, false);
   }, [client, providers, local, selection, remote.detailKey]);
   useEffect(() => {
-    if (selection) review.current?.scrollTo(0);
+    if (selection) {
+      review.current?.scrollTo(0);
+      description.current?.scrollTo(0);
+    }
   }, [selection]);
 
   const changeFilter = (filter: ShellSnapshot["terminalFilter"]) => {
@@ -187,7 +192,8 @@ export function TerminalHome({
       return;
     }
     if (key.name === "tab") {
-      setFocus(focus === "filters" ? "list" : focus === "list" ? "review" : "filters");
+      const delta = key.shift ? -1 : 1;
+      setFocus(panes[(panes.indexOf(focus) + delta + panes.length) % panes.length]!);
       return;
     }
     if (["j", "down", "k", "up", "pagedown", "pageup"].includes(key.name)) {
@@ -198,12 +204,12 @@ export function TerminalHome({
             (filters.indexOf(state.terminalFilter) + delta + filters.length) % filters.length
           ]!,
         );
-      else if (focus === "review")
-        review.current?.scrollBy(
-          delta *
-            (key.name.startsWith("page") ? Math.max(1, (review.current?.height ?? 5) - 2) : 1),
+      else if (focus === "review" || focus === "description") {
+        const pane = focus === "review" ? review.current : description.current;
+        pane?.scrollBy(
+          delta * (key.name.startsWith("page") ? Math.max(1, (pane.height ?? 5) - 2) : 1),
         );
-      else move(delta);
+      } else move(delta);
       return;
     }
     if (key.name === "g") {
@@ -239,7 +245,7 @@ export function TerminalHome({
     ? !!state.localInfo && entry?.kind === "working-tree"
     : row?.kind === "pr" && !!entry && providerPrKey(entry, entry.prId ?? 0) === row.key;
   const findings = loaded ? (state.terminalReview?.findings ?? visibleFindings(state)) : [];
-  const filterWidth = width < 70 ? 12 : Math.min(32, Math.floor(width * 0.28));
+  const reviewWidth = Math.max(18, Math.floor(width * 0.4));
   const repo = state.repositories[state.selected];
   const active = state.operation;
   return (
@@ -257,33 +263,125 @@ export function TerminalHome({
           truncate
         >{`Norn · ${repo?.workspace ?? ""}/${repo?.repo ?? ""}`}</text>
       </box>
+      <box
+        id="home-filters"
+        height={1}
+        flexShrink={0}
+        flexDirection="row"
+        backgroundColor={theme.panel}
+        marginBottom={1}
+        onMouseDown={() => focusPane("filters")}
+      >
+        {filters.map((filter) => (
+          <text
+            id={`home-filter-${filter}`}
+            key={filter}
+            height={1}
+            width={filter.length + 4}
+            fg={state.terminalFilter === filter ? theme.primary : theme.muted}
+            bg={state.terminalFilter === filter ? theme.element : theme.panel}
+            attributes={
+              state.terminalFilter === filter
+                ? TextAttributes.BOLD | (focus === "filters" ? TextAttributes.UNDERLINE : 0)
+                : 0
+            }
+            onMouseDown={() => {
+              focusPane("filters");
+              changeFilter(filter);
+            }}
+          >{` ${state.terminalFilter === filter ? "●" : " "} ${filter[0]}${filter.slice(1).toLowerCase()} `}</text>
+        ))}
+      </box>
       <box flexGrow={1} minHeight={0} flexDirection="row">
         <box
-          width={filterWidth}
+          id="home-review"
+          width={reviewWidth}
           flexShrink={0}
+          minHeight={0}
           border
-          borderColor={focus === "filters" ? theme.primary : theme.muted}
+          borderColor={focus === "review" ? theme.primary : theme.muted}
           flexDirection="column"
-          onMouseDown={() => focusPane("filters")}
+          onMouseDown={() => focusPane("review")}
         >
-          <text fg={theme.primary} height={1} truncate>
-            PR FILTER
+          <text fg={theme.primary} height={1}>
+            AI REVIEW
           </text>
-          {filters.map((filter) => (
-            <text
-              key={filter}
-              height={1}
-              fg={state.terminalFilter === filter ? theme.primary : theme.text}
-              onMouseDown={() => changeFilter(filter)}
-            >{`${state.terminalFilter === filter ? "▶ " : "  "}${filter[0]}${filter.slice(1).toLowerCase()}`}</text>
-          ))}
-          <text fg={theme.muted} marginTop={1} wrapMode="word">
-            f cycle · Tab focus
-          </text>
+          <scrollbox id="home-review-scroll" ref={review} flexGrow={1} minHeight={0} scrollY>
+            {busy || state.snapshotLoading ? (
+              <text width="100%" wrapMode="word" fg={theme.muted}>
+                Loading selected evidence…
+              </text>
+            ) : !loaded ? (
+              <text width="100%" wrapMode="word" fg={theme.muted}>
+                Enter load selection · a start AI review
+              </text>
+            ) : (
+              <text
+                fg={theme.muted}
+              >{`${state.files.length} changed files · ${state.terminalReview?.findings === null ? "findings unavailable" : `${findings.length} findings`} · ${state.history.length} saved runs`}</text>
+            )}
+            {active && (
+              <>
+                <text
+                  fg={active.state === "failed" ? theme.error : theme.secondary}
+                >{`Review ${active.state} · ${active.targetLabel}`}</text>
+                {active.logs.map((log) => (
+                  <text width="100%" wrapMode="word" key={log.id} fg={theme.muted}>
+                    {log.text}
+                  </text>
+                ))}
+              </>
+            )}
+            {loaded && state.terminalReview && (
+              <>
+                <text
+                  width="100%"
+                  wrapMode="word"
+                  fg={theme.muted}
+                >{`Saved AI review · ${state.terminalReview.runId}`}</text>
+                <text
+                  width="100%"
+                  wrapMode="word"
+                  fg={state.terminalReview.output === null ? theme.muted : theme.text}
+                >
+                  {state.terminalReview.output ??
+                    "Stored output unavailable; see findings and status below."}
+                </text>
+              </>
+            )}
+            {findings.map((finding) => (
+              <box key={finding.id} flexDirection="column" flexShrink={0}>
+                <text
+                  width="100%"
+                  wrapMode="word"
+                  fg={theme.primary}
+                >{`${finding.severity} · ${finding.title}`}</text>
+                <text width="100%" wrapMode="word" fg={theme.text}>
+                  {finding.summary}
+                </text>
+              </box>
+            ))}
+            {state.error && (
+              <text width="100%" wrapMode="word" fg={theme.error}>
+                {state.error}
+              </text>
+            )}
+            {state.notice && (
+              <text width="100%" wrapMode="word" fg={theme.muted}>
+                {state.notice}
+              </text>
+            )}
+            {remote.notice && (
+              <text width="100%" wrapMode="word" fg={theme.muted}>
+                {remote.notice}
+              </text>
+            )}
+          </scrollbox>
         </box>
-        <box flexGrow={1} minWidth={0} flexDirection="column">
+        <box id="home-center" flexGrow={1} minWidth={0} flexDirection="column">
           <box
-            height={Math.max(5, Math.floor((height - 5) * 0.34))}
+            id="home-pr-list"
+            height={Math.max(5, Math.floor((height - 6) * 0.34))}
             flexShrink={0}
             border
             borderColor={focus === "list" ? theme.primary : theme.muted}
@@ -334,83 +432,59 @@ export function TerminalHome({
             </scrollbox>
           </box>
           <box
+            id="home-description"
             flexGrow={1}
             minHeight={0}
             border
-            borderColor={focus === "review" ? theme.primary : theme.muted}
+            borderColor={focus === "description" ? theme.primary : theme.muted}
             flexDirection="column"
-            onMouseDown={() => focusPane("review")}
+            onMouseDown={() => focusPane("description")}
           >
             <text fg={theme.primary} height={1}>
-              AI REVIEW
+              {local ? "LOCAL COMPARISON" : "PR DESCRIPTION"}
             </text>
-            <scrollbox ref={review} flexGrow={1} minHeight={0} scrollY>
-              <text fg={theme.text}>
+            <scrollbox
+              id="home-description-scroll"
+              contentOptions={{ paddingRight: 1 }}
+              ref={description}
+              flexGrow={1}
+              minHeight={0}
+              scrollY
+            >
+              <text width="100%" wrapMode="word" fg={theme.text}>
                 {local
                   ? "Current repository · tracked local changes"
                   : row?.kind === "pr"
                     ? `#${row.pr.id} ${row.pr.title}\n${row.pr.sourceBranch} → ${row.pr.destinationBranch}`
                     : "Select a review target."}
               </text>
-              {!local && row?.kind === "pr" && (
-                <>
-                  <text fg={theme.primary}>PR DESCRIPTION</text>
-                  {remote.detailKey === row.key && remote.detailLoading ? (
-                    <text fg={theme.muted}>Loading PR description…</text>
-                  ) : remote.detailKey === row.key && remote.detailError ? (
-                    <text
-                      fg={theme.error}
-                    >{`PR description unavailable: ${remote.detailError} · Enter retry`}</text>
-                  ) : remote.detailKey === row.key && remote.detail ? (
-                    <text fg={theme.text}>
-                      {remote.detail.detail.descriptionRaw.trim()
-                        ? remote.detail.detail.descriptionRaw
-                        : "No PR description."}
-                    </text>
-                  ) : (
-                    <text fg={theme.muted}>Loading PR description…</text>
-                  )}
-                </>
-              )}
-              {busy || state.snapshotLoading ? (
-                <text fg={theme.muted}>Loading selected evidence…</text>
-              ) : !loaded ? (
-                <text fg={theme.muted}>Enter load selection · a start AI review</text>
-              ) : (
-                <text
-                  fg={theme.muted}
-                >{`${state.files.length} changed files · ${state.terminalReview?.findings === null ? "findings unavailable" : `${findings.length} findings`} · ${state.history.length} saved runs`}</text>
-              )}
-              {active && (
-                <>
-                  <text
-                    fg={active.state === "failed" ? theme.error : theme.secondary}
-                  >{`Review ${active.state} · ${active.targetLabel}`}</text>
-                  {active.logs.map((log) => (
-                    <text key={log.id} fg={theme.muted}>
-                      {log.text}
-                    </text>
-                  ))}
-                </>
-              )}
-              {loaded && state.terminalReview && (
-                <>
-                  <text fg={theme.muted}>{`Saved AI review · ${state.terminalReview.runId}`}</text>
-                  <text fg={state.terminalReview.output === null ? theme.muted : theme.text}>
-                    {state.terminalReview.output ??
-                      "Stored output unavailable; see findings and status below."}
+              {!local &&
+                row?.kind === "pr" &&
+                (remote.detailKey === row.key && remote.detailLoading ? (
+                  <text width="100%" wrapMode="word" fg={theme.muted}>
+                    Loading PR description…
                   </text>
-                </>
+                ) : remote.detailKey === row.key && remote.detailError ? (
+                  <text
+                    fg={theme.error}
+                  >{`PR description unavailable: ${remote.detailError} · Enter retry`}</text>
+                ) : remote.detailKey === row.key && remote.detail ? (
+                  <text width="100%" wrapMode="word" fg={theme.text}>
+                    {remote.detail.detail.descriptionRaw.trim()
+                      ? remote.detail.detail.descriptionRaw
+                      : "No PR description."}
+                  </text>
+                ) : (
+                  <text width="100%" wrapMode="word" fg={theme.muted}>
+                    Loading PR description…
+                  </text>
+                ))}
+              {local && (
+                <text width="100%" wrapMode="word" fg={theme.muted}>
+                  Enter configures the base and tracked layers. Use g for the diff or a to start a
+                  review.
+                </text>
               )}
-              {findings.map((finding) => (
-                <box key={finding.id} flexDirection="column" flexShrink={0}>
-                  <text fg={theme.primary}>{`${finding.severity} · ${finding.title}`}</text>
-                  <text fg={theme.text}>{finding.summary}</text>
-                </box>
-              ))}
-              {state.error && <text fg={theme.error}>{state.error}</text>}
-              {state.notice && <text fg={theme.muted}>{state.notice}</text>}
-              {remote.notice && <text fg={theme.muted}>{remote.notice}</text>}
             </scrollbox>
           </box>
         </box>

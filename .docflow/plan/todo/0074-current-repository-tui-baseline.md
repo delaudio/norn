@@ -18,8 +18,9 @@ claim or repeat their already merged implementations.
 ## Corrected behavioral scope (2026-10-13 feedback)
 
 Current-repository filtering alone is insufficient. Restore the Ratatui main
-screen: filter panel (Open/Draft/Merged/Local), PR/local-target list, AI review
-panel and modal Settings. Preserve `s` settings, `a` explicit AI review,
+screen workflows with the maintainer's refined layout: horizontal top filters
+(Open/Draft/Merged/Local), left AI output, central PR/local-target list above
+its independently scrolling description, and modal Settings. Preserve `s` settings, `a` explicit AI review,
 `Enter` load selection, and `g` diff choice (`g` native diff / `b` authenticated
 browser), with return from diff to the original selection/filter. Load and show the
 selected PR description independently of snapshot/diff verification; failures

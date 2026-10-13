@@ -423,3 +423,8 @@ export const CompactTerminalHomeSettings: Story = {
 };
 export const TerminalHomeLocal: Story = { args: { frameId: "terminal-home-local-120x30" } };
 export const CompactTerminalHomeLocal: Story = { args: { frameId: "terminal-home-local-50x15" } };
+
+export const TerminalHomeReviewOutput: Story = { args: { frameId: "terminal-home-review-120x30" } };
+export const CompactTerminalHomeReviewOutput: Story = {
+  args: { frameId: "terminal-home-review-50x20" },
+};

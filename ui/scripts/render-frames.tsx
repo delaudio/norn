@@ -865,9 +865,35 @@ async function publicationScene(mode: "drafts" | "preview" | "partial" | "status
 
 async function currentRepositoryScene(
   provider: "github" | "bitbucket",
-  modal?: "diff" | "settings" | "local",
+  modal?: "diff" | "settings" | "local" | "review",
 ) {
-  const client = new BackendClient(new CurrentTransport(provider));
+  const transport = new CurrentTransport(provider);
+  if (modal === "review") {
+    const request = transport.request.bind(transport);
+    transport.request = async (method, params) => {
+      if (method === "review.history")
+        return {
+          runs: [
+            {
+              runId: "ui-demo",
+              createdAt: "2026-10-13T00:00:00Z",
+              status: "completed",
+              turnKind: "initial",
+              threadId: null,
+              findingsCount: 0,
+            },
+          ],
+        };
+      if (method === "review.output")
+        return {
+          target: params.target,
+          runId: "ui-demo",
+          text: "AI line 1\nChecked changes.\nNo issues found.\n\nReview summary.",
+        };
+      return request(method, params);
+    };
+  }
+  const client = new BackendClient(transport);
   const store = new ShellStore();
   await store.connect(client, "current-repo");
   return {
@@ -878,7 +904,8 @@ async function currentRepositoryScene(
         await Bun.sleep(0);
         await test.renderOnce();
       }
-      if (modal === "diff") test.mockInput.pressKey("g");
+      if (modal === "review") test.mockInput.pressEnter();
+      else if (modal === "diff") test.mockInput.pressKey("g");
       else if (modal === "settings") test.mockInput.pressKey("s");
       else if (modal === "local") {
         test.mockInput.pressKey("f");
@@ -890,7 +917,17 @@ async function currentRepositoryScene(
           await Bun.sleep(0);
           await test.renderOnce();
         }
+      if (modal === "review") {
+        const deadline = Date.now() + 2000;
+        while (!store.getSnapshot().terminalReview?.output && Date.now() < deadline) {
+          await Bun.sleep(1);
+          await test.renderOnce();
+        }
+        await test.renderOnce();
+      }
       const content = test.captureCharFrame();
+      if (modal === "review" && !content.includes("AI line 1"))
+        throw new Error("Saved AI output did not render on home");
       if (modal === "settings") {
         if (!content.includes("Settings") || !store.getSnapshot().settingsOpen)
           throw new Error("Settings modal did not render");
@@ -1113,6 +1150,18 @@ const scenes: Scene[] = [
     cols: 50,
     rows: 15,
     build: () => currentRepositoryScene("github", "local"),
+  },
+  {
+    id: "terminal-home-review-120x30",
+    cols: 120,
+    rows: 30,
+    build: () => currentRepositoryScene("github", "review"),
+  },
+  {
+    id: "terminal-home-review-50x20",
+    cols: 50,
+    rows: 20,
+    build: () => currentRepositoryScene("github", "review"),
   },
   {
     id: "current-repository-github-120x30",

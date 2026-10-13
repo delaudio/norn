@@ -4,6 +4,10 @@ Git is authoritative. Durable history lives in WORKLOG and plan/done.
 
 ## Active state
 
+- 2026-10-13 layout refinement explicitly requested: Under-style horizontal
+  filters at top, AI output left, central PR list above description. Separate
+  scroll/focus and native geometry tests; same open PR394, plan0074 pending.
+
 - 2026-10-13 latest feedback: a blocked by generic snapshot error; reproduce
   valid Git suppressed-empty context with owned Bitbucket fixtures, preserve
   inventory validation and provide safe failure-stage diagnostics. Scope modal
