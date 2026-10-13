@@ -4,6 +4,11 @@ Git is authoritative. Durable history lives in WORKLOG and plan/done.
 
 ## Active state
 
+- 2026-10-13 browser regression: full75-file PR passed to singular PatchDiff.
+  Parse with real Pierre API, render FileDiff per file, safe original-patch
+  fallback, regression fixture75files. Rebuild browser assets in owned worktree;
+  user must restart backend/browser session to discard the old asset cache.
+
 - 2026-10-13 latest presentation request supersedes left-AI layout: AI output
   right, PR list/description central-left. Native Markdown in review/description
   uses active palette; test colored spans, concealment, dark/light change and

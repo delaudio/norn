@@ -1343,3 +1343,23 @@ root tests/typechecks, UI typecheck, Archgate17, lint,223native frames and
 Storybook build pass. Changed React Doctor has no issues (score API unreachable).
 Plan0074 remains pending until verified actual integration; installed launcher
 and root/user files unchanged. No Norn review or live provider/agent invocation.
+
+
+## 2026-10-13 — Multi-file browser diff regression
+
+Plan0074 / browser viewer workflow: maintainer reports Pierre singular-patch
+exception with75files. Previous tests mocked PatchDiff and missed its cardinality
+contract. Use actual parsePatchFiles in strict mode, flatten complete patches
+and pass one FileDiffMetadata per native Pierre FileDiff. Namespace parser cache
+keys by server version and retain repeated paths across local layers. Parser
+failure retains the exact original patch in an escaped React pre instead of
+crashing; independent image metadata remains available. Inline empty favicon
+avoids the unrelated unauthenticated favicon404 without changing Rust policy.
+
+Tests now mock only browser rendering, keeping the real Pierre parser: single
+file,75files, repeated-path local layers, malformed-patch fallback, current
+polling/session/image tests. Nine viewer tests and root suite/tooling, typecheck,
+lint, Archgate17 and React Doctor pass; browser asset bundle rebuilt in owned
+worktree. No live provider/agent or Norn review. Existing browser server caches
+its assets; maintainer must quit/restart TUI and create a new g→b session.
+No backend/source-store change. PR394 remains open;0074pending until actualmerge.

@@ -1,5 +1,6 @@
 import { Moon, Sun } from "@phosphor-icons/react";
-import { PatchDiff } from "@pierre/diffs/react";
+import { parsePatchFiles } from "@pierre/diffs";
+import { FileDiff } from "@pierre/diffs/react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { parseUnifiedDiff } from "@/lib/diff";
 import type { ImageDiffMetadata, ReviewFileData } from "@/lib/imageDiff";
@@ -175,11 +176,34 @@ export function BrowserDiffApp() {
     if (!remoteState) return [];
     const diffstat = remoteState.diffstat ?? [];
     return mergeImageDiffstat(
-      parseUnifiedDiff(remoteState.diff ?? ""),
+      (() => {
+        try {
+          return parseUnifiedDiff(remoteState.diff ?? "");
+        } catch {
+          return [];
+        }
+      })(),
       diffstat,
       previewStates(diffstat, window.location.pathname),
     );
   }, [remoteState]);
+
+  const pierre = useMemo(() => {
+    const patch = remoteState?.diff ?? "";
+    if (!patch.trim()) return { files: [], error: null };
+    try {
+      const files = parsePatchFiles(patch, `browser-diff-${remoteState?.version}`, true).flatMap(
+        (patch) => patch.files,
+      );
+      if (!files.length) throw new Error("Empty parsed patch");
+      return { files, error: null };
+    } catch {
+      return {
+        files: [],
+        error: "The formatted diff could not be rendered. The original patch is shown below.",
+      };
+    }
+  }, [remoteState?.diff, remoteState?.version]);
 
   const totals = useMemo(
     () =>
@@ -294,16 +318,25 @@ export function BrowserDiffApp() {
           <div className="px-5 py-8 text-sm text-muted-foreground">Loading review target…</div>
         ) : (
           <>
-            {(remoteState.diff ?? "").trim().length > 0 ? (
-              <PatchDiff
-                patch={remoteState.diff ?? ""}
+            {pierre.files.map((fileDiff) => (
+              <FileDiff
+                key={`${fileDiff.cacheKey}:${fileDiff.prevName ?? ""}:${fileDiff.name}`}
+                fileDiff={fileDiff}
                 options={{
                   theme: theme === "dark" ? "github-dark" : "github-light",
                   diffStyle: viewMode,
                 }}
                 disableWorkerPool
               />
-            ) : null}
+            ))}
+            {pierre.error && (
+              <div className="px-5 py-4">
+                <p role="alert" className="mb-3 text-sm text-destructive">
+                  {pierre.error}
+                </p>
+                <pre className="whitespace-pre-wrap break-words text-xs">{remoteState.diff}</pre>
+              </div>
+            )}
             {imageFiles.map((file) => (
               <BrowserImagePanel
                 key={`${file.imageDiff!.oldPath}->${file.imageDiff!.newPath}`}

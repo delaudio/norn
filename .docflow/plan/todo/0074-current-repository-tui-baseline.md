@@ -54,6 +54,10 @@ without leaking patch content; valid suppressed-empty Git context is supported.
    data preservation, Rust/headless contracts and terminal quality remain gates.
 7. Root typecheck/tests/Archgate and UI typecheck/tests pass before integration.
 
+Browser diff must parse complete multi-file patches with Pierre and pass one
+file metadata object per renderer, including large PRs. Parser failure displays
+the original patch instead of crashing the viewer.
+
 ## Dependencies
 
 Existing native provider reads/snapshots and read-only `local.options` IPC.
