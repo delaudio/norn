@@ -287,6 +287,7 @@ export interface ReviewJobSummary {
   destinationBranch: string;
   status: string;
   trigger: string;
+  legacy?: boolean;
   threadId: string | null;
   error: string | null;
   createdAt: string;
