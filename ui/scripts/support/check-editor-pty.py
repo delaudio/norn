@@ -21,9 +21,11 @@ with tempfile.TemporaryDirectory(prefix='norn-owned-editor-pty-') as owned:
     def run_git(*args): subprocess.run([git,'-C',str(repo),*args],env=env,check=True,capture_output=True)
     run_git('init','-q');run_git('remote','add','origin','https://github.com/owned/editor.git');run_git('config','user.name','Owned Editor');run_git('config','user.email','owned@example.invalid');run_git('add','--',source.name);run_git('-c','commit.gpgsign=false','commit','-qm','owned base')
     (config/'settings.json').write_text(json.dumps({'aiProvider':'claude','repos':[{'provider':'github','workspace':'owned','repo':'editor','localPath':str(repo)}],'defaultDiffView':'unified','theme':'dark'}))
+    # Exercise local editor lifecycle without provider startup/credential probes.
+    # Current-repo home/F8 bindings have native fake-transport input coverage.
     pid, master = pty.fork()
     if pid == 0:
-        os.chdir(project/'ui'); os.execve(bun,[bun,'run','src/main.ts'],env)
+        os.chdir(project/'ui'); os.execve(bun,[bun,'run','src/main.ts','--workspace'],env)
     fcntl.ioctl(master, termios.TIOCSWINSZ, struct.pack('HHHH',35,120,0,0))
     initial = termios.tcgetattr(master); output = bytearray(); exited = False
     def pump():

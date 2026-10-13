@@ -863,7 +863,10 @@ async function publicationScene(mode: "drafts" | "preview" | "partial" | "status
   };
 }
 
-async function currentRepositoryScene(provider: "github" | "bitbucket") {
+async function currentRepositoryScene(
+  provider: "github" | "bitbucket",
+  modal?: "diff" | "settings" | "local",
+) {
   const client = new BackendClient(new CurrentTransport(provider));
   const store = new ShellStore();
   await store.connect(client, "current-repo");
@@ -875,7 +878,34 @@ async function currentRepositoryScene(provider: "github" | "bitbucket") {
         await Bun.sleep(0);
         await test.renderOnce();
       }
+      if (modal === "diff") test.mockInput.pressKey("g");
+      else if (modal === "settings") test.mockInput.pressKey("s");
+      else if (modal === "local") {
+        test.mockInput.pressKey("f");
+        test.mockInput.pressKey("f");
+        test.mockInput.pressKey("f");
+      }
+      if (modal)
+        for (let i = 0; i < 8; i++) {
+          await Bun.sleep(0);
+          await test.renderOnce();
+        }
       const content = test.captureCharFrame();
+      if (modal === "settings") {
+        if (!content.includes("Settings") || !store.getSnapshot().settingsOpen)
+          throw new Error("Settings modal did not render");
+        return;
+      }
+      if (modal === "local") {
+        if (!content.includes("LOCAL CHANGES") || !content.includes("AI REVIEW"))
+          throw new Error("Local terminal home did not render");
+        return;
+      }
+      if (modal === "diff") {
+        if (!content.includes("Open diff") || !content.includes("Browser diff viewer"))
+          throw new Error("Diff choice modal did not render");
+        return;
+      }
       if (!content.includes("PULL REQUESTS") || !content.includes(`${provider} change 7`))
         throw new Error("Current-repository PR startup did not render");
       if (content.includes(`${provider === "github" ? "bitbucket" : "github"} change 7`))
@@ -1048,6 +1078,42 @@ async function savedLocalScene(kind: "list" | "next" | "empty" | "loading" | "er
   return { client, store };
 }
 const scenes: Scene[] = [
+  {
+    id: "terminal-home-diff-choice-120x30",
+    cols: 120,
+    rows: 30,
+    build: () => currentRepositoryScene("github", "diff"),
+  },
+  {
+    id: "terminal-home-diff-choice-50x15",
+    cols: 50,
+    rows: 15,
+    build: () => currentRepositoryScene("github", "diff"),
+  },
+  {
+    id: "terminal-home-settings-120x30",
+    cols: 120,
+    rows: 30,
+    build: () => currentRepositoryScene("github", "settings"),
+  },
+  {
+    id: "terminal-home-settings-50x15",
+    cols: 50,
+    rows: 15,
+    build: () => currentRepositoryScene("github", "settings"),
+  },
+  {
+    id: "terminal-home-local-120x30",
+    cols: 120,
+    rows: 30,
+    build: () => currentRepositoryScene("github", "local"),
+  },
+  {
+    id: "terminal-home-local-50x15",
+    cols: 50,
+    rows: 15,
+    build: () => currentRepositoryScene("github", "local"),
+  },
   {
     id: "current-repository-github-120x30",
     cols: 120,

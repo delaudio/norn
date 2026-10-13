@@ -18,8 +18,8 @@ const HELP = [
   "--current-repo: default mode · --workspace: all configured repositories",
   "",
   "j/k or ↑/↓: move selection · Tab: switch pane (detail scrolls with j/k)",
-  "PR list: Enter detail · Space open diff · r refresh · m settings",
-  "Review workspace: Enter start review · x cancel · F2 PRs · F4 local",
+  "Home: f Open/Draft/Merged/Local · Enter load · a AI review · s settings",
+  "g: choose diff → g terminal / b browser · Tab pane · j/k move · F8 files",
   "q or Ctrl+C: quit",
 ].join("\n");
 

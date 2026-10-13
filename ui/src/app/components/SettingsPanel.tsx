@@ -21,6 +21,13 @@ export function SettingsPanel({
   useEffect(() => {
     scroll.current?.scrollChildIntoView(`setting-${state.selected}`);
   }, [state.selected]);
+  const savePreferences = () =>
+    void settings
+      .save(client)
+      .then(async (value) => {
+        if (value) await shell.applySettings(client, value);
+      })
+      .catch((error) => shell.setError(error instanceof Error ? error.message : String(error)));
   useKeyboard((key) => {
     key.preventDefault();
     key.stopPropagation();
@@ -43,13 +50,11 @@ export function SettingsPanel({
         settings.append(key.sequence);
       return;
     }
-    if (key.ctrl && key.name === "s") {
-      void settings
-        .save(client)
-        .then(async (value) => {
-          if (value) await shell.applySettings(client, value);
-        })
-        .catch((error) => shell.setError(error instanceof Error ? error.message : String(error)));
+    if (
+      (key.ctrl && key.name === "s") ||
+      (shell.getSnapshot().terminalLayout && key.name === "s")
+    ) {
+      savePreferences();
     } else if (key.ctrl && key.name === "d") shell.toggleData();
     else if (key.ctrl && key.name === "t") void settings.previewImportedTheme(client);
     else if (key.ctrl && key.name === "r") void settings.refreshReadiness(client);
@@ -57,7 +62,8 @@ export function SettingsPanel({
     else if (key.name === "escape" || key.name === "q") shell.toggleSettings();
     else if (key.name === "j" || key.name === "down" || key.name === "tab") settings.move(1);
     else if (key.name === "k" || key.name === "up") settings.move(-1);
-    else if (key.name === "return") settings.beginEdit();
+    else if (key.name === "return" || (shell.getSnapshot().terminalLayout && key.name === "e"))
+      settings.beginEdit();
     else if (key.name === "a") settings.addRepository();
     else if (key.name === "d") settings.removeRepository();
     else if (key.name === "x") settings.requestClear();
@@ -70,7 +76,9 @@ export function SettingsPanel({
   return (
     <box flexDirection="column" flexGrow={1} paddingX={1} backgroundColor={theme.background}>
       <text fg={theme.primary} height={1} flexShrink={0} truncate>
-        Settings · Enter edit/cycle · Esc discard and close
+        {shell.getSnapshot().terminalLayout
+          ? "Settings · Enter/e edit · s save · Esc discard and close"
+          : "Settings · Enter edit/cycle · Esc discard and close"}
       </text>
       <text fg={theme.muted} height={1} flexShrink={0} truncate>
         Ctrl+D user data · Ctrl+S preferences · Ctrl+K credential · a add repo · d remove repo · x

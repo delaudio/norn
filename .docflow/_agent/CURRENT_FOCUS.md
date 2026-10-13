@@ -4,6 +4,17 @@ Git is authoritative. Durable history lives in WORKLOG and plan/done.
 
 ## Active state
 
+- 2026-10-13 latest correction: PR394 remains open; current-repository filtering
+  alone failed the maintainer's UX requirement. Plan0074 now restores the actual
+  terminal home (filters/PRs/AI), modal Settings, Enter load/a explicit review,
+  g choice → g native/b authenticated diff, and preserved selection/focus.
+  Implementation stays in the same isolated branch/worktree. Native editor
+  regression traced to no startup PR-browser access to F8/target identity;
+  home now exposes F8 and resolves the selected repository without a PR target.
+  Actual owned macOS local-workspace production PTY cases pass; native
+  fake transport separately covers default current-repo home and F8.
+  Keep0074 pending until verified merged head; do not present394 as merged.
+
 - 2026-10-13: plan 0074 claimed by the single writer in isolated
   `/private/tmp/norn-current-repo-first`, branch `fix/current-repo-first`.
   Maintainer explicitly chooses the old TUI as baseline and retires desktop

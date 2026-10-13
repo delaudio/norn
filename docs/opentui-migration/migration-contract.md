@@ -17,6 +17,15 @@ must show the current Git repository's PRs. Global repositories/history and
 working-tree capture are explicit secondary actions; they are not the home
 screen. Failure states must expose an actionable backend cause.
 
+The main screen preserves three terminal panels: Open/Draft/Merged/Local
+filters, the PR/local-target list, and AI review. Settings opens as a modal
+with `s`. `Enter` loads the selected target without starting an agent; `a`
+explicitly starts AI review. `g` opens the diff-choice modal: `g` selects the
+native Git diff, `b` opens the authenticated browser diff viewer. In the diff,
+`g` or Escape returns to the same home filter and PR. `b` means the diff viewer,
+not the provider's PR page. Global history and the optional standalone provider
+browser must not replace this layout.
+
 Mandatory replication of Tauri-only workflows is retired. Existing native
 features and useful React components may stay; their existence does not require
 recreating the desktop dashboard or adding remaining desktop functions. This

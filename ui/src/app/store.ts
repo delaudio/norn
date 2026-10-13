@@ -196,6 +196,16 @@ export interface ShellSnapshot {
   referencesOpen: boolean;
   draftsOpen: boolean;
   findingStage: { target: DraftTarget; findingId: string } | null;
+  terminalLayout: boolean;
+  terminalHomeOpen: boolean;
+  terminalHomeFocus: "filters" | "list" | "review";
+  terminalFilter: "OPEN" | "DRAFT" | "MERGED" | "LOCAL";
+  terminalDiffPrompt: boolean;
+  terminalReview: {
+    runId: string;
+    output: string | null;
+    findings: FindingSummary[] | null;
+  } | null;
   providerOpen: boolean;
   explorerOpen: boolean;
   explorerReads: boolean;
@@ -295,6 +305,12 @@ const INITIAL: ShellSnapshot = {
   referencesOpen: false,
   draftsOpen: false,
   findingStage: null,
+  terminalLayout: false,
+  terminalHomeOpen: false,
+  terminalHomeFocus: "list",
+  terminalFilter: "OPEN",
+  terminalDiffPrompt: false,
+  terminalReview: null,
   providerOpen: false,
   explorerOpen: false,
   explorerReads: false,
@@ -557,6 +573,65 @@ export class ShellStore {
       ...picker,
       ...[...this.remoteEntries].filter(([key]) => !existing.has(key)).map(([, entry]) => entry),
     ]);
+  }
+  async loadTerminalReview(client: BackendClient): Promise<void> {
+    const target = this.activeTarget();
+    const generation = this.state.generation;
+    if (target?.kind !== "provider" || !target.prId) return;
+    const current = () =>
+      generation === this.state.generation &&
+      sameTarget(this.activeTarget(), target) &&
+      this.state.status !== "closed";
+    this.update({ terminalReview: null });
+    try {
+      const history = await client.reviewHistory(target);
+      if (!current()) return;
+      this.update({ history });
+      const run = history[0];
+      if (!run) return;
+      const saved = { ...target, runId: run.runId };
+      const [output, findings] = await Promise.allSettled([
+        client.reviewOutput(saved),
+        client.reviewFindings(saved),
+      ]);
+      if (current())
+        this.update({
+          terminalReview: {
+            runId: run.runId,
+            output: output.status === "fulfilled" ? output.value : null,
+            findings: findings.status === "fulfilled" ? findings.value : null,
+          },
+          notice:
+            [output, findings]
+              .filter((result) => result.status === "rejected")
+              .map(
+                (result) =>
+                  `Saved AI review partially unavailable: ${message((result as PromiseRejectedResult).reason).slice(0, 2048)}`,
+              )
+              .join(" · ") || null,
+        });
+    } catch (error) {
+      if (current())
+        this.update({ notice: `Saved AI review could not be loaded: ${message(error)}` });
+    }
+  }
+  setTerminalHomeFocus(terminalHomeFocus: ShellSnapshot["terminalHomeFocus"]): void {
+    this.update({ terminalHomeFocus });
+  }
+  showTerminalHome(): void {
+    this.update({ terminalHomeOpen: true, terminalDiffPrompt: false });
+  }
+  showTerminalDiff(): void {
+    this.update({ terminalHomeOpen: false, terminalDiffPrompt: false, focus: "files" });
+  }
+  setTerminalFilter(terminalFilter: ShellSnapshot["terminalFilter"]): void {
+    this.update({ terminalFilter, terminalDiffPrompt: false });
+  }
+  promptTerminalDiff(open: boolean): void {
+    this.update({ terminalDiffPrompt: open });
+  }
+  toggleTerminalDiffFocus(): void {
+    this.update({ focus: this.state.focus === "files" ? "diff" : "files" });
   }
   toggleProvider(): void {
     if (this.state.providerOpen) {
@@ -1554,7 +1629,7 @@ export class ShellStore {
         scrollRequest: 0,
       });
       if (mode === "current-repo") {
-        this.update({ providerOpen: true });
+        this.update({ terminalLayout: true, terminalHomeOpen: true });
       } else if (this.state.localAvailable) {
         await this.openLocalComparison(client, { kind: "current" });
         await this.applyLocalComparison(client);
@@ -1782,6 +1857,7 @@ export class ShellStore {
       sameTarget(this.activeTarget(), target);
     this.update({
       snapshotLoading: true,
+      terminalReview: null,
       liveSnapshot: null,
       files: [],
       findings: [],
@@ -2566,6 +2642,7 @@ export class ShellStore {
       } else {
         await this.loadSnapshot(client, generation);
       }
+      if (this.state.terminalLayout) await this.loadTerminalReview(client);
     } catch (error) {
       if (generation === this.state.generation)
         this.update({ notice: `Review finished; saved state refresh failed: ${message(error)}.` });

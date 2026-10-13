@@ -52,6 +52,7 @@ import { ReferencePanel } from "./ReferencePanel";
 import { ReviewProfilesPanel } from "./ReviewProfilesPanel";
 import { SavedLocalPanel } from "./SavedLocalPanel";
 import { SettingsPanel } from "./SettingsPanel";
+import { TerminalHome } from "./TerminalHome";
 import { VirtualDiff } from "./VirtualDiff";
 import { WorkspacePanel } from "./WorkspacePanel";
 
@@ -72,6 +73,10 @@ function useShellInput(
   useKeyboard((key) => {
     if (
       key.defaultPrevented ||
+      (store.getSnapshot().terminalHomeOpen &&
+        !store.getSnapshot().localForm &&
+        !store.getSnapshot().savedLocal &&
+        !store.getSnapshot().profileOpen) ||
       store.getSnapshot().providerOpen ||
       store.getSnapshot().explorerOpen ||
       store.getSnapshot().settingsOpen ||
@@ -194,6 +199,32 @@ function useShellInput(
       return;
     }
     key.preventDefault();
+    if (store.getSnapshot().terminalLayout) {
+      if (["g", "escape", "f2"].includes(key.name)) {
+        store.showTerminalHome();
+        return;
+      }
+      if (key.name === "s") {
+        store.toggleSettings();
+        return;
+      }
+      if (key.name === "u") {
+        store.toggleDiffMode();
+        return;
+      }
+      if (key.name === "a") {
+        void store.startReview(client);
+        return;
+      }
+      if (key.name === "return") {
+        void store.loadSnapshot(client, store.getSnapshot().generation);
+        return;
+      }
+      if (key.name === "tab") {
+        store.toggleTerminalDiffFocus();
+        return;
+      }
+    }
     // Case-sensitive shortcuts must be handled before the lowercase branches
     // (h/l scroll, b browser, m settings, e expand, ...) that share the letter.
     if (key.sequence === "H" || key.name === "H") {
@@ -1133,7 +1164,7 @@ export function Shell({ store, client, quit }: ShellProps) {
   );
   const providers = useMemo(() => new ProviderStore(), []);
   const explorer = useMemo(() => new ExplorerStore(), []);
-  const explorerEntry = state.picker[state.selectedPicker];
+  const explorerEntry = state.picker[state.selectedPicker] ?? state.repositories[state.selected];
   const explorerProvider = explorerEntry?.provider;
   const explorerWorkspace = explorerEntry?.workspace;
   const explorerRepository = explorerEntry?.repo;
@@ -1158,11 +1189,11 @@ export function Shell({ store, client, quit }: ShellProps) {
   ]);
 
   useEffect(() => {
-    if (!state.providerOpen) return;
+    if (!state.providerOpen && !state.terminalLayout) return;
     const snapshot = store.getSnapshot();
     providers.load(client, snapshot.repositories, snapshot.picker, snapshot.providerReads);
     return () => providers.dispose();
-  }, [providers, client, store, state.providerOpen]);
+  }, [providers, client, store, state.providerOpen, state.terminalLayout]);
   const positions = useMemo(() => new DiffScrollPositions(), []);
   useEffect(() => () => positions.clear(), [positions]);
   useEffect(() => () => store.cancelSyntax(), [store]);
@@ -1295,7 +1326,7 @@ export function Shell({ store, client, quit }: ShellProps) {
   const { width, height } = useTerminalDimensions();
   const fixScroll = useRef<ScrollBoxRenderable | null>(null);
   useShellInput(store, client, quit, scroll, fixScroll);
-  const wide = width >= 100;
+  const wide = width >= 100 && !state.terminalLayout;
 
   const diffLinesData = useMemo(() => {
     const lines = state.diff
@@ -1361,7 +1392,7 @@ export function Shell({ store, client, quit }: ShellProps) {
             })),
             selectedIndex: state.selectedThread,
           }
-        : state.focus === "files"
+        : state.focus === "files" || state.terminalLayout
           ? {
               id: "files-list",
               title: "FILES",
@@ -1491,8 +1522,33 @@ export function Shell({ store, client, quit }: ShellProps) {
     );
   if (state.dataOpen)
     return <DataPanel data={data} client={client} onClose={() => store.toggleData()} />;
-  if (state.settingsOpen)
-    return <SettingsPanel settings={settings} shell={store} client={client} />;
+  const terminalHome = (
+    <TerminalHome shell={store} providers={providers} client={client} quit={quit} />
+  );
+  if (state.settingsOpen) {
+    const panel = <SettingsPanel settings={settings} shell={store} client={client} />;
+    if (!state.terminalLayout) return panel;
+    const modalWidth = Math.min(90, Math.max(24, width - 4));
+    const modalHeight = Math.max(8, height - 4);
+    return (
+      <box width="100%" height="100%" backgroundColor={theme.background}>
+        {terminalHome}
+        <box
+          position="absolute"
+          left={Math.floor((width - modalWidth) / 2)}
+          top={2}
+          width={modalWidth}
+          height={modalHeight}
+          border
+          borderColor={theme.primary}
+          backgroundColor={theme.panel}
+        >
+          {panel}
+        </box>
+      </box>
+    );
+  }
+  if (state.terminalHomeOpen) return terminalHome;
 
   return (
     <box width="100%" height="100%" flexDirection="column" backgroundColor={theme.background}>
@@ -1697,9 +1753,11 @@ export function Shell({ store, client, quit }: ShellProps) {
           {diffCollapsed ? "large diff · e expand  " : ""}
           {state.fixPreview
             ? "y approve · Esc/n dismiss · ↑/↓ scroll effects"
-            : wide
-              ? "F2 PRs · F4 local · F7 saved · F8 files · F6 profile · q quit · Tab pane · j/k move · i stage finding · d drafts · w refs · m settings · n prompt/viewed · s split · e expand · a fix · r reply · t threads · v chat · f filter · g group · x cancel · u sync · o conflicts · c commit · p push"
-              : "F2 PRs  F4 local  F7 saved  F8 files  F6 profile  j/k  ←/→  s  e  Tab  m settings  n prompt  i stage  d drafts  w refs  q"}
+            : state.terminalLayout
+              ? "g/Esc review · b browser diff · s settings · u split · Tab file/diff · j/k move · a AI review · F8 files · q quit"
+              : wide
+                ? "F2 PRs · F4 local · F7 saved · F8 files · F6 profile · q quit · Tab pane · j/k move · i stage finding · d drafts · w refs · m settings · n prompt/viewed · s split · e expand · a fix · r reply · t threads · v chat · f filter · g group · x cancel · u sync · o conflicts · c commit · p push"
+                : "F2 PRs  F4 local  F7 saved  F8 files  F6 profile  j/k  ←/→  s  e  Tab  m settings  n prompt  i stage  d drafts  w refs  q"}
         </text>
       </box>
     </box>

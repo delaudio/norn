@@ -495,6 +495,16 @@ export class ProviderStore {
     });
     this.refresh(client, false);
   }
+  setFilter(client: BackendClient, filter: ProviderFilter) {
+    if (!prFilters.includes(filter) || this.state.filter === filter) return;
+    this.update({ filter });
+    this.refresh(client, false);
+  }
+  selectRow(key: string) {
+    if (!this.rows().some((row) => row.key === key)) return;
+    this.clearApproval();
+    this.update({ selected: key });
+  }
   cycleFilter(client: BackendClient, delta: number) {
     this.update({
       filter:

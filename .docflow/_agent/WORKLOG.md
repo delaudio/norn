@@ -1211,3 +1211,42 @@ Plan 0053 completion prepared after implementation `e4264db`, effective only on 
 - Additional owned actual Rust stdio smoke resolves GitHub and Bitbucket current
   repositories with no configured entry and unborn HEAD, without reading an
   intentionally invalid owned review policy. No provider request or credentials.
+
+
+## 2026-10-13 — Correct the actual terminal UX in PR394
+
+- Maintainer rejected the standalone PR browser as the home screen. The same
+ plan0074/PR394 now restores filter/PR-list/AI panels together, Settings as a
+ modal, Enter load, a explicit AI review, s settings, and g choice followed
+ by g native diff or b authenticated diff viewer. Filter, selection and focus
+ survive diff/settings return. Local capture remains an explicit action.
+- AI output/findings load by actual provider/repository/PR/run identity; partial
+ output failures do not hide valid findings. Native paste cannot trigger home
+ or diff-choice shortcuts. F8 resolves the launch repository without a PR.
+- Fixed the default-entry regression observed by all three editor CI lanes on
+ f648c6d: the standalone browser swallowed F8. Actual owned macOS production
+ PTY success/failure/interrupt/backend-death now pass with exact terminal
+ restoration and owned process cleanup. No test bypass or private profiles.
+- Native tests cover both providers, wide/narrow panels, filters, local explicit
+ capture, saved/partial AI output, capture retry, modal/paste fencing and
+ native/browser diff identity. 221 real native Storybook frames match.
+- React Doctor DOM-property reports are false positives for typed OpenTUI
+ native text properties; no DOM is mounted. Maintainability warnings concern
+ the keyboard/controller complexity and new home component size. No broad
+ rule suppression or unrelated refactor. The narrowly documented Biome ARIA
+ exception applies only to native terminal renderables with keyboard handlers.
+- New source verification and exact-head CI remain required before merge;
+ 0074 stays todo and ADR0020 Accepted. Original installed norn stays unchanged.
+
+- Isolation correction: NORN_CONFIG_DIR does not itself isolate the credential
+ loader's OS keychain/default terminal-config paths. Owned real editor lifecycle
+ fixtures now explicitly use --workspace to avoid startup provider requests.
+ Default current-repo home/F8 is separately tested through the native renderer
+ with fake transport. Do not claim config redirection alone prevents credential
+ probing, or run a real provider-startup fixture on a private machine.
+
+- Final local verification for the corrected home: UI301/0 failures (16 native
+ home scenarios), root tests/typecheck, UI typecheck, lint (3 pre-existing
+ informational suggestions), Archgate17,221golden native frames and Storybook
+ build pass. Owned local-workspace PTY all4cases pass. No source changes after
+ this gate; exact-head CI/merge remain pending.
