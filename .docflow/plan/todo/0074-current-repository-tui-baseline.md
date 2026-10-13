@@ -21,7 +21,9 @@ Current-repository filtering alone is insufficient. Restore the Ratatui main
 screen: filter panel (Open/Draft/Merged/Local), PR/local-target list, AI review
 panel and modal Settings. Preserve `s` settings, `a` explicit AI review,
 `Enter` load selection, and `g` diff choice (`g` native diff / `b` authenticated
-browser), with return from diff to the original selection/filter. Reuse backend
+browser), with return from diff to the original selection/filter. Load and show the
+selected PR description independently of snapshot/diff verification; failures
+must not hide metadata. Fence late detail responses by full provider scope. Reuse backend
 services, not the desktop-style standalone PR browser. Add native keyboard,
 modal/input-fencing, narrow/wide frame and default-entry lifecycle evidence.
 

@@ -363,3 +363,71 @@ test("default current-repository home routes F8 using Git identity without loadi
     await app.cleanup();
   }
 });
+
+for (const provider of ["github", "bitbucket"] as const) {
+  for (const width of [120, 50]) {
+    test(`the selected ${provider} PR description loads independently at ${width} columns`, async () => {
+      const app = await fixture(provider, width);
+      try {
+        expect(app.renderer.captureCharFrame()).toContain("Actual synthetic description");
+        const detail = app.transport.calls.filter((call) => call.method === "provider.pr.detail");
+        expect(detail).toHaveLength(1);
+        expect(detail[0]?.params).toEqual({
+          repository: { provider, workspace: "synthetic", repo: "review" },
+          prId: 7,
+        });
+        expect(app.transport.calls.some((call) => call.method === "provider.snapshot")).toBe(false);
+        app.transport.fault = "snapshot";
+        await app.key("return");
+        expect(app.store.getSnapshot().error).not.toBeNull();
+        expect(app.renderer.captureCharFrame()).toContain("Actual synthetic description");
+        expect(app.store.getSnapshot().terminalHomeOpen).toBe(true);
+      } finally {
+        await app.cleanup();
+      }
+    });
+  }
+}
+
+test("a late description cannot replace the next selected PR and filters hide stale metadata", async () => {
+  const app = await fixture("github");
+  const request = app.transport.request.bind(app.transport);
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  app.transport.request = async (method, params) => {
+    const result = await request(method, params);
+    if (method === "provider.pr.detail") {
+      if (params.prId === 7) await gate;
+      return {
+        ...result,
+        detail: {
+          ...(result.detail as Record<string, unknown>),
+          descriptionRaw:
+            params.prId === 7 ? "Old delayed PR description" : "Current PR eight description",
+        },
+      };
+    }
+    return result;
+  };
+  try {
+    // Enter explicitly reloads details for 7, without tying them to its diff.
+    await app.key("return");
+    await app.key("j");
+    await app.settle();
+    expect(app.renderer.captureCharFrame()).toContain("Current PR eight description");
+    release();
+    await app.settle();
+    expect(app.renderer.captureCharFrame()).toContain("Current PR eight description");
+    expect(app.renderer.captureCharFrame()).not.toContain("Old delayed PR description");
+    await app.key("f");
+    await app.key("f");
+    await app.key("f");
+    expect(app.renderer.captureCharFrame()).toContain("LOCAL CHANGES");
+    expect(app.renderer.captureCharFrame()).not.toContain("Current PR eight description");
+  } finally {
+    release();
+    await app.cleanup();
+  }
+});

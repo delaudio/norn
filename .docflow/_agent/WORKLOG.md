@@ -1250,3 +1250,22 @@ Plan 0053 completion prepared after implementation `e4264db`, effective only on 
  informational suggestions), Archgate17,221golden native frames and Storybook
  build pass. Owned local-workspace PTY all4cases pass. No source changes after
  this gate; exact-head CI/merge remain pending.
+
+
+## 2026-10-13 — Show PR description independently of snapshot verification
+
+- User screenshot shows metadata missing when the provider snapshot fails.
+  Terminal home now loads selected PR details through the existing bounded
+  provider reader, without opening the standalone browser or starting a diff,
+  capture or review. Description/loading/empty/error states remain scoped to
+  the exact selected provider/repository/PR. Enter refreshes metadata separately.
+- Existing detail queue/generation fencing is reused; late responses cannot
+  replace the next selection. Selection resets review scrolling; Local hides
+  previous provider descriptions. Snapshot errors do not hide descriptions.
+- Native coverage: both providers at wide/narrow sizes, snapshot failure with
+  description still visible, late PR response and Local switch. UI306tests pass;
+  root tests/typecheck, UI typecheck, lint, Archgate17,221native golden frames
+  and Storybook build pass. Changed-delta React Doctor reports no issues
+  (score API unavailable). No real provider/credential/agent access in tests.
+- Same PR394/plan0074 remains pending until the new head has verified CI and
+  actually merges. The installed legacy launcher is untouched.

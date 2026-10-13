@@ -48,6 +48,13 @@ export function TerminalHome({
     if (selection) list.current?.scrollChildIntoView(`home-${selection}`);
   }, [selection]);
 
+  useEffect(() => {
+    if (!local && selection && remote.detailKey !== selection) providers.showDetail(client, false);
+  }, [client, providers, local, selection, remote.detailKey]);
+  useEffect(() => {
+    if (selection) review.current?.scrollTo(0);
+  }, [selection]);
+
   const changeFilter = (filter: ShellSnapshot["terminalFilter"]) => {
     if (
       pending.current ||
@@ -75,6 +82,7 @@ export function TerminalHome({
       providers.notice("Select a pull request first.");
       return;
     }
+    if (action === "load" && !local) providers.showDetail(client, false);
     pending.current = true;
     setBusy(true);
     const request = ++revision.current;
@@ -344,6 +352,26 @@ export function TerminalHome({
                     ? `#${row.pr.id} ${row.pr.title}\n${row.pr.sourceBranch} → ${row.pr.destinationBranch}`
                     : "Select a review target."}
               </text>
+              {!local && row?.kind === "pr" && (
+                <>
+                  <text fg={theme.primary}>PR DESCRIPTION</text>
+                  {remote.detailKey === row.key && remote.detailLoading ? (
+                    <text fg={theme.muted}>Loading PR description…</text>
+                  ) : remote.detailKey === row.key && remote.detailError ? (
+                    <text
+                      fg={theme.error}
+                    >{`PR description unavailable: ${remote.detailError} · Enter retry`}</text>
+                  ) : remote.detailKey === row.key && remote.detail ? (
+                    <text fg={theme.text}>
+                      {remote.detail.detail.descriptionRaw.trim()
+                        ? remote.detail.detail.descriptionRaw
+                        : "No PR description."}
+                    </text>
+                  ) : (
+                    <text fg={theme.muted}>Loading PR description…</text>
+                  )}
+                </>
+              )}
               {busy || state.snapshotLoading ? (
                 <text fg={theme.muted}>Loading selected evidence…</text>
               ) : !loaded ? (
