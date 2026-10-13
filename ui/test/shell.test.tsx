@@ -615,3 +615,17 @@ test("? opens the keyboard help overlay and Esc closes it", async () => {
     app.renderer.renderer.destroy();
   }
 });
+
+test("H opens the global review history panel", async () => {
+  const app = await mount(100, 30);
+  try {
+    app.renderer.mockInput.pressKey("H");
+    await app.renderer.renderOnce();
+    await app.renderer.renderOnce();
+    expect(app.renderer.captureCharFrame()).toContain("Review history");
+  } finally {
+    app.cleanup();
+    app.ui.unmount();
+    app.renderer.renderer.destroy();
+  }
+});

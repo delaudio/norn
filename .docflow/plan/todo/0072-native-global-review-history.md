@@ -24,8 +24,11 @@ GitHub issue: #361 (epic #294 step 12/15).
   with status/trigger/identity/timestamps/error; no fake statuses.
 - `review.metrics.closed` returns bounded closed-PR analytics computed in Rust
   (risk summary, findings counts) without fabricating zeroes.
-- The shell can open the bounded global history (`shift+H`) and closed-PR
-  analytics (`shift+M`).
+- The shell opens a navigable global history panel (`shift+H`) listing jobs,
+  with `Enter` opening the matching stored review target, plus closed-PR metrics
+  (`shift+M`) and effectiveness (`shift+E`).
+- Case-sensitive shortcuts are handled before the lowercase branches that share
+  the letter (fixes `H`/`M`/`E`/`B` being swallowed by `h`/`m`/`e`/`b`).
 - `cargo clippy -D warnings`, `cargo test`, `pnpm run lint/typecheck/test`, the
   `ui` job and `archgate check` pass.
 

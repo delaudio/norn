@@ -1115,3 +1115,50 @@ test("loads the review-effectiveness report", async () => {
   expect(store.getSnapshot().effectiveness?.summary.reviewCount).toBe(0);
   expect(store.getSnapshot().notice).toContain("Effectiveness");
 });
+
+test("global history opens and navigates to a stored review target", async () => {
+  const store = new ShellStore();
+  const client = new BackendClient(
+    new FakeBackendTransport({
+      repositories,
+      targets: [
+        {
+          provider: "github",
+          workspace: "acme",
+          repo: "payments",
+          prId: 42,
+          runId: "run-1",
+          title: "Title",
+          status: "succeeded",
+        },
+      ],
+      jobs: [
+        {
+          id: "job-1",
+          workspace: "acme",
+          repo: "payments",
+          prId: 42,
+          prTitle: "Title",
+          sourceBranch: "feature/x",
+          destinationBranch: "main",
+          status: "succeeded",
+          trigger: "manual",
+          threadId: null,
+          error: null,
+          createdAt: "2026-01-01T00:00:00Z",
+          startedAt: null,
+          finishedAt: null,
+        },
+      ],
+    }),
+  );
+  await store.connect(client);
+  await store.toggleJobs(client);
+  expect(store.getSnapshot().jobsOpen).toBe(true);
+  expect(store.getSnapshot().jobs).toHaveLength(1);
+  await store.selectJob();
+  expect(store.getSnapshot().jobsOpen).toBe(false);
+  const picker = store.getSnapshot().picker[store.getSnapshot().selectedPicker];
+  expect(picker?.kind).toBe("review");
+  expect(picker?.runId).toBe("run-1");
+});
