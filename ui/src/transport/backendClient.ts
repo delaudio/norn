@@ -184,6 +184,7 @@ export interface ReviewRunSummary {
   createdAt: string;
   status: string;
   turnKind: string;
+  threadId?: string | null;
   findingsCount: number;
 }
 

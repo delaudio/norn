@@ -212,6 +212,10 @@ function useShellInput(
       void store.cycleLocalBase(client);
       return;
     }
+    if (key.sequence === "T" || key.name === "T") {
+      void store.openThreadForLatestRun();
+      return;
+    }
     if (key.name === "?" || key.sequence === "?") {
       store.toggleHelp();
     } else if (key.name === "q") {

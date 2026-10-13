@@ -1215,3 +1215,37 @@ test("refresh ignores a second call while one is in flight", async () => {
   expect(calls).toBe(1);
   expect(store.getSnapshot().syncing).toBe(false);
 });
+
+test("opens the latest run's conversation thread", async () => {
+  const store = new ShellStore();
+  const client = new BackendClient(
+    new FakeBackendTransport({
+      repositories,
+      files,
+      findings,
+      history: [
+        {
+          runId: "run-1",
+          createdAt: "2026-01-01T00:00:00Z",
+          status: "succeeded",
+          turnKind: "initial",
+          threadId: "th-1",
+          findingsCount: 0,
+        },
+      ],
+      threads: [
+        {
+          id: "th-1",
+          title: "Conversation",
+          latestRunId: "run-1",
+          messages: [{ id: "m1", role: "user", content: "hi", truncated: false }],
+        },
+      ],
+    }),
+  );
+  await store.connect(client);
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  await store.openThreadForLatestRun();
+  expect(store.getSnapshot().threads[0]?.id).toBe("th-1");
+  expect(store.getSnapshot().selectedThread).toBe(0);
+});
