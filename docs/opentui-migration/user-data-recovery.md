@@ -1,5 +1,13 @@
 # Desktop user-data recovery (internal migration evidence)
 
+Scope revision (2026-10-13): mandatory desktop parity and a new native GUI
+exporter proof lane are retired by the maintainer. Preserve the immutable
+archive, source profiles, stored user content and existing non-destructive
+import/export. Do not describe unperformed native recovery as verified success.
+Data-preserving install/upgrade/rollback remains required; recreating desktop
+recovery UX is not a terminal cutover prerequisite.
+
+
 Owning decision: [0020](../../.docflow/adr/0020-opentui-rust-stdio-workspace.md).
 Owning issue: #305. This document records the implementation and recovery gate;
 public recovery instructions must omit internal catalogue references.
@@ -115,7 +123,7 @@ An already-upgraded user can obtain the archived source revision containing the
 bridge and build it in a separate checkout on macOS, Linux or Windows with the
 same prerequisites as the old desktop. The archive reference is pinned to `72440eaef4177b809664bf6b563647d7659f3e52` in
 [public recovery instructions](../user-data-recovery.md); installed platform builds
-remain a required verification before #309 removes the desktop. Install dependencies,
+are an optional recovery route rather than a #309 desktop parity gate. Install dependencies,
 build production frontend assets, and compile with `custom-protocol,desktop-bundle`
 so the original production origin is used (a Vite dev origin has different storage).
 Run the resulting desktop binary directly from that checkout, export, close it,
@@ -139,11 +147,11 @@ failed import and cancellation/input fencing.
 This delivery supplies canonical persistence/import ownership. Viewed-file navigation and prompt consumption use these canonical records.
 Imported themes can be explicitly previewed/staged in terminal settings, then
 saved through the existing settings version fence. Draft publication and
-reference UI/enrichment remain coordinated with #304/#306 before final parity
-is declared complete. Platform
-recovery builds and the exact archived source reference must be verified/pinned
-before cutover. No cross-platform installed recovery test is claimed by Linux-
-or macOS-hosted synthetic exports alone.
+reference consumption retain their existing canonical behavior. Additional
+Jira/Notion enrichment and new native GUI recovery proof are retired as migration
+requirements. Keep the exact archived source pinned and preserve profiles
+through upgrade/rollback. No cross-platform installed recovery test is claimed
+by Linux- or macOS-hosted synthetic exports alone.
 
 ## Archived bridge source verification
 
@@ -175,6 +183,8 @@ uses the archive's engine-only `--no-default-features` unit build; the separate
 full desktop compile/custom-protocol gate is retained. This narrows the copy
 regression to its required filesystem dependencies and does not claim the
 Windows desktop runtime/loading problem is diagnosed or repaired. Actual
-native recovery remains a distinct final gate. Contract-only tooling imports
+native recovery remains unproven; the former mandatory desktop proof gate is
+retired, while source preservation and honest recovery instructions remain
+required. Contract-only tooling imports
 the revision constant without eagerly requiring TypeScript; transpilation is
 loaded only when the installed-dependency source verifier executes.

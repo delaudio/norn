@@ -1207,3 +1207,7 @@ Plan 0053 completion prepared after implementation `e4264db`, effective only on 
 - Source PR/CI/merge evidence remains pending;0074 stays todo. ADR0020 stays
  Accepted because packaging/cutover are unfinished. User's root .norn.yaml
  and stash are untouched; no Norn review, live providers or private profiles.
+
+- Additional owned actual Rust stdio smoke resolves GitHub and Bitbucket current
+  repositories with no configured entry and unborn HEAD, without reading an
+  intentionally invalid owned review policy. No provider request or credentials.

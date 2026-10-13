@@ -184,11 +184,11 @@ removal with maintainer decision; `shared` = Rust/native service reused as-is.
 | Image diffs (terminal protocols; single preview) | both | `tui/image_diff.rs`, `FileDiff.ImagePreviewPanel` | none | #302 | port |
 | Authenticated browser diff viewer | TUI + shared assets | `browser_diff.rs`, `browser-diff/*` | session token | #302 | preserve |
 | Drafts/composer staged comments + explicit publish | both | `tui/mod.rs`, `useDraftComments`, `reviewService` | localStorage (desktop), session (TUI) | #304 | port |
-| Structured finding publication + reconciliation | desktop | `reviewFindingPublication.ts`, `reviewService.ts`, Rust `publish_review_finding` | Rust review store | #304 | retire mandatory desktop parity; existing native implementation may remain |
+| Structured finding publication + reconciliation | desktop | `reviewFindingPublication.ts`, `reviewService.ts`, Rust `publish_review_finding` | Rust review store | #304 | preserve explicitly requested terminal review workflow; retire desktop UX parity |
 | AI review start + streaming logs | both | `tui/mod.rs`, `AiReviewPanel`, `useAiReview` | Rust run store | #303 | port |
-| AI findings panel + navigation | desktop | `AiReviewPanel` | Rust review store | #303 | retire mandatory desktop parity; existing native implementation may remain |
-| AI conversation threads + replies + cancel | desktop | `useAiReview` | Rust review store + session | #303 | retire mandatory desktop parity; existing native implementation may remain |
-| AI fix / commit / push / conflict resolution | desktop | `useAiReviewFix`, `buildAiFixPayload` | Rust fix store | #303 | retire mandatory desktop parity; existing native implementation may remain |
+| AI findings panel + navigation | desktop | `AiReviewPanel` | Rust review store | #303 | preserve explicitly requested terminal review workflow; retire desktop UX parity |
+| AI conversation threads + replies + cancel | desktop | `useAiReview` | Rust review store + session | #303 | preserve explicitly requested terminal review workflow; retire desktop UX parity |
+| AI fix / commit / push / conflict resolution | desktop | `useAiReviewFix`, `buildAiFixPayload` | Rust fix store | #303 | preserve explicitly requested terminal review workflow; retire desktop UX parity |
 | Branch sync (PR source→destination) | desktop | `useBranchSync` | in-memory | #303 | retire mandatory desktop parity; existing native implementation may remain |
 | Settings: AI provider/model/effort | both | `tui/mod.rs` settings, `SettingsDialog` | `config.rs` settings | #305 | port |
 | Settings: credentials (GitHub/Bitbucket) + readiness | both | `tui/mod.rs` settings, `useCredentials` | keychain + `config.toml` | #305 | port |
