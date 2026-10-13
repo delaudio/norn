@@ -177,7 +177,38 @@ function useShellInput(
       }
       return;
     }
+    if (store.getSnapshot().jobsOpen) {
+      key.preventDefault();
+      if (key.name === "escape" || key.name === "esc" || key.name === "q" || key.sequence === "H") {
+        void store.toggleJobs(client);
+      } else if (key.name === "j" || key.name === "down") {
+        store.moveJob(1);
+      } else if (key.name === "k" || key.name === "up") {
+        store.moveJob(-1);
+      } else if (key.name === "return") {
+        void store.selectJob();
+      }
+      return;
+    }
     key.preventDefault();
+    // Case-sensitive shortcuts must be handled before the lowercase branches
+    // (h/l scroll, b browser, m settings, e expand, ...) that share the letter.
+    if (key.sequence === "H" || key.name === "H") {
+      void store.toggleJobs(client);
+      return;
+    }
+    if (key.sequence === "M" || key.name === "M") {
+      void store.loadClosedMetrics(client);
+      return;
+    }
+    if (key.sequence === "E" || key.name === "E") {
+      void store.loadEffectiveness(client);
+      return;
+    }
+    if (key.sequence === "B" || key.name === "B") {
+      void store.cycleLocalBase(client);
+      return;
+    }
     if (key.name === "?" || key.sequence === "?") {
       store.toggleHelp();
     } else if (key.name === "q") {
@@ -247,14 +278,6 @@ function useShellInput(
       void store.previewFix(client);
     } else if (key.name === "r") {
       store.beginReply();
-    } else if (key.sequence === "B") {
-      void store.cycleLocalBase(client);
-    } else if (key.sequence === "H") {
-      void store.loadJobs(client);
-    } else if (key.sequence === "M") {
-      void store.loadClosedMetrics(client);
-    } else if (key.sequence === "E") {
-      void store.loadEffectiveness(client);
     } else if (key.name === "b") {
       void store.openBrowser(client);
     } else if (key.name === "y") {
@@ -1617,6 +1640,36 @@ export function Shell({ store, client, quit }: ShellProps) {
           <text fg={theme.primary} wrapMode="none" truncate>
             {`${state.composerKind === "profile" ? "Profile (empty = default)" : state.composerKind === "commit" ? "Commit" : "Reply"} › ${state.composerText}`}
           </text>
+        </box>
+      ) : null}
+      {state.jobsOpen ? (
+        <box
+          flexDirection="column"
+          flexShrink={0}
+          height={Math.min(24, Math.max(3, state.jobs.length + 2))}
+          paddingX={2}
+          backgroundColor={theme.panel}
+        >
+          <text fg={theme.primary} attributes={TextAttributes.BOLD} height={1}>
+            {"Review history  ·  Enter opens the target  ·  Esc closes"}
+          </text>
+          {state.jobs.length === 0 ? (
+            <text fg={theme.muted} height={1}>
+              {"No review history."}
+            </text>
+          ) : (
+            state.jobs.slice(0, 20).map((job, index) => (
+              <text
+                key={job.id}
+                fg={index === state.selectedJob ? theme.primary : theme.muted}
+                height={1}
+                wrapMode="none"
+                truncate
+              >
+                {`${index === state.selectedJob ? "▶ " : "  "}${job.workspace}/${job.repo}#${job.prId} · ${job.status} · ${job.createdAt}`}
+              </text>
+            ))
+          )}
         </box>
       ) : null}
       {state.helpOpen ? (

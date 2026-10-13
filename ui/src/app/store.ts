@@ -232,6 +232,8 @@ export interface ShellSnapshot {
   lastSyncAt: number | null;
   syncError: string | null;
   helpOpen: boolean;
+  jobsOpen: boolean;
+  selectedJob: number;
   closedMetrics: ClosedPrMetric[];
   effectiveness: ReviewEffectivenessReport | null;
   threads: ReviewThreadSummary[];
@@ -337,6 +339,8 @@ const INITIAL: ShellSnapshot = {
   lastSyncAt: null,
   syncError: null,
   helpOpen: false,
+  jobsOpen: false,
+  selectedJob: 0,
   closedMetrics: [],
   effectiveness: null,
   threads: [],
@@ -3081,6 +3085,47 @@ export class ShellStore {
     if (this.state.helpOpen) {
       this.update({ helpOpen: false });
     }
+  }
+
+  /// Open or close the global review history panel, loading jobs on open.
+  async toggleJobs(client: BackendClient): Promise<void> {
+    if (this.state.jobsOpen) {
+      this.update({ jobsOpen: false });
+      return;
+    }
+    this.update({ jobsOpen: true, selectedJob: 0 });
+    await this.loadJobs(client);
+  }
+
+  moveJob(delta: number): void {
+    const length = this.state.jobs.length;
+    if (length === 0) {
+      return;
+    }
+    this.update({ selectedJob: (this.state.selectedJob + delta + length) % length });
+  }
+
+  /// Open the selected job's review target when a matching stored review exists.
+  async selectJob(): Promise<void> {
+    const job = this.state.jobs[this.state.selectedJob];
+    if (!job) {
+      return;
+    }
+    const index = this.state.picker.findIndex(
+      (entry) =>
+        entry.kind === "review" &&
+        entry.workspace === job.workspace &&
+        entry.repo === job.repo &&
+        entry.prId === job.prId,
+    );
+    if (index < 0) {
+      this.update({
+        notice: `No stored review target for ${job.workspace}/${job.repo}#${job.prId}.`,
+      });
+      return;
+    }
+    this.update({ jobsOpen: false });
+    await this.selectPicker(index);
   }
 
   /// Load the bounded global review history and surface a summary.
