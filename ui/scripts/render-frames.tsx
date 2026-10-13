@@ -888,7 +888,7 @@ async function currentRepositoryScene(
         return {
           target: params.target,
           runId: "ui-demo",
-          text: "AI line 1\nChecked changes.\nNo issues found.\n\nReview summary.",
+          text: "# AI line 1\n\n**Major**: check `package.json`.\n\n[Docs](https://example.invalid)\n\n- Checked changes.\n- No further issues.",
         };
       return request(method, params);
     };
@@ -919,7 +919,7 @@ async function currentRepositoryScene(
         }
       if (modal === "review") {
         const deadline = Date.now() + 2000;
-        while (!store.getSnapshot().terminalReview?.output && Date.now() < deadline) {
+        while (!test.captureCharFrame().includes("AI line 1") && Date.now() < deadline) {
           await Bun.sleep(1);
           await test.renderOnce();
         }

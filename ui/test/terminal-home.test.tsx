@@ -45,6 +45,12 @@ async function fixture(provider: "github" | "bitbucket", width = 120) {
     await client.close();
   };
   await settle();
+  // The native Markdown parser runs asynchronously, including a cold worker.
+  const deadline = Date.now() + 2000;
+  while (!renderer.captureCharFrame().includes("Actual synthetic") && Date.now() < deadline) {
+    await Bun.sleep(1);
+    await renderer.renderOnce();
+  }
   return { transport, client, store, renderer, key, settle, cleanup };
 }
 
@@ -74,7 +80,7 @@ for (const provider of ["github", "bitbucket"] as const) {
         expect(menu).toBeGreaterThanOrEqual(0);
         expect(menu).toBeLessThan(reviewHeader);
         expect(reviewHeader).toBe(listHeader);
-        expect(lines[reviewHeader]!.indexOf("AI REVIEW")).toBeLessThan(
+        expect(lines[reviewHeader]!.indexOf("AI REVIEW")).toBeGreaterThan(
           lines[listHeader]!.indexOf("PULL REQUESTS"),
         );
         expect(descriptionHeader).toBeGreaterThan(listHeader);
@@ -161,7 +167,7 @@ test("Settings is a modal over the terminal home; paste cannot launch diff or re
     await app.key("s");
     expect(app.store.getSnapshot().settingsOpen).toBe(true);
     const frame = app.renderer.captureCharFrame();
-    expect(frame).toContain("AI REVIEW");
+    expect(frame).toContain("PULL REQUESTS");
     expect(frame).toContain("Settings");
     for (const unwanted of [
       "Jira URL",

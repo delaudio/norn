@@ -4,6 +4,11 @@ Git is authoritative. Durable history lives in WORKLOG and plan/done.
 
 ## Active state
 
+- 2026-10-13 latest presentation request supersedes left-AI layout: AI output
+  right, PR list/description central-left. Native Markdown in review/description
+  uses active palette; test colored spans, concealment, dark/light change and
+  unknown fences without grammar downloads. Same PR394 remains open.
+
 - 2026-10-13 layout refinement explicitly requested: Under-style horizontal
   filters at top, AI output left, central PR list above description. Separate
   scroll/focus and native geometry tests; same open PR394, plan0074 pending.

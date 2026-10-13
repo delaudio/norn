@@ -6,13 +6,14 @@ import type { BackendClient } from "../../transport/backendClient";
 import { type ProviderStore, providerPrKey } from "../providerStore";
 import { type ShellSnapshot, type ShellStore, visibleFindings } from "../store";
 import { theme } from "../theme";
+import { TerminalMarkdown } from "./TerminalMarkdown";
 
 const filters = ["OPEN", "DRAFT", "MERGED", "LOCAL"] as const;
 type Focus = ShellSnapshot["terminalHomeFocus"];
 const panes: Focus[] = ["filters", "list", "description", "review"];
 type Action = "load" | "diff" | "browser" | "review";
 
-// Keep terminal workflows together: top filters, review output on the left,
+// Keep terminal workflows together: top filters, review output on the right,
 // PR list and independent description on the right.
 export function TerminalHome({
   shell,
@@ -293,91 +294,6 @@ export function TerminalHome({
         ))}
       </box>
       <box flexGrow={1} minHeight={0} flexDirection="row">
-        <box
-          id="home-review"
-          width={reviewWidth}
-          flexShrink={0}
-          minHeight={0}
-          border
-          borderColor={focus === "review" ? theme.primary : theme.muted}
-          flexDirection="column"
-          onMouseDown={() => focusPane("review")}
-        >
-          <text fg={theme.primary} height={1}>
-            AI REVIEW
-          </text>
-          <scrollbox id="home-review-scroll" ref={review} flexGrow={1} minHeight={0} scrollY>
-            {busy || state.snapshotLoading ? (
-              <text width="100%" wrapMode="word" fg={theme.muted}>
-                Loading selected evidence…
-              </text>
-            ) : !loaded ? (
-              <text width="100%" wrapMode="word" fg={theme.muted}>
-                Enter load selection · a start AI review
-              </text>
-            ) : (
-              <text
-                fg={theme.muted}
-              >{`${state.files.length} changed files · ${state.terminalReview?.findings === null ? "findings unavailable" : `${findings.length} findings`} · ${state.history.length} saved runs`}</text>
-            )}
-            {active && (
-              <>
-                <text
-                  fg={active.state === "failed" ? theme.error : theme.secondary}
-                >{`Review ${active.state} · ${active.targetLabel}`}</text>
-                {active.logs.map((log) => (
-                  <text width="100%" wrapMode="word" key={log.id} fg={theme.muted}>
-                    {log.text}
-                  </text>
-                ))}
-              </>
-            )}
-            {loaded && state.terminalReview && (
-              <>
-                <text
-                  width="100%"
-                  wrapMode="word"
-                  fg={theme.muted}
-                >{`Saved AI review · ${state.terminalReview.runId}`}</text>
-                <text
-                  width="100%"
-                  wrapMode="word"
-                  fg={state.terminalReview.output === null ? theme.muted : theme.text}
-                >
-                  {state.terminalReview.output ??
-                    "Stored output unavailable; see findings and status below."}
-                </text>
-              </>
-            )}
-            {findings.map((finding) => (
-              <box key={finding.id} flexDirection="column" flexShrink={0}>
-                <text
-                  width="100%"
-                  wrapMode="word"
-                  fg={theme.primary}
-                >{`${finding.severity} · ${finding.title}`}</text>
-                <text width="100%" wrapMode="word" fg={theme.text}>
-                  {finding.summary}
-                </text>
-              </box>
-            ))}
-            {state.error && (
-              <text width="100%" wrapMode="word" fg={theme.error}>
-                {state.error}
-              </text>
-            )}
-            {state.notice && (
-              <text width="100%" wrapMode="word" fg={theme.muted}>
-                {state.notice}
-              </text>
-            )}
-            {remote.notice && (
-              <text width="100%" wrapMode="word" fg={theme.muted}>
-                {remote.notice}
-              </text>
-            )}
-          </scrollbox>
-        </box>
         <box id="home-center" flexGrow={1} minWidth={0} flexDirection="column">
           <box
             id="home-pr-list"
@@ -469,11 +385,11 @@ export function TerminalHome({
                     fg={theme.error}
                   >{`PR description unavailable: ${remote.detailError} · Enter retry`}</text>
                 ) : remote.detailKey === row.key && remote.detail ? (
-                  <text width="100%" wrapMode="word" fg={theme.text}>
-                    {remote.detail.detail.descriptionRaw.trim()
-                      ? remote.detail.detail.descriptionRaw
-                      : "No PR description."}
-                  </text>
+                  remote.detail.detail.descriptionRaw.trim() ? (
+                    <TerminalMarkdown content={remote.detail.detail.descriptionRaw} />
+                  ) : (
+                    <text fg={theme.muted}>No PR description.</text>
+                  )
                 ) : (
                   <text width="100%" wrapMode="word" fg={theme.muted}>
                     Loading PR description…
@@ -487,6 +403,88 @@ export function TerminalHome({
               )}
             </scrollbox>
           </box>
+        </box>
+        <box
+          id="home-review"
+          width={reviewWidth}
+          flexShrink={0}
+          minHeight={0}
+          border
+          borderColor={focus === "review" ? theme.primary : theme.muted}
+          flexDirection="column"
+          onMouseDown={() => focusPane("review")}
+        >
+          <text fg={theme.primary} height={1}>
+            AI REVIEW
+          </text>
+          <scrollbox id="home-review-scroll" ref={review} flexGrow={1} minHeight={0} scrollY>
+            {busy || state.snapshotLoading ? (
+              <text width="100%" wrapMode="word" fg={theme.muted}>
+                Loading selected evidence…
+              </text>
+            ) : !loaded ? (
+              <text width="100%" wrapMode="word" fg={theme.muted}>
+                Enter load selection · a start AI review
+              </text>
+            ) : (
+              <text
+                fg={theme.muted}
+              >{`${state.files.length} changed files · ${state.terminalReview?.findings === null ? "findings unavailable" : `${findings.length} findings`} · ${state.history.length} saved runs`}</text>
+            )}
+            {active && (
+              <>
+                <text
+                  fg={active.state === "failed" ? theme.error : theme.secondary}
+                >{`Review ${active.state} · ${active.targetLabel}`}</text>
+                {active.logs.map((log) => (
+                  <text width="100%" wrapMode="word" key={log.id} fg={theme.muted}>
+                    {log.text}
+                  </text>
+                ))}
+              </>
+            )}
+            {loaded && state.terminalReview && (
+              <>
+                <text
+                  width="100%"
+                  wrapMode="word"
+                  fg={theme.muted}
+                >{`Saved AI review · ${state.terminalReview.runId}`}</text>
+                {state.terminalReview.output === null ? (
+                  <text fg={theme.muted}>
+                    Stored output unavailable; see findings and status below.
+                  </text>
+                ) : (
+                  <TerminalMarkdown content={state.terminalReview.output} />
+                )}
+              </>
+            )}
+            {findings.map((finding) => (
+              <box key={finding.id} flexDirection="column" flexShrink={0}>
+                <text
+                  width="100%"
+                  wrapMode="word"
+                  fg={theme.primary}
+                >{`${finding.severity} · ${finding.title}`}</text>
+                <TerminalMarkdown content={finding.summary} />
+              </box>
+            ))}
+            {state.error && (
+              <text width="100%" wrapMode="word" fg={theme.error}>
+                {state.error}
+              </text>
+            )}
+            {state.notice && (
+              <text width="100%" wrapMode="word" fg={theme.muted}>
+                {state.notice}
+              </text>
+            )}
+            {remote.notice && (
+              <text width="100%" wrapMode="word" fg={theme.muted}>
+                {remote.notice}
+              </text>
+            )}
+          </scrollbox>
         </box>
       </box>
       <text height={2} flexShrink={0} fg={theme.muted}>

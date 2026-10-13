@@ -1321,3 +1321,25 @@ infos), React Doctor changed delta (13 DOM-property false positives for typed
 native text wrapMode; no DOM exists and native wrap tests pass; score unavailable),223native
 frames and Storybook build pass. No backend change or rebuild needed for layout.
 Keep0074pending until verified actual merge; root working tree/user config untouched.
+
+
+## 2026-10-13 — Right AI pane and themed native Markdown
+
+Plan0074 / PR394: maintainer moves AI to the right; PR list/description occupy
+central-left with existing separate scroll/focus. Shared TerminalMarkdown uses
+OpenTUI's native renderer and SyntaxStyle from active palette: headings, strong,
+emphasis, inline code, links, quotes, list styling. Review output, PR description
+and finding summaries render natively; operational status remains plain text.
+Theme replacement rebuilds/frees native style resources. As in the explorer,
+remote fence-language labels cannot trigger grammar asset downloads; code body
+is preserved and rendered plain. No change to stored source or provider/backend.
+
+Native tests validate actual colored/bold spans, marker concealment, unknown
+fences and dark-to-light change at100/32columns. Home geometry now requires
+right AI pane, and fixtures await asynchronous cold Markdown paint. Wide/compact
+saved-review Storybook frames contain actual native colored Markdown. ADR0020r5,
+contract and plan reflect the maintainer's refinement. Validation:315UI tests,
+root tests/typechecks, UI typecheck, Archgate17, lint,223native frames and
+Storybook build pass. Changed React Doctor has no issues (score API unreachable).
+Plan0074 remains pending until verified actual integration; installed launcher
+and root/user files unchanged. No Norn review or live provider/agent invocation.

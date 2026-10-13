@@ -18,9 +18,11 @@ working-tree capture are explicit secondary actions; they are not the home
 screen. Failure states must expose an actionable backend cause.
 
 The main screen uses an Under-style horizontal Open/Draft/Merged/Local filter
-menu at the top. AI review output occupies the left pane; the central column
+menu at the top. AI review output occupies the right pane; the central column
 shows the PR/local-target list above the independent description. Each text
-pane scrolls independently; Tab/Shift+Tab cycles focus. Settings opens as a modal
+pane scrolls independently; Tab/Shift+Tab cycles focus. Review and PR description
+use native OpenTUI Markdown, styled with the active dark/light theme. Remote
+code fences render without fetching additional language grammar assets. Settings opens as a modal
 with `s`. `Enter` loads the selected target without starting an agent; `a`
 explicitly starts AI review. `g` opens the diff-choice modal: `g` selects the
 native Git diff, `b` opens the authenticated browser diff viewer. In the diff,
