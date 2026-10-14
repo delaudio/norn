@@ -865,15 +865,40 @@ enum CommandStatus {
     SpawnFailed(String),
 }
 
+fn analyzer_shell(command: &str) -> std::process::Command {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        let root = std::env::var_os("SystemRoot")
+            .map(std::path::PathBuf::from)
+            .filter(|path| path.is_absolute())
+            .unwrap_or_else(|| std::path::PathBuf::from(r"C:\Windows"));
+        let mut shell = std::process::Command::new(root.join("System32/cmd.exe"));
+        // This is already an explicitly configured analyzer shell program,
+        // never provider text. /D disables AutoRun; /S strips only these outer
+        // quotes. cmd's syntax must not be escaped as a C-runtime argv string.
+        shell
+            .args(["/D", "/S", "/C"])
+            .raw_arg(format!("\"{command}\""));
+        shell
+    }
+    #[cfg(not(windows))]
+    {
+        let mut shell = std::process::Command::new("/bin/sh");
+        shell.args(["-lc", command]);
+        shell
+    }
+}
+
 fn run_bounded_command(
     repo_path: &Path,
     command: &str,
     timeout_seconds: u64,
 ) -> BoundedCommandResult {
     let started = Instant::now();
-    let mut child = match std::process::Command::new("/bin/sh")
-        .arg("-lc")
-        .arg(command)
+    let mut shell = analyzer_shell(command);
+    crate::local_review::configure_owned_command(&mut shell);
+    let mut child = match shell
         .current_dir(repo_path)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -887,6 +912,20 @@ fn run_bounded_command(
                 duration_ms: started.elapsed().as_millis() as u64,
                 truncated: false,
             }
+        }
+    };
+
+    let process_tree = match crate::local_review::GitProcessTree::attach_and_resume(&child) {
+        Ok(tree) => tree,
+        Err(error) => {
+            let _ = child.kill();
+            let _ = child.wait();
+            return BoundedCommandResult {
+                status: CommandStatus::SpawnFailed(error.to_string()),
+                exit_status: None,
+                duration_ms: started.elapsed().as_millis() as u64,
+                truncated: false,
+            };
         }
     };
 
@@ -904,18 +943,20 @@ fn run_bounded_command(
         match child.try_wait() {
             Ok(Some(status)) => break (CommandStatus::Ran(status.code()), status.code()),
             Ok(None) if started.elapsed() >= timeout => {
-                let _ = child.kill();
-                let _ = child.wait();
+                crate::local_review::terminate_git_child(&mut child, &process_tree);
                 break (CommandStatus::TimedOut, None);
             }
             Ok(None) => thread::sleep(Duration::from_millis(50)),
             Err(error) => {
-                let _ = child.kill();
+                crate::local_review::terminate_git_child(&mut child, &process_tree);
                 break (CommandStatus::SpawnFailed(error.to_string()), None);
             }
         }
     };
 
+    // End any descendants which retain output pipes, including after a shell
+    // exits successfully. Only this owned process group/job is terminated.
+    crate::local_review::terminate_git_child(&mut child, &process_tree);
     let mut truncated = false;
     if let Some(reader) = stdout_reader {
         truncated |= reader.join().unwrap_or(false);
@@ -1348,19 +1389,109 @@ mod tests {
         }
     }
 
+    fn owned_analyzer(directory: &Path) -> std::path::PathBuf {
+        let binary = directory.join(if cfg!(windows) {
+            "analyzer.exe"
+        } else {
+            "analyzer"
+        });
+        let output = Command::new("rustc")
+            .args([
+                "--edition=2021",
+                concat!(
+                    env!("CARGO_MANIFEST_DIR"),
+                    "/tests/fixtures/owned-analyzer.rs"
+                ),
+                "-o",
+            ])
+            .arg(&binary)
+            .output()
+            .expect("compile owned analyzer");
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        binary
+    }
+    fn owned_analyzer_alive(pid: u32) -> bool {
+        #[cfg(unix)]
+        {
+            unsafe { libc::kill(pid as i32, 0) == 0 }
+        }
+        #[cfg(windows)]
+        {
+            use windows_sys::Win32::Foundation::{
+                CloseHandle, GetLastError, ERROR_INVALID_PARAMETER,
+            };
+            use windows_sys::Win32::System::Threading::{
+                GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
+            };
+            unsafe {
+                let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+                if handle.is_null() {
+                    assert_eq!(GetLastError(), ERROR_INVALID_PARAMETER);
+                    return false;
+                }
+                let mut code = 0;
+                let queried = GetExitCodeProcess(handle, &mut code);
+                CloseHandle(handle);
+                assert_ne!(queried, 0);
+                code == 259
+            }
+        }
+        #[cfg(not(any(unix, windows)))]
+        {
+            let _ = pid;
+            panic!("Unsupported native analyzer fixture platform")
+        }
+    }
+
+    fn owned_analyzer_command(binary: &Path, mode: &str) -> String {
+        #[cfg(windows)]
+        {
+            format!("\"{}\" {mode}", binary.display())
+        }
+        #[cfg(not(windows))]
+        {
+            format!(
+                "'{}' {mode}",
+                binary.to_string_lossy().replace('\'', "'\\''")
+            )
+        }
+    }
+
     #[test]
     fn analyzer_evidence_records_provenance_and_outcomes() {
         let fixture = Fixture::new("analyzer-outcomes");
         fixture.write("src/lib.rs", "pub fn one() {}\n");
         fixture.commit_all("seed");
 
+        let peer = tempfile::Builder::new()
+            .prefix("norn owned analyzer-")
+            .tempdir()
+            .expect("owned peer directory");
+        let binary = owned_analyzer(peer.path());
         let mut analyzers = BTreeMap::new();
-        analyzers.insert("clean".to_string(), analyzer(true, Some("echo ok"), 30));
-        analyzers.insert("failing".to_string(), analyzer(true, Some("exit 3"), 30));
-        analyzers.insert("timeout".to_string(), analyzer(true, Some("sleep 5"), 1));
+        analyzers.insert(
+            "clean".to_string(),
+            analyzer(true, Some(&owned_analyzer_command(&binary, "clean")), 30),
+        );
+        analyzers.insert(
+            "failing".to_string(),
+            analyzer(true, Some(&owned_analyzer_command(&binary, "exit3")), 30),
+        );
+        analyzers.insert(
+            "timeout".to_string(),
+            analyzer(true, Some(&owned_analyzer_command(&binary, "timeout")), 1),
+        );
         analyzers.insert(
             "truncated".to_string(),
-            analyzer(true, Some("yes a | head -c 400000"), 30),
+            analyzer(
+                true,
+                Some(&owned_analyzer_command(&binary, "truncated")),
+                30,
+            ),
         );
         analyzers.insert(
             "disabled".to_string(),
@@ -1389,6 +1520,18 @@ mod tests {
         assert_eq!(by_id["failing"].status, AnalyzerOutcome::Failed);
         assert_eq!(by_id["failing"].exit_status, Some(3));
         assert_eq!(by_id["timeout"].status, AnalyzerOutcome::TimedOut);
+        let child_pid = std::fs::read_to_string(peer.path().join("child.pid"))
+            .expect("owned child started")
+            .parse::<u32>()
+            .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while owned_analyzer_alive(child_pid) {
+            assert!(
+                Instant::now() < deadline,
+                "Timed-out owned analyzer child survived its process tree"
+            );
+            thread::sleep(Duration::from_millis(10));
+        }
         assert!(by_id["truncated"].truncated);
         assert_eq!(
             by_id["disabled"].applicability,
@@ -1411,9 +1554,20 @@ mod tests {
         fixture.write("src/app.ts", "export const a = 1;\n");
         fixture.commit_all("seed");
 
+        let peer = tempfile::Builder::new()
+            .prefix("norn owned analyzer-")
+            .tempdir()
+            .expect("owned peer directory");
+        let binary = owned_analyzer(peer.path());
         let mut analyzers = BTreeMap::new();
-        analyzers.insert("bad".to_string(), analyzer(true, Some("exit 1"), 30));
-        analyzers.insert("good".to_string(), analyzer(true, Some("echo ok"), 30));
+        analyzers.insert(
+            "bad".to_string(),
+            analyzer(true, Some(&owned_analyzer_command(&binary, "exit1")), 30),
+        );
+        analyzers.insert(
+            "good".to_string(),
+            analyzer(true, Some(&owned_analyzer_command(&binary, "clean")), 30),
+        );
 
         let evidence = collect_repository_audit_evidence(
             &fixture.path,

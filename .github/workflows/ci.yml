@@ -159,3 +159,21 @@ jobs:
 
       - name: Exercise real terminal editor handoff and restoration
         run: bun run ui/scripts/check-editor-workflow.ts
+
+  service-image:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Build and exercise the Rust-only service image
+        run: |
+          docker build --file Dockerfile.service --tag norn-service:ci .
+          docker run --rm norn-service:ci --version
+          docker run --rm norn-service:ci --help
+          docker run --rm norn-service:ci service smoke
+          task_service_container=$(docker run --detach --rm norn-service:ci)
+          trap 'docker stop --time 2 "$task_service_container" >/dev/null' EXIT
+          docker exec "$task_service_container" norn service healthcheck
+          docker run --rm --entrypoint /bin/sh norn-service:ci -ec 'test ! -e /usr/local/bin/norn-ui; ! command -v bun; ! command -v node; ! dpkg-query -W libwebkit2gtk-4.1-0 libgtk-3-0; test -f /usr/local/share/norn/agent-skills/norn-review/SKILL.md'

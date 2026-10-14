@@ -1,0 +1,13 @@
+.git
+**/node_modules
+**/target
+dist
+**/storybook-static
+.env*
+**/.env*
+.norn.yaml
+.norn.local.yaml
+.norn/
+.lachesi.yaml
+.lachesi.local.yaml
+.lachesi/

@@ -1439,3 +1439,13 @@ shell agents/PermissionsExt without cfg protection. Replaced those fixture
 scripts with a std-only agent compiled natively on every OS, retaining actual
 streaming,10-second delayed completion and cancellation/no-late-completion
 assertions. No tests are skipped for Windows.
+
+Expanded Windows core gate found28inherited failures; corrected native trusted
+Git fordoctor,LF wire fixtures,legal literal/quoted filenames,oversized remote
+fixture setup and explicit Windows no-clobber errno. Analyzer shell is now native
+onWindows and its owned process tree is terminated before joining output pipes.
+Compiled peers preserve outcome/timeout/truncation checks and prove child PID
+termination. Final local complete core/stdIO/CLI/onboarding and strict all-feature
+Clippy pass. Service image now omits GUI dependencies, preserves Git/TLS/skills,
+excludes private context files and passes local Docker build/version/help/smoke/
+readiness without user volumes/ports. New exact-head CI remains required.

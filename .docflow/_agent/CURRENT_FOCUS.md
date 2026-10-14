@@ -22,3 +22,9 @@ Native suites cap test concurrency at four; exact-head3OS CI remains pending.
 Next after verified hardening: #308 matched installable artifacts, then #309
 Tauri/Ratatui removal. Do not publish releases or touch stored user data.
 Preserve root untracked .norn.yaml and user stash.
+
+PR396 prepared; initial full Windows failures exposed inherited Unix assumptions.
+Local corrected complete suite and strict all-feature Clippy pass. Native peers
+prove analyzer child termination; Rust-only Docker service image build/smoke/
+container-local readiness passes without GUI/JS. Await new exact-head3OS CI
+before merge; #308/#309 remain blocked until hardening integration.

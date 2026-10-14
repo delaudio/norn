@@ -114,3 +114,26 @@ The first complete Windows stdio compile exposed two inherited agent tests
 using Unix-only PermissionsExt and shell executables. Both use a native
 compiled std-only fixture now, retaining streaming/cancel/no-late-completion
 assertions on every OS. No test is skipped to bypass Windows compilation.
+
+The expanded Windows core gate exposed inherited Unix assumptions (716passed,
+28failures, including cascading poisoned fixture locks). Corrected doctor to
+use trusted native Git, seeded the64KiB remote directly in owned config instead
+of oversized Windows argv, pinned wire patch fixtures to LF, and used legal
+Windows bracket/Unicode filenames while retaining literal/quoted-path coverage.
+The literal-path test now also modifies a glob-matching decoy and proves exclusion.
+The directory no-clobber test asserts Windows ERROR_ACCESS_DENIED plus unchanged
+source/destination content instead of demanding a Unix errno.
+
+Analyzers now use native cmd.exe with AutoRun disabled on Windows and retain
+the configured shell program explicitly; no provider text is interpolated.
+Owned compiled analyzer fixtures preserve successful/failing/truncated/timeout
+checks. Reusing the existing process-group/JobObject supervisor prevents timed-out
+descendants from retaining output pipes; the timeout fixture proves its native
+PID has terminated, rather than asserting only a reported status.
+
+The Rust-only service Dockerfile no longer installs GTK/WebKit in build/runtime
+layers. It retains Git/TLS certificates and managed skills; the build context
+excludes user configs,env files and compiled caches. Local Linuxarm64 image
+build,version,help,offline initialization and actual container-local readiness
+passed without Bun,Node,GTK or WebKit and without user mounts/exposed ports.
+A dedicated Linux CI job exercises the same image. No image/release is published.

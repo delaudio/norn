@@ -7132,15 +7132,20 @@ mod tests {
                 .expect("run git");
             assert!(output.status.success(), "git {args:?} failed");
         };
-        std::fs::write(dir.path().join("star*.txt"), "one\n").expect("write");
-        std::fs::write(dir.path().join("other.txt"), "x\n").expect("write");
+        #[cfg(windows)]
+        let literal = "star[1].txt";
+        #[cfg(not(windows))]
+        let literal = "star*.txt";
+        std::fs::write(dir.path().join(literal), "one\n").expect("write");
+        std::fs::write(dir.path().join("star1.txt"), "x\n").expect("write");
         git(&["add", "-A"]);
         git(&["commit", "-qm", "one"]);
-        std::fs::write(dir.path().join("star*.txt"), "one\ntwo\n").expect("edit");
+        std::fs::write(dir.path().join(literal), "one\ntwo\n").expect("edit");
 
-        let diff = file_diff(dir.path(), "star*.txt", None, None).expect("diff");
-        assert!(diff.contains("star*.txt"), "diff: {diff}");
-        assert!(!diff.contains("other.txt"), "diff: {diff}");
+        std::fs::write(dir.path().join("star1.txt"), "changed decoy\n").expect("decoy edit");
+        let diff = file_diff(dir.path(), literal, None, None).expect("diff");
+        assert!(diff.contains(literal), "diff: {diff}");
+        assert!(!diff.contains("star1.txt"), "diff: {diff}");
     }
 
     #[test]
@@ -7219,6 +7224,9 @@ mod tests {
             assert!(output.status.success(), "git {args:?} failed");
         };
         git(&["config", "diff.noprefix", "true"]);
+        #[cfg(windows)]
+        let name = "世界 b.txt";
+        #[cfg(not(windows))]
         let name = "ta\tb.txt";
         std::fs::write(dir.path().join(name), "one\n").expect("write");
         git(&["add", "-A"]);
