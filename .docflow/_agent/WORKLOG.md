@@ -1428,3 +1428,24 @@ no ADR overlap with paused #396 and no duplicate plan numbers. Existing audit
 finding: ADR0011 has no linked plan/done coverage; legacy coordination scaffold
 is retained under recorded repository conventions. These are outside this
 build transition. Plan0074's merged receipt is already prepared in paused #396.
+
+## 2026-10-14 — default headless/OpenTUI delivered (#397)
+
+PR #397 merged at 10:21:52 UTC as 416610fe42c7b4b7c0453bbcb04b126f9c528c78,
+from exact tested b312fe9562bd8f4bdf63c32507e6e3c155908d57. Main CI verify,
+UI, native Linux/macOS/Windows, explicit legacy adapters and release contract
+all report SUCCESS. Lifecycle is intentionally skipped on PRs. New install
+smoke proves the compiled UI/worker, adjacent Rust backend, terminal handoff
+and authenticated installed browser assets on all three native platforms.
+
+After observing the actual merge, moved plan0076 to done with the shipped
+commit and exact validation receipt. ADR0020 remains Accepted for the broader
+unfinished migration. Corrected the UI smoke fixture's explicit subprocess type
+and optional diagnostic handling before its final successful CI run. Locally
+also built the owned headless Docker image and verified CLI startup without
+GUI libraries. No Norn review, releases, provider mutation or user data writes.
+
+Hardening #396 stays draft/paused; no concurrent implementation. The original
+user checkout and private untracked config were untouched. Existing ADR0011
+coverage and legacy coordination-layout audit findings remain recorded rather
+than silently broadening this implementation into a catalogue migration.
