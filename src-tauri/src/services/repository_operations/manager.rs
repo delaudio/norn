@@ -775,7 +775,11 @@ fn execute(
         if stop.load(Ordering::Acquire) {
             return Err("Workspace is shutting down.".into());
         }
-        let control = make_control(LocalReviewCancellation::new(), 5);
+        // Reconciliation reads the same complete snapshot as preview (including
+        // config, refs, index and pending-operation paths). Use its bounded read
+        // budget too: Windows process startup can exhaust five seconds even for
+        // a small, clean checkout. Never retry the write or infer success here.
+        let control = make_control(LocalReviewCancellation::new(), 20);
         if context::resolve_context(&plan.request.context, &control)? != plan.root {
             return Err(invalid());
         }

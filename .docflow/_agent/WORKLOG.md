@@ -1395,3 +1395,12 @@ changed delta has no issues (score service unavailable). ADR0020r6/contract/plan
 updated under maintainer direction. No Norn review, private provider/agent calls,
 user data changes or backend rebuild. Keep0074pending until verified actual merge;
 restart TUI/browser session to load rebuilt web assets.
+
+## 2026-10-14 — Resume authorized packaging and cutover
+
+Synced PR394 with current main (#395), retaining independent tests. Windows
+post-operation full snapshot had a five-second budget while preview uses twenty;
+reconciliation now uses twenty too, without retrying writes or weakening uncertain
+state. Owned failed-fetch IPC fixture asserts refreshed HEAD and prints bounded
+operation diagnostics on failure. Local focused Rust and UI/root gates pass;
+Windows confirmation and actual integration remain pending.
