@@ -1276,3 +1276,37 @@ test("failed final event fetches the actual error at the same sequence without d
   expect(transport.requests.filter((request) => request.method === "review.start")).toHaveLength(1);
   await client.close();
 });
+
+test("a legacy job is read-only and cannot open a provider target", async () => {
+  const store = new ShellStore();
+  const client = new BackendClient(
+    new FakeBackendTransport({
+      repositories,
+      jobs: [
+        {
+          id: "legacy-1",
+          workspace: "",
+          repo: "",
+          prId: 0,
+          prTitle: "Legacy",
+          sourceBranch: "",
+          destinationBranch: "",
+          status: "succeeded",
+          trigger: "legacy",
+          legacy: true,
+          threadId: null,
+          error: null,
+          createdAt: "2026-01-01T00:00:00Z",
+          startedAt: null,
+          finishedAt: null,
+        },
+      ],
+    }),
+  );
+  await store.connect(client);
+  await store.toggleJobs(client);
+  const before = store.getSnapshot().selectedPicker;
+  await store.selectJob();
+  expect(store.getSnapshot().selectedPicker).toBe(before);
+  expect(store.getSnapshot().notice).toContain("read-only");
+});

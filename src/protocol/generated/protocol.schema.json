@@ -7900,7 +7900,8 @@
         "destinationBranch",
         "status",
         "trigger",
-        "createdAt"
+        "createdAt",
+        "legacy"
       ],
       "properties": {
         "id": {
@@ -7931,6 +7932,9 @@
         },
         "trigger": {
           "type": "string"
+        },
+        "legacy": {
+          "type": "boolean"
         },
         "threadId": {
           "type": [
