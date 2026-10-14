@@ -25,16 +25,21 @@ Stop and surface the issue rather than guessing if:
 
 ## Active migration mandate
 
-The maintainer explicitly authorized finishing every remaining epic #294 task
-through verified PRs and squash merges, without Norn reviews. Read CURRENT_FOCUS
-for the current claimed branch and WORKLOG for actual merge proof before picking
-a pending file by number. Older migration plans 0022–0030 contain already merged
-work and require evidence reconciliation in #306, rather than duplicate code.
-#357–#364 are bounded P0 retained-parity deliveries; #307–#309 follow them. No
-private credential/profile access or live provider mutation is an automated test
-requirement. Inherited CLI credential status now uses an owned child mock keyring.
-A failed gate blocks integration while it is diagnosed/repaired; a passing rerun
-does not erase the observed publication-fixture intermittency recorded in #307.
-Native recovery/installed-platform proof must not be replaced by mocks/compile
-checks. ADR 0020 remains Accepted until the full cutover, and the goal remains
-active until every required issue and the epic are actually completed.
+The maintainer authorized migration epic #294 through verified PRs and squash
+merges, without Norn reviews. The terminal workflow is the reference; mandatory
+desktop-only parity was retired on 2026-10-13. Do not revive that work from old
+queue descriptions. Current-repository terminal home shipped in #394.
+
+The latest bounded default-build task shipped in #397: empty Cargo defaults,
+OpenTUI plus Rust CLI/backend, browser diff preserved, explicit legacy adapters
+and separate CI. Read its plan/done receipt and CURRENT_FOCUS before resuming.
+#396 remains a paused draft; its branch and owned followup stash are preserved.
+Do not implement that work concurrently or merge it without rebasing onto main
+and repairing its remaining Windows fixture failures.
+
+Older plans 0022–0030 contain merged work that needs evidence reconciliation,
+not duplicate implementation. Full packaging/upgrade proof and final source
+removal remain #308/#309 work. ADR0020 stays Accepted until full cutover. Native
+installed-platform proof must not be replaced by mocks or compile checks.
+Never read the user's untracked root config or probe their credentials during
+tests; use owned fixtures. Do not publish releases as part of this work.
