@@ -20,6 +20,8 @@ try {
   const env = {
     PATH: join(root, "no runtimes here"),
     SystemRoot: process.env.SystemRoot,
+    TEMP: root,
+    TMP: root,
     HOME: root,
     USERPROFILE: root,
     NORN_CONFIG_DIR: config,
@@ -144,7 +146,9 @@ try {
     ["config", "user.name", "Owned"],
     ["config", "user.email", "owned@example.invalid"],
   ]) {
-    const result = Bun.spawnSync([git, "-C", repo, ...args], { env: gitEnv });
+    const result: ReturnType<typeof Bun.spawnSync> = Bun.spawnSync([git, "-C", repo, ...args], {
+      env: gitEnv,
+    });
     assert.equal(result.exitCode, 0, result.stderr.toString());
   }
   await writeFile(join(repo, "owned.txt"), "before\n");
