@@ -47,15 +47,8 @@ const checks = [
     "the verification toolchain includes rustfmt and Clippy",
   ],
   [
-    workflow.includes("name: Install Linux desktop build dependencies") &&
-      workflow.includes("if: runner.os == 'Linux'") &&
-      workflow.includes("sudo apt-get install --no-install-recommends --yes") &&
-      workflow.includes("libwebkit2gtk-4.1-dev") &&
-      workflow.includes("libayatana-appindicator3-dev") &&
-      workflow.includes("librsvg2-dev") &&
-      workflow.indexOf("name: Install Linux desktop build dependencies") <
-        workflow.indexOf("name: Run complete Rust gate"),
-    "the Ubuntu verification job installs Tauri system libraries before compiling all features",
+    !workflow.includes("libwebkit2gtk-4.1-dev") && workflow.includes("pnpm run ui:build"),
+    "ordinary release checks require no desktop libraries and build OpenTUI",
   ],
   [
     workflow.includes("cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check"),
@@ -64,9 +57,9 @@ const checks = [
   [workflow.includes("pnpm run lint"), "the release gate runs the frontend lint gate"],
   [
     workflow.includes(
-      "cargo clippy --locked --manifest-path src-tauri/Cargo.toml --all-targets --all-features -- -D warnings",
+      "cargo clippy --locked --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings",
     ),
-    "the release gate denies Clippy warnings across every target and feature",
+    "the release gate denies Clippy warnings across default headless targets",
   ],
   [
     workflow.includes(
@@ -75,15 +68,7 @@ const checks = [
     "the release gate separately verifies zero-argument command behavior without desktop features",
   ],
   [
-    workflow.includes(
-      "cargo test --locked --manifest-path src-tauri/Cargo.toml --bin norn --all-features",
-    ),
-    "the release gate verifies desktop routing without launching GUI integration tests",
-  ],
-  [
-    workflow.includes(
-      "cargo test --locked --manifest-path src-tauri/Cargo.toml --all-targets --no-default-features --features custom-protocol",
-    ),
+    workflow.includes("cargo test --locked --manifest-path src-tauri/Cargo.toml --all-targets"),
     "the release gate tests the exact command release feature set",
   ],
   [
@@ -93,9 +78,9 @@ const checks = [
   ],
   [
     workflow.includes(
-      'cargo build --locked --manifest-path src-tauri/Cargo.toml --release --target "$TARGET" --no-default-features --features custom-protocol,tui --bin norn --bin norn-tui',
+      'cargo build --locked --manifest-path src-tauri/Cargo.toml --release --target "$TARGET" --bin norn --bin norn-tui --bin norn-backend',
     ),
-    "release archives explicitly disable desktop routing and use the production protocol",
+    "release archives include the default headless CLI and IPC backend",
   ],
   [
     workflow.includes("pnpm run test:rust:core"),

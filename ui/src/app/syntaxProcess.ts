@@ -17,7 +17,9 @@ export class SyntaxProcess implements SyntaxTask {
   private stopping = false;
   constructor() {
     this.proc = Bun.spawn(
-      [process.execPath, fileURLToPath(new URL("../workers/syntax.ts", import.meta.url))],
+      process.env.NORN_COMPILED_UI === "1"
+        ? [process.execPath, "--syntax-worker"]
+        : [process.execPath, fileURLToPath(new URL("../workers/syntax.ts", import.meta.url))],
       {
         stdin: "ignore",
         stdout: "ignore",

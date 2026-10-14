@@ -4,15 +4,16 @@ Git is authoritative. Durable history lives in WORKLOG and plan/done.
 
 ## Active state — 2026-10-14
 
-Single writer; no delegation or Norn review per maintainer.
-PR #394 remains open on fix/current-repo-first in
-/private/tmp/norn-current-repo-first. Plan 0074 remains pending.
-Merged current origin/main (including #395), preserving both conflicting tests.
-Repairing Windows repository-operation reconciliation: complete post-write
-snapshot uses the same bounded 20-second budget as preview instead of five.
-Unverified state remains uncertain; failed-fetch fixture also asserts actual HEAD.
-Local UI 318 tests, root 127 tests/tooling, six focused Rust tests pass.
-Exact-head three-platform CI and actual merge are required before shipping.
-Next: #308 matched installable artifacts, then #309 Tauri/Ratatui cutover.
-Do not publish releases or touch stored user data. Keep ADR0020 Accepted until
-full cutover. Preserve root untracked .norn.yaml and user stash.
+Single writer, no delegation or Norn review. #394 merged as c5bcabf.
+Claim plan 0076 on fix/default-headless-opentui in
+/private/tmp/norn-current-repo-first. The maintainer explicitly overrides the
+old desktop-default instructions: ordinary builds are core/CLI/stdio plus
+OpenTUI, optional Tauri/Ratatui checks remain separate. Preserve browser diff.
+#396/plan 0075 is paused as a draft on fix/opentui-hardening; its followup is
+in an owned stash. No concurrent changes or merges from that branch.
+Preserve root untracked .norn.yaml, user stash and all stored data. Do not
+publish releases. ADR0020 remains Accepted until full migration cutover.
+
+Local release build and isolated installed runtime smoke pass (including real
+PTY handoff and served browser assets). Core 776, UI 318, frames 223, root
+tests/tooling, default graph, Clippy and Archgate pass. Preparing PR; await CI.

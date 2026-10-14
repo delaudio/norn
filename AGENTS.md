@@ -5,10 +5,10 @@ This file provides guidance to coding agents working in this repository.
 ## What this repository is
 
 Norn is an open-source, local-first review workspace for pull requests
-across Bitbucket Cloud and GitHub. It is a Tauri v2 desktop app with a Rust
-backend (`src-tauri/`) and a React 19 + TypeScript + Vite frontend (`src/`).
-Provider access, local evidence, review findings, and publication workflows
-are controlled from the local app; credentials must stay out of the webview.
+across Bitbucket Cloud and GitHub. The ordinary application is an OpenTUI React
+client (`ui/`) over a Rust stdio backend (`src-tauri/`). The Rust engine owns
+provider access, credentials, Git and persistence. Retained Tauri/React desktop
+and Ratatui sources are optional legacy adapters, never default build inputs.
 
 ## Repository structure
 
@@ -30,11 +30,11 @@ are controlled from the local app; credentials must stay out of the webview.
 ## Commands
 
 ```bash
-pnpm run dev          # start Vite dev server (browser mode, mock IPC)
+pnpm run dev          # build backend/browser diff and start OpenTUI
 pnpm run typecheck    # tsc --noEmit
 pnpm run test         # Vitest/jsdom test suite
 pnpm run lint         # Biome checks
-pnpm run build        # TypeScript + Vite production build
+pnpm run build        # Rust CLI/backend, standalone OpenTUI, browser diff
 pnpm tauri dev --features desktop-bundle # start full Tauri app
 archgate check        # run ADR compliance checks
 ```
@@ -131,10 +131,10 @@ state and history; LOCKS discipline is not in use.
 
 ## Key architecture notes
 
-All external provider calls go through Rust commands behind Tauri IPC. The
-frontend calls `tauriCall(commandName, args)` from `src/lib/tauri.ts`; every
-registered Rust command in `src-tauri/src/lib.rs` must have a matching mock
-handler in `src/mock-tauri/mock-handlers.ts`.
+All provider access stays in Rust. OpenTUI uses the generated stdio protocol.
+The optional legacy desktop frontend calls `tauriCall(commandName, args)` from
+`src/lib/tauri.ts`; every registered desktop command in `src-tauri/src/lib.rs`
+must retain its mock handler in `src/mock-tauri/mock-handlers.ts`.
 
 When invoking a user-installed CLI binary from Rust Tauri commands, use a zsh
 login shell:
@@ -150,16 +150,18 @@ macOS GUI-launched apps have a minimal `PATH` that omits user install
 locations. Without `/bin/zsh -l`, binaries installed by Homebrew, npm, or local
 CLI installers may not be found.
 
-A bare command-build `norn` invocation launches the TUI only when both stdin
-and stdout are attached to terminals. Non-interactive zero-argument command
-invocations print CLI help. Tauri development and package builds must enable
-the `desktop-bundle` Cargo feature so a zero-argument desktop launch opens the
-GUI consistently on every supported operating system. That feature is the safe
-Cargo default so an ordinary Tauri bundle cannot silently get command routing;
-CLI archives, service images, and local command installers must pass
-`--no-default-features` explicitly. A desktop-bundle binary is GUI-only even
-when the operating system supplies launch arguments; CLI flags and subcommands
-are supported only by command-distribution builds.
+A bare `norn` opens the adjacent standalone OpenTUI client only when stdin and
+stdout are terminals. Noninteractive zero-argument invocation prints CLI help;
+CLI subcommands require no JS runtime. `pnpm run dev` uses Bun from source;
+`pnpm run install:local` installs the compiled UI, backend and browser assets.
+The current working directory remains the reviewed repository. Never resolve an
+installed UI from the repository being reviewed.
+
+Cargo defaults are empty. Do not enable `desktop`, `tui`, `desktop-bundle` or
+`custom-protocol` in ordinary builds, installers, tests or service images.
+Legacy desktop bundles must explicitly enable `custom-protocol,desktop-bundle`;
+only these GUI-only binaries use desktop routing. Ratatui is explicitly opt-in
+with `--no-default-features --features tui`. Legacy CI is separate.
 
 App-generated data lives under `dirs::data_local_dir()` in the `norn`
 subdirectory. The legacy `lachesi` subdirectory is migration input only.
@@ -169,31 +171,21 @@ repo config, examples, screenshots, or fixtures.
 CSS custom properties in this project are hex color values, not HSL component
 tuples. Use `fill="var(--primary)"`, not `fill="hsl(var(--primary))"`.
 
-Navigation is state-driven through the `AppSelection` union type, not React
+Legacy desktop navigation is state-driven through `AppSelection`, not React
 Router. Browser dev and Storybook use the mock IPC layer in
 `src/mock-tauri/`.
 
 `src-tauri/Cargo.toml` gates the Tauri desktop adapter behind the optional
 `desktop` feature and the Ratatui terminal UI behind the optional `tui` feature.
-The default `desktop-bundle` feature enables both. A `--no-default-features`
-build is the Tauri- and Ratatui-free engine/headless build; `pnpm run
-test:rust:core` proves it compiles and that `tauri`, `ratatui`, `crossterm`, and
-`ratatui-image` are absent from its active dependency tree.
+Default builds are Tauri- and Ratatui-free; `pnpm run test:rust:core` and
+`scripts/verify-core-no-gui-deps.mjs` inspect the actual default dependency graph,
+including build and test dependencies. Keep optional legacy adapters compiling
+in `.github/workflows/legacy-ui.yml` until final removal.
 
-Keep the `custom-protocol` feature declared as
-`custom-protocol = ["desktop", "tauri/custom-protocol"]`. Without it, every
-Tauri build — `cargo build`, `cargo build --release`, and even `tauri build` if
-the feature is missing entirely — loads `build.devUrl` from `tauri.conf.json`
-instead of the embedded `frontendDist`. That means the compiled binary silently
-tries to reach the Vite dev server on every launch; if it isn't running, the
-window shows a blank white screen with no console error and no crash.
-`pnpm run cli:build` passes `--no-default-features --features
-custom-protocol,tui` to build the CLI, the interactive terminal UI, and the
-desktop launcher together — don't drop the flags when touching the script.
-
-The headless service image is intentionally exempt from `custom-protocol`: it
-does not copy or serve frontend assets. Its Docker build must still pass
-`--no-default-features` so the service entrypoint uses command routing.
+Keep `custom-protocol = ["desktop", "tauri/custom-protocol"]` for explicit
+legacy bundles so they embed frontend assets. It activates Tauri transitively:
+never pass it to ordinary CLI/backend builds. The legacy Tauri configuration
+uses `legacy:web:dev` / `legacy:web:build`, not the OpenTUI commands.
 
 `tauri.conf.json`'s `mainBinaryName` does not select a different `[[bin]]`
 target to compile. It only renames whichever binary `cargo` produces for the

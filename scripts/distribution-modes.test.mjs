@@ -2,58 +2,51 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
-const cargoManifest = readFileSync("src-tauri/Cargo.toml", "utf8");
-const packageManifest = JSON.parse(readFileSync("package.json", "utf8"));
-const releaseWorkflow = readFileSync(".github/workflows/release-norn-macos.yml", "utf8");
-const windowsRunner = readFileSync("justfile", "utf8");
-const serviceDockerfile = readFileSync("Dockerfile.service", "utf8");
-const coreDependencyGuard = readFileSync("scripts/verify-core-no-gui-deps.mjs", "utf8");
+const read = (path) => readFileSync(path, "utf8");
+const manifest = read("src-tauri/Cargo.toml");
+const scripts = JSON.parse(read("package.json")).scripts;
 
-test("desktop routing is the safe default for package builds", () => {
-  assert.match(cargoManifest, /^default = \["desktop-bundle"\]$/m);
-  assert.match(cargoManifest, /^desktop-bundle = \["desktop", "tui"\]$/m);
-  assert.match(cargoManifest, /^desktop = \[/m);
-  assert.match(cargoManifest, /^tui = \[/m);
-  assert.match(
-    windowsRunner,
-    /tauri build --bundles nsis --features custom-protocol,desktop-bundle/,
-  );
-  assert.match(
-    releaseWorkflow,
-    /tauri build --ci --target "\$TARGET" --bundles dmg --features custom-protocol,desktop-bundle/,
-  );
+test("default Rust graph is headless; desktop and Ratatui remain explicit", () => {
+  assert.match(manifest, /^default = \[\]$/m);
+  assert.match(manifest, /^desktop-bundle = \["desktop", "tui"\]$/m);
+  assert.match(manifest, /^custom-protocol = \["desktop", "tauri\/custom-protocol"\]$/m);
+  assert.match(manifest, /path = "src\/bin\/norn-app.rs"\nrequired-features = \["desktop"\]/);
+  assert.doesNotMatch(read("scripts/verify-core-no-gui-deps.mjs"), /"--no-default-features"/);
 });
 
-test("command distributions explicitly disable desktop routing", () => {
-  for (const scriptName of ["install:build", "cli:build", "tui:build", "evaluate"]) {
-    assert.match(packageManifest.scripts[scriptName], /--no-default-features/);
+test("ordinary scripts cannot transitively enable legacy features", () => {
+  const visited = new Set();
+  function inspect(name) {
+    if (visited.has(name)) return;
+    visited.add(name);
+    const script = scripts[name];
+    assert.equal(typeof script, "string", name);
+    assert.doesNotMatch(script, /custom-protocol|--features|--bin norn-app|legacy:/, name);
+    for (const match of script.matchAll(/pnpm run ([a-z:-]+)/g)) inspect(match[1]);
   }
-  assert.match(packageManifest.scripts.evaluate, /--no-default-features --bin norn -- evaluate/);
-  assert.match(packageManifest.scripts["test:rust:core"], /--no-default-features/);
-  assert.match(packageManifest.scripts["test:rust:core"], /verify-core-no-gui-deps\.mjs/);
-  assert.match(coreDependencyGuard, /tauri/);
-  assert.match(coreDependencyGuard, /ratatui/);
-  assert.match(coreDependencyGuard, /process\.exit\(1\)/);
-  assert.match(serviceDockerfile, /cargo build .*--no-default-features.*--bin norn/);
-  assert.match(
-    releaseWorkflow,
-    /cargo build .*--target "\$TARGET" --no-default-features --features custom-protocol,tui --bin norn --bin norn-tui/,
-  );
-  assert.match(
-    releaseWorkflow,
-    /cp -R integrations\/agent-skills\/norn-review .*share\/norn\/agent-skills\/norn-review/,
-  );
-  assert.match(releaseWorkflow, /pnpm run browser-diff:build/);
-  assert.match(releaseWorkflow, /cp -R dist\/browser-diff\/\. .*share\/norn\/browser-diff/);
-  assert.match(
-    releaseWorkflow,
-    /cargo test .*--all-targets --no-default-features --features custom-protocol/,
-  );
-  assert.match(releaseWorkflow, /cargo test .*--bin norn --all-features/);
-  assert.doesNotMatch(releaseWorkflow, /cargo test .*--all-targets --all-features/);
+  for (const name of [
+    "dev",
+    "build",
+    "install:local",
+    "cli:install",
+    "tui:install",
+    "test:rust:cli",
+    "test:rust:core",
+  ])
+    inspect(name);
+  assert.match(scripts.build, /browser-diff:build/);
+  assert.match(scripts.build, /ui:build/);
 });
 
-test("development TUI keeps readiness enabled by default", () => {
-  assert.match(packageManifest.scripts.tui, /--bin norn-tui/);
-  assert.doesNotMatch(packageManifest.scripts.tui, /--skip-readiness/);
+test("main CI and command releases use headless targets; legacy has a separate lane", () => {
+  const ci = read(".github/workflows/ci.yml");
+  assert.doesNotMatch(ci, /libwebkit|--all-features|custom-protocol|test:tauri/);
+  assert.match(ci, /verify-core-no-gui-deps/);
+  assert.match(read(".github/workflows/legacy-ui.yml"), /--all-features/);
+  const release = read(".github/workflows/release-norn-macos.yml").split(
+    "  build-macos-desktop:",
+  )[0];
+  assert.doesNotMatch(release, /custom-protocol|--all-features|libwebkit/);
+  assert.match(release, /norn-backend/);
+  assert.match(release, /dist\/opentui\/norn-ui/);
 });

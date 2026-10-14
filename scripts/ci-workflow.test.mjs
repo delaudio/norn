@@ -10,13 +10,13 @@ test("general CI runs the repository gates for every pull request", () => {
     "pnpm run lint",
     "pnpm run typecheck",
     "pnpm run test",
-    "pnpm run build",
+    "pnpm run browser-diff:build",
+    "pnpm run ui:build",
     "cargo fmt",
     "cargo clippy",
     "cargo test",
     "pnpm run test:rust:core",
     "pnpm run test:rust:cli",
-    "pnpm run test:tauri",
     "archgate check",
   ]) {
     assert.ok(workflow.includes(command), `missing CI gate: ${command}`);

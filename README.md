@@ -37,7 +37,7 @@ It brings together:
 
 - unified PR browsing across Bitbucket and GitHub;
 - a diff-first desktop interface (unified + split views, image previews);
-- both interfaces: a Tauri desktop app and a terminal user interface (`norn-tui`);
+- an OpenTUI terminal workspace over a local Rust backend (`norn-backend`);
 - reviewer-owned draft comments and publish controls;
 - AI-assist runs (Claude, Codex, or OpenCode/DeepSeek) with local persistence;
 - local clone operations for branch sync, fixing, commit, and push flows;
@@ -91,14 +91,37 @@ Norn expects repository policy and review defaults in `.norn.yaml`.
 Compatibility files are still read during migration only (`.lachesi.yaml`,
 `.lachesi/`), with `.norn.yaml` and `.norn/` taking precedence.
 
-### Run GUI App (Tauri)
+### Develop or install the terminal workspace
+
+Install Rust, pnpm and Bun 1.3.8, then:
 
 ```sh
 pnpm install
-pnpm tauri dev --features desktop-bundle
+cd ui && bun install --frozen-lockfile && cd ..
+pnpm run dev
 ```
 
-This starts the full GUI desktop app with Tauri IPC wired end-to-end.
+`dev` builds the Rust backend and browser diff, then opens OpenTUI for the
+current repository. `pnpm run build` creates release Rust commands, a standalone
+OpenTUI executable and the browser assets used by `g` → `b`.
+
+```sh
+pnpm run install:local
+# Default destination: ~/.local/bin (override with NORN_INSTALL_PREFIX)
+norn
+```
+
+The installed commands include `norn`, `norn-tui`, `norn-backend`, `norn-ui`
+and compatibility aliases. The compiled client needs no external Bun runtime.
+Keep the binaries together and browser assets under `share/norn/browser-diff`.
+Noninteractive `norn`, `norn --help`, `norn --version` and CLI subcommands stay
+Rust-only. A bare Cargo build intentionally does not compile or install the UI;
+use the complete build/install commands above for interactive use.
+
+Tauri and Ratatui are temporarily retained as optional legacy adapters.
+`pnpm run legacy:desktop:build`, `pnpm tauri dev --features desktop-bundle`
+and `pnpm run legacy:tui` are explicit opt-ins. Their CI runs separately;
+ordinary builds never enable `custom-protocol` or require desktop libraries.
 
 ## Documentation
 
@@ -154,13 +177,13 @@ diff; automatic review uses the locally persisted choice. Codex and Claude Code
 still ask for their own narrowly scoped permission to run `norn review` outside
 the agent sandbox. Norn never edits either agent's permission settings.
 
-## CLI, App and TUI
+## CLI and terminal workspace
 
-Norn ships both a desktop app and terminal interfaces:
+The ordinary command distribution uses OpenTUI:
 
-- `norn`: review/repository CLI when subcommands are passed; no subcommand opens `norn-tui` by default.
+- `norn`: Rust review/repository CLI; no arguments on a terminal opens OpenTUI, while redirected invocation prints help.
 - `norn-tui`: terminal interface for PR browsing and review actions.
-- `norn-app`: launches the desktop GUI (`norn`/Tauri app).
+- `norn-app`: optional legacy desktop launcher, excluded from ordinary installation.
 
 Build and install the canonical CLI from source:
 
@@ -168,12 +191,12 @@ Build and install the canonical CLI from source:
 make install-local
 norn --version
 norn-tui --version
-norn-app --version
+norn-backend --version
 ```
 
 This installs durable executable files under `~/.local/bin`; it does not link
 back into `target/release`. Set `NORN_INSTALL_PREFIX=/absolute/prefix` to use a
-different `<prefix>/bin`. Component-specific installs remain available:
+different `<prefix>/bin`. The CLI/TUI convenience recipes install the same complete runtime:
 
 ```sh
 make cli-install
@@ -237,7 +260,10 @@ Run the core quality gates before submitting a change:
 pnpm install
 pnpm run typecheck
 pnpm run test
-pnpm run test:tauri
+pnpm run test:rust:core
+pnpm run ui:typecheck
+pnpm run ui:test
+pnpm run ui:frames:check
 pnpm run lint
 pnpm run build
 ```
@@ -253,17 +279,17 @@ pnpm run docs:build
 pnpm run docs:deploy
 ```
 
-Local-only development can use the browser mock layer (for UI and review flow
-experiments) with `pnpm dev`.
+The optional legacy browser mock layer remains available with
+`pnpm run legacy:web:dev`; desktop adapter tests use `pnpm run test:tauri`.
 
 ## Architecture
 
-Norn is split into a React frontend and Rust/Tauri backend:
+Norn uses an OpenTUI React client and Rust stdio backend:
 
-- **Frontend:** React 19, TypeScript, Vite, Tailwind.
-- **Backend:** Tauri v2 with Rust commands over IPC.
+- **Frontend:** OpenTUI, React and TypeScript; Vite builds the browser diff.
+- **Backend:** Rust engine and versioned JSON messages over stdin/stdout.
 - **Providers:** Bitbucket Cloud and GitHub are handled server-side in Rust.
-- **State:** local React/Tauri state and local persistence for review models.
+- **State:** transient React presentation state and Rust-owned persistence.
 - **Storage:** settings and credentials are handled separately; review state is
   persisted locally in SQLite.
 

@@ -1404,3 +1404,27 @@ reconciliation now uses twenty too, without retrying writes or weakening uncerta
 state. Owned failed-fetch IPC fixture asserts refreshed HEAD and prints bounded
 operation diagnostics on failure. Local focused Rust and UI/root gates pass;
 Windows confirmation and actual integration remain pending.
+
+## 2026-10-14 — default headless/OpenTUI transition (plan 0076, pending merge)
+
+Maintainer explicitly supersedes desktop-default build instructions. Single
+writer paused hardening #396 as a draft and switched to a clean branch from
+merged #394/c5bcabf. Cargo defaults are empty; ordinary scripts build Rust
+commands/backend, compiled OpenTUI (including owned syntax entry), and browser
+diff. Local installer stages the complete adjacent pair; desktop is opt-in.
+Principal CI inspects the default graph without GUI system libraries; separate
+legacy lane retains explicit adapter checks. Release command archives include
+UI/backend/browser assets; no release is published by this work.
+Local evidence: default tree guard, 776 core tests, CLI/onboarding tests,
+318 UI tests, 223 native frames, production release build and isolated installed
+CLI/UI/worker/IPC/browser smoke pass. Actual compiled PTY editor handoff restores
+the terminal. Root typecheck/tests/tooling, Clippy and 17 Archgate checks pass.
+No Norn review, providers, user settings or stored credentials were used.
+Await exact-head CI and actual squash merge before marking shipped. ADR0020
+remains Accepted; optional adapter deletion and full upgrade proof remain later.
+
+Integration audit: numbering/INDEX/current links and ADR0020 sections pass;
+no ADR overlap with paused #396 and no duplicate plan numbers. Existing audit
+finding: ADR0011 has no linked plan/done coverage; legacy coordination scaffold
+is retained under recorded repository conventions. These are outside this
+build transition. Plan0074's merged receipt is already prepared in paused #396.

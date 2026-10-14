@@ -23,23 +23,37 @@ function command(path, version, succeeds = true) {
 function fixture(version = "1.0.0") {
   const root = mkdtempSync(join(tmpdir(), "norn-install-"));
   const sourceDirectory = join(root, "build");
-  const prefix = join(root, "prefix");
+  const prefix = join(root, "prefix with spaces");
+  const uiDirectory = join(root, "ui build");
+  mkdirSync(uiDirectory);
+  command(join(uiDirectory, "norn-ui"), `norn-ui ${version}`);
   const browserAssetsDirectory = join(root, "browser-diff");
   mkdirSync(sourceDirectory);
   mkdirSync(join(browserAssetsDirectory, "assets"), { recursive: true });
   writeFileSync(join(browserAssetsDirectory, "browser-diff.html"), '<div id="root"></div>');
   writeFileSync(join(browserAssetsDirectory, "assets", "viewer.js"), "export {};");
-  for (const name of ["norn", "norn-tui", "norn-app", "lachesi", "lac"]) {
+  for (const name of ["norn", "norn-backend", "norn-tui", "norn-app", "lachesi", "lac"]) {
     command(join(sourceDirectory, name), `${name} ${version}`);
   }
-  return { root, sourceDirectory, browserAssetsDirectory, prefix };
+  return { root, sourceDirectory, browserAssetsDirectory, prefix, uiDirectory };
 }
 
 test("installs durable executable files and upgrades every selected command", () => {
   const context = fixture();
   try {
     const first = installLocal(context);
-    assert.deepEqual(first.commands, ["norn", "norn-tui", "norn-app", "lachesi", "lac"]);
+    assert.deepEqual(first.commands, [
+      "norn",
+      "norn-backend",
+      "norn-ui",
+      "norn-tui",
+      "lachesi",
+      "lac",
+    ]);
+    assert.equal(
+      lstatSync(join(context.prefix, "bin", "norn-app"), { throwIfNoEntry: false }),
+      undefined,
+    );
     assert.equal(
       readFileSync(
         join(context.prefix, "share", "norn", "browser-diff", "browser-diff.html"),
@@ -56,7 +70,10 @@ test("installs durable executable files and upgrades every selected command", ()
 
     mkdirSync(context.sourceDirectory);
     for (const name of first.commands) {
-      command(join(context.sourceDirectory, name), `${name} 2.0.0`);
+      command(
+        join(name === "norn-ui" ? context.uiDirectory : context.sourceDirectory, name),
+        `${name} 2.0.0`,
+      );
     }
     writeFileSync(
       join(context.browserAssetsDirectory, "browser-diff.html"),

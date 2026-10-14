@@ -4,22 +4,22 @@
 # package.json / cargo / tauri commands so package.json stays authoritative.
 
 .DEFAULT_GOAL := help
-.PHONY: help dev tauri-dev install-local cli-build cli-install tui tui-build tui-install build typecheck lint test test-tauri ui-typecheck ui-test ui-native-workflow ui-repository-operations ui-frames-check evaluate check bundle-windows
+.PHONY: help dev tauri-dev install-local cli-build cli-install tui tui-build tui-install build typecheck lint test test-tauri ui-typecheck ui-test ui-native-workflow ui-repository-operations ui-frames-check evaluate check bundle-windows legacy-desktop-build legacy-tui core-no-gui
 
 # List available recipes (runs by default).
 help:
-	@echo "Norn recipes: dev tauri-dev install-local cli-build cli-install tui tui-build tui-install build typecheck lint test test-tauri ui-typecheck ui-test ui-native-workflow ui-repository-operations ui-frames-check evaluate check bundle-windows"
+	@echo "Norn recipes: dev tauri-dev install-local cli-build cli-install tui tui-build tui-install build typecheck lint test test-tauri ui-typecheck ui-test ui-native-workflow ui-repository-operations ui-frames-check evaluate check bundle-windows legacy-desktop-build legacy-tui core-no-gui"
 
-# Start the Vite dev server (browser mock IPC).
+# Start OpenTUI with the headless backend and browser diff assets.
 dev:
 	pnpm run dev
 
-# Start the full Tauri app (real IPC).
+# Legacy only: start the retained Tauri app (explicit desktop feature).
 # Uses credentials from the OS keychain; if none are stored, BITBUCKET_USERNAME and BITBUCKET_TOKEN env vars are used as a dev fallback.
 tauri-dev:
 	pnpm tauri dev --features desktop-bundle
 
-# Build and durably install CLI, TUI, desktop launcher, and compatibility aliases.
+# Build and install Rust CLI/backend, standalone OpenTUI and browser diff.
 install-local:
 	pnpm run install:local
 
@@ -27,7 +27,7 @@ install-local:
 cli-build:
 	pnpm run cli:build
 
-# Durably install `norn`, `norn-app`, and the deprecated `lachesi` alias.
+# Install the complete OpenTUI command distribution (no desktop launcher).
 cli-install:
 	pnpm run cli:install
 
@@ -39,11 +39,11 @@ tui:
 tui-build:
 	pnpm run tui:build
 
-# Durably install `norn-tui` and the deprecated `lac` alias.
+# Install the complete OpenTUI command distribution and compatibility aliases.
 tui-install:
 	pnpm run tui:install
 
-# Typecheck + Vite production build.
+# Build Rust CLI/backend, standalone OpenTUI and browser diff.
 build:
 	pnpm run build
 
@@ -100,3 +100,15 @@ ui-native-workflow:
 # Approved Git operations using disposable clones and loopback-only bare remotes.
 ui-repository-operations:
 	pnpm run ui:repository-operations
+
+# Explicit legacy desktop build; never part of ordinary build/install.
+legacy-desktop-build:
+	pnpm run legacy:desktop:build
+
+# Explicit archived Ratatui terminal frontend.
+legacy-tui:
+	pnpm run legacy:tui
+
+# Verify the default Rust dependency graph contains no GUI/terminal toolkit.
+core-no-gui:
+	node scripts/verify-core-no-gui-deps.mjs
