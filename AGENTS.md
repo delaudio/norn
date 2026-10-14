@@ -131,10 +131,10 @@ state and history; LOCKS discipline is not in use.
 
 ## Key architecture notes
 
-All external provider calls go through Rust commands behind Tauri IPC. The
-frontend calls `tauriCall(commandName, args)` from `src/lib/tauri.ts`; every
-registered Rust command in `src-tauri/src/lib.rs` must have a matching mock
-handler in `src/mock-tauri/mock-handlers.ts`.
+All provider access stays in Rust. OpenTUI uses the generated stdio protocol.
+The optional legacy desktop frontend calls `tauriCall(commandName, args)` from
+`src/lib/tauri.ts`; every registered desktop command in `src-tauri/src/lib.rs`
+must retain its mock handler in `src/mock-tauri/mock-handlers.ts`.
 
 When invoking a user-installed CLI binary from Rust Tauri commands, use a zsh
 login shell:
@@ -171,7 +171,7 @@ repo config, examples, screenshots, or fixtures.
 CSS custom properties in this project are hex color values, not HSL component
 tuples. Use `fill="var(--primary)"`, not `fill="hsl(var(--primary))"`.
 
-Navigation is state-driven through the `AppSelection` union type, not React
+Legacy desktop navigation is state-driven through `AppSelection`, not React
 Router. Browser dev and Storybook use the mock IPC layer in
 `src/mock-tauri/`.
 

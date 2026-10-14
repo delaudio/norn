@@ -27,7 +27,8 @@ tui = [
     "dep:crossterm",
     "dep:ctrlc",
 ]
-# This feature is used for production builds or when a dev server is not specified, DO NOT REMOVE!!
+# Explicit legacy desktop bundles only: this transitively enables Tauri.
+# Never pass it to ordinary CLI, backend, OpenTUI or service builds.
 custom-protocol = ["desktop", "tauri/custom-protocol"]
 desktop-bundle = ["desktop", "tui"]
 

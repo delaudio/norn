@@ -177,11 +177,11 @@ diff; automatic review uses the locally persisted choice. Codex and Claude Code
 still ask for their own narrowly scoped permission to run `norn review` outside
 the agent sandbox. Norn never edits either agent's permission settings.
 
-## CLI, App and TUI
+## CLI and terminal workspace
 
-Norn ships both a desktop app and terminal interfaces:
+The ordinary command distribution uses OpenTUI:
 
-- `norn`: review/repository CLI when subcommands are passed; no subcommand opens `norn-tui` by default.
+- `norn`: Rust review/repository CLI; no arguments on a terminal opens OpenTUI, while redirected invocation prints help.
 - `norn-tui`: terminal interface for PR browsing and review actions.
 - `norn-app`: optional legacy desktop launcher, excluded from ordinary installation.
 
@@ -191,12 +191,12 @@ Build and install the canonical CLI from source:
 make install-local
 norn --version
 norn-tui --version
-norn-app --version
+norn-backend --version
 ```
 
 This installs durable executable files under `~/.local/bin`; it does not link
 back into `target/release`. Set `NORN_INSTALL_PREFIX=/absolute/prefix` to use a
-different `<prefix>/bin`. Component-specific installs remain available:
+different `<prefix>/bin`. The CLI/TUI convenience recipes install the same complete runtime:
 
 ```sh
 make cli-install
