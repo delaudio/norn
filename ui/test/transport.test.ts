@@ -128,3 +128,62 @@ test("production local options remain pending beyond the native 30-second Git bu
     client.close();
   }
 }, 50_000);
+
+for (const scenario of ["oversized", "unterminated", "utf8", "direction", "schema"]) {
+  test(`invalid native ${scenario} output rejects pending work and reaps the backend once`, async () => {
+    const script = fileURLToPath(new URL("./fixtures/invalid-output-backend.ts", import.meta.url));
+    chmodSync(script, 0o755);
+    const transport = new ProcessBackendTransport(script, {
+      ...process.env,
+      NORN_OWNED_BAD_FRAME: scenario,
+    });
+    let notifications = 0;
+    let events = 0;
+    transport.onOperationEvent(() => events++);
+    const exited = new Promise<number | null>((resolve) =>
+      transport.onExit((exit) => {
+        notifications++;
+        resolve(exit.code);
+      }),
+    );
+    try {
+      await transport.start();
+      const first = transport.request("repository.status", {});
+      const second = transport.request("repository.status", {});
+      const errors = await Promise.allSettled([first, second]);
+      for (const result of errors) {
+        expect(result.status).toBe("rejected");
+        if (result.status === "rejected") {
+          expect(String(result.reason)).toContain("protocol");
+          expect(String(result.reason)).not.toContain("OWNED_PAYLOAD");
+        }
+      }
+      expect(await exited).toBe(0);
+      await transport.close();
+      await transport.close();
+      expect(notifications).toBe(1);
+      expect(events).toBe(0);
+      await expect(transport.request("repository.status", {})).rejects.toThrow("closed");
+    } finally {
+      await transport.close();
+    }
+  });
+}
+
+test("a stalled native handshake rejects and reaps its owned backend", async () => {
+  const script = fileURLToPath(new URL("./fixtures/invalid-output-backend.ts", import.meta.url));
+  chmodSync(script, 0o755);
+  const transport = new ProcessBackendTransport(script, {
+    ...process.env,
+    NORN_OWNED_BAD_FRAME: "stalled-handshake",
+  });
+  const exited = new Promise<number | null>((resolve) =>
+    transport.onExit((exit) => resolve(exit.code)),
+  );
+  try {
+    await expect(transport.start()).rejects.toThrow("handshake timed out");
+    expect(await exited).toBe(0);
+  } finally {
+    await transport.close();
+  }
+}, 10000);

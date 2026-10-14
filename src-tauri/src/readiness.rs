@@ -1527,7 +1527,7 @@ fn resolve_command_path(command: &str) -> (bool, Option<String>) {
 }
 
 fn run_git_command(path: &Path, command_name: &str, args: &[&str]) -> Result<String, String> {
-    let mut command = Command::new("/usr/bin/git");
+    let mut command = Command::new(crate::local_repo::trusted_git_path()?);
     command.arg("-C");
     command.arg(path);
     command.arg(command_name);
@@ -1656,33 +1656,39 @@ mod tests {
     }
 
     fn init_git_repo(path: &PathBuf) {
-        std::process::Command::new("/usr/bin/git")
-            .arg("-C")
-            .arg(path)
-            .args(["init", "--initial-branch", "main"])
-            .output()
-            .expect("git init");
+        std::process::Command::new(
+            crate::local_repo::trusted_git_path().expect("trusted fixture Git"),
+        )
+        .arg("-C")
+        .arg(path)
+        .args(["init", "--initial-branch", "main"])
+        .output()
+        .expect("git init");
         fs::write(path.join("README.md"), "ready\n").expect("write README");
-        std::process::Command::new("/usr/bin/git")
-            .arg("-C")
-            .arg(path)
-            .args(["add", "README.md"])
-            .output()
-            .expect("git add");
-        std::process::Command::new("/usr/bin/git")
-            .arg("-C")
-            .arg(path)
-            .args([
-                "-c",
-                "user.email=ci@example.com",
-                "-c",
-                "user.name=CI",
-                "commit",
-                "-m",
-                "init",
-            ])
-            .output()
-            .expect("git commit");
+        std::process::Command::new(
+            crate::local_repo::trusted_git_path().expect("trusted fixture Git"),
+        )
+        .arg("-C")
+        .arg(path)
+        .args(["add", "README.md"])
+        .output()
+        .expect("git add");
+        std::process::Command::new(
+            crate::local_repo::trusted_git_path().expect("trusted fixture Git"),
+        )
+        .arg("-C")
+        .arg(path)
+        .args([
+            "-c",
+            "user.email=ci@example.com",
+            "-c",
+            "user.name=CI",
+            "commit",
+            "-m",
+            "init",
+        ])
+        .output()
+        .expect("git commit");
     }
 
     #[test]
@@ -1730,17 +1736,19 @@ mod tests {
     fn doctor_json_distinguishes_warn_as_exit_one() {
         let repo = temp_repo();
         init_git_repo(&repo);
-        std::process::Command::new("/usr/bin/git")
-            .arg("-C")
-            .arg(&repo)
-            .args([
-                "remote",
-                "add",
-                "origin",
-                "https://github.com/example/repo.git",
-            ])
-            .output()
-            .expect("git remote add");
+        std::process::Command::new(
+            crate::local_repo::trusted_git_path().expect("trusted fixture Git"),
+        )
+        .arg("-C")
+        .arg(&repo)
+        .args([
+            "remote",
+            "add",
+            "origin",
+            "https://github.com/example/repo.git",
+        ])
+        .output()
+        .expect("git remote add");
         fs::write(repo.join("next.txt"), "untracked\n").expect("write untracked");
 
         let mut stdout = Vec::new();
@@ -1795,17 +1803,19 @@ mod tests {
     fn doctor_detects_untracked_files_and_dirty_tree() {
         let repo = temp_repo();
         init_git_repo(&repo);
-        std::process::Command::new("/usr/bin/git")
-            .arg("-C")
-            .arg(&repo)
-            .args([
-                "remote",
-                "add",
-                "origin",
-                "https://github.com/example/repo.git",
-            ])
-            .output()
-            .expect("git remote add");
+        std::process::Command::new(
+            crate::local_repo::trusted_git_path().expect("trusted fixture Git"),
+        )
+        .arg("-C")
+        .arg(&repo)
+        .args([
+            "remote",
+            "add",
+            "origin",
+            "https://github.com/example/repo.git",
+        ])
+        .output()
+        .expect("git remote add");
         fs::write(repo.join("next.txt"), "untracked\n").expect("write untracked");
 
         let mut report = collect_report(&repo, false);
@@ -1831,17 +1841,19 @@ mod tests {
     fn doctor_reports_legacy_and_canonical_config_precedence_issue() {
         let repo = temp_repo();
         init_git_repo(&repo);
-        std::process::Command::new("/usr/bin/git")
-            .arg("-C")
-            .arg(&repo)
-            .args([
-                "remote",
-                "add",
-                "origin",
-                "https://github.com/example/repo.git",
-            ])
-            .output()
-            .expect("git remote add");
+        std::process::Command::new(
+            crate::local_repo::trusted_git_path().expect("trusted fixture Git"),
+        )
+        .arg("-C")
+        .arg(&repo)
+        .args([
+            "remote",
+            "add",
+            "origin",
+            "https://github.com/example/repo.git",
+        ])
+        .output()
+        .expect("git remote add");
         fs::write(repo.join(".norn.yaml"), "version: 0.1\n").expect("write norn");
         fs::write(repo.join(".lachesi.yaml"), "version: 0.1\n").expect("write lachesi");
 
@@ -1861,17 +1873,19 @@ mod tests {
     fn doctor_reports_unapproved_legacy_name_occurrences() {
         let repo = temp_repo();
         init_git_repo(&repo);
-        std::process::Command::new("/usr/bin/git")
-            .arg("-C")
-            .arg(&repo)
-            .args([
-                "remote",
-                "add",
-                "origin",
-                "https://github.com/example/repo.git",
-            ])
-            .output()
-            .expect("git remote add");
+        std::process::Command::new(
+            crate::local_repo::trusted_git_path().expect("trusted fixture Git"),
+        )
+        .arg("-C")
+        .arg(&repo)
+        .args([
+            "remote",
+            "add",
+            "origin",
+            "https://github.com/example/repo.git",
+        ])
+        .output()
+        .expect("git remote add");
         fs::write(repo.join("README.md"), "# Welcome to lachesi\n").expect("legacy readme");
 
         let report = collect_report(&repo, false);
@@ -1885,17 +1899,19 @@ mod tests {
     fn doctor_allows_intentional_legacy_artifacts() {
         let repo = temp_repo();
         init_git_repo(&repo);
-        std::process::Command::new("/usr/bin/git")
-            .arg("-C")
-            .arg(&repo)
-            .args([
-                "remote",
-                "add",
-                "origin",
-                "https://github.com/example/repo.git",
-            ])
-            .output()
-            .expect("git remote add");
+        std::process::Command::new(
+            crate::local_repo::trusted_git_path().expect("trusted fixture Git"),
+        )
+        .arg("-C")
+        .arg(&repo)
+        .args([
+            "remote",
+            "add",
+            "origin",
+            "https://github.com/example/repo.git",
+        ])
+        .output()
+        .expect("git remote add");
         fs::write(repo.join(".lachesi.yaml"), "version: 0.1\n").expect("legacy config");
 
         let report = collect_report(&repo, false);
@@ -1976,17 +1992,19 @@ mod tests {
     fn doctor_detects_github_and_bitbucket_remote_provider() {
         let repo = temp_repo();
         init_git_repo(&repo);
-        std::process::Command::new("/usr/bin/git")
-            .arg("-C")
-            .arg(&repo)
-            .args([
-                "remote",
-                "add",
-                "origin",
-                "https://github.com/example/repo.git",
-            ])
-            .output()
-            .expect("git remote add");
+        std::process::Command::new(
+            crate::local_repo::trusted_git_path().expect("trusted fixture Git"),
+        )
+        .arg("-C")
+        .arg(&repo)
+        .args([
+            "remote",
+            "add",
+            "origin",
+            "https://github.com/example/repo.git",
+        ])
+        .output()
+        .expect("git remote add");
         let github_report = collect_report(&repo, false);
         assert_eq!(
             github_report
@@ -2007,17 +2025,19 @@ mod tests {
             "example"
         );
 
-        std::process::Command::new("/usr/bin/git")
-            .arg("-C")
-            .arg(&repo)
-            .args([
-                "remote",
-                "set-url",
-                "origin",
-                "https://bitbucket.org/example/repo.git",
-            ])
-            .output()
-            .expect("git remote set-url");
+        std::process::Command::new(
+            crate::local_repo::trusted_git_path().expect("trusted fixture Git"),
+        )
+        .arg("-C")
+        .arg(&repo)
+        .args([
+            "remote",
+            "set-url",
+            "origin",
+            "https://bitbucket.org/example/repo.git",
+        ])
+        .output()
+        .expect("git remote set-url");
         let bitbucket_report = collect_report(&repo, false);
         assert_eq!(
             bitbucket_report
@@ -2034,17 +2054,19 @@ mod tests {
     fn doctor_redacts_remote_credentials_in_report() {
         let repo = temp_repo();
         init_git_repo(&repo);
-        std::process::Command::new("/usr/bin/git")
-            .arg("-C")
-            .arg(&repo)
-            .args([
-                "remote",
-                "add",
-                "origin",
-                "https://ci:super-secret@github.com/example/repo.git",
-            ])
-            .output()
-            .expect("git remote add");
+        std::process::Command::new(
+            crate::local_repo::trusted_git_path().expect("trusted fixture Git"),
+        )
+        .arg("-C")
+        .arg(&repo)
+        .args([
+            "remote",
+            "add",
+            "origin",
+            "https://ci:super-secret@github.com/example/repo.git",
+        ])
+        .output()
+        .expect("git remote add");
         let report = collect_report(&repo, false);
         let url = &report
             .repository
@@ -2060,17 +2082,19 @@ mod tests {
     fn doctor_detects_repository_evidence_in_a_monorepo_shape() {
         let repo = temp_repo();
         init_git_repo(&repo);
-        std::process::Command::new("/usr/bin/git")
-            .arg("-C")
-            .arg(&repo)
-            .args([
-                "remote",
-                "add",
-                "origin",
-                "https://github.com/example/repo.git",
-            ])
-            .output()
-            .expect("git remote add");
+        std::process::Command::new(
+            crate::local_repo::trusted_git_path().expect("trusted fixture Git"),
+        )
+        .arg("-C")
+        .arg(&repo)
+        .args([
+            "remote",
+            "add",
+            "origin",
+            "https://github.com/example/repo.git",
+        ])
+        .output()
+        .expect("git remote add");
 
         fs::create_dir_all(repo.join("packages/frontend")).expect("create package dir");
         fs::write(repo.join("Cargo.toml"), "[package]\nname = \"root\"\n").expect("write cargo");
@@ -2121,17 +2145,19 @@ mod tests {
     fn doctor_with_no_repository_config_marks_missing_config_as_present_but_not_fatal() {
         let repo = temp_repo();
         init_git_repo(&repo);
-        std::process::Command::new("/usr/bin/git")
-            .arg("-C")
-            .arg(&repo)
-            .args([
-                "remote",
-                "add",
-                "origin",
-                "https://github.com/example/repo.git",
-            ])
-            .output()
-            .expect("git remote add");
+        std::process::Command::new(
+            crate::local_repo::trusted_git_path().expect("trusted fixture Git"),
+        )
+        .arg("-C")
+        .arg(&repo)
+        .args([
+            "remote",
+            "add",
+            "origin",
+            "https://github.com/example/repo.git",
+        ])
+        .output()
+        .expect("git remote add");
 
         let report = collect_report(&repo, false);
         let config = report

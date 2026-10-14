@@ -1,0 +1,15 @@
+{
+  "type": "response",
+  "id": "owned-contract",
+  "ok": true,
+  "result": {
+    "version": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "settings": {
+      "repos": [],
+      "reviewProvider": "github",
+      "aiProvider": "claude",
+      "defaultDiffView": "unified",
+      "theme": "dark"
+    }
+  }
+}

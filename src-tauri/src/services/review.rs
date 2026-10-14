@@ -9124,12 +9124,12 @@ mod tests {
         assert_eq!(command.get_program(), "codex");
     }
 
-    fn assert_private_temp_dir(temp_dir: &tempfile::TempDir) {
+    fn assert_private_temp_dir(_temp_dir: &tempfile::TempDir) {
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
 
-            let mode = std::fs::metadata(temp_dir.path())
+            let mode = std::fs::metadata(_temp_dir.path())
                 .expect("private temp dir metadata")
                 .permissions()
                 .mode();

@@ -7,7 +7,7 @@ import type {
   WorkspaceDraft,
   WorkspaceValue,
 } from "../../../src/protocol/generated/protocol";
-import { FakeBackendTransport } from "./fakeTransport";
+import { FakeBackendTransport, type FakeTransportOptions } from "./fakeTransport";
 
 const hash = (value: unknown) =>
   new Bun.CryptoHasher("sha256").update(JSON.stringify(value)).digest("hex");
@@ -69,8 +69,9 @@ export class FakePublicationTransport extends FakeBackendTransport {
   >();
   private journal: PublicationJournalEntry[] = [];
   private applied = 0;
-  constructor(drafts = publicationFixtureDrafts) {
+  constructor(drafts = publicationFixtureDrafts, options: FakeTransportOptions = {}) {
     super({
+      ...options,
       workspaceRecords: {
         "drafts.github:synthetic/review/7": { kind: "drafts", value: structuredClone(drafts) },
       },

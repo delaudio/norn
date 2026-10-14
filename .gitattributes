@@ -1,0 +1,2 @@
+# Wire patch fixtures must retain LF on Windows; CRLF changes header bytes.
+*.patch text eol=lf

@@ -657,12 +657,15 @@ mod tests {
             .expect("git init");
         let oversized_repo = "x".repeat(MAX_LOCAL_REPO_GIT_OUTPUT_BYTES + 1);
         let remote = format!("https://github.com/delaudio/{oversized_repo}");
-        Command::new(test_git())
-            .arg("-C")
-            .arg(&path)
-            .args(["remote", "add", "origin", &remote])
-            .output()
-            .expect("git remote add");
+        // Do not put a65KiB remote in argv: Windows command lines are smaller
+        // than the output bound being tested. Seed the owned config directly.
+        use std::io::Write;
+        let mut config = fs::OpenOptions::new()
+            .append(true)
+            .open(path.join(".git/config"))
+            .expect("owned Git config");
+        writeln!(config, "\n[remote \"origin\"]\n\turl = {remote}")
+            .expect("oversized owned origin");
 
         let error = git_origin_matches(&path, ReviewProvider::Github, "delaudio", &oversized_repo)
             .expect_err("oversized remote output");

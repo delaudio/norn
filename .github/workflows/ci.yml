@@ -95,13 +95,26 @@ jobs:
           bun run frames:check
           bun test
 
+      - name: Measure bounded diff navigation under streaming load
+        run: bun run ui/scripts/streaming-diff-bench.ts streaming-diff.json
+
+      - name: Preserve native frame failures and streaming measurements
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: opentui-hardening
+          path: |
+            streaming-diff.json
+            ui/storybook/visual-artifacts/
+          if-no-files-found: ignore
+
   native-workflow:
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -123,6 +136,15 @@ jobs:
       - name: Build headless backend and command binary
         run: cargo build --locked --manifest-path src-tauri/Cargo.toml --no-default-features --bin norn-backend --bin norn
 
+      - name: Build the browser assets exercised by native stdio tests
+        run: |
+          corepack enable
+          pnpm install --frozen-lockfile
+          pnpm run browser-diff:build
+
+      - name: Run complete core, CLI and stdio regression suites without GUI features
+        run: cargo test --locked --manifest-path src-tauri/Cargo.toml --no-default-features -- --test-threads=4
+
       - name: Exercise native local capture, review, cancellation and restart
         run: bun run ui/scripts/check-local-workflow.tsx
 
@@ -137,3 +159,21 @@ jobs:
 
       - name: Exercise real terminal editor handoff and restoration
         run: bun run ui/scripts/check-editor-workflow.ts
+
+  service-image:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Build and exercise the Rust-only service image
+        run: |
+          docker build --file Dockerfile.service --tag norn-service:ci .
+          docker run --rm norn-service:ci --version
+          docker run --rm norn-service:ci --help
+          docker run --rm norn-service:ci service smoke
+          task_service_container=$(docker run --detach --rm norn-service:ci)
+          trap 'docker stop --time 2 "$task_service_container" >/dev/null' EXIT
+          docker exec "$task_service_container" norn service healthcheck
+          docker run --rm --entrypoint /bin/sh norn-service:ci -ec 'test ! -e /usr/local/bin/norn-ui; ! command -v bun; ! command -v node; ! dpkg-query -W libwebkit2gtk-4.1-0 libgtk-3-0; test -f /usr/local/share/norn/agent-skills/norn-review/SKILL.md'

@@ -3216,6 +3216,12 @@ review:
         let error = crate::runtime_identity::rename_directory_noclobber(&staged, &target)
             .expect_err("concurrent target must not be replaced");
 
+        // Windows directory rename reports ERROR_ACCESS_DENIED for an existing
+        // nonempty destination. The unchanged source/target assertions below
+        // are the no-clobber guarantee; don't demand a Unix errno on Windows.
+        #[cfg(windows)]
+        assert_eq!(error.raw_os_error(), Some(5));
+        #[cfg(not(windows))]
         assert!(matches!(
             error.kind(),
             std::io::ErrorKind::AlreadyExists | std::io::ErrorKind::Other

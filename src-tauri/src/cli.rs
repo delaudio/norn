@@ -2633,33 +2633,39 @@ prompt:
     #[test]
     fn doctor_json_returns_status_and_schema() {
         let repo = temp_repo();
-        std::process::Command::new("/usr/bin/git")
-            .arg("-C")
-            .arg(&repo)
-            .args(["init", "--initial-branch", "main"])
-            .output()
-            .expect("git init");
+        std::process::Command::new(
+            crate::local_repo::trusted_git_path().expect("trusted fixture Git"),
+        )
+        .arg("-C")
+        .arg(&repo)
+        .args(["init", "--initial-branch", "main"])
+        .output()
+        .expect("git init");
         fs::write(repo.join("README.md"), "hello\n").expect("write readme");
-        std::process::Command::new("/usr/bin/git")
-            .arg("-C")
-            .arg(&repo)
-            .args(["add", "README.md"])
-            .output()
-            .expect("git add");
-        std::process::Command::new("/usr/bin/git")
-            .arg("-C")
-            .arg(&repo)
-            .args([
-                "-c",
-                "user.email=ci@example.com",
-                "-c",
-                "user.name=CI",
-                "commit",
-                "-m",
-                "init",
-            ])
-            .output()
-            .expect("git commit");
+        std::process::Command::new(
+            crate::local_repo::trusted_git_path().expect("trusted fixture Git"),
+        )
+        .arg("-C")
+        .arg(&repo)
+        .args(["add", "README.md"])
+        .output()
+        .expect("git add");
+        std::process::Command::new(
+            crate::local_repo::trusted_git_path().expect("trusted fixture Git"),
+        )
+        .arg("-C")
+        .arg(&repo)
+        .args([
+            "-c",
+            "user.email=ci@example.com",
+            "-c",
+            "user.name=CI",
+            "commit",
+            "-m",
+            "init",
+        ])
+        .output()
+        .expect("git commit");
 
         let mut stdout = Vec::new();
         let mut stderr = Vec::new();

@@ -67,3 +67,12 @@ the original patch instead of crashing the viewer.
 
 Existing native provider reads/snapshots and read-only `local.options` IPC.
 Packaging/install and final Tauri/Ratatui deletion remain #308/#309.
+
+## Shipped
+
+PR #394 squash-merged to main at c5bcabf6b1cdade2accf01b172b5511dc5fe6ce9
+on 2026-10-14. Exact source fa61cd4badccffd6d0984dffbfabbcaf282d4c15
+passed all eight CI checks, including actual native macOS/Linux/Windows workflows
+and the Windows reconciliation correction. Root typecheck, 127 tests/tooling,
+Archgate17, UI318 tests and223 native frames passed locally. ADR0020 remains
+Accepted until packaging/cutover.

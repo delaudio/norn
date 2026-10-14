@@ -1098,6 +1098,34 @@ fn fake_review_engine_streams_deterministic_events() {
     assert_eq!(succeeded["event"]["kind"], "state");
 }
 
+// Shell scripts are not executable agent fixtures on Windows. Compile the same
+// std-only peer natively; keep actual spawning/cancellation assertions on all OS.
+fn owned_inline_agent(directory: &Path) -> std::path::PathBuf {
+    let binary = directory.join(if cfg!(windows) {
+        "owned-agent.exe"
+    } else {
+        "owned-agent"
+    });
+    let output = Command::new("rustc")
+        .args([
+            "--edition=2021",
+            concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/tests/fixtures/owned-inline-agent.rs"
+            ),
+            "-o",
+        ])
+        .arg(&binary)
+        .output()
+        .expect("compile owned agent");
+    assert!(
+        output.status.success(),
+        "owned agent compilation: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    binary
+}
+
 #[test]
 fn inline_review_streams_and_succeeds_with_a_fake_agent() {
     let repo = temp_repo();
@@ -1108,17 +1136,7 @@ fn inline_review_streams_and_succeeds_with_a_fake_agent() {
 
     let data_dir = tempfile::tempdir().expect("data dir");
     let agent_dir = tempfile::tempdir().expect("agent dir");
-    let agent_path = agent_dir.path().join("fake-claude");
-    let script = r#"#!/bin/sh
-printf '%s\n' '{"result":"No review findings were produced.","session_id":"fake-session"}'
-"#;
-    std::fs::write(&agent_path, script).expect("write agent");
-    let mut perms = std::fs::metadata(&agent_path)
-        .expect("metadata")
-        .permissions();
-    use std::os::unix::fs::PermissionsExt;
-    perms.set_mode(0o755);
-    std::fs::set_permissions(&agent_path, perms).expect("chmod");
+    let agent_path = owned_inline_agent(agent_dir.path());
 
     let mut backend = Backend::spawn_configured_env(
         repo.path(),
@@ -1182,20 +1200,7 @@ fn inline_review_can_be_cancelled() {
     let agent_dir = tempfile::tempdir().expect("agent dir");
     let started_marker = agent_dir.path().join("started");
     let done_marker = agent_dir.path().join("done");
-    let agent_path = agent_dir.path().join("slow-claude");
-    let script = r#"#!/bin/sh
-if [ -n "$NORN_FAKE_STARTED" ]; then printf 'up' > "$NORN_FAKE_STARTED"; fi
-sleep 10
-if [ -n "$NORN_FAKE_DONE" ]; then printf 'done' > "$NORN_FAKE_DONE"; fi
-printf '%s\n' '{"result":"late","session_id":"fake-session"}'
-"#;
-    std::fs::write(&agent_path, script).expect("write agent");
-    let mut perms = std::fs::metadata(&agent_path)
-        .expect("metadata")
-        .permissions();
-    use std::os::unix::fs::PermissionsExt;
-    perms.set_mode(0o755);
-    std::fs::set_permissions(&agent_path, perms).expect("chmod");
+    let agent_path = owned_inline_agent(agent_dir.path());
 
     let mut backend = Backend::spawn_configured_env(
         repo.path(),

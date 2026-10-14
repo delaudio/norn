@@ -125,7 +125,11 @@ const open = async () => {
   clients.add(client);
   const store = new ShellStore();
   await store.connect(client);
-  assert.equal(store.getSnapshot().status, "ready");
+  assert.equal(
+    store.getSnapshot().status,
+    "ready",
+    store.getSnapshot().error ?? "Owned workflow did not connect",
+  );
   const renderer = await createTestRenderer({ width: 120, height: 30 });
   const app = mountApp(renderer.renderer, store, client);
   const tick = async () => {

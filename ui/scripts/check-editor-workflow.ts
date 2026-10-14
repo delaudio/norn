@@ -13,7 +13,14 @@ assert(
     : "Python 3 is required for owned PTY tests",
 );
 const failures: unknown[] = [];
-for (const scenario of ["success", "failure", "interrupt", "backend-death"]) {
+for (const scenario of [
+  "success",
+  "failure",
+  "interrupt",
+  "backend-death",
+  "resize",
+  "ui-interrupt",
+]) {
   const command: string[] = windows
     ? [
         driver,

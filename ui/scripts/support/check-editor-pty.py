@@ -1,10 +1,10 @@
 """Production OpenTUI + Rust backend in a dedicated controlling POSIX PTY.
 Never attaches to the user's terminal or reads their configuration.
 """
-import argparse, errno, fcntl, json, os, pathlib, pty, re, select, shutil, signal, struct, subprocess, tempfile, termios, time
+import argparse, errno, fcntl, json, os, pathlib, pty, re, select, shutil, signal, struct, subprocess, sys, tempfile, termios, time
 parser = argparse.ArgumentParser()
 parser.add_argument('--root', required=True)
-parser.add_argument('--case', choices=['success','failure','interrupt','backend-death'], default='success')
+parser.add_argument('--case', choices=['success','failure','interrupt','backend-death','resize','ui-interrupt'], default='success')
 options = parser.parse_args()
 project = pathlib.Path(options.root).resolve()
 backend = project / 'src-tauri/target/debug/norn-backend'
@@ -40,6 +40,30 @@ with tempfile.TemporaryDirectory(prefix='norn-owned-editor-pty-') as owned:
             if time.monotonic()>deadline: raise AssertionError(label+'\n'+output.decode('utf-8','replace')[-12000:])
     try:
         wait(lambda: b'F8' in output,'Workspace did not render')
+        if options.case == 'ui-interrupt':
+            rows = subprocess.check_output(['/bin/ps','-axo','pid=,ppid=,command=']).decode().splitlines()
+            children = [int(parts[0]) for row in rows if len(parts := row.strip().split(None,2)) == 3 and int(parts[1]) == pid and parts[2] == str(backend)]
+            assert len(children) == 1, 'Expected exactly our owned backend child'
+            os.write(master,b'\x03')
+            deadline=time.monotonic()+8
+            while time.monotonic()<deadline:
+                pump();got,status=os.waitpid(pid,os.WNOHANG)
+                if got:
+                    exited=True;assert os.waitstatus_to_exitcode(status)==0, 'UI Ctrl+C exit: '+str(os.waitstatus_to_exitcode(status));break
+            assert exited,'UI Ctrl+C did not terminate'
+            for child in children:
+                try: os.kill(child,0)
+                except ProcessLookupError: pass
+                else: raise AssertionError('Owned backend survived UI Ctrl+C')
+            mask=termios.ICANON|termios.ECHO|termios.ISIG
+            assert initial[3]&mask==termios.tcgetattr(master)[3]&mask,'UI Ctrl+C did not restore terminal modes'
+            print('PASS ui-interrupt: real UI Ctrl+C, backend reaping and terminal restoration')
+            sys.exit(0)
+        if options.case == 'resize':
+            output.clear()
+            fcntl.ioctl(master,termios.TIOCSWINSZ,struct.pack('HHHH',25,90,0,0))
+            os.kill(pid,signal.SIGWINCH)
+            wait(lambda: b'F8' in output,'Workspace did not redraw after actual PTY resize')
         output.clear(); os.write(master,b'\x1b[19~')
         wait(lambda: source.name.encode() in output,'F8 explorer inventory did not render')
         os.write(master,b'\r'); wait(lambda: b'owned line one' in output,'Selected source did not render')
