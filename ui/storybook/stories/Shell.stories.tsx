@@ -397,3 +397,34 @@ export const RepositoryRecovery: Story = {
 export const CompactLongRepositoryApproval: Story = {
   args: { frameId: "repository-operations-long-preview-50x20" },
 };
+
+export const CurrentRepositoryGitHub: Story = {
+  args: { frameId: "current-repository-github-120x30" },
+};
+export const CompactCurrentRepositoryGitHub: Story = {
+  args: { frameId: "current-repository-github-50x15" },
+};
+export const CurrentRepositoryBitbucket: Story = {
+  args: { frameId: "current-repository-bitbucket-120x30" },
+};
+export const CompactCurrentRepositoryBitbucket: Story = {
+  args: { frameId: "current-repository-bitbucket-50x15" },
+};
+
+export const TerminalHomeDiffChoice: Story = {
+  args: { frameId: "terminal-home-diff-choice-120x30" },
+};
+export const CompactTerminalHomeDiffChoice: Story = {
+  args: { frameId: "terminal-home-diff-choice-50x15" },
+};
+export const TerminalHomeSettings: Story = { args: { frameId: "terminal-home-settings-120x30" } };
+export const CompactTerminalHomeSettings: Story = {
+  args: { frameId: "terminal-home-settings-50x15" },
+};
+export const TerminalHomeLocal: Story = { args: { frameId: "terminal-home-local-120x30" } };
+export const CompactTerminalHomeLocal: Story = { args: { frameId: "terminal-home-local-50x15" } };
+
+export const TerminalHomeReviewOutput: Story = { args: { frameId: "terminal-home-review-120x30" } };
+export const CompactTerminalHomeReviewOutput: Story = {
+  args: { frameId: "terminal-home-review-50x20" },
+};

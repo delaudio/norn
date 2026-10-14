@@ -1,3 +1,4 @@
+/** biome-ignore-all lint/a11y/noStaticElementInteractions: OpenTUI boxes are native terminal renderables; the shell provides keyboard equivalents for mouse focus. */
 import {
   CliRenderEvents,
   type ImageRenderProtocol,
@@ -39,6 +40,7 @@ import { startSyncScheduler } from "../syncScheduler";
 import type { DiffSyntax } from "../syntaxTypes";
 import { theme } from "../theme";
 import { WorkspaceStore } from "../workspaceStore";
+import { ClickableList } from "./ClickableList";
 import { ConversationPanel } from "./ConversationPanel";
 import { DataPanel } from "./DataPanel";
 import { DraftPanel } from "./DraftPanel";
@@ -52,6 +54,7 @@ import { ReferencePanel } from "./ReferencePanel";
 import { ReviewProfilesPanel } from "./ReviewProfilesPanel";
 import { SavedLocalPanel } from "./SavedLocalPanel";
 import { SettingsPanel } from "./SettingsPanel";
+import { TerminalHome } from "./TerminalHome";
 import { VirtualDiff } from "./VirtualDiff";
 import { WorkspacePanel } from "./WorkspacePanel";
 
@@ -72,6 +75,10 @@ function useShellInput(
   useKeyboard((key) => {
     if (
       key.defaultPrevented ||
+      (store.getSnapshot().terminalHomeOpen &&
+        !store.getSnapshot().localForm &&
+        !store.getSnapshot().savedLocal &&
+        !store.getSnapshot().profileOpen) ||
       store.getSnapshot().providerOpen ||
       store.getSnapshot().explorerOpen ||
       store.getSnapshot().settingsOpen ||
@@ -194,6 +201,32 @@ function useShellInput(
       return;
     }
     key.preventDefault();
+    if (store.getSnapshot().terminalLayout) {
+      if (["g", "escape", "f2"].includes(key.name)) {
+        store.showTerminalHome();
+        return;
+      }
+      if (key.name === "s") {
+        store.toggleSettings();
+        return;
+      }
+      if (key.name === "u") {
+        store.toggleDiffMode();
+        return;
+      }
+      if (key.name === "a") {
+        void store.startReview(client);
+        return;
+      }
+      if (key.name === "return") {
+        void store.loadSnapshot(client, store.getSnapshot().generation);
+        return;
+      }
+      if (key.name === "tab") {
+        store.toggleTerminalDiffFocus();
+        return;
+      }
+    }
     // Case-sensitive shortcuts must be handled before the lowercase branches
     // (h/l scroll, b browser, m settings, e expand, ...) that share the letter.
     if (key.sequence === "H" || key.name === "H") {
@@ -362,19 +395,23 @@ export function diffLines(text: string, highlight: number | null, side: "old" | 
   let oldLine = 0;
   let newLine = 0;
   let inHunk = false;
+  let oldRemaining = 0;
+  let newRemaining = 0;
   for (const raw of text.split("\n")) {
     let fg: string = theme.text;
     let highlighted = false;
     let kind: DiffLineKind = "context";
     let oldNumber: number | null = null;
     let newNumber: number | null = null;
-    const hunk = raw.match(/^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
+    const hunk = raw.match(/^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/);
     if (hunk) {
       fg = theme.muted;
       kind = "hunk";
       inHunk = true;
       oldLine = Number.parseInt(hunk[1] ?? "0", 10);
-      newLine = Number.parseInt(hunk[2] ?? "0", 10);
+      newLine = Number.parseInt(hunk[3] ?? "0", 10);
+      oldRemaining = Number(hunk[2] ?? 1);
+      newRemaining = Number(hunk[4] ?? 1);
     } else if (!inHunk) {
       // File headers and other pre-hunk metadata are not source lines.
       fg = theme.muted;
@@ -388,13 +425,15 @@ export function diffLines(text: string, highlight: number | null, side: "old" | 
       newNumber = newLine;
       highlighted = highlight !== null && side === "new" && newLine === highlight;
       newLine += 1;
+      newRemaining -= 1;
     } else if (raw.startsWith("-")) {
       fg = theme.error;
       kind = "del";
       oldNumber = oldLine;
       highlighted = highlight !== null && side === "old" && oldLine === highlight;
       oldLine += 1;
-    } else if (raw.startsWith(" ")) {
+      oldRemaining -= 1;
+    } else if (raw.startsWith(" ") || (raw === "" && oldRemaining > 0 && newRemaining > 0)) {
       kind = "context";
       oldNumber = oldLine;
       newNumber = newLine;
@@ -402,7 +441,9 @@ export function diffLines(text: string, highlight: number | null, side: "old" | 
         highlight !== null &&
         ((side === "new" && newLine === highlight) || (side === "old" && oldLine === highlight));
       oldLine += 1;
+      oldRemaining -= 1;
       newLine += 1;
+      newRemaining -= 1;
     }
     lines.push({ rawIndex: lines.length, text: raw, fg, highlighted, kind, oldNumber, newNumber });
   }
@@ -938,6 +979,7 @@ function ListPanel({
   selectedIndex,
   showDescription = false,
   showSelectionIndicator = true,
+  onPick,
 }: {
   id: string;
   title: string;
@@ -946,23 +988,28 @@ function ListPanel({
   selectedIndex: number;
   showDescription?: boolean;
   showSelectionIndicator?: boolean;
+  onPick?: (index: number) => void;
 }) {
   return (
     <>
       <text fg={focused ? theme.primary : theme.muted}>{title}</text>
-      <select
-        id={id}
-        flexGrow={1}
-        minHeight={0}
-        options={options}
-        selectedIndex={selectedIndex}
-        showDescription={showDescription}
-        showSelectionIndicator={showSelectionIndicator}
-        backgroundColor={theme.panel}
-        textColor={theme.text}
-        selectedBackgroundColor={theme.element}
-        selectedTextColor={theme.primary}
-      />
+      {onPick ? (
+        <ClickableList id={id} options={options} selectedIndex={selectedIndex} onSelect={onPick} />
+      ) : (
+        <select
+          id={id}
+          flexGrow={1}
+          minHeight={0}
+          options={options}
+          selectedIndex={selectedIndex}
+          showDescription={showDescription}
+          showSelectionIndicator={showSelectionIndicator}
+          backgroundColor={theme.panel}
+          textColor={theme.text}
+          selectedBackgroundColor={theme.element}
+          selectedTextColor={theme.primary}
+        />
+      )}
     </>
   );
 }
@@ -1133,7 +1180,7 @@ export function Shell({ store, client, quit }: ShellProps) {
   );
   const providers = useMemo(() => new ProviderStore(), []);
   const explorer = useMemo(() => new ExplorerStore(), []);
-  const explorerEntry = state.picker[state.selectedPicker];
+  const explorerEntry = state.picker[state.selectedPicker] ?? state.repositories[state.selected];
   const explorerProvider = explorerEntry?.provider;
   const explorerWorkspace = explorerEntry?.workspace;
   const explorerRepository = explorerEntry?.repo;
@@ -1158,11 +1205,11 @@ export function Shell({ store, client, quit }: ShellProps) {
   ]);
 
   useEffect(() => {
-    if (!state.providerOpen) return;
+    if (!state.providerOpen && !state.terminalLayout) return;
     const snapshot = store.getSnapshot();
     providers.load(client, snapshot.repositories, snapshot.picker, snapshot.providerReads);
     return () => providers.dispose();
-  }, [providers, client, store, state.providerOpen]);
+  }, [providers, client, store, state.providerOpen, state.terminalLayout]);
   const positions = useMemo(() => new DiffScrollPositions(), []);
   useEffect(() => () => positions.clear(), [positions]);
   useEffect(() => () => store.cancelSyntax(), [store]);
@@ -1281,11 +1328,12 @@ export function Shell({ store, client, quit }: ShellProps) {
     return () => data.dispose();
   }, [data, state.dataOpen]);
   const settings = useMemo(() => new SettingsStore(), []);
+  const settingsProvider = state.terminalLayout ? (state.repositories[0]?.provider ?? null) : null;
   useEffect(() => {
     if (!state.settingsOpen) return;
-    void settings.load(client);
+    void settings.load(client, settingsProvider, state.terminalLayout);
     return () => settings.dispose();
-  }, [settings, client, state.settingsOpen]);
+  }, [settings, client, state.settingsOpen, settingsProvider, state.terminalLayout]);
   useEffect(() => {
     if (!["accepted", "running"].includes(state.operation?.state ?? "")) return;
     const timer = setInterval(() => void store.pollOperation(), 1000);
@@ -1295,7 +1343,7 @@ export function Shell({ store, client, quit }: ShellProps) {
   const { width, height } = useTerminalDimensions();
   const fixScroll = useRef<ScrollBoxRenderable | null>(null);
   useShellInput(store, client, quit, scroll, fixScroll);
-  const wide = width >= 100;
+  const wide = width >= 100 && !state.terminalLayout;
 
   const diffLinesData = useMemo(() => {
     const lines = state.diff
@@ -1361,7 +1409,7 @@ export function Shell({ store, client, quit }: ShellProps) {
             })),
             selectedIndex: state.selectedThread,
           }
-        : state.focus === "files"
+        : state.focus === "files" || state.terminalLayout
           ? {
               id: "files-list",
               title: "FILES",
@@ -1491,8 +1539,33 @@ export function Shell({ store, client, quit }: ShellProps) {
     );
   if (state.dataOpen)
     return <DataPanel data={data} client={client} onClose={() => store.toggleData()} />;
-  if (state.settingsOpen)
-    return <SettingsPanel settings={settings} shell={store} client={client} />;
+  const terminalHome = (
+    <TerminalHome shell={store} providers={providers} client={client} quit={quit} />
+  );
+  if (state.settingsOpen) {
+    const panel = <SettingsPanel settings={settings} shell={store} client={client} />;
+    if (!state.terminalLayout) return panel;
+    const modalWidth = Math.min(90, Math.max(24, width - 4));
+    const modalHeight = Math.max(8, height - 4);
+    return (
+      <box width="100%" height="100%" backgroundColor={theme.background}>
+        {terminalHome}
+        <box
+          position="absolute"
+          left={Math.floor((width - modalWidth) / 2)}
+          top={2}
+          width={modalWidth}
+          height={modalHeight}
+          border
+          borderColor={theme.primary}
+          backgroundColor={theme.panel}
+        >
+          {panel}
+        </box>
+      </box>
+    );
+  }
+  if (state.terminalHomeOpen) return terminalHome;
 
   return (
     <box width="100%" height="100%" flexDirection="column" backgroundColor={theme.background}>
@@ -1575,6 +1648,11 @@ export function Shell({ store, client, quit }: ShellProps) {
           >
             <ListPanel
               id={compactPanel.id}
+              onPick={
+                state.terminalLayout && compactPanel.id === "files-list"
+                  ? (index) => store.clickTerminalFile(index)
+                  : undefined
+              }
               title={compactPanel.title}
               focused
               options={compactPanel.options}
@@ -1585,6 +1663,9 @@ export function Shell({ store, client, quit }: ShellProps) {
         )}
         <box
           id="detail"
+          onMouseDown={(event) => {
+            if (event.button === 0) store.clickTerminalDiff();
+          }}
           flexGrow={1}
           minWidth={0}
           paddingX={2}
@@ -1697,9 +1778,11 @@ export function Shell({ store, client, quit }: ShellProps) {
           {diffCollapsed ? "large diff · e expand  " : ""}
           {state.fixPreview
             ? "y approve · Esc/n dismiss · ↑/↓ scroll effects"
-            : wide
-              ? "F2 PRs · F4 local · F7 saved · F8 files · F6 profile · q quit · Tab pane · j/k move · i stage finding · d drafts · w refs · m settings · n prompt/viewed · s split · e expand · a fix · r reply · t threads · v chat · f filter · g group · x cancel · u sync · o conflicts · c commit · p push"
-              : "F2 PRs  F4 local  F7 saved  F8 files  F6 profile  j/k  ←/→  s  e  Tab  m settings  n prompt  i stage  d drafts  w refs  q"}
+            : state.terminalLayout
+              ? "g/Esc review · b browser diff · s settings · u split · Tab file/diff · j/k move · a AI review · F8 files · q quit"
+              : wide
+                ? "F2 PRs · F4 local · F7 saved · F8 files · F6 profile · q quit · Tab pane · j/k move · i stage finding · d drafts · w refs · m settings · n prompt/viewed · s split · e expand · a fix · r reply · t threads · v chat · f filter · g group · x cancel · u sync · o conflicts · c commit · p push"
+                : "F2 PRs  F4 local  F7 saved  F8 files  F6 profile  j/k  ←/→  s  e  Tab  m settings  n prompt  i stage  d drafts  w refs  q"}
         </text>
       </box>
     </box>

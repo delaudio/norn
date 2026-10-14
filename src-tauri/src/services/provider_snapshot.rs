@@ -267,7 +267,7 @@ impl Manager {
             section.content_sha256 = hash(&capture.patch.as_bytes()[section.start..section.end]);
         }
         if files.len() != capture.expected_count {
-            return Err(invalid());
+            return Err(format!("Provider diff contains {} file sections, but its inventory reports {}. Refresh the PR; no review was started.", files.len(), capture.expected_count));
         }
         if let Some(expected) = capture.expected_files {
             if expected.len() != files.len() {
@@ -288,7 +288,7 @@ impl Manager {
                         && (file.additions != section.file.additions
                             || file.deletions != section.file.deletions))
                 {
-                    return Err(invalid());
+                    return Err("Provider diff disagrees with its file inventory (paths, status or line counts). Refresh the PR; no review was started.".into());
                 }
             }
         }
@@ -605,6 +605,38 @@ pub(crate) mod tests {
                 offset: invalid_offset
             })
             .is_err());
+    }
+    #[test]
+    fn parses_actual_git_suppressed_empty_context() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join("old")).unwrap();
+        std::fs::create_dir(dir.path().join("new")).unwrap();
+        std::fs::write(dir.path().join("old/x"), "before\n\ntail\n").unwrap();
+        std::fs::write(dir.path().join("new/x"), "after\n\ntail\n").unwrap();
+        let output = std::process::Command::new("git")
+            .args([
+                "-c",
+                "diff.suppressBlankEmpty=true",
+                "diff",
+                "--no-index",
+                "--no-ext-diff",
+                "--",
+                "old/x",
+                "new/x",
+            ])
+            .current_dir(dir.path())
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(1));
+        let patch = String::from_utf8(output.stdout).unwrap();
+        assert!(patch.contains("\n\n tail\n"));
+        let sections = super::super::bitbucket::workspace_prs::snapshot_sections(&patch).unwrap();
+        assert_eq!(sections.len(), 1);
+        let (file, range) = sections[0].parts();
+        assert_eq!((file.additions, file.deletions), (1, 1));
+        assert_eq!(file.path, "new/x");
+        assert_eq!(file.old_path.as_deref(), Some("old/x"));
+        assert_eq!(&patch[range], patch);
     }
     #[test]
     fn rejects_truncated_contradictory_duplicate_and_hostile_patch_metadata() {

@@ -313,7 +313,8 @@ try {
     proxy.fail(true);
     const failed = await request({ kind: "fetch" });
     proxy.fail(false);
-    assert.equal(failed.state, "failed");
+    assert.equal(failed.state, "failed", JSON.stringify(failed));
+    assert.equal(failed.after?.headSha, expectedHead);
     assert.equal(runGit("rev-parse", "HEAD"), expectedHead);
     // Cancellation must settle before any later write, and cannot replay a job.
     proxy.delay(true);

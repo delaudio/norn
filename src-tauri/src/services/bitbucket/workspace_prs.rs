@@ -1300,6 +1300,117 @@ mod tests {
         }
     }
     #[test]
+    fn bitbucket_abbreviated_metadata_resolves_full_commits_and_fences_drift() {
+        use crate::services::provider_snapshot::Manager;
+        for fault in [
+            "none",
+            "prefix",
+            "repository",
+            "capture-drift",
+            "start-drift",
+        ] {
+            let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+            let server = Server::new(move |path, _| {
+                let value = if path.contains("/commit/") {
+                    let count = calls.fetch_add(1, Ordering::SeqCst);
+                    let source = path.contains("/Fork/Repo/");
+                    let prefix = if source { "a" } else { "b" }.repeat(12);
+                    let hash = if fault == "prefix" {
+                        "d".repeat(40)
+                    } else if (fault == "capture-drift" && count >= 2)
+                        || (fault == "start-drift" && count >= 4)
+                    {
+                        format!("{prefix}{}", "e".repeat(28))
+                    } else {
+                        if source { "a" } else { "b" }.repeat(40)
+                    };
+                    json!({"hash":hash,"repository":{"full_name":if fault == "repository" { "Foreign/Repo" } else if source { "Fork/Repo" } else { "Owner/Repo" }}})
+                } else if path.contains("/merge-base/") {
+                    assert!(path.contains(&"a".repeat(40)) && path.contains(&"b".repeat(40)));
+                    json!({"hash":"c".repeat(40)})
+                } else if path.contains("/diffstat/") {
+                    json!({"page":1,"values":[{"status":"modified","old":{"path":"x"},"new":{"path":"x"},"lines_added":1,"lines_removed":1}]})
+                } else if path.contains("/diff/") {
+                    return (
+                        200,
+                        String::new(),
+                        "diff --git a/x b/x\n--- a/x\n+++ b/x\n@@ -1 +1 @@\n-old\n+new\n".into(),
+                    );
+                } else {
+                    let mut value = bb(7, false);
+                    value["source"]["commit"]["hash"] = json!("a".repeat(12));
+                    value["destination"]["commit"]["hash"] = json!("b".repeat(12));
+                    value["source"]["repository"] = json!({"full_name":"Fork/Repo"});
+                    value
+                };
+                (200, String::new(), value.to_string())
+            });
+            let api = server.api(ReviewProvider::Bitbucket);
+            let capture = api.capture(DetailParams {
+                repository: identity(ReviewProvider::Bitbucket),
+                pr_id: 7,
+            });
+            if fault == "none" || fault == "start-drift" {
+                let manager = Manager::default();
+                let info = manager.insert(capture.unwrap()).unwrap();
+                assert_eq!(info.head_sha, "a".repeat(40));
+                assert_eq!(info.destination_sha, "b".repeat(40));
+                let recheck = api.recheck_snapshot(&manager.get(&info.snapshot).unwrap());
+                assert_eq!(recheck.is_ok(), fault == "none");
+            } else {
+                assert!(capture.is_err(), "accepted {fault}");
+            }
+        }
+    }
+    #[test]
+    fn bitbucket_snapshot_accepts_suppressed_empty_context_without_relaxing_inventory() {
+        use crate::services::provider_snapshot::Manager;
+        for fault in ["none", "truncated", "inventory"] {
+            let server = Server::new(move |path, _| {
+                if path.contains("/diff/") {
+                    let patch = if fault == "truncated" {
+                        "diff --git a/x b/x\n--- a/x\n+++ b/x\n@@ -1,3 +1,3 @@\n-old\n+new\n\n"
+                    } else {
+                        "diff --git a/x b/x\n--- a/x\n+++ b/x\n@@ -1,3 +1,3 @@\n-old\n+new\n\n tail\n"
+                    };
+                    return (200, String::new(), patch.into());
+                }
+                let value = if path.contains("/merge-base/") {
+                    json!({"hash":"c".repeat(40)})
+                } else if path.contains("/diffstat/") {
+                    assert!(path.contains("renames=true"));
+                    json!({"page":1,"values":[{"status":"modified","old":{"path":"x"},"new":{"path":"x"},"lines_added":if fault == "inventory" { 2 } else { 1 },"lines_removed":1}]})
+                } else {
+                    let mut value = bb(7, false);
+                    value["source"]["repository"] = json!({"full_name":"Fork/Repo"});
+                    value
+                };
+                (200, String::new(), value.to_string())
+            });
+            let result = server
+                .api(ReviewProvider::Bitbucket)
+                .capture(DetailParams {
+                    repository: identity(ReviewProvider::Bitbucket),
+                    pr_id: 7,
+                })
+                .and_then(|capture| Manager::default().insert(capture));
+            if fault == "none" {
+                assert_eq!(result.unwrap().file_count, 1);
+            } else {
+                let error = result.unwrap_err();
+                assert!(
+                    error.contains(if fault == "truncated" {
+                        "incomplete"
+                    } else {
+                        "inventory"
+                    }),
+                    "{error}"
+                );
+                assert!(!error.contains("old\n") && !error.contains("Fork/Repo"));
+            }
+        }
+    }
+    #[test]
     fn review_start_rechecks_owned_provider_metadata_without_recapturing_patch() {
         use crate::services::provider_snapshot::Manager;
         for provider in [ReviewProvider::Github, ReviewProvider::Bitbucket] {

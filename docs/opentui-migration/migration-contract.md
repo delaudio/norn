@@ -9,6 +9,47 @@ command behavior, supported platforms, measurement, and the per-capability
 parity matrix. It is an internal artefact: it may reference ADR and issue
 numbers and must not appear in product strings.
 
+## Product baseline revision (2026-10-13)
+
+The maintainer explicitly directed: "TUI come riferimento; ritira la parità
+desktop". The shipped Ratatui TUI is the behavior reference. Default launch
+must show the current Git repository's PRs. Global repositories/history and
+working-tree capture are explicit secondary actions; they are not the home
+screen. Failure states must expose an actionable backend cause.
+
+The main screen uses an Under-style horizontal Open/Draft/Merged/Local filter
+menu at the top. AI review output occupies the right pane; the central column
+shows the PR/local-target list above the independent description. Each text
+pane scrolls independently; Tab/Shift+Tab cycles focus. Review and PR description
+use native OpenTUI Markdown, styled with the active dark/light theme. Remote
+code fences render without fetching additional language grammar assets. Settings opens as a modal
+with `s`. Mouse clicks select filters, PRs and diff files, focus panes and invoke
+explicit toolbar/settings/diff-choice actions; modal backgrounds stay fenced.
+The web viewer retains an expandable searchable file tree with file navigation.
+`Enter` loads the selected target without starting an agent; `a`
+explicitly starts AI review. `g` opens the diff-choice modal: `g` selects the
+native Git diff, `b` opens the authenticated browser diff viewer. In the diff,
+`g` or Escape returns to the same home filter and PR. `b` means the diff viewer,
+not the provider's PR page. Global history and the optional standalone provider
+browser must not replace this layout.
+
+Mandatory replication of Tauri-only workflows is retired. Existing native
+features and useful React components may stay; their existence does not require
+recreating the desktop dashboard or adding remaining desktop functions. This
+revision supersedes earlier retained-desktop wording in this document and
+#306/#361-#364. Desktop analytics, provider-less global history UX, Jira/Notion
+materialization and native GUI exporter parity are not cutover prerequisites.
+No new desktop parity work should delay the working terminal, packaging or
+removal of obsolete UI dependencies.
+
+This does not authorize deleting user profiles, SQLite records, drafts,
+references or prompts. Existing canonical stores, non-destructive import/export
+and the immutable recovery archive remain available. Document recovery
+limitations honestly; preserve old profiles through upgrade and rollback.
+Do not claim unperformed native exports or delete their source data.
+Rust/provider security, headless contracts, explicit publication/approvals,
+terminal regression tests and installed-artifact quality remain required.
+
 ## 1. Package boundaries
 
 | Part | Path | Package / binary | Toolchain | Notes |
@@ -31,7 +72,10 @@ Rules:
 ## 2. Command and runtime contract
 
 - Interactive zero-argument `norn` on a terminal opens the OpenTUI workspace.
-  The workspace launches `norn-backend` itself over stdio.
+  The workspace launches `norn-backend` itself over stdio. It opens PRs for
+  the current Git repository; `--current-repo` is explicit default mode and
+  `--workspace` opts into configured multi-repository browsing. Neither default
+  startup nor refresh may start a review or capture a working tree implicitly.
 - Non-interactive zero-argument `norn` prints CLI help (unchanged).
 - Headless commands (`review`, `doctor`, `setup`, `init`, `metrics`, `config`,
   `policy`, `evaluate`, `auth`, `skills`, `service`) remain Rust-only and are
@@ -147,7 +191,7 @@ removal with maintainer decision; `shared` = Rust/native service reused as-is.
 | --- | --- | --- | --- | --- | --- |
 | Repository list/selection, current-repo resolution | both | `tui/mod.rs`, `App.tsx`, `PrSidebar` | `config.rs` settings | #299 | port |
 | PR list + Open/Draft/Merged/All filters, paging | both | `tui/mod.rs` `PrListFilter`, `PrStateTabs`, `usePullRequests` | provider fetch | #299 | port |
-| Author/repository filters | desktop | `AuthorFilter`, `RepositoryFilter` | in-memory | #299 | port |
+| Author/repository filters | desktop | `AuthorFilter`, `RepositoryFilter` | in-memory | #299 | retire mandatory desktop parity; existing native implementation may remain |
 | Local review target (working tree / branch), base selection | both | `tui/mod.rs`, `local_review.rs`, #268/#289 | local git snapshot | #301/#302 | port |
 | PR detail metadata, reviewers/approvals | both | `render.rs`, `PrDetailPanel`, `PrHeader` | provider fetch | #301 | port |
 | Comments/threads + replies + composer | desktop (TUI shows count only) | `comments/*`, `useComments` | provider + draft store | #304 | port |
@@ -156,36 +200,40 @@ removal with maintainer decision; `shared` = Rust/native service reused as-is.
 | Image diffs (terminal protocols; single preview) | both | `tui/image_diff.rs`, `FileDiff.ImagePreviewPanel` | none | #302 | port |
 | Authenticated browser diff viewer | TUI + shared assets | `browser_diff.rs`, `browser-diff/*` | session token | #302 | preserve |
 | Drafts/composer staged comments + explicit publish | both | `tui/mod.rs`, `useDraftComments`, `reviewService` | localStorage (desktop), session (TUI) | #304 | port |
-| Structured finding publication + reconciliation | desktop | `reviewFindingPublication.ts`, `reviewService.ts`, Rust `publish_review_finding` | Rust review store | #304 | port |
+| Structured finding publication + reconciliation | desktop | `reviewFindingPublication.ts`, `reviewService.ts`, Rust `publish_review_finding` | Rust review store | #304 | preserve explicitly requested terminal review workflow; retire desktop UX parity |
 | AI review start + streaming logs | both | `tui/mod.rs`, `AiReviewPanel`, `useAiReview` | Rust run store | #303 | port |
-| AI findings panel + navigation | desktop | `AiReviewPanel` | Rust review store | #303 | port |
-| AI conversation threads + replies + cancel | desktop | `useAiReview` | Rust review store + session | #303 | port |
-| AI fix / commit / push / conflict resolution | desktop | `useAiReviewFix`, `buildAiFixPayload` | Rust fix store | #303 | port |
-| Branch sync (PR source→destination) | desktop | `useBranchSync` | in-memory | #303 | port |
+| AI findings panel + navigation | desktop | `AiReviewPanel` | Rust review store | #303 | preserve explicitly requested terminal review workflow; retire desktop UX parity |
+| AI conversation threads + replies + cancel | desktop | `useAiReview` | Rust review store + session | #303 | preserve explicitly requested terminal review workflow; retire desktop UX parity |
+| AI fix / commit / push / conflict resolution | desktop | `useAiReviewFix`, `buildAiFixPayload` | Rust fix store | #303 | preserve explicitly requested terminal review workflow; retire desktop UX parity |
+| Branch sync (PR source→destination) | desktop | `useBranchSync` | in-memory | #303 | retire mandatory desktop parity; existing native implementation may remain |
 | Settings: AI provider/model/effort | both | `tui/mod.rs` settings, `SettingsDialog` | `config.rs` settings | #305 | port |
 | Settings: credentials (GitHub/Bitbucket) + readiness | both | `tui/mod.rs` settings, `useCredentials` | keychain + `config.toml` | #305 | port |
-| Settings: repos, diff view, sync, Jira/Notion tokens | desktop | `SettingsDialog` | `config.rs` + keychain | #305 | port |
+| Settings: repos, diff view, sync, Jira/Notion tokens | desktop | `SettingsDialog` | `config.rs` + keychain | #305 | retire mandatory desktop parity; existing native implementation may remain |
 | Credential onboarding (OAuth/GitHub App) | none shipped | `bitbucket_oauth_onboarding.rs`, `github_app_onboarding.rs` | enrollment tables | #305 | port (onboarding UX decided on #305) |
-| Menu-bar sync + tray | desktop | `useMenuBarPrSync`, `lib.rs` `setup_menu_bar` | localStorage snapshot | #306 | retire |
-| Native notifications | desktop | `useMenuBarPrSync`, `App.tsx` | localStorage snapshot | #306 | retire |
-| Automatic sync polling | desktop | `useAutomaticSyncPolling` | `config.rs` | #305 | port |
-| Repository explorer (tree/content/blame/diff/find) | desktop | `RepositoryExplorerPanel`, `localRepoService`; bounded native `repository_reader` + typed explorer IPC/client | in-memory | #359 | native API PR379/b15d80b and F8 tree/previews/Markdown/blame/find PR380/d623231 merged with real3OS proof; editor PR381/29f5e2a merged with real3OS terminal proof |
-| Branch/worktree operations | desktop | `RepositoryBranchesPanel`, `localRepoService` | local git | #360 | merged: typed approved checkout/fetch/ff-pull/stash and native branch panel (`49a4867`, PR #382); five exact-head jobs green |
-| Review history panel | desktop | `ReviewHistoryPanel` | Rust review store | #306 | port |
-| Analytics: closed-PR metrics, review effectiveness | desktop | `OverviewPanel`, `ClosedPrAnalyticsPanel`, `ReviewEffectivenessDashboard` | Rust review store | #306 | port |
-| References panel (PR/Jira/Notion/note) | desktop | `ReviewReferencesPanel`, `reviewReferencesStorage` | localStorage | #305 | port |
+| Menu-bar sync + tray | desktop | `useMenuBarPrSync`, `lib.rs` `setup_menu_bar` | localStorage snapshot | #306 | retire mandatory desktop parity; existing native implementation may remain |
+| Native notifications | desktop | `useMenuBarPrSync`, `App.tsx` | localStorage snapshot | #306 | retire mandatory desktop parity; existing native implementation may remain |
+| Automatic sync polling | desktop | `useAutomaticSyncPolling` | `config.rs` | #305 | retire mandatory desktop parity; existing native implementation may remain |
+| Repository explorer (tree/content/blame/diff/find) | desktop | `RepositoryExplorerPanel`, `localRepoService`; bounded native `repository_reader` + typed explorer IPC/client | in-memory | #359 | retire mandatory desktop parity; existing native implementation may remain |
+| Branch/worktree operations | desktop | `RepositoryBranchesPanel`, `localRepoService` | local git | #360 | retire mandatory desktop parity; existing native implementation may remain |
+| Review history panel | desktop | `ReviewHistoryPanel` | Rust review store | #306 | retire mandatory desktop parity; existing native implementation may remain |
+| Analytics: closed-PR metrics, review effectiveness | desktop | `OverviewPanel`, `ClosedPrAnalyticsPanel`, `ReviewEffectivenessDashboard` | Rust review store | #306 | retire mandatory desktop parity; existing native implementation may remain |
+| References panel (PR/Jira/Notion/note) | desktop | `ReviewReferencesPanel`, `reviewReferencesStorage` | localStorage | #305 | retire mandatory desktop parity; existing native implementation may remain |
 | Review prompt content (repo + user) and AI conversation user prompts | both | `reviewPrompt.ts`, `.norn.yaml` `review.prompt`, `AiReviewPanel` threads | repo config + Rust review store | #303 | port |
 | Desktop-local user data (drafts, references, user prompts) | desktop | localStorage stores + Rust review store | localStorage + SQLite | #305 | migrate |
-| Jira/Notion context in AI payload | desktop | `useReviewContext`, `jira.ts` | keychain tokens | #303 | port |
+| Jira/Notion context in AI payload | desktop | `useReviewContext`, `jira.ts` | keychain tokens | #303 | retire mandatory desktop parity; existing native implementation may remain |
 | Clipboard copy | both | `tui/terminal.rs` OSC52, `lib/clipboard.ts` | none | #302 | port |
-| Shortcuts help / theme | desktop | `ShortcutsDialog`, `useTheme` | localStorage | #305 | port |
-| Find in repository | desktop | `RepositoryExplorerPanel`; native selected-file/diff find with original UTF-8 byte and UTF-16 positions | in-memory | #359 | native byte-jump/highlight/result paging merged PR380/d623231 with real3OS F8 proof |
-| External file open | desktop | `localRepoService` `open_repository_file_external` | none | #359 | native editor PR381/29f5e2a merged; real3OS GUI IPC + terminal success/error/interrupt/death, exact restoration and owned reaping proven |
-| Tray + menu-bar review trigger | desktop | `App.runBackgroundMenuReview`, `backgroundReviewStart` | Rust review store | #306 | retire |
+| Shortcuts help / theme | desktop | `ShortcutsDialog`, `useTheme` | localStorage | #305 | retire mandatory desktop parity; existing native implementation may remain |
+| Find in repository | desktop | `RepositoryExplorerPanel`; native selected-file/diff find with original UTF-8 byte and UTF-16 positions | in-memory | #359 | retire mandatory desktop parity; existing native implementation may remain |
+| External file open | desktop | `localRepoService` `open_repository_file_external` | none | #359 | retire mandatory desktop parity; existing native implementation may remain |
+| Tray + menu-bar review trigger | desktop | `App.runBackgroundMenuReview`, `backgroundReviewStart` | Rust review store | #306 | retire mandatory desktop parity; existing native implementation may remain |
 | Readiness preflight / `--skip-readiness` / `--current-repo` | TUI | `tui/mod.rs` | `config.rs` | #299 | port |
 | Headless CLI/service | CLI | `cli.rs`, `headless_review.rs`, `self_hosted_service.rs` | Rust stores | n/a | preserve |
 
-Every row has an owning child issue and a single disposition. Dispositions:
+Desktop-only rows retire the parity obligation, not their stored data or already
+merged native services. Mixed terminal/desktop rows retain the shipped TUI
+behavior and explicitly requested diff/finding/conversation improvements.
+
+Every row has an owning child issue and a disposition. Dispositions:
 `port` (reimplement in the OpenTUI client/backend), `preserve` (keep unchanged;
 typically Rust or browser assets), `retire` (intentional removal), `migrate`
 (recover existing user data), `shared` (reuse the Rust/native service). The
@@ -200,8 +248,9 @@ Current scoped parity evidence: [canonical saved-scope access](./canonical-scope
 shipped under #355 / plan 0053 in PR #356 at `2a7f0fe` after publication PR #354. It preserves
 unconfigured imported PR data and actual saved-run/provider identities. It does
 not mark the complete PR-list, history, native-profile recovery or other #306
-rows shipped. #306 was closed by the maintainer; retained child workflows still require
-merged verification before cutover.
+rows shipped. #306 was closed by the maintainer; required terminal workflows
+still need merged verification before cutover. Desktop-only follow-ups are
+retired as mandatory parity by the 2026-10-13 revision.
 
 [Native provider PR reads](./provider-pr-reads.md) are the first bounded #357 /
 plan 0054 delivery, merged in PR #365 at `2f2cd50`. The second bounded delivery,

@@ -27,6 +27,7 @@ import {
   FakePublicationTransport,
   publicationFixtureScope,
 } from "../src/transport/fakePublicationTransport";
+import { CurrentTransport } from "../test/fixtures/current-provider-backend";
 import { EditorExplorerFixture } from "../test/fixtures/editor-backend";
 import { ExplorerFixture } from "../test/fixtures/explorer-backend";
 import { LocalTransport } from "../test/fixtures/local-backend";
@@ -862,6 +863,94 @@ async function publicationScene(mode: "drafts" | "preview" | "partial" | "status
   };
 }
 
+async function currentRepositoryScene(
+  provider: "github" | "bitbucket",
+  modal?: "diff" | "settings" | "local" | "review",
+) {
+  const transport = new CurrentTransport(provider);
+  if (modal === "review") {
+    const request = transport.request.bind(transport);
+    transport.request = async (method, params) => {
+      if (method === "review.history")
+        return {
+          runs: [
+            {
+              runId: "ui-demo",
+              createdAt: "2026-10-13T00:00:00Z",
+              status: "completed",
+              turnKind: "initial",
+              threadId: null,
+              findingsCount: 0,
+            },
+          ],
+        };
+      if (method === "review.output")
+        return {
+          target: params.target,
+          runId: "ui-demo",
+          text: "# AI line 1\n\n**Major**: check `package.json`.\n\n[Docs](https://example.invalid)\n\n- Checked changes.\n- No further issues.",
+        };
+      return request(method, params);
+    };
+  }
+  const client = new BackendClient(transport);
+  const store = new ShellStore();
+  await store.connect(client, "current-repo");
+  return {
+    client,
+    store,
+    afterMount: async (test: Awaited<ReturnType<typeof createTestRenderer>>) => {
+      for (let i = 0; i < 12; i++) {
+        await Bun.sleep(0);
+        await test.renderOnce();
+      }
+      if (modal === "review") test.mockInput.pressEnter();
+      else if (modal === "diff") test.mockInput.pressKey("g");
+      else if (modal === "settings") test.mockInput.pressKey("s");
+      else if (modal === "local") {
+        test.mockInput.pressKey("f");
+        test.mockInput.pressKey("f");
+        test.mockInput.pressKey("f");
+      }
+      if (modal)
+        for (let i = 0; i < 8; i++) {
+          await Bun.sleep(0);
+          await test.renderOnce();
+        }
+      if (modal === "review") {
+        const deadline = Date.now() + 2000;
+        while (!test.captureCharFrame().includes("AI line 1") && Date.now() < deadline) {
+          await Bun.sleep(1);
+          await test.renderOnce();
+        }
+        await test.renderOnce();
+      }
+      const content = test.captureCharFrame();
+      if (modal === "review" && !content.includes("AI line 1"))
+        throw new Error("Saved AI output did not render on home");
+      if (modal === "settings") {
+        if (!content.includes("Settings") || !store.getSnapshot().settingsOpen)
+          throw new Error("Settings modal did not render");
+        return;
+      }
+      if (modal === "local") {
+        if (!content.includes("LOCAL CHANGES") || !content.includes("AI REVIEW"))
+          throw new Error("Local terminal home did not render");
+        return;
+      }
+      if (modal === "diff") {
+        if (!content.includes("Open diff") || !content.includes("Browser diff viewer"))
+          throw new Error("Diff choice modal did not render");
+        return;
+      }
+      if (!content.includes("PULL REQUESTS") || !content.includes(`${provider} change 7`))
+        throw new Error("Current-repository PR startup did not render");
+      if (content.includes(`${provider === "github" ? "bitbucket" : "github"} change 7`))
+        throw new Error("Startup included a foreign repository");
+    },
+  };
+}
+
 async function providerScene(
   kind:
     | "list"
@@ -940,7 +1029,20 @@ async function providerPreviewScene(kind: "github" | "bitbucket" | "saved" | "er
   if (kind === "image") {
     store.cycleFocus();
     store.move(1);
-    for (let i = 0; i < 10; i++) await Bun.sleep(0);
+    const deadline = Date.now() + 2000;
+    while (
+      (store.getSnapshot().diffLoading ||
+        !store.getSnapshot().preview?.before ||
+        !store.getSnapshot().preview?.after) &&
+      Date.now() < deadline
+    )
+      await Bun.sleep(1);
+    if (
+      store.getSnapshot().diffLoading ||
+      !store.getSnapshot().preview?.before ||
+      !store.getSnapshot().preview?.after
+    )
+      throw new Error("Provider image scene did not finish its owned reads");
   }
   return { client, store };
 }
@@ -1026,6 +1128,78 @@ async function savedLocalScene(kind: "list" | "next" | "empty" | "loading" | "er
   return { client, store };
 }
 const scenes: Scene[] = [
+  {
+    id: "terminal-home-diff-choice-120x30",
+    cols: 120,
+    rows: 30,
+    build: () => currentRepositoryScene("github", "diff"),
+  },
+  {
+    id: "terminal-home-diff-choice-50x15",
+    cols: 50,
+    rows: 15,
+    build: () => currentRepositoryScene("github", "diff"),
+  },
+  {
+    id: "terminal-home-settings-120x30",
+    cols: 120,
+    rows: 30,
+    build: () => currentRepositoryScene("github", "settings"),
+  },
+  {
+    id: "terminal-home-settings-50x15",
+    cols: 50,
+    rows: 15,
+    build: () => currentRepositoryScene("github", "settings"),
+  },
+  {
+    id: "terminal-home-local-120x30",
+    cols: 120,
+    rows: 30,
+    build: () => currentRepositoryScene("github", "local"),
+  },
+  {
+    id: "terminal-home-local-50x15",
+    cols: 50,
+    rows: 15,
+    build: () => currentRepositoryScene("github", "local"),
+  },
+  {
+    id: "terminal-home-review-120x30",
+    cols: 120,
+    rows: 30,
+    build: () => currentRepositoryScene("github", "review"),
+  },
+  {
+    id: "terminal-home-review-50x20",
+    cols: 50,
+    rows: 20,
+    build: () => currentRepositoryScene("github", "review"),
+  },
+  {
+    id: "current-repository-github-120x30",
+    cols: 120,
+    rows: 30,
+    build: () => currentRepositoryScene("github"),
+  },
+  {
+    id: "current-repository-github-50x15",
+    cols: 50,
+    rows: 15,
+    build: () => currentRepositoryScene("github"),
+  },
+  {
+    id: "current-repository-bitbucket-120x30",
+    cols: 120,
+    rows: 30,
+    build: () => currentRepositoryScene("bitbucket"),
+  },
+  {
+    id: "current-repository-bitbucket-50x15",
+    cols: 50,
+    rows: 15,
+    build: () => currentRepositoryScene("bitbucket"),
+  },
   ...(
     [
       "tree",

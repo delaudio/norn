@@ -495,6 +495,16 @@ export class ProviderStore {
     });
     this.refresh(client, false);
   }
+  setFilter(client: BackendClient, filter: ProviderFilter) {
+    if (!prFilters.includes(filter) || this.state.filter === filter) return;
+    this.update({ filter });
+    this.refresh(client, false);
+  }
+  selectRow(key: string) {
+    if (!this.rows().some((row) => row.key === key)) return;
+    this.clearApproval();
+    this.update({ selected: key });
+  }
   cycleFilter(client: BackendClient, delta: number) {
     this.update({
       filter:
@@ -718,14 +728,14 @@ export class ProviderStore {
     }
   }
 
-  showDetail(client: BackendClient) {
+  showDetail(client: BackendClient, open = true) {
     const row = this.selectedRow();
     if (row?.kind !== "pr") return;
     const generation = this.generation;
     const detailGeneration = ++this.detailGeneration;
     this.queue = this.queue.filter((task) => task.kind !== "detail");
     this.update({
-      detailOpen: true,
+      detailOpen: open,
       detailKey: row.key,
       detail: null,
       detailLoading: true,
@@ -739,7 +749,9 @@ export class ProviderStore {
           const current = () =>
             generation === this.generation &&
             detailGeneration === this.detailGeneration &&
-            this.state.detailOpen;
+            this.state.detailKey === row.key &&
+            this.state.selected === row.key &&
+            (!open || this.state.detailOpen);
           try {
             const detail = await client.providerPrDetail(
               { repository: row.group.repository, prId: row.pr.id },

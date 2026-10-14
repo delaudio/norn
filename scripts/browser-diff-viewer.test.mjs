@@ -8,9 +8,10 @@ const browserHtml = readFileSync("browser-diff.html", "utf8");
 const browserViteConfig = readFileSync("vite.browser-diff.config.ts", "utf8");
 
 test("browser viewer renders provider diffs with the Pierre diff renderer", () => {
-  assert.match(browserSource, /import \{ PatchDiff \} from "@pierre\/diffs\/react"/);
-  assert.match(browserSource, /<PatchDiff/);
-  assert.match(browserSource, /patch=\{remoteState\.diff \?\? ""\}/);
+  assert.match(browserSource, /import \{ FileDiff \} from "@pierre\/diffs\/react"/);
+  assert.match(browserSource, /<FileDiff/);
+  assert.match(browserSource, /fileDiff=\{fileDiff\}/);
+  assert.match(browserSource, /parsePatchFiles\(patch,/);
   assert.match(browserSource, /diffStyle: viewMode/);
   assert.match(browserSource, /parseUnifiedDiff\(remoteState\.diff \?\? ""\)/);
   assert.match(browserSource, /mergeImageDiffstat\(/);

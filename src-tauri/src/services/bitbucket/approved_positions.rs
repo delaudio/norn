@@ -163,7 +163,7 @@ pub(super) fn validate_inline_positions(
         if line.starts_with("\\ No newline at end of file") {
             continue;
         }
-        let origin = line.as_bytes().first().copied().ok_or_else(invalid)?;
+        let origin = line.as_bytes().first().copied().unwrap_or(b' ');
         let (old, new) = match origin {
             b' ' => (true, true),
             b'-' => (true, false),
@@ -228,6 +228,20 @@ mod tests {
             finding_ref: None,
             original_draft_hash: None,
         }
+    }
+    #[test]
+    fn suppressed_empty_context_keeps_exact_inline_positions() {
+        let patch = "diff --git a/x b/x\n--- a/x\n+++ b/x\n@@ -1,3 +1,3 @@\n-old\n+new\n\n tail\n";
+        assert!(
+            validate_inline_positions(patch, &[comment("x", false, 3), comment("x", true, 2)])
+                .is_ok()
+        );
+        assert!(validate_inline_positions(patch, &[comment("x", false, 4)]).is_err());
+        assert!(validate_inline_positions(
+            "diff --git a/x b/x\n--- a/x\n+++ b/x\n@@ -0,0 +1 @@\n\n",
+            &[comment("x", false, 1)]
+        )
+        .is_err());
     }
     #[test]
     fn unchanged_old_new_and_quoted_unicode_space_paths_are_exact() {

@@ -1187,3 +1187,220 @@ Plan 0053 completion prepared after implementation `e4264db`, effective only on 
   `plan/done/2026-10-12-native-repository-operations.md`; updated the parity
   matrix row to merged with the commit and CI evidence; kept no code change.
 - #360 can now be closed with the merge evidence; epic #294 continues with #361.
+
+
+## 2026-10-13 — Current-repository entry and TUI baseline
+
+- Maintainer explicitly chooses the shipped TUI as baseline and retires desktop
+  parity. Plan 0074 owns the urgent startup correction in an isolated worktree.
+- Production startup now resolves read-only Git origin identity and opens only
+  that repository's PRs; no global targets/history or automatic local capture.
+  Explicit workspace mode remains available. Failed final events fetch actual
+  backend errors even at an equal event/status sequence, without log duplicates.
+- Revised ADR0020/migration contract and issues294/306/307/308/309/361/363;
+ 362/364 retired as not planned, not implemented. Existing data, recovery
+ archive, stores and non-destructive import/export remain protected.
+- Verification: root typecheck/tests and Archgate17 pass; UI285tests and
+ typecheck pass;215actual native frames match, Storybook build passes; lint
+ has3existing informational suggestions. Changed-file React Doctor reports no
+ issues (score API unavailable). ADR/index/link/plan-collision audit passes.
+- Source PR/CI/merge evidence remains pending;0074 stays todo. ADR0020 stays
+ Accepted because packaging/cutover are unfinished. User's root .norn.yaml
+ and stash are untouched; no Norn review, live providers or private profiles.
+
+- Additional owned actual Rust stdio smoke resolves GitHub and Bitbucket current
+  repositories with no configured entry and unborn HEAD, without reading an
+  intentionally invalid owned review policy. No provider request or credentials.
+
+
+## 2026-10-13 — Correct the actual terminal UX in PR394
+
+- Maintainer rejected the standalone PR browser as the home screen. The same
+ plan0074/PR394 now restores filter/PR-list/AI panels together, Settings as a
+ modal, Enter load, a explicit AI review, s settings, and g choice followed
+ by g native diff or b authenticated diff viewer. Filter, selection and focus
+ survive diff/settings return. Local capture remains an explicit action.
+- AI output/findings load by actual provider/repository/PR/run identity; partial
+ output failures do not hide valid findings. Native paste cannot trigger home
+ or diff-choice shortcuts. F8 resolves the launch repository without a PR.
+- Fixed the default-entry regression observed by all three editor CI lanes on
+ f648c6d: the standalone browser swallowed F8. Actual owned macOS production
+ PTY success/failure/interrupt/backend-death now pass with exact terminal
+ restoration and owned process cleanup. No test bypass or private profiles.
+- Native tests cover both providers, wide/narrow panels, filters, local explicit
+ capture, saved/partial AI output, capture retry, modal/paste fencing and
+ native/browser diff identity. 221 real native Storybook frames match.
+- React Doctor DOM-property reports are false positives for typed OpenTUI
+ native text properties; no DOM is mounted. Maintainability warnings concern
+ the keyboard/controller complexity and new home component size. No broad
+ rule suppression or unrelated refactor. The narrowly documented Biome ARIA
+ exception applies only to native terminal renderables with keyboard handlers.
+- New source verification and exact-head CI remain required before merge;
+ 0074 stays todo and ADR0020 Accepted. Original installed norn stays unchanged.
+
+- Isolation correction: NORN_CONFIG_DIR does not itself isolate the credential
+ loader's OS keychain/default terminal-config paths. Owned real editor lifecycle
+ fixtures now explicitly use --workspace to avoid startup provider requests.
+ Default current-repo home/F8 is separately tested through the native renderer
+ with fake transport. Do not claim config redirection alone prevents credential
+ probing, or run a real provider-startup fixture on a private machine.
+
+- Final local verification for the corrected home: UI301/0 failures (16 native
+ home scenarios), root tests/typecheck, UI typecheck, lint (3 pre-existing
+ informational suggestions), Archgate17,221golden native frames and Storybook
+ build pass. Owned local-workspace PTY all4cases pass. No source changes after
+ this gate; exact-head CI/merge remain pending.
+
+
+## 2026-10-13 — Show PR description independently of snapshot verification
+
+- User screenshot shows metadata missing when the provider snapshot fails.
+  Terminal home now loads selected PR details through the existing bounded
+  provider reader, without opening the standalone browser or starting a diff,
+  capture or review. Description/loading/empty/error states remain scoped to
+  the exact selected provider/repository/PR. Enter refreshes metadata separately.
+- Existing detail queue/generation fencing is reused; late responses cannot
+  replace the next selection. Selection resets review scrolling; Local hides
+  previous provider descriptions. Snapshot errors do not hide descriptions.
+- Native coverage: both providers at wide/narrow sizes, snapshot failure with
+  description still visible, late PR response and Local switch. UI306tests pass;
+  root tests/typecheck, UI typecheck, lint, Archgate17,221native golden frames
+  and Storybook build pass. Changed-delta React Doctor reports no issues
+  (score API unavailable). No real provider/credential/agent access in tests.
+- Same PR394/plan0074 remains pending until the new head has verified CI and
+  actually merges. The installed legacy launcher is untouched.
+
+
+## 2026-10-13 — Current-repository review evidence and compact Settings
+
+Plan0074 / PR394: maintainer reports a blocked behind generic provider snapshot
+error and a desktop-style global Settings inventory. Preserve verified evidence;
+resolve abbreviated Bitbucket metadata to full commits using authenticated
+fixed-origin endpoints, validate prefix/repository, and recheck at capture and
+review start. Align rename handling across diffstat/patch. Parse Git suppressed
+empty context with exact hunk counts; preserve inline positions and native
+split/anchor navigation. Failure diagnostics expose stage/line/count, never
+patch content or credentials. No live provider/agent used; maintainer PR still
+requires a matched-backend user trial to identify its exact previous failure.
+
+Terminal Settings shows only selected agent/model/effort, diff/theme and current
+provider credentials. Hide folder inventory, Jira/sync and other agent models;
+keep hidden draft values and repository paths unchanged on save. Unknown launch
+identity still gets compact Settings with GitHub/Bitbucket credential choice.
+Owned native tests fence paste, verify modal contents and explicit a retry with
+pinned evidence for both providers.
+
+Validation: core library776 passed/2ignored with owned loopback fixture permission;
+initial sandbox run rejected52 loopback binds, so it is not passing evidence.
+UI310 suite passed plus two new a retry tests; root tests/typechecks,
+UI typecheck, strict core Clippy, Archgate17, lint (three existing infos),
+221native golden frames and Storybook build. Changed-delta React Doctor found no
+issues (score API unavailable). APFS clone of build cache isolates backend
+compilation from root workspace; matched backend built in this worktree.
+Plan stays todo / ADR0020 Accepted until verified integration and final cutover.
+
+
+## 2026-10-13 — Maintainer-directed terminal layout refinement
+
+Plan0074 / PR394: use the horizontal button style inspected read-only in
+~/dev/under/src/menu.ts and app.ts. Top Open/Draft/Merged/Local choices replace
+the vertical filter column. Left AI output/logs/findings are independent from
+the central PR list above PR description. Tab/Shift+Tab cycles filters, list,
+description, review; j/k and PageUp/PageDown scroll the focused text pane.
+Selection resets each scroll; diff return and settings input fences remain.
+Explicit text wrapping and reserved scrollbar space prevent narrow-pane text
+clipping. Preserve current-repository scope and Rust operation/evidence contracts.
+
+ADR0020r4 and migration contract reflect the maintainer's presentation refinement,
+without expanding desktop parity. Native geometry tests check horizontal menu,
+left output, PR/description alignment at120/50columns for both providers;
+independent scroll/selection reset and reverse focus pass. Two new actual native
+Storybook frames show saved AI output alongside description, wide/compact.
+Validation: root tests/typechecks, UI typecheck, Archgate17, lint (three existing
+infos), React Doctor changed delta (13 DOM-property false positives for typed
+native text wrapMode; no DOM exists and native wrap tests pass; score unavailable),223native
+frames and Storybook build pass. No backend change or rebuild needed for layout.
+Keep0074pending until verified actual merge; root working tree/user config untouched.
+
+
+## 2026-10-13 — Right AI pane and themed native Markdown
+
+Plan0074 / PR394: maintainer moves AI to the right; PR list/description occupy
+central-left with existing separate scroll/focus. Shared TerminalMarkdown uses
+OpenTUI's native renderer and SyntaxStyle from active palette: headings, strong,
+emphasis, inline code, links, quotes, list styling. Review output, PR description
+and finding summaries render natively; operational status remains plain text.
+Theme replacement rebuilds/frees native style resources. As in the explorer,
+remote fence-language labels cannot trigger grammar asset downloads; code body
+is preserved and rendered plain. No change to stored source or provider/backend.
+
+Native tests validate actual colored/bold spans, marker concealment, unknown
+fences and dark-to-light change at100/32columns. Home geometry now requires
+right AI pane, and fixtures await asynchronous cold Markdown paint. Wide/compact
+saved-review Storybook frames contain actual native colored Markdown. ADR0020r5,
+contract and plan reflect the maintainer's refinement. Validation:315UI tests,
+root tests/typechecks, UI typecheck, Archgate17, lint,223native frames and
+Storybook build pass. Changed React Doctor has no issues (score API unreachable).
+Plan0074 remains pending until verified actual integration; installed launcher
+and root/user files unchanged. No Norn review or live provider/agent invocation.
+
+
+## 2026-10-13 — Multi-file browser diff regression
+
+Plan0074 / browser viewer workflow: maintainer reports Pierre singular-patch
+exception with75files. Previous tests mocked PatchDiff and missed its cardinality
+contract. Use actual parsePatchFiles in strict mode, flatten complete patches
+and pass one FileDiffMetadata per native Pierre FileDiff. Namespace parser cache
+keys by server version and retain repeated paths across local layers. Parser
+failure retains the exact original patch in an escaped React pre instead of
+crashing; independent image metadata remains available. Inline empty favicon
+avoids the unrelated unauthenticated favicon404 without changing Rust policy.
+
+Tests now mock only browser rendering, keeping the real Pierre parser: single
+file,75files, repeated-path local layers, malformed-patch fallback, current
+polling/session/image tests. Nine viewer tests and root suite/tooling, typecheck,
+lint, Archgate17 and React Doctor pass; browser asset bundle rebuilt in owned
+worktree. No live provider/agent or Norn review. Existing browser server caches
+its assets; maintainer must quit/restart TUI and create a new g→b session.
+No backend/source-store change. PR394 remains open;0074pending until actualmerge.
+
+
+## 2026-10-13 — Browser file tree and native click support
+
+Plan0074 / PR394: reuse FileTree for the authenticated viewer with search,
+expandable folders, selected row, hide/show and per-file navigation anchors.
+Tree deduplicates repeated local paths while retaining every Pierre section;
+images navigate to their actual preview. Anchors use encoded paths and only one
+per repeated path. Viewer keeps independently scrolling sidebar/content.
+
+OpenTUI mouse reporting was enabled, but native diff Select rows lacked click
+handlers. Add readonly clickable rows that invoke the existing store selection
+and diff/preview loading pipeline, plus pane focus. Home clicks select/load PRs
+or Local, filter, start review explicitly, open diff/settings/files, refresh/quit.
+Diff choice supports native/browser/cancel clicks; cancelling fences a pending
+read's dependent actions. Settings fields edit/cycle by click, Save/Close mirror
+keyboard actions. Background clicks stay blocked during modal/loading state.
+Thread compact lists cannot accidentally be interpreted as file rows.
+
+Native mouse events test filter/PR selection, native diff, second/image file,
+diff focus, settings editing/close, blocked background AI, browser diff and
+explicit AI button. Web tests cover search/click/collapse visibility, image
+preview navigation and unique repeated-path anchors. Async fixture waits now
+require full Markdown paint and complete image/diff reads rather than fixed
+short sleeps, retaining positive assertions and golden baselines.
+
+Validation:317UI tests,127root tests plus tooling, typechecks, lint, Archgate17,
+223native golden frames/Storybook and rebuilt browser bundle pass. React Doctor
+changed delta has no issues (score service unavailable). ADR0020r6/contract/plan
+updated under maintainer direction. No Norn review, private provider/agent calls,
+user data changes or backend rebuild. Keep0074pending until verified actual merge;
+restart TUI/browser session to load rebuilt web assets.
+
+## 2026-10-14 — Resume authorized packaging and cutover
+
+Synced PR394 with current main (#395), retaining independent tests. Windows
+post-operation full snapshot had a five-second budget while preview uses twenty;
+reconciliation now uses twenty too, without retrying writes or weakening uncertain
+state. Owned failed-fetch IPC fixture asserts refreshed HEAD and prints bounded
+operation diagnostics on failure. Local focused Rust and UI/root gates pass;
+Windows confirmation and actual integration remain pending.

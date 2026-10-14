@@ -2,48 +2,17 @@
 
 Git is authoritative. Durable history lives in WORKLOG and plan/done.
 
-## Active state
+## Active state — 2026-10-14
 
-- Unlimited epic294 goal; single writer, no delegation/Norn review per user.
-- PR381 actually MERGED 29f5e2a63efca38fccb0f332d812fde80f11354b at2026-10-12T17:03:36Z.
-  All5CI38280325908 SUCCESS on e883fc9f8a0f181d99283f56ffade41788816dda,
-  real3OS GUI IPC and four terminal cases with exact restoration/reaping.
-- 0070 reconciled into done only after actual merge;359 baseline complete.
-  0071 claimed before code: issue360 repository branch/status/approved
-  checkout/fetch/pull/stash, isolated /private/tmp/norn-repository-operations,
-  branch issue-360-repository-operations on actual381main.
-- 0071 implementation prepared: typed Rust Git manager/stdio and native branch
-  panel with read-only preview, one-use30s approval, cancellation, actual-state
-  recovery and full provider/root fencing. No PR/merge yet; plan stays todo.
-- Owned native IPC passes both provider identities via fixed loopback-only
-  smart Git CGI, checkout/ff-pull/fetch/stash, dirty/ignored/conflict protection,
-  tracking/detached/local-commit semantics, stale config/token/restart/expiry.
-- Local gates: UI259tests, root30files/123tests, core772+2ignored/noGUI,
-  stdio76, strict all-feature Clippy, typechecks,209frames/Storybook, Archgate
-  and audit. Doctor rendering-ref issue corrected;2maintainability warnings.
-- Actual post-checkout-hook drift proof PASS; initial source5a4ccaa committed;
-  native3OS exact-head CI and actual merge remain required.
-- PR382 open on source5a4ccaa; firstCI38292751534 UI SUCCESS but Windows
-  build fails ownedString/&str after platform normalization. Narrow borrowing
-  correctionf2861a5 passes all5CI38293524038, including3OS native tests.
-- Final UI correction prepared: readable long approvals via passiveCtrl-D/U,
-  viewport reset, actualview frame slot and positive component/tail assertions.
- 211actualframes/UI259/typechecks/Storybook/lint/Doctor pass; new exact-head
- 5checks pending. No merge yet.
-- Rootmain synced actual381. Never read/copy/stage unrelated untracked.norn.yaml;
-  preserve user stash5f69c995c9b79fc163b60955cbe73987d346086a.
-- Keep0071 todo until actual verified merge;360/294 remain open. Preserve
-  maintainer305/306/357closures. ADR0020 Accepted until fullcutover.
-- No private profiles/credentials/providerwrites/actualagents/releases.
-
-## Remaining work
-
-- PR382 actually MERGED as 49a4867 on 2026-10-12 after all five exact-head jobs
-  passed (verify, ui, native-workflow macOS/Ubuntu/Windows). 0071 moved to
-  plan/done/2026-10-12-native-repository-operations.md; #360 reconciled in the
-  parity matrix and ready to close. Next: #361.
--360approvedbranch/worktree;361globalhistory/legacy;362resolvedreferences;
- 363polling/help;364actual3OS native frozen-profile recovery;307hardening;
- 308installedmatchedpair/upgrade/rollback;309cutover.
-- Frozen exporter72440ea actualnative3OS profile export remains unobserved;
-  compilation/copy tests insufficient. WinGUI0xc0000139cause unproved.
+Single writer; no delegation or Norn review per maintainer.
+PR #394 remains open on fix/current-repo-first in
+/private/tmp/norn-current-repo-first. Plan 0074 remains pending.
+Merged current origin/main (including #395), preserving both conflicting tests.
+Repairing Windows repository-operation reconciliation: complete post-write
+snapshot uses the same bounded 20-second budget as preview instead of five.
+Unverified state remains uncertain; failed-fetch fixture also asserts actual HEAD.
+Local UI 318 tests, root 127 tests/tooling, six focused Rust tests pass.
+Exact-head three-platform CI and actual merge are required before shipping.
+Next: #308 matched installable artifacts, then #309 Tauri/Ratatui cutover.
+Do not publish releases or touch stored user data. Keep ADR0020 Accepted until
+full cutover. Preserve root untracked .norn.yaml and user stash.

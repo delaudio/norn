@@ -116,3 +116,63 @@ test("repository removal is a draft change and cancelled forms leave configurati
   await store.save(client);
   expect(await client.repositories()).toHaveLength(2);
 });
+
+for (const provider of ["github", "bitbucket"] as const) {
+  test(`terminal settings for ${provider} hide global folders and preserve their values on save`, async () => {
+    const transport = new FakeBackendTransport({
+      repositories: [
+        { provider: "github", workspace: "owned", repo: "one", localPath: "/tmp/owned-one" },
+        { provider: "bitbucket", workspace: "owned", repo: "two", localPath: "/tmp/owned-two" },
+      ],
+    });
+    const client = new BackendClient(transport);
+    const before = await client.settings();
+    const store = new SettingsStore();
+    await store.load(client, provider);
+    const ids = store.fields().map((field) => field.id);
+    expect(ids).toEqual([
+      "aiProvider",
+      `${before.settings.aiProvider}Model`,
+      `${before.settings.aiProvider}Effort`,
+      "defaultDiffView",
+      "theme",
+      "credentialProvider",
+      ...(provider === "bitbucket" ? ["username"] : []),
+      "token",
+    ]);
+    expect(store.getSnapshot().credentialProvider).toBe(provider);
+    store.addRepository();
+    store.removeRepository();
+    expect(store.getSnapshot().draft?.repos).toEqual(before.settings.repos);
+    store.select("aiProvider");
+    store.beginEdit();
+    const selected = store.getSnapshot().draft!.aiProvider;
+    expect(store.fields().map((field) => field.id)).toContain(`${selected}Model`);
+    expect(store.fields().filter((field) => field.id.endsWith("Model"))).toHaveLength(1);
+    edit(store, `${selected}Model`, "owned/custom-model");
+    const saved = await store.save(client);
+    expect(saved).toEqual({
+      ...before.settings,
+      aiProvider: selected,
+      [`${selected}Model`]: "owned/custom-model",
+    });
+    expect(store.fields().find((field) => field.id === "credentialProvider")?.choices).toEqual([
+      provider,
+    ]);
+    store.dispose();
+    await client.close();
+  });
+}
+
+test("terminal settings remain compact when repository identity is unavailable", async () => {
+  const client = new BackendClient(new FakeBackendTransport());
+  const store = new SettingsStore();
+  await store.load(client, null, true);
+  expect(store.fields().some((field) => field.id.startsWith("repo."))).toBe(false);
+  expect(store.fields().find((field) => field.id === "credentialProvider")?.choices).toEqual([
+    "github",
+    "bitbucket",
+  ]);
+  store.dispose();
+  await client.close();
+});

@@ -61,6 +61,8 @@ export class SettingsStore {
   private listeners = new Set<() => void>();
   private original: SettingsSnapshot | null = null;
   private generation = 0;
+  private terminalMode = false;
+  private terminalProvider: "github" | "bitbucket" | null = null;
   private state: SettingsState = {
     themeLoading: false,
     themePreview: null,
@@ -92,7 +94,13 @@ export class SettingsStore {
     this.state = { ...this.state, ...patch };
     for (const listener of this.listeners) listener();
   }
-  async load(client: BackendClient) {
+  async load(
+    client: BackendClient,
+    terminalProvider: "github" | "bitbucket" | null = null,
+    terminalMode = terminalProvider !== null,
+  ) {
+    this.terminalMode = terminalMode;
+    this.terminalProvider = terminalProvider;
     const generation = ++this.generation;
     this.update({
       loading: true,
@@ -100,6 +108,10 @@ export class SettingsStore {
       themeLoading: false,
       error: null,
       notice: null,
+      selected: 0,
+      editing: false,
+      editText: "",
+      credentialProvider: terminalProvider ?? "github",
     });
     try {
       const snapshot = await client.settings();
@@ -224,32 +236,50 @@ export class SettingsStore {
   fields(): SettingsField[] {
     const draft = this.state.draft;
     if (!draft) return [];
-    const fields: SettingsField[] = preferenceFields.map((field) => ({
+    const visiblePreferences = this.terminalMode
+      ? preferenceFields.filter((field) =>
+          [
+            "aiProvider",
+            `${draft.aiProvider}Model`,
+            `${draft.aiProvider}Effort`,
+            "defaultDiffView",
+            "theme",
+          ].includes(field.id),
+        )
+      : preferenceFields;
+    const fields: SettingsField[] = visiblePreferences.map((field) => ({
       ...field,
       display: String(draft[field.id] ?? ""),
     }));
-    draft.repos.forEach((repo, index) => {
-      fields.push({
-        id: `repo.${index}.provider`,
-        label: `Repo ${index + 1} provider`,
-        display: repo.provider,
-        choices: ["github", "bitbucket"],
-      });
-      for (const key of ["workspace", "repo", "localPath"] as const)
+    if (!this.terminalMode)
+      draft.repos.forEach((repo, index) => {
         fields.push({
-          id: `repo.${index}.${key}`,
-          label: `Repo ${index + 1} ${key === "workspace" ? "owner / workspace" : key === "repo" ? "name" : "local clone path"}`,
-          display: repo[key] ?? "",
+          id: `repo.${index}.provider`,
+          label: `Repo ${index + 1} provider`,
+          display: repo.provider,
+          choices: ["github", "bitbucket"],
         });
-    });
+        for (const key of ["workspace", "repo", "localPath"] as const)
+          fields.push({
+            id: `repo.${index}.${key}`,
+            label: `Repo ${index + 1} ${key === "workspace" ? "owner / workspace" : key === "repo" ? "name" : "local clone path"}`,
+            display: repo[key] ?? "",
+          });
+      });
     fields.push(
       {
         id: "credentialProvider",
         label: "Credential provider",
         display: this.state.credentialProvider,
-        choices: ["github", "bitbucket", "jira", "notion"],
+        choices: this.terminalProvider
+          ? [this.terminalProvider]
+          : this.terminalMode
+            ? ["github", "bitbucket"]
+            : ["github", "bitbucket", "jira", "notion"],
       },
-      { id: "username", label: "Bitbucket username", display: this.state.username },
+      ...(this.terminalMode && this.state.credentialProvider !== "bitbucket"
+        ? []
+        : [{ id: "username", label: "Bitbucket username", display: this.state.username }]),
       {
         id: "token",
         label: "New credential (never read back)",
@@ -273,6 +303,7 @@ export class SettingsStore {
     const field = this.fields()[this.state.selected];
     if (!field) return;
     if (field.choices) {
+      if (field.choices.length === 1) return;
       this.apply(
         field.id,
         field.choices[(field.choices.indexOf(field.display) + 1) % field.choices.length] ??
@@ -362,13 +393,20 @@ export class SettingsStore {
     return true;
   }
   addRepository() {
-    if (!this.state.draft || this.state.saving || this.state.draft.repos.length >= 100) return;
+    if (
+      this.terminalMode ||
+      !this.state.draft ||
+      this.state.saving ||
+      this.state.draft.repos.length >= 100
+    )
+      return;
     const draft = structuredClone(this.state.draft);
     draft.repos.push({ provider: draft.reviewProvider, workspace: "", repo: "", localPath: null });
     this.update({ draft });
     this.select(`repo.${draft.repos.length - 1}.workspace`);
   }
   removeRepository() {
+    if (this.terminalMode) return;
     const id = this.fields()[this.state.selected]?.id;
     if (!id?.startsWith("repo.") || !this.state.draft || this.state.saving) return;
     const index = Number(id.split(".")[1]);

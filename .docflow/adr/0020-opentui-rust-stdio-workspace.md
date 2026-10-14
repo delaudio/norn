@@ -40,10 +40,12 @@ Norn exposes a single interactive terminal workspace built with OpenTUI + React
 + TypeScript that talks to the existing Rust engine through a versioned,
 generated, bounded stdio protocol, so the Rust CLI and service remain usable
 without Bun, OpenTUI, or a graphical toolkit, and the Tauri/Ratatui surfaces can
-be retired once parity is proven.
+be retired once terminal workflow preservation and cutover safety are proven.
 
 ## User stories / scenarios
 
+- As a reviewer, startup opens pull requests for the Git repository in my
+  current directory; multi-repository browsing and history are explicit actions.
 - As a reviewer, I can browse repositories and pull requests, read and navigate
   diffs, findings, and agent conversations, stage comments, and publish
   explicitly from one OpenTUI workspace.
@@ -61,6 +63,8 @@ be retired once parity is proven.
 1. A bare interactive `norn` invocation on a terminal opens the OpenTUI
    workspace, which starts the local Rust backend itself; a non-interactive
    zero-argument invocation prints CLI help; headless commands remain Rust-only.
+   The interactive default lists PRs for the current Git repository. Global
+   workspace/history and local working-tree capture require explicit actions.
 2. The Rust engine builds and tests with no Tauri or Ratatui dependency in its
    active dependency tree; the CLI and service run without Bun or OpenTUI.
 3. A versioned, typed protocol with a generated contract covers requests and
@@ -71,9 +75,19 @@ be retired once parity is proven.
 4. The OpenTUI client is the only interactive UI after cutover, and its
    components are covered by native-frame Storybook scenarios with screenshot
    regressions and input tests.
-5. Every shipped terminal and desktop workflow has a disposition of preserved or
-   explicitly retired, recorded in the migration parity matrix with an owning
-   child issue; no capability is dropped silently.
+5. The shipped Ratatui TUI is the behavioral baseline. The maintainer-directed
+   layout uses a horizontal top filter menu, AI output on the right and a central
+   column with the PR list above its independently scrolling description. Review
+   and description use native Markdown styled with the active terminal theme.
+   Mouse selection/actions retain keyboard equivalents and modal safety; the
+   browser viewer provides a searchable folder tree and file navigation. These
+   workflows remain together, Settings is modal, and `g` selects the native or
+   authenticated browser diff (`b`), preserving focus/filter/selection on return.
+   Its review workflows
+   are preserved with test evidence. Mandatory parity with desktop-only
+   workflows is retired by maintainer direction on 2026-10-13, recorded in the
+   migration matrix. Useful React components and already merged native
+   enhancements may remain, without recreating the desktop product.
 6. Desktop-local user content (drafts, references, and prompts) is recovered or
    migrated before the desktop app is removed.
 7. The authenticated browser diff viewer is preserved with its security policy
@@ -120,6 +134,11 @@ be retired once parity is proven.
 
 | Date | Revision | Author | Change |
 |------|----------|--------|--------|
+| 2026-10-13 | r6 | default-agent | Maintainer requests browser file tree and terminal click navigation/actions, retaining keyboard equivalents, explicit review starts and modal fencing. |
+| 2026-10-13 | r5 | default-agent | Maintainer moves AI output to the right and requests native Markdown colors from the active terminal theme for review/description. |
+| 2026-10-13 | r4 | default-agent | Maintainer refines terminal presentation: horizontal top filters, left AI output, PR list above independent description in the central column. Workflow and security scope unchanged. |
+| 2026-10-13 | r3 | default-agent | Corrected the baseline to preserve the terminal main-screen panels, Settings overlay, explicit AI action and native/browser diff choice rather than using the standalone provider browser as home. |
+| 2026-10-13 | r2 | default-agent | Maintainer chooses the shipped TUI as the behavioral baseline, requires current-repository PR startup and retires mandatory desktop-only parity. Data preservation and Rust/headless/cutover safeguards remain. |
 | 2026-10-09 | r1 | default-agent | Accepted the OpenTUI React over Rust stdio backend migration and the retirement of the Ratatui and Tauri surfaces, superseding the terminal UI decision. |
 
 ## Approvals
@@ -127,3 +146,7 @@ be retired once parity is proven.
 | Role | Name | Date | Signature |
 |------|------|------|-----------|
 | Maintainer | delaudio | 2026-10-09 | authorized through epic #294 |
+| Maintainer | delaudio | 2026-10-13 | "TUI come riferimento; ritira la parità desktop" |
+| Maintainer | delaudio | 2026-10-13 | requested top filters, left review output, central PR list/description |
+| Maintainer | delaudio | 2026-10-13 | requested right AI pane and OpenTUI-themed Markdown |
+| Maintainer | delaudio | 2026-10-13 | requested web file tree and terminal click support |

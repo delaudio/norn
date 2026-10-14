@@ -1250,6 +1250,33 @@ test("opens the latest run's conversation thread", async () => {
   expect(store.getSnapshot().selectedThread).toBe(0);
 });
 
+test("failed final event fetches the actual error at the same sequence without duplicating it", async () => {
+  const { transport, client, store, target } = await controlledReview();
+  await store.startReview(client);
+  transport.state = "failed";
+  transport.sequence = 1;
+  transport.error = { code: "internal", message: "Owned agent executable not found" };
+  const id = store.getSnapshot().operation!.id;
+  store.applyEvent({
+    operationId: id,
+    target,
+    sequence: 1,
+    event: { kind: "state", state: "failed" },
+  });
+  await Bun.sleep(20);
+  expect(store.getSnapshot().operation?.logs.at(-1)?.text).toContain(
+    "Owned agent executable not found",
+  );
+  await store.refreshOperation();
+  expect(
+    store
+      .getSnapshot()
+      .operation!.logs.filter((entry) => entry.text.includes("Owned agent executable not found")),
+  ).toHaveLength(1);
+  expect(transport.requests.filter((request) => request.method === "review.start")).toHaveLength(1);
+  await client.close();
+});
+
 test("a legacy job is read-only and cannot open a provider target", async () => {
   const store = new ShellStore();
   const client = new BackendClient(
