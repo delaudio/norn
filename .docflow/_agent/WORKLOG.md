@@ -1428,3 +1428,8 @@ paint plus subscription flush and selected state, not production sleeps.
 A competing-load stdio run timed out in one owned image case; final bounded
 four-test-concurrent stdio passed80 with original deadlines. This limitation is
 recorded in the report; no production defect is inferred from a passing rerun.
+
+PR396 source470461f: UI CI passed; expanded native Linux stdio failed because
+that lane had never built browser assets (78passed/2missing-assets failures).
+Added actual retained browser build before the complete stdio gate on all3OS;
+no test fixture, production code or assertion was weakened.

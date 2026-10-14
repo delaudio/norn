@@ -136,6 +136,12 @@ jobs:
       - name: Build headless backend and command binary
         run: cargo build --locked --manifest-path src-tauri/Cargo.toml --no-default-features --bin norn-backend --bin norn
 
+      - name: Build the browser assets exercised by native stdio tests
+        run: |
+          corepack enable
+          pnpm install --frozen-lockfile
+          pnpm run browser-diff:build
+
       - name: Run complete core, CLI and stdio regression suites without GUI features
         run: cargo test --locked --manifest-path src-tauri/Cargo.toml --no-default-features -- --test-threads=4
 

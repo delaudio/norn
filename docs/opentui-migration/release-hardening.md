@@ -104,3 +104,8 @@ production deadlines or fixture assertions. CI caps native suite concurrency
 to four, while dedicated race/concurrency tests still exercise their owned
 concurrent requests. This records the observed failure rather than claiming
 that a passing rerun alone proves a production fix.
+
+The first expanded Linux CI lane reported missing browser assets in two stdio
+tests. It previously built only Rust/UI dependencies. Native CI now installs
+web dependencies and builds the actual retained browser bundle before these
+tests on every OS; fixtures and production asset resolution remain unchanged.
