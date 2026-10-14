@@ -1433,3 +1433,9 @@ PR396 source470461f: UI CI passed; expanded native Linux stdio failed because
 that lane had never built browser assets (78passed/2missing-assets failures).
 Added actual retained browser build before the complete stdio gate on all3OS;
 no test fixture, production code or assertion was weakened.
+
+The new full Windows stdio gate also exposed two inherited tests using Unix
+shell agents/PermissionsExt without cfg protection. Replaced those fixture
+scripts with a std-only agent compiled natively on every OS, retaining actual
+streaming,10-second delayed completion and cancellation/no-late-completion
+assertions. No tests are skipped for Windows.

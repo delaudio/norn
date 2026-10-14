@@ -109,3 +109,8 @@ The first expanded Linux CI lane reported missing browser assets in two stdio
 tests. It previously built only Rust/UI dependencies. Native CI now installs
 web dependencies and builds the actual retained browser bundle before these
 tests on every OS; fixtures and production asset resolution remain unchanged.
+
+The first complete Windows stdio compile exposed two inherited agent tests
+using Unix-only PermissionsExt and shell executables. Both use a native
+compiled std-only fixture now, retaining streaming/cancel/no-late-completion
+assertions on every OS. No test is skipped to bypass Windows compilation.
