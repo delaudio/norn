@@ -149,7 +149,7 @@ try {
     const result: ReturnType<typeof Bun.spawnSync> = Bun.spawnSync([git, "-C", repo, ...args], {
       env: gitEnv,
     });
-    assert.equal(result.exitCode, 0, result.stderr.toString());
+    assert.equal(result.exitCode, 0, result.stderr?.toString() ?? "Owned Git setup failed");
   }
   await writeFile(join(repo, "owned.txt"), "before\n");
   for (const args of [
