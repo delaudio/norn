@@ -1404,3 +1404,27 @@ reconciliation now uses twenty too, without retrying writes or weakening uncerta
 state. Owned failed-fetch IPC fixture asserts refreshed HEAD and prints bounded
 operation diagnostics on failure. Local focused Rust and UI/root gates pass;
 Windows confirmation and actual integration remain pending.
+
+## 2026-10-14 — Current repository baseline shipped; hardening prepared
+
+PR394 merged c5bcabf at08:26:17Z after all8checks on fa61cd4 passed. Windows
+confirmed post-operation reconciliation;0074 moved to done. Plan0075 claimed
+before implementation. Incoming client frames are bounded in wire bytes and
+validated by the shared generated schema; invalid peers/stalled handshakes
+reject work and reap their child. Added missing exact settings/auth/recovery/
+fix/thread result definitions and nullable operation error already emitted by
+Rust; shared fixtures guard real wire compatibility. Complete local Rust suite,
+native local journey and4PTY restoration cases pass. Benchmarks retain original
+budgets; first simultaneous-load timing failed, separate quiet measurements
+passed and retain actual exit0. No live providers/agents/user data or releases.
+Hardening integration and3OS gate still pending; packaging/cutover remain next.
+
+Final hardening additions: actual PTY/ConPTY resize and raw UI Ctrl+C scenarios
+(the existing keyboard quit returns0; OS SIGINT is distinct); all6POSIX cases
+passed. One native UI journey preserves exact pinned AI finding/draft across a
+new session and requires preview/explicit approval for one simulated publication.
+Initial fixture UI paint/input-subscription timing was corrected by waiting for
+paint plus subscription flush and selected state, not production sleeps.
+A competing-load stdio run timed out in one owned image case; final bounded
+four-test-concurrent stdio passed80 with original deadlines. This limitation is
+recorded in the report; no production defect is inferred from a passing rerun.

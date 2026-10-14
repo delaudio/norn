@@ -423,7 +423,14 @@
           "minimum": 0
         },
         "error": {
-          "$ref": "#/definitions/ProtocolError"
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ProtocolError"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       }
     },
@@ -8453,6 +8460,513 @@
           "$ref": "#/definitions/ReviewJobSummary"
         }
       }
+    },
+    "SettingsSnapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "version",
+        "settings"
+      ],
+      "properties": {
+        "version": {
+          "type": "string",
+          "pattern": "^[a-fA-F0-9]{64}$"
+        },
+        "settings": {
+          "$ref": "#/definitions/WorkspaceSettings"
+        }
+      }
+    },
+    "CredentialStatus": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "provider",
+        "available",
+        "source"
+      ],
+      "properties": {
+        "provider": {
+          "type": "string",
+          "enum": [
+            "github",
+            "bitbucket",
+            "jira",
+            "notion"
+          ]
+        },
+        "available": {
+          "type": "boolean"
+        },
+        "source": {
+          "enum": [
+            "keychain",
+            "environment",
+            "none"
+          ]
+        }
+      }
+    },
+    "CredentialStatusResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "credentials"
+      ],
+      "properties": {
+        "credentials": {
+          "type": "array",
+          "maxItems": 4,
+          "items": {
+            "$ref": "#/definitions/CredentialStatus"
+          }
+        }
+      }
+    },
+    "CredentialSavedResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "saved",
+        "provider"
+      ],
+      "properties": {
+        "saved": {
+          "const": true
+        },
+        "provider": {
+          "type": "string",
+          "enum": [
+            "github",
+            "bitbucket",
+            "jira",
+            "notion"
+          ]
+        }
+      }
+    },
+    "CredentialClearedResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "cleared",
+        "provider"
+      ],
+      "properties": {
+        "cleared": {
+          "const": true
+        },
+        "provider": {
+          "type": "string",
+          "enum": [
+            "github",
+            "bitbucket",
+            "jira",
+            "notion"
+          ]
+        }
+      }
+    },
+    "DataImportRejection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "entry",
+        "reason"
+      ],
+      "properties": {
+        "entry": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "reason": {
+          "type": "string"
+        }
+      }
+    },
+    "DataImportPreview": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "inputVersion",
+        "destinationVersion",
+        "additionsCount",
+        "unchangedCount",
+        "conflictsCount",
+        "rejectedCount",
+        "detailsTruncated",
+        "additions",
+        "unchanged",
+        "conflicts",
+        "rejected"
+      ],
+      "properties": {
+        "inputVersion": {
+          "type": "string",
+          "pattern": "^[a-fA-F0-9]{64}$"
+        },
+        "destinationVersion": {
+          "type": "string",
+          "pattern": "^[a-fA-F0-9]{64}$"
+        },
+        "additionsCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "unchangedCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "conflictsCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "rejectedCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "detailsTruncated": {
+          "type": "boolean"
+        },
+        "additions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "unchanged": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "conflicts": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "rejected": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/DataImportRejection"
+          }
+        }
+      }
+    },
+    "DataImportResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "imported",
+        "unchanged",
+        "conflicts",
+        "rejectedCount",
+        "detailsTruncated",
+        "rejected",
+        "backupPath",
+        "destinationVersion"
+      ],
+      "properties": {
+        "imported": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "unchanged": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "conflicts": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "rejectedCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "detailsTruncated": {
+          "type": "boolean"
+        },
+        "rejected": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/DataImportRejection"
+          }
+        },
+        "backupPath": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "destinationVersion": {
+          "type": "string",
+          "pattern": "^[a-fA-F0-9]{64}$"
+        }
+      }
+    },
+    "DataExportResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "exported"
+      ],
+      "properties": {
+        "exported": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "ReviewFixPreview": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "target",
+        "approvalToken",
+        "repoPath",
+        "currentBranch",
+        "sourceBranch",
+        "destinationBranch",
+        "dirtyFiles",
+        "effects",
+        "snapshotSha256",
+        "expiresInSeconds"
+      ],
+      "properties": {
+        "target": {
+          "$ref": "#/definitions/TargetIdentity"
+        },
+        "action": {
+          "enum": [
+            "fix",
+            "commit",
+            "push",
+            "sync",
+            "conflicts"
+          ]
+        },
+        "approvalToken": {
+          "type": "string",
+          "pattern": "^[a-fA-F0-9]{64}$"
+        },
+        "repoPath": {
+          "type": "string"
+        },
+        "currentBranch": {
+          "type": "string"
+        },
+        "sourceBranch": {
+          "type": "string"
+        },
+        "destinationBranch": {
+          "type": "string"
+        },
+        "dirtyFiles": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "dirtyFileCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "dirtyFilesTruncated": {
+          "type": "boolean"
+        },
+        "effects": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "filesToCommit": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "commitMessage": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "commitSha": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "snapshotSha256": {
+          "type": "string",
+          "pattern": "^[a-fA-F0-9]{64}$"
+        },
+        "expiresInSeconds": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "ReviewFixState": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "phase",
+        "commitSha",
+        "summary",
+        "suggestedCommitMessage",
+        "filesTouched",
+        "tests"
+      ],
+      "properties": {
+        "status": {
+          "type": "string"
+        },
+        "phase": {
+          "type": "string"
+        },
+        "commitSha": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "summary": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "suggestedCommitMessage": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "filesTouched": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "tests": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "ReviewFixStateResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "target",
+        "state"
+      ],
+      "properties": {
+        "target": {
+          "$ref": "#/definitions/TargetIdentity"
+        },
+        "state": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ReviewFixState"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "ReviewThreadMessage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "role",
+        "content",
+        "truncated"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "role": {
+          "enum": [
+            "user",
+            "assistant"
+          ]
+        },
+        "content": {
+          "type": "string"
+        },
+        "truncated": {
+          "type": "boolean"
+        }
+      }
+    },
+    "ReviewThreadSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "title",
+        "latestRunId",
+        "messages",
+        "truncated"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "latestRunId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "selected": {
+          "type": "boolean"
+        },
+        "messages": {
+          "type": "array",
+          "maxItems": 8,
+          "items": {
+            "$ref": "#/definitions/ReviewThreadMessage"
+          }
+        },
+        "truncated": {
+          "type": "boolean"
+        }
+      }
+    },
+    "ReviewThreadsResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "threads"
+      ],
+      "properties": {
+        "threads": {
+          "type": "array",
+          "maxItems": 12,
+          "items": {
+            "$ref": "#/definitions/ReviewThreadSummary"
+          }
+        },
+        "truncated": {
+          "type": "boolean"
+        }
+      }
     }
   },
   "oneOf": [
@@ -11071,6 +11585,36 @@
             },
             {
               "$ref": "#/definitions/ReviewJobResult"
+            },
+            {
+              "$ref": "#/definitions/SettingsSnapshot"
+            },
+            {
+              "$ref": "#/definitions/CredentialStatusResult"
+            },
+            {
+              "$ref": "#/definitions/CredentialSavedResult"
+            },
+            {
+              "$ref": "#/definitions/CredentialClearedResult"
+            },
+            {
+              "$ref": "#/definitions/DataImportPreview"
+            },
+            {
+              "$ref": "#/definitions/DataImportResult"
+            },
+            {
+              "$ref": "#/definitions/DataExportResult"
+            },
+            {
+              "$ref": "#/definitions/ReviewFixPreview"
+            },
+            {
+              "$ref": "#/definitions/ReviewFixStateResult"
+            },
+            {
+              "$ref": "#/definitions/ReviewThreadsResult"
             }
           ]
         }

@@ -1,0 +1,18 @@
+{
+  "type": "response",
+  "id": "owned-contract",
+  "ok": true,
+  "result": {
+    "inputVersion": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "destinationVersion": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "additionsCount": 0,
+    "unchangedCount": 0,
+    "conflictsCount": 0,
+    "rejectedCount": 0,
+    "detailsTruncated": false,
+    "additions": [],
+    "unchanged": [],
+    "conflicts": [],
+    "rejected": []
+  }
+}

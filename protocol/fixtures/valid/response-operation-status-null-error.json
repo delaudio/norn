@@ -1,0 +1,11 @@
+{
+  "type": "response",
+  "id": "owned-contract",
+  "ok": true,
+  "result": {
+    "operationId": "owned",
+    "state": "succeeded",
+    "sequence": 1,
+    "error": null
+  }
+}

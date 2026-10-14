@@ -1,3 +1,4 @@
+import { readProtocolLines } from "./framing";
 // Production transport: a persistent `norn-backend` subprocess speaking the
 // versioned stdio protocol. The executable is resolved by path and launched with
 // an argument array (never a shell); protocol input is written to the child's
@@ -40,32 +41,6 @@ interface Pending {
   timer: ReturnType<typeof setTimeout>;
 }
 
-async function* readLines(stream: ReadableStream<Uint8Array>): AsyncGenerator<string, void, void> {
-  const reader = stream.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
-  try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) {
-        break;
-      }
-      buffer += decoder.decode(value, { stream: true });
-      let index = buffer.indexOf("\n");
-      while (index >= 0) {
-        yield buffer.slice(0, index);
-        buffer = buffer.slice(index + 1);
-        index = buffer.indexOf("\n");
-      }
-    }
-    if (buffer.length > 0) {
-      yield buffer;
-    }
-  } finally {
-    reader.releaseLock();
-  }
-}
-
 export class ProcessBackendTransport implements BackendTransport {
   private readonly proc: Bun.Subprocess<"pipe", "pipe", "pipe">;
   private readonly pending = new Map<string, Pending>();
@@ -104,6 +79,7 @@ export class ProcessBackendTransport implements BackendTransport {
         this.readyResolve = null;
         this.readyReject = null;
         reject(new Error("backend handshake timed out"));
+        void this.close();
       }, HANDSHAKE_TIMEOUT_MS);
       this.readyResolve = (info) => {
         clearTimeout(timer);
@@ -251,12 +227,23 @@ export class ProcessBackendTransport implements BackendTransport {
     if (!this.proc.stdout) {
       return;
     }
-    for await (const line of readLines(this.proc.stdout)) {
-      const frame = parseFrame(line);
-      if (!frame) {
-        continue;
+    try {
+      for await (const line of readProtocolLines(this.proc.stdout)) {
+        const frame = parseFrame(line);
+        if (!frame || !["ready", "response", "event"].includes(frame.type)) {
+          throw new Error("backend sent an invalid protocol frame");
+        }
+        this.dispatch(frame);
       }
-      this.dispatch(frame);
+    } catch (error) {
+      // Never expose incoming payloads in diagnostics or dispatch an invalid
+      // event. Reject work immediately and reap only our own subprocess.
+      const failure = error instanceof Error ? error : new Error("backend protocol failed");
+      this.readyReject?.(failure);
+      this.failPending(failure);
+      await this.close();
+      this.notifyExit(await this.proc.exited);
+      return;
     }
     // EOF rejects pending work immediately; report the actual reaped exit code.
     // An alive process which closed its protocol gets bounded native shutdown.

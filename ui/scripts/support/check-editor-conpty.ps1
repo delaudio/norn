@@ -1,4 +1,4 @@
-param([Parameter(Mandatory=$true)][string]$ProjectRoot, [ValidateSet('success','failure','interrupt','backend-death')][string]$Case='success')
+param([Parameter(Mandatory=$true)][string]$ProjectRoot, [ValidateSet('success','failure','interrupt','backend-death','resize','ui-interrupt')][string]$Case='success')
 $ErrorActionPreference='Stop'
 $ProjectRoot=[IO.Path]::GetFullPath($ProjectRoot)
 $Backend=[IO.Path]::GetFullPath((Join-Path $ProjectRoot 'src-tauri/target/debug/norn-backend.exe'))
@@ -56,6 +56,23 @@ try {
     }
   }
   AwaitOwned { $Session.Output.Contains('F8') } 'Production workspace did not render'
+  if ($Case -eq 'ui-interrupt') {
+    $UiPid=[uint32][IO.File]::ReadAllText((Join-Path $Editors 'ui.pid'))
+    $BackendChildren=@([OwnedConPty]::Children($UiPid) | Where-Object { (Get-Process -Id $_ -ErrorAction SilentlyContinue).Path -eq $Backend })
+    if($BackendChildren.Count -ne 1){throw 'Expected exactly our owned backend child'}
+    $Session.Send([string][char]3)
+    AwaitOwned { $Session.ExitCode -ne -1 } 'UI Ctrl+C did not terminate'
+    if($Session.ExitCode -ne 0){throw ('UI Ctrl+C exit was '+$Session.ExitCode)}
+    foreach($ChildPid in $BackendChildren){AwaitOwned { !(Get-Process -Id $ChildPid -ErrorAction SilentlyContinue) } 'Owned backend survived UI Ctrl+C' $true}
+    $Modes=[IO.File]::ReadAllLines((Join-Path $Editors 'console-modes.txt'))
+    if($Modes.Count -ne 2 -or $Modes[0] -ne $Modes[1]){throw 'UI Ctrl+C did not restore native console modes'}
+    Write-Output 'PASS ui-interrupt: actual UI Ctrl+C, backend reaping and native mode restoration'
+    return
+  }
+  if ($Case -eq 'resize') {
+    $Session.ClearOutput(); $Session.Resize(90,25)
+    AwaitOwned { $Session.Output.Contains('F8') } 'Workspace did not redraw after actual ConPTY resize'
+  }
   $Session.Send("`e[19~")
   AwaitOwned { $Session.Output.Contains('--owned ü.txt') } 'F8 inventory did not render'
   $Session.Send("`r")

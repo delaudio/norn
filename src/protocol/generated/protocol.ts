@@ -1450,7 +1450,17 @@ export interface ResponseOk {
     | ReviewJobsResult
     | ClosedPrMetricsResult
     | ReviewEffectivenessResult
-    | ReviewJobResult;
+    | ReviewJobResult
+    | SettingsSnapshot
+    | CredentialStatusResult
+    | CredentialSavedResult
+    | CredentialClearedResult
+    | DataImportPreview
+    | DataImportResult
+    | DataExportResult
+    | ReviewFixPreview
+    | ReviewFixStateResult
+    | ReviewThreadsResult;
 }
 export interface DiffFileResult {
   target: TargetIdentity;
@@ -1467,7 +1477,7 @@ export interface OperationStatusResult {
   operationId: string;
   state: OperationState;
   sequence: number;
-  error?: ProtocolError;
+  error?: ProtocolError | null;
 }
 export interface ProtocolError {
   code: ErrorCode;
@@ -2723,6 +2733,235 @@ export interface RepositoryReviewEffectiveness {
 }
 export interface ReviewJobResult {
   job: ReviewJobSummary;
+}
+export interface SettingsSnapshot {
+  version: string;
+  settings: WorkspaceSettings;
+}
+export interface CredentialStatusResult {
+  /**
+   * @maxItems 4
+   */
+  credentials:
+    | []
+    | [CredentialStatus]
+    | [CredentialStatus, CredentialStatus]
+    | [CredentialStatus, CredentialStatus, CredentialStatus]
+    | [CredentialStatus, CredentialStatus, CredentialStatus, CredentialStatus];
+}
+export interface CredentialStatus {
+  provider: "github" | "bitbucket" | "jira" | "notion";
+  available: boolean;
+  source: "keychain" | "environment" | "none";
+}
+export interface CredentialSavedResult {
+  saved: true;
+  provider: "github" | "bitbucket" | "jira" | "notion";
+}
+export interface CredentialClearedResult {
+  cleared: true;
+  provider: "github" | "bitbucket" | "jira" | "notion";
+}
+export interface DataImportPreview {
+  inputVersion: string;
+  destinationVersion: string;
+  additionsCount: number;
+  unchangedCount: number;
+  conflictsCount: number;
+  rejectedCount: number;
+  detailsTruncated: boolean;
+  additions: string[];
+  unchanged: string[];
+  conflicts: string[];
+  rejected: DataImportRejection[];
+}
+export interface DataImportRejection {
+  entry: number;
+  reason: string;
+}
+export interface DataImportResult {
+  imported: number;
+  unchanged: number;
+  conflicts: number;
+  rejectedCount: number;
+  detailsTruncated: boolean;
+  rejected: DataImportRejection[];
+  backupPath: string | null;
+  destinationVersion: string;
+}
+export interface DataExportResult {
+  exported: number;
+}
+export interface ReviewFixPreview {
+  target: TargetIdentity;
+  action?: "fix" | "commit" | "push" | "sync" | "conflicts";
+  approvalToken: string;
+  repoPath: string;
+  currentBranch: string;
+  sourceBranch: string;
+  destinationBranch: string;
+  dirtyFiles: string[];
+  dirtyFileCount?: number;
+  dirtyFilesTruncated?: boolean;
+  effects: string[];
+  filesToCommit?: string[];
+  commitMessage?: string | null;
+  commitSha?: string | null;
+  snapshotSha256: string;
+  expiresInSeconds: number;
+}
+export interface ReviewFixStateResult {
+  target: TargetIdentity;
+  state: ReviewFixState | null;
+}
+export interface ReviewFixState {
+  status: string;
+  phase: string;
+  commitSha: string | null;
+  summary: string | null;
+  suggestedCommitMessage: string | null;
+  filesTouched: string[];
+  tests: string[];
+}
+export interface ReviewThreadsResult {
+  /**
+   * @maxItems 12
+   */
+  threads:
+    | []
+    | [ReviewThreadSummary]
+    | [ReviewThreadSummary, ReviewThreadSummary]
+    | [ReviewThreadSummary, ReviewThreadSummary, ReviewThreadSummary]
+    | [ReviewThreadSummary, ReviewThreadSummary, ReviewThreadSummary, ReviewThreadSummary]
+    | [ReviewThreadSummary, ReviewThreadSummary, ReviewThreadSummary, ReviewThreadSummary, ReviewThreadSummary]
+    | [
+        ReviewThreadSummary,
+        ReviewThreadSummary,
+        ReviewThreadSummary,
+        ReviewThreadSummary,
+        ReviewThreadSummary,
+        ReviewThreadSummary
+      ]
+    | [
+        ReviewThreadSummary,
+        ReviewThreadSummary,
+        ReviewThreadSummary,
+        ReviewThreadSummary,
+        ReviewThreadSummary,
+        ReviewThreadSummary,
+        ReviewThreadSummary
+      ]
+    | [
+        ReviewThreadSummary,
+        ReviewThreadSummary,
+        ReviewThreadSummary,
+        ReviewThreadSummary,
+        ReviewThreadSummary,
+        ReviewThreadSummary,
+        ReviewThreadSummary,
+        ReviewThreadSummary
+      ]
+    | [
+        ReviewThreadSummary,
+        ReviewThreadSummary,
+        ReviewThreadSummary,
+        ReviewThreadSummary,
+        ReviewThreadSummary,
+        ReviewThreadSummary,
+        ReviewThreadSummary,
+        ReviewThreadSummary,
+        ReviewThreadSummary
+      ]
+    | [
+        ReviewThreadSummary,
+        ReviewThreadSummary,
+        ReviewThreadSummary,
+        ReviewThreadSummary,
+        ReviewThreadSummary,
+        ReviewThreadSummary,
+        ReviewThreadSummary,
+        ReviewThreadSummary,
+        ReviewThreadSummary,
+        ReviewThreadSummary
+      ]
+    | [
+        ReviewThreadSummary,
+        ReviewThreadSummary,
+        ReviewThreadSummary,
+        ReviewThreadSummary,
+        ReviewThreadSummary,
+        ReviewThreadSummary,
+        ReviewThreadSummary,
+        ReviewThreadSummary,
+        ReviewThreadSummary,
+        ReviewThreadSummary,
+        ReviewThreadSummary
+      ]
+    | [
+        ReviewThreadSummary,
+        ReviewThreadSummary,
+        ReviewThreadSummary,
+        ReviewThreadSummary,
+        ReviewThreadSummary,
+        ReviewThreadSummary,
+        ReviewThreadSummary,
+        ReviewThreadSummary,
+        ReviewThreadSummary,
+        ReviewThreadSummary,
+        ReviewThreadSummary,
+        ReviewThreadSummary
+      ];
+  truncated?: boolean;
+}
+export interface ReviewThreadSummary {
+  id: string;
+  title: string;
+  latestRunId: string | null;
+  selected?: boolean;
+  /**
+   * @maxItems 8
+   */
+  messages:
+    | []
+    | [ReviewThreadMessage]
+    | [ReviewThreadMessage, ReviewThreadMessage]
+    | [ReviewThreadMessage, ReviewThreadMessage, ReviewThreadMessage]
+    | [ReviewThreadMessage, ReviewThreadMessage, ReviewThreadMessage, ReviewThreadMessage]
+    | [ReviewThreadMessage, ReviewThreadMessage, ReviewThreadMessage, ReviewThreadMessage, ReviewThreadMessage]
+    | [
+        ReviewThreadMessage,
+        ReviewThreadMessage,
+        ReviewThreadMessage,
+        ReviewThreadMessage,
+        ReviewThreadMessage,
+        ReviewThreadMessage
+      ]
+    | [
+        ReviewThreadMessage,
+        ReviewThreadMessage,
+        ReviewThreadMessage,
+        ReviewThreadMessage,
+        ReviewThreadMessage,
+        ReviewThreadMessage,
+        ReviewThreadMessage
+      ]
+    | [
+        ReviewThreadMessage,
+        ReviewThreadMessage,
+        ReviewThreadMessage,
+        ReviewThreadMessage,
+        ReviewThreadMessage,
+        ReviewThreadMessage,
+        ReviewThreadMessage,
+        ReviewThreadMessage
+      ];
+  truncated: boolean;
+}
+export interface ReviewThreadMessage {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+  truncated: boolean;
 }
 export interface ResponseError {
   type: "response";

@@ -1,0 +1,8 @@
+{
+  "type": "response",
+  "id": "owned-contract",
+  "ok": true,
+  "result": {
+    "exported": 0
+  }
+}

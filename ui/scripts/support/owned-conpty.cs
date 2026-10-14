@@ -21,6 +21,7 @@ public sealed class OwnedConPty : IDisposable {
     }
     [DllImport("kernel32",SetLastError=true)] static extern bool CreatePipe(out IntPtr read,out IntPtr write,IntPtr security,uint size);
     [DllImport("kernel32")] static extern int CreatePseudoConsole(Coord size,IntPtr input,IntPtr output,uint flags,out IntPtr console);
+    [DllImport("kernel32")] static extern int ResizePseudoConsole(IntPtr console,Coord size);
     [DllImport("kernel32")] static extern void ClosePseudoConsole(IntPtr console);
     [DllImport("kernel32",SetLastError=true)] static extern bool InitializeProcThreadAttributeList(IntPtr list,int count,uint flags,ref IntPtr bytes);
     [DllImport("kernel32",SetLastError=true)] static extern bool UpdateProcThreadAttribute(IntPtr list,uint flags,IntPtr attribute,IntPtr value,IntPtr bytes,IntPtr previous,IntPtr returned);
@@ -96,6 +97,18 @@ public sealed class OwnedConPty : IDisposable {
         }
     }
     public void Send(string value) {byte[] bytes=Encoding.UTF8.GetBytes(value);uint written;Check(WriteFile(input,bytes,(uint)bytes.Length,out written,IntPtr.Zero)&&written==bytes.Length,"owned terminal input");}
+    public void ClearOutput() {lock(sync) text.Clear();}
+    public void Resize(short width,short height) {Marshal.ThrowExceptionForHR(ResizePseudoConsole(console,new Coord {X=width,Y=height}));}
+    public static uint[] Children(uint parent) {
+        var children=new System.Collections.Generic.List<uint>();
+        IntPtr snapshot=CreateToolhelp32Snapshot(2,0); Check(snapshot!=new IntPtr(-1),"process snapshot");
+        try {
+            Entry entry=new Entry();entry.size=(uint)Marshal.SizeOf(typeof(Entry));
+            bool present=Process32FirstW(snapshot,ref entry);
+            while(present) {if(entry.parent==parent)children.Add(entry.pid);present=Process32NextW(snapshot,ref entry);}
+            return children.ToArray();
+        } finally {CloseHandle(snapshot);}
+    }
     public int ExitCode {get {uint code;Check(GetExitCodeProcess(process,out code),"owned exit code");return code==259?-1:unchecked((int)code);}}
     public void Dispose() {
         if(process!=IntPtr.Zero) {uint code;if(GetExitCodeProcess(process,out code)&&code==259)TerminateProcess(process,125);CloseHandle(process);process=IntPtr.Zero;}

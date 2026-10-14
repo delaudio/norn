@@ -48,8 +48,7 @@ try {
   });
   await client.shutdown();
   const observedExitCode = await exit;
-  if (observedExitCode !== null && observedExitCode !== 0)
-    throw new Error("Backend exited unsuccessfully");
+  if (observedExitCode !== 0) throw new Error("Backend exited unsuccessfully");
   await writeFile(
     outputPath,
     JSON.stringify(
@@ -81,6 +80,6 @@ try {
 } finally {
   if (exitTimer) clearTimeout(exitTimer);
   unsubscribe?.();
-  client?.close();
+  await client?.close();
   await rm(sandbox, { recursive: true, force: true });
 }

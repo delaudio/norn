@@ -1,0 +1,32 @@
+{
+  "type": "response",
+  "id": "owned-fix",
+  "ok": true,
+  "result": {
+    "target": {
+      "kind": "provider",
+      "provider": "github",
+      "workspace": "owned",
+      "repo": "review",
+      "prId": 1,
+      "runId": "owned-run"
+    },
+    "action": "fix",
+    "approvalToken": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "repoPath": "/owned/checkout",
+    "currentBranch": "feature",
+    "sourceBranch": "feature",
+    "destinationBranch": "main",
+    "dirtyFiles": [],
+    "dirtyFileCount": 0,
+    "dirtyFilesTruncated": false,
+    "effects": [
+      "Owned explicit fix"
+    ],
+    "filesToCommit": [],
+    "commitMessage": null,
+    "commitSha": null,
+    "snapshotSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "expiresInSeconds": 300
+  }
+}

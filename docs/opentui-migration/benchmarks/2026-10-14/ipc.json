@@ -1,0 +1,17 @@
+{
+  "backendVersion": "0.3.4",
+  "runtime": "1.4.3",
+  "platform": "darwin",
+  "arch": "arm64",
+  "request": "repository.status",
+  "samples": 100,
+  "processHandshakeMs": 55.027083000000005,
+  "roundTripMedianMs": 23.895708999999897,
+  "roundTripP95Ms": 25.054000000000087,
+  "providerCalls": 0,
+  "agentRuns": 0,
+  "config": "isolated empty",
+  "shutdownAcknowledged": true,
+  "observedExitCode": 0,
+  "shutdown": "clean exit 0"
+}
