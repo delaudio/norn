@@ -65,8 +65,12 @@ be retired once terminal workflow preservation and cutover safety are proven.
    zero-argument invocation prints CLI help; headless commands remain Rust-only.
    The interactive default lists PRs for the current Git repository. Global
    workspace/history and local working-tree capture require explicit actions.
-2. The Rust engine builds and tests with no Tauri or Ratatui dependency in its
-   active dependency tree; the CLI and service run without Bun or OpenTUI.
+2. Default Rust builds and tests include only the core, CLI and stdio backend;
+   no Tauri or Ratatui dependency appears in the active default graph. Ordinary
+   development/build/install use OpenTUI and retain browser diff assets.
+   Legacy adapters remain behind explicit features and separate CI until final
+   removal. `custom-protocol` must never activate Tauri in ordinary scripts.
+   The CLI and service run without Bun or OpenTUI.
 3. A versioned, typed protocol with a generated contract covers requests and
    results, correlated operation events, cancellation, and snapshots. Standard
    output is protocol-only and standard error is diagnostic; framing and queues
@@ -134,6 +138,7 @@ be retired once terminal workflow preservation and cutover safety are proven.
 
 | Date | Revision | Author | Change |
 |------|----------|--------|--------|
+| 2026-10-14 | r7 | default-agent | Maintainer requires default headless builds and OpenTUI entry/install paths, explicit legacy feature lanes and separate CI, preserving browser diff and Rust-only CLI. |
 | 2026-10-13 | r6 | default-agent | Maintainer requests browser file tree and terminal click navigation/actions, retaining keyboard equivalents, explicit review starts and modal fencing. |
 | 2026-10-13 | r5 | default-agent | Maintainer moves AI output to the right and requests native Markdown colors from the active terminal theme for review/description. |
 | 2026-10-13 | r4 | default-agent | Maintainer refines terminal presentation: horizontal top filters, left AI output, PR list above independent description in the central column. Workflow and security scope unchanged. |
@@ -150,3 +155,4 @@ be retired once terminal workflow preservation and cutover safety are proven.
 | Maintainer | delaudio | 2026-10-13 | requested top filters, left review output, central PR list/description |
 | Maintainer | delaudio | 2026-10-13 | requested right AI pane and OpenTUI-themed Markdown |
 | Maintainer | delaudio | 2026-10-13 | requested web file tree and terminal click support |
+| Maintainer | delaudio | 2026-10-14 | requested default core/CLI/IPC builds; optional legacy adapters with separate CI |

@@ -6,21 +6,14 @@
 
 import { execFileSync } from "node:child_process";
 
-const FORBIDDEN = /(^|[ /])(tauri|ratatui|ratatui-image|crossterm) v\d/;
+const FORBIDDEN =
+  /(^|[ /])(tauri(?:-[a-z0-9-]+)?|ratatui(?:-image)?|crossterm|wry|tao|gtk|gtk-sys|webkit2gtk(?:-sys)?|tray-icon) v\d/;
 
 let output;
 try {
   output = execFileSync(
     "cargo",
-    [
-      "tree",
-      "--locked",
-      "--manifest-path",
-      "src-tauri/Cargo.toml",
-      "--no-default-features",
-      "-e",
-      "normal,build,dev",
-    ],
+    ["tree", "--locked", "--manifest-path", "src-tauri/Cargo.toml", "-e", "normal,build,dev"],
     { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
   );
 } catch (error) {

@@ -60,12 +60,18 @@ fn main() {
                 }
                 #[cfg(not(feature = "tui"))]
                 {
-                    eprintln!("norn: this build does not include the terminal UI; showing help.");
-                    let _ = norn_lib::cli::print_usage();
+                    match norn_lib::opentui_launcher::run() {
+                        Ok(code) => std::process::exit(code),
+                        Err(error) => {
+                            eprintln!("norn: {error}");
+                            std::process::exit(1);
+                        }
+                    }
                 }
             }
             ZeroArgumentLaunch::Help => std::process::exit(norn_lib::cli::print_usage()),
         }
+        #[cfg(feature = "tui")]
         return;
     }
 
@@ -74,7 +80,7 @@ fn main() {
     }
 
     eprintln!(
-        "norn: unknown command `{}`. Use `norn --help` for CLI usage or `norn-app` for GUI.",
+        "norn: unknown command `{}`. Use `norn --help` for CLI usage.",
         positional_args
             .first()
             .copied()

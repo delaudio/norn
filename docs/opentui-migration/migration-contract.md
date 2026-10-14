@@ -93,9 +93,17 @@ Rules:
     remains its deprecated alias.
   - `norn-app` and `lachesi` remain recognized compatibility aliases; the
     desktop GUI is retired at cutover (#309), not before.
-- The `desktop-bundle` and `custom-protocol` Cargo features keep their current
-  meaning until cutover. No interactive UI is delivered through a bare
-  command-distribution binary.
+- Default Cargo features are empty (maintainer direction, 2026-10-14).
+  Ordinary development/build/install use Rust CLI/backend, standalone OpenTUI
+  and browser assets. The command launches its adjacent UI/backend; it never
+  searches the reviewed repository for executable UI code.
+- `desktop-bundle` and `custom-protocol` retain their meaning only for explicit
+  legacy builds; `tui` opts into Ratatui. Neither is enabled by ordinary scripts.
+  Legacy adapter checks run separately from the headless CI lanes.
+- `pnpm run dev` requires Bun; the compiled installed client embeds it and
+  hosts its syntax subprocess through a separate worker entry. CLI subcommands
+  and the service remain Rust-only. Final removal/rename and complete upgrade
+  lifecycle proof remain #309/#308 work.
 
 ## 3. Protocol
 

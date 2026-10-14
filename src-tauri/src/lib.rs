@@ -22,6 +22,7 @@ pub mod incremental_review;
 mod launch;
 mod local_repo;
 mod local_review;
+pub mod opentui_launcher;
 pub mod operational_telemetry;
 pub mod organization_policy;
 pub mod policy_doctor;

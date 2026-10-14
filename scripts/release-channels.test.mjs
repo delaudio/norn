@@ -23,20 +23,11 @@ function step(jobContents, name) {
   return yamlBlock(jobContents, `      - name: ${name}\n`, /^ {6}- name: /m);
 }
 
-test("the Ubuntu release gate installs Tauri system dependencies before Rust compilation", () => {
+test("ordinary release verification avoids GUI dependencies and legacy features", () => {
   const checks = job(releaseWorkflow, "checks");
-  const dependencies = step(checks, "Install Linux desktop build dependencies");
-
-  assert.ok(
-    checks.indexOf("Install Linux desktop build dependencies") <
-      checks.indexOf("Run complete Rust gate"),
-  );
-  assert.match(dependencies, /if: runner\.os == 'Linux'/);
-  assert.match(dependencies, /sudo apt-get install --no-install-recommends --yes/);
-  assert.match(dependencies, /libwebkit2gtk-4\.1-dev/);
-  assert.match(dependencies, /libayatana-appindicator3-dev/);
-  assert.match(dependencies, /librsvg2-dev/);
-  assert.match(dependencies, /libxdo-dev/);
+  assert.doesNotMatch(checks, /libwebkit|libayatana|--all-features|custom-protocol/);
+  assert.match(checks, /pnpm run test:rust:core/);
+  assert.match(checks, /cargo test .*--all-targets/);
 });
 
 test("command-only releases skip desktop work without weakening command gates", () => {

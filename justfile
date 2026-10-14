@@ -13,16 +13,16 @@ set windows-shell := ["powershell.exe", "-NoLogo", "-NoProfile", "-ExecutionPoli
 help:
     @just --list
 
-# Start the Vite dev server (browser mock IPC).
+# Start OpenTUI with the headless backend and browser diff assets.
 dev:
     pnpm run dev
 
-# Start the full Tauri app (real IPC).
+# Legacy only: start the retained Tauri app (explicit desktop feature).
 # Requires BITBUCKET_USERNAME and BITBUCKET_TOKEN in the environment.
 tauri-dev:
     pnpm tauri dev --features desktop-bundle
 
-# Build and durably install CLI, TUI, desktop launcher, and compatibility aliases.
+# Build and install Rust CLI/backend, standalone OpenTUI and browser diff.
 install-local:
     pnpm run install:local
 
@@ -30,7 +30,7 @@ install-local:
 cli-build:
     pnpm run cli:build
 
-# Durably install `norn`, `norn-app`, and the deprecated `lachesi` alias.
+# Install the complete OpenTUI command distribution (no desktop launcher).
 cli-install:
     pnpm run cli:install
 
@@ -42,11 +42,11 @@ tui:
 tui-build:
     pnpm run tui:build
 
-# Durably install `norn-tui` and the deprecated `lac` alias.
+# Install the complete OpenTUI command distribution and compatibility aliases.
 tui-install:
     pnpm run tui:install
 
-# Typecheck + Vite production build.
+# Build Rust CLI/backend, standalone OpenTUI and browser diff.
 build:
     pnpm run build
 
@@ -103,3 +103,15 @@ ui-native-workflow:
 # Approved Git operations using disposable clones and loopback-only bare remotes.
 ui-repository-operations:
     pnpm run ui:repository-operations
+
+# Explicit legacy desktop build; never part of ordinary build/install.
+legacy-desktop-build:
+    pnpm run legacy:desktop:build
+
+# Explicit archived Ratatui terminal frontend.
+legacy-tui:
+    pnpm run legacy:tui
+
+# Verify the default Rust dependency graph contains no GUI/terminal toolkit.
+core-no-gui:
+    node scripts/verify-core-no-gui-deps.mjs

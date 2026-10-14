@@ -1,0 +1,39 @@
+name: legacy-ui
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: legacy-ui-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  legacy-adapters:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.94.0"
+          components: clippy
+      - name: Install legacy desktop libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends --yes libayatana-appindicator3-dev librsvg2-dev libwebkit2gtk-4.1-dev libxdo-dev
+      - run: corepack enable
+      - run: pnpm install --frozen-lockfile
+      - name: Build retained desktop frontend
+        run: pnpm run legacy:web:build
+      - name: Check explicit desktop and Ratatui adapters
+        run: |
+          cargo clippy --locked --manifest-path src-tauri/Cargo.toml --all-targets --all-features -- -D warnings
+          pnpm run test:tauri
+          cargo test --locked --manifest-path src-tauri/Cargo.toml --no-default-features --features tui --lib tui::
+          cargo test --locked --manifest-path src-tauri/Cargo.toml --features custom-protocol,desktop-bundle --bin norn

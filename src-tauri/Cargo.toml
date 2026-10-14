@@ -1,7 +1,7 @@
 [package]
 name = "norn"
 version = "0.3.4"
-description = "A Tauri App"
+description = "Local-first review engine, CLI and OpenTUI backend"
 authors = ["you"]
 edition = "2021"
 autobins = false
@@ -9,7 +9,7 @@ autobins = false
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [features]
-default = ["desktop-bundle"]
+default = []
 # The Tauri desktop adapter. Everything Tauri-specific is gated behind this so
 # the engine, headless CLI, and service can build without Tauri.
 desktop = [
@@ -49,6 +49,7 @@ path = "src/bin/norn-tui.rs"
 [[bin]]
 name = "norn-app"
 path = "src/bin/norn-app.rs"
+required-features = ["desktop"]
 
 [[bin]]
 name = "norn-backend"

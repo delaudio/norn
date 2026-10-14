@@ -4,9 +4,9 @@
   "version": "0.3.4",
   "identifier": "app.norn.desktop",
   "build": {
-    "beforeDevCommand": "pnpm dev",
+    "beforeDevCommand": "pnpm run legacy:web:dev",
     "devUrl": "http://localhost:5210",
-    "beforeBuildCommand": "pnpm build",
+    "beforeBuildCommand": "pnpm run legacy:web:build",
     "frontendDist": "../dist"
   },
   "app": {

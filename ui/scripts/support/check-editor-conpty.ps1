@@ -36,7 +36,9 @@ try {
   # Deliberately bounded environment: no personal config/profile or credentials.
   $Environment=@{PATH=($Editors+';'+[IO.Path]::GetDirectoryName($Git)+';'+$env:SystemRoot+'\System32;'+$env:SystemRoot);SystemRoot=$env:SystemRoot;WINDIR=$env:WINDIR;TEMP=$Root;TMP=$Root;TERM='xterm-256color';NORN_BACKEND_BIN=$Backend;NORN_BACKEND_REPO_PATH=$Repo;NORN_CONFIG_DIR=$Config;NORN_DATA_DIR=(Join-Path $Root 'workspace');NORN_REVIEW_DATA_DIR=(Join-Path $Root 'reviews');NORN_OWNED_EDITOR_DIR=$Editors;VISUAL=$Editor;GIT_CONFIG_NOSYSTEM='1';GIT_CONFIG_GLOBAL='NUL';NORN_BROWSER_OPEN='0'}
   $Block=($Environment.Keys|Sort-Object|ForEach-Object {$_+'='+$Environment[$_]}) -join "`0"
-  $Session=[OwnedConPty]::new($Witness,('"'+$Bun+'" run src/main.ts --workspace'),(Join-Path $ProjectRoot 'ui'),($Block+"`0`0"))
+  $Command='"'+$Bun+'" run "'+(Join-Path $ProjectRoot 'ui/src/main.ts')+'" --workspace'
+  if ($env:NORN_TEST_INSTALLED_BIN) { $Command='"'+(Join-Path $env:NORN_TEST_INSTALLED_BIN 'norn-tui.exe')+'" --workspace' }
+  $Session=[OwnedConPty]::new($Witness,$Command,$Repo,($Block+"`0`0"))
   function AwaitOwned([scriptblock]$Condition,[string]$Label,[bool]$AllowExited=$false) {
     $Deadline=[DateTime]::UtcNow.AddSeconds(25)
     while (!( & $Condition )) {

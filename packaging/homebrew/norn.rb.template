@@ -18,6 +18,8 @@ class Norn < Formula
   def install
     bin.install "norn"
     bin.install "norn-tui"
+    bin.install "norn-backend"
+    bin.install "norn-ui"
     pkgshare.install "share/norn/agent-skills"
     pkgshare.install "share/norn/browser-diff"
   end

@@ -17,13 +17,13 @@ import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const commandGroups = {
-  cli: ["norn"],
-  tui: ["norn-tui"],
+  cli: ["norn", "norn-backend", "norn-ui"],
+  tui: ["norn-tui", "norn-backend", "norn-ui"],
   desktop: ["norn-app"],
   "cli-compat": ["lachesi"],
   "tui-compat": ["lac"],
 };
-const defaultComponents = Object.keys(commandGroups);
+const defaultComponents = ["cli", "tui", "cli-compat", "tui-compat"];
 const scriptDirectory = dirname(fileURLToPath(import.meta.url));
 
 function executableName(command, platform) {
@@ -54,6 +54,7 @@ export function installLocal({
   prefix,
   sourceDirectory,
   browserAssetsDirectory = resolve(scriptDirectory, "../dist/browser-diff"),
+  uiDirectory = resolve(scriptDirectory, "../dist/opentui"),
   components = defaultComponents,
   platform = process.platform,
 }) {
@@ -62,7 +63,7 @@ export function installLocal({
   }
   const commands = selectedCommands(components);
   const installsBrowserViewer = components.some((component) =>
-    ["tui", "tui-compat"].includes(component),
+    ["cli", "tui", "tui-compat"].includes(component),
   );
   if (commands.length === 0) {
     throw new Error("At least one install component is required.");
@@ -98,7 +99,7 @@ export function installLocal({
 
     for (const command of commands) {
       const name = executableName(command, platform);
-      const source = join(sourceDirectory, name);
+      const source = join(command === "norn-ui" ? uiDirectory : sourceDirectory, name);
       if (!existsSync(source) || !lstatSync(source).isFile()) {
         throw new Error(`Required built command is missing or not a regular file: ${name}.`);
       }

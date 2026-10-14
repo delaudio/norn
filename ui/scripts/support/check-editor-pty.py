@@ -25,7 +25,12 @@ with tempfile.TemporaryDirectory(prefix='norn-owned-editor-pty-') as owned:
     # Current-repo home/F8 bindings have native fake-transport input coverage.
     pid, master = pty.fork()
     if pid == 0:
-        os.chdir(project/'ui'); os.execve(bun,[bun,'run','src/main.ts','--workspace'],env)
+        os.chdir(repo)
+        installed = os.environ.get('NORN_TEST_INSTALLED_BIN')
+        if installed:
+            command = str(pathlib.Path(installed) / 'norn-tui')
+            os.execve(command, [command, '--workspace'], env)
+        os.execve(bun,[bun,'run',str(project/'ui/src/main.ts'),'--workspace'],env)
     fcntl.ioctl(master, termios.TIOCSWINSZ, struct.pack('HHHH',35,120,0,0))
     initial = termios.tcgetattr(master); output = bytearray(); exited = False
     def pump():

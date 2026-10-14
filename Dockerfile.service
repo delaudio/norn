@@ -1,12 +1,5 @@
 FROM rust:1.94-bookworm AS build
 
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends \
-        libayatana-appindicator3-dev \
-        librsvg2-dev \
-        libwebkit2gtk-4.1-dev \
-    && rm -rf /var/lib/apt/lists/*
-
 WORKDIR /build/src-tauri
 COPY src-tauri/Cargo.toml src-tauri/Cargo.lock ./
 COPY src-tauri/src ./src
@@ -20,9 +13,8 @@ FROM debian:bookworm-slim
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
-        libayatana-appindicator3-1 \
-        librsvg2-2 \
-        libwebkit2gtk-4.1-0 \
+        ca-certificates \
+        git \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd --gid 10001 norn \
     && useradd --uid 10001 --gid norn --create-home --home-dir /var/lib/norn norn
